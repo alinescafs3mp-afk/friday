@@ -1,0 +1,532 @@
+{
+  "schema": "friday.astra.lab918.author.result.received.v1",
+  "received_msk": "2026-10-03T19:07:40.856002+03:00",
+  "assignment": "ASTRA-E4-A229-PUBLISHER-SOL093-ACTUAL-ALLJOB-COHORT-BOTH-CODECS-CLOSURE-LAB-918",
+  "generation": 1,
+  "job_id": "job_b2e3a7839eb64bb9805f2087cc490910",
+  "result_message_id": "msg_c293a5f84dfc4ba4bf9c8346e15a9535",
+  "manifest": {
+    "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/manifest.json",
+    "bytes": 2325,
+    "sha256": "457f659e7e0e6f73b04cfd86e8bd9e9cc6d02df5a0287552d57c91f80e7174af",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371851",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "2325",
+      "1791042529403739088",
+      "1791042529403739088"
+    ],
+    "stable9": true
+  },
+  "physical": [
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/README.txt",
+      "bytes": 188,
+      "sha256": "0f2904b6abeb9366eca816bd7f780c66c45dc1adc7fa639ee9ccf82d2fed01a4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371836",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "188",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/analysis.json",
+      "bytes": 780,
+      "sha256": "8c7168dc10f74f6d5804bb58f00b16a0d4710250162a01d6632d699eacaf734a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371837",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "780",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/bound.json",
+      "bytes": 313,
+      "sha256": "bebc98d298ce1b883d26c85f03d7faef35aaba9e3a83d36906601d021416a4b2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371838",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "313",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/bound.txt",
+      "bytes": 627,
+      "sha256": "95c2275db5cdc9bf95dce5e492685ae197e28934ccdbcf6b4c91d59116744c4f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371839",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "627",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/current-partitions.json",
+      "bytes": 481,
+      "sha256": "277cce09b006c65626616171aff5ef78daf340ec3edd867e32051ab61b673110",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371840",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "481",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/layout-account.json",
+      "bytes": 1667,
+      "sha256": "dda99dc91685a3d8c4bc90b6cf53a01784af691ffae42320d5f29d138a45fbd3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371841",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1667",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/manifest.json",
+      "bytes": 2325,
+      "sha256": "457f659e7e0e6f73b04cfd86e8bd9e9cc6d02df5a0287552d57c91f80e7174af",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371851",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2325",
+        "1791042529403739088",
+        "1791042529403739088"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/pathset.json",
+      "bytes": 2177,
+      "sha256": "be62630fe39eee236382e3e16103f8640ee6ee43e4fdc39ec7480cb314135ead",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371850",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2177",
+        "1791042529403739088",
+        "1791042529403739088"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/payload.json",
+      "bytes": 99,
+      "sha256": "e201bc8c26f021d1fd1417847321b636c5e67205dfcad4e29301311abefda2e1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371852",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "99",
+        "1791042529403739088",
+        "1791042529403739088"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/pin-checks.json",
+      "bytes": 351404,
+      "sha256": "728a996fff4ee65b2b40d7f92e6a9ad9134e52f9638ced20bc60a5a258302b05",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371842",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "351404",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/relation.json",
+      "bytes": 631,
+      "sha256": "3257cbc8562c95223da278eb3e1c347011728c494895c7d5a9464477927f3039",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371843",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "631",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/result.json",
+      "bytes": 5947,
+      "sha256": "5a099334b9752faf1d744218dc63890e73b0c0db420434740c7911d004362aed",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371849",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5947",
+        "1791042529403739088",
+        "1791042529403739088"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/source/alljob_cohort.py",
+      "bytes": 8511,
+      "sha256": "ab0c37220fefa86c3c52fa931b131fe83be322623c02c9afec3154a49212275b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371844",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8511",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/source/capacity.py",
+      "bytes": 22216,
+      "sha256": "37edc25fbbf4e59f5df503ab72ea0993e0554cddfdcefa15a13e6bd8d0406b93",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371845",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "22216",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/source/observer.py",
+      "bytes": 101377,
+      "sha256": "9237bb8a7d04e322a7f2d7fa372ed40376bc38dbfe7cab51c9ea0e82d25df8fb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371846",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101377",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/source/owned_prefix_bank.py",
+      "bytes": 15246,
+      "sha256": "cf7fa7889721ba8cef6002d24f157aa8e824060a1932bbb7d9660d16fa8256cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371847",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15246",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/validation-plan.txt",
+      "bytes": 393,
+      "sha256": "c7222b746d68b026de30d657015c75acaa90c07cb68edc7be3ea97ad95a620f7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371848",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "393",
+        "1791042529402739031",
+        "1791042529402739031"
+      ],
+      "stable9": true
+    }
+  ],
+  "physical_bytes": 514382,
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB918-INPUT-20261003.json",
+    "bytes": 42370,
+    "sha256": "0783ffb92e82e91acd22740edfb6317c0d3904cc5fd1b9f5d4f670f3b80e0bdb",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534289",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "42370",
+      "1791040877510803661",
+      "1791040877566807246"
+    ],
+    "stable9": true
+  },
+  "run": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB918-RUN-20261003.json",
+    "bytes": 4052,
+    "sha256": "14fde605b56070fba0f88a22573840bc27d55397333be85307c4a386e97f21ef",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534291",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "4052",
+      "1791040907944751365",
+      "1791040907996754693"
+    ],
+    "stable9": true
+  },
+  "external_count": 286,
+  "external_sha_bytes_verified": 10531162,
+  "source_result": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "accepted": false,
+    "assignment": "ASTRA-E4-A229-PUBLISHER-SOL093-ACTUAL-ALLJOB-COHORT-BOTH-CODECS-CLOSURE-LAB-918",
+    "author_self_acceptance_used": false,
+    "author_text_used_as_credit": false,
+    "c1": "CODE",
+    "c2": "UNKNOWN_NOT_ZERO",
+    "classification": "INERT_CONNECTED_SOURCE_IMPLEMENTATION",
+    "compiler_ABI": "NOT_RUN",
+    "costs": {
+      "completed_msk": "2026-10-03T18:48:49.401633+03:00",
+      "cumulative": 11654597,
+      "elapsed_s": 1612.454466,
+      "memory_hash": 514283,
+      "physical": 10620084,
+      "proc": 1832,
+      "proc_is_subset_of_physical": true,
+      "proc_read_bytes_counter": 0,
+      "seal_elapsed_s": 0.042452,
+      "sealed_tree": 514283,
+      "transport": 520230,
+      "vmrss_kib": 23604
+    },
+    "decision": "ALLJOB_EXTERNAL_STORE_FITS_EXISTING_TERMINAL_ROW_ENROLLED_SECOND_COPY_DOES_NOT",
+    "delivery_id": "del_e49206b417bd4a0b82fc8b2e6bbee73a",
+    "executor_ack_at": "2026-10-03T15:21:56.947167Z",
+    "gates": "NOT_RUN",
+    "generation": 1,
+    "image": "NOT_RUN",
+    "implementation_complete": false,
+    "implementation_submitted": true,
+    "input_bytes": 42370,
+    "input_sha256": "0783ffb92e82e91acd22740edfb6317c0d3904cc5fd1b9f5d4f670f3b80e0bdb",
+    "job_id": "job_b2e3a7839eb64bb9805f2087cc490910",
+    "joined": "EXTERNAL_PREIMAGE_BOTH_RECEIVERS_NOT_SOURCE_READY",
+    "kind": "publisher-sol093-actual-alljob-cohort-both-codecs-connected-inert-implementation",
+    "layout": {
+      "caps_changed": false,
+      "ceiling_used": false,
+      "duplication_shortfall": 578683,
+      "enrolled_raw_copied": false,
+      "historical_ceiling": 36005644,
+      "historical_shortfall": 2451212,
+      "live": 583992,
+      "packet_room": 16094,
+      "row_output_remaining": 11420104,
+      "row_reads_remaining": 14832016,
+      "selected": 8043432,
+      "store_width": 48666,
+      "unit": 16222
+    },
+    "output_names": [
+      "README.txt",
+      "analysis.json",
+      "bound.json",
+      "bound.txt",
+      "current-partitions.json",
+      "layout-account.json",
+      "manifest.json",
+      "pathset.json",
+      "payload.json",
+      "pin-checks.json",
+      "relation.json",
+      "result.json",
+      "source/alljob_cohort.py",
+      "source/capacity.py",
+      "source/observer.py",
+      "source/owned_prefix_bank.py",
+      "validation-plan.txt"
+    ],
+    "passport_bytes": 33195,
+    "passport_consulted": true,
+    "passport_recorded_pids_used": false,
+    "pins_declared": 729,
+    "pins_friday_mode_ok": 280,
+    "pins_hash_mismatch": 0,
+    "pins_unique": 286,
+    "pre_seal_heartbeat": "2026-10-03T15:48:49.332813Z pid=833352 epoch=15",
+    "pre_task_compact": "FORBIDDEN_OWNER_POLICY",
+    "preserved_caps": {
+      "FD": 128,
+      "all_original_cases_required": true,
+      "body": 80000000,
+      "metadata": 2000000,
+      "original_clocks_and_gates": true,
+      "unsafe_required_no_waiver": true,
+      "whole_RAM": 8589934592,
+      "whole_output": 33554432,
+      "whole_read": 40960000000,
+      "workers": 4
+    },
+    "qualification": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "qualification_required": true,
+    "qualification_waiver": false,
+    "read_cap_bytes": 268435456,
+    "record": "Inert connected source for the actual all-job cohort. Twelve metadata files and six immutable stores share the existing terminal hold. The equal unit is 16222. Packet room is 16094. The store is three units and keeps the initial images of the mutable files. Enrolled raw is not copied; that duplication fails by 578683. The historical ceiling 36005644 exceeds 33554432 by 2451212 and is not the refusal used. Dynamic packets above the prefix stay CODE. Native ends stay open. N2, native sources, and existing_root_caller were not edited. No third descriptor was added. Source execution is 0. This copy is not acceptance.",
+    "residuals": [
+      "Packets larger than the prefix refuse with exact sizes.",
+      "Native N1 and N4 ends stay CODE.",
+      "C2 stays UNKNOWN_NOT_ZERO.",
+      "A dynamic arena can exceed the prefix.",
+      "Image, compiler ABI, admission, runtime, and gates stay NOT_RUN.",
+      "No self-acceptance and no whole admission."
+    ],
+    "resources": {
+      "RAM_bytes": 8589934592,
+      "children": 0,
+      "deadline_sec": 3600,
+      "friday": 0,
+      "local": 4,
+      "network": 0,
+      "output_bytes": 33554432,
+      "read_bytes": 268435456,
+      "retry": 0,
+      "seal_sec": 600
+    },
+    "run_message_id": "msg_6b449625bae049ab971b68ab8773b14e",
+    "runtime": "NOT_RUN",
+    "schema": "friday.astra.lab918.publisher.actualalljob.cohort.implementation.run.v1",
+    "shared_interface": {
+      "astra_hunk": null,
+      "not_edited": [
+        "actor_bootstrap.py",
+        "root_tool_adapter.py",
+        "existing_root_caller.py",
+        "native sources"
+      ],
+      "signatures": [
+        "PrefixBodyMailbox.prepare(carrier, metadata_carrier)",
+        "PrefixBodyMailbox.attach_late(carrier, metadata)"
+      ]
+    },
+    "source_execution": 0,
+    "source_proof": false,
+    "sources": [
+      {
+        "bytes": 8511,
+        "name": "source/alljob_cohort.py",
+        "sha256": "ab0c37220fefa86c3c52fa931b131fe83be322623c02c9afec3154a49212275b"
+      },
+      {
+        "bytes": 22216,
+        "name": "source/capacity.py",
+        "sha256": "37edc25fbbf4e59f5df503ab72ea0993e0554cddfdcefa15a13e6bd8d0406b93"
+      },
+      {
+        "bytes": 101377,
+        "name": "source/observer.py",
+        "sha256": "9237bb8a7d04e322a7f2d7fa372ed40376bc38dbfe7cab51c9ea0e82d25df8fb"
+      },
+      {
+        "bytes": 15246,
+        "name": "source/owned_prefix_bank.py",
+        "sha256": "cf7fa7889721ba8cef6002d24f157aa8e824060a1932bbb7d9660d16fa8256cf"
+      }
+    ],
+    "stamp_inequality_declarations": 218,
+    "stamp_inequality_is_not_host_drift": true,
+    "stamp_inequality_unique": 138,
+    "task_done": false,
+    "task_done_scope": true,
+    "tripwires": [
+      "unit_search_not_a_ceiling_refusal",
+      "store_not_written_after_cut",
+      "enrolled_raw_not_copied",
+      "n2_and_native_not_copied",
+      "caps_unchanged",
+      "source_not_executed"
+    ],
+    "verdict": "FINITE_LAYOUT_ATTEMPT_NOT_SELF_ACCEPTED",
+    "whole_accepted": false
+  },
+  "scope": "Authentication and intake only; no independent source acceptance, Source/native execution, runtime/gate or release credit.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

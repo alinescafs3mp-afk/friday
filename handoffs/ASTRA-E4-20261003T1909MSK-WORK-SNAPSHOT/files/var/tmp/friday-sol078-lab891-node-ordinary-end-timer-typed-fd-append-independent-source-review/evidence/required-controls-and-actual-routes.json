@@ -1,0 +1,84 @@
+{
+  "schema": "friday.sol078.required-static-controls.v1",
+  "execution": "REQUIRED_NOT_RUN",
+  "safe_abstract_only": true,
+  "required": true,
+  "waiver": false,
+  "routes": [
+    {
+      "route": "actual caller main",
+      "sites": "caller.py3590-3607 -> outside typed opener664-685 -> current parser3199-3224 -> actualclose_final3707-3806 -> end3919 -> encode3920 -> both fd1 kinds3810-3816 -> exit3934"
+    },
+    {
+      "route": "actual supervisor run/main",
+      "sites": "supervisor.py2963-2982 adopts8 -> verifier decoder1139 etc -> cleanup/finish3140 -> R qualified3155 -> outsidecommit3162 -> end3163 -> frame3164 -> commit3178 -> qualifiedexit3188"
+    },
+    {
+      "route": "actual verifier main",
+      "sites": "verifier.py2393-2411 adopts8 + actualtimer -> cleanup2615 -> finishallocation2631 -> status2640 -> commit2642 -> end2643 -> frame2644 -> commit2658 -> verifiedexit2667"
+    }
+  ],
+  "meaningful_obligations": [
+    {
+      "id": "P1",
+      "type": "positive",
+      "obligation": "All original canonical6 with their expected complete three-layer evidence and GPG6, exact ordinary negative causes and unchanged both receiver cap/schema paths; no blanket positive refusal to green Source."
+    },
+    {
+      "id": "P2",
+      "type": "positive",
+      "obligation": "Successful caller memfd and typed alias, both actual child adoptions, simultaneous overlap append under SAME original cap and actual record lock protocol; full byte extents conserved."
+    },
+    {
+      "id": "P3",
+      "type": "positive",
+      "obligation": "Pipe and regular complete PO880*+frame exact both original decoders; success not nativebody custody; all original data retained."
+    },
+    {
+      "id": "N1",
+      "type": "negative",
+      "obligation": "Actual ordinary memfd/dup2/lease wrapper/fstat fault and original alarm between native return and typed record; prospectively distinguish unknown vs known return; exact originals retained, no guessed close."
+    },
+    {
+      "id": "N2",
+      "type": "negative",
+      "obligation": "Actual lock contention until original due/end, native lock failure, interrupted call and unlock failure including simultaneous primary and secondary; no refreshed clock or substituted reason-only error."
+    },
+    {
+      "id": "N3",
+      "type": "negative",
+      "obligation": "Actual pwrite partial/no-progress/error, cap exhaustion, marker mismatch/divergence/shrink; exact originals plus actual partial extent remain owned; no overwrite/drop/new allowance."
+    },
+    {
+      "id": "N4",
+      "type": "negative",
+      "obligation": "Typed inherited8 adoption failure before/after fstat/pread/metadata; no numeric8 custody exemption without exact owned state and no falsely absent inheritedbody."
+    },
+    {
+      "id": "N5",
+      "type": "negative",
+      "obligation": "Actual end fstat/copy/observation failure clears R and actual qualified/verified variables BEFORE frame; original failure object is retained, not only false flags."
+    },
+    {
+      "id": "N6",
+      "type": "negative",
+      "obligation": "Prefix/overflow/partial-prefix/encoding/regular readback/final transport failure; no second encoding or append after uncertain tail; already physical bytes and unknown outside custody truthful."
+    },
+    {
+      "id": "N7",
+      "type": "negative",
+      "obligation": "Original interval/absolute end through cleanup/publication, expired alarm cannot count as observed active timer; no borrowed time/new clock or local boolean endproof."
+    },
+    {
+      "id": "N8",
+      "type": "negative",
+      "obligation": "Ordinary close uncertainty is sticky, no second close/reclaim on unknown; successful close reclaims only live slot, lifetime counts not simultaneous resource violations; outsidebody never self-retired."
+    },
+    {
+      "id": "N9",
+      "type": "negative",
+      "obligation": "Actual current19 drift, exact schema/type/canonical byte/alias refs and full raw errors/partial/original default controls preserved; all35/all3/F1F2/D1D2 full resource/end obligations remain required."
+    }
+  ],
+  "no_test_generator_or_Source_execution": true
+}

@@ -1,0 +1,41 @@
+{
+  "schema": "friday.sol094.resource.truth.v1",
+  "accepted": {
+    "utc": "2026-10-03 15:22:15 UTC",
+    "msk": "2026-10-03 18:22:15 MSK",
+    "epoch": 1791040935000
+  },
+  "deadline_sec": 3600,
+  "seal_sec": 600,
+  "caps": {
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 33554432,
+    "local": 4,
+    "children": 0,
+    "network": 0,
+    "retry": 0,
+    "friday": 0
+  },
+  "accounted_physical_read_components": {
+    "two_full_pinned_292_passes": 21567626,
+    "two_full_current49_partition_passes": 2274858,
+    "explicit_subtotal": 23842484
+  },
+  "additional_reads": "Trusted metadata initial JSON gathering, instruction/task reads, manual Source excerpts/searches and sealing/native administration; UNKNOWN_NOT_ZERO, subtotal is not complete whole upper bound. No Source-product factory/runtime cost inferred.",
+  "RAM_peak": "UNKNOWN_NOT_ZERO",
+  "CPU": "UNKNOWN_NOT_ZERO",
+  "product_whole_cost": "UNKNOWN_NOT_ZERO",
+  "helper_diagnostics": [
+    "One trusted Node metadata command shell newline quoting failed before filesystem work; fixed host quoting, no Source parser invoked.",
+    "One trusted integrity JSON response truncated in transport; reduced output (not verification scope), exact same pinned bytes verified again.",
+    "One JS orchestration expression invalid regex failed before apply_patch; corrected orchestration, no Source authoring/parse."
+  ],
+  "Source_execution": 0,
+  "code_authored": 0,
+  "children": 0,
+  "model_or_network_runs": 0,
+  "native_peer_protocol": "Authorized canonical read-only intake/checkpoint checks and one immutable RESULT enqueue; not Source/Root execution",
+  "guards_models_provider_writerlocks": "UNCHANGED",
+  "retained_original_obligations": "REQUIRED_NOT_RUN_NO_WAIVER"
+}

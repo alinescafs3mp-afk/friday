@@ -1,0 +1,67 @@
+A190 actual connected Source attempt. Accepted 2026-10-02 14:54:33 MSK.
+
+The NEW candidate preserves the exact current134 pathset, Source21,
+consumer24, schema20 and both Source133/consumer70 manifests. Seventeen
+current134 files changed, including ten performing Python files. All seven
+A186 findings were addressed as one connected normal/error/ownership/end
+package. This is implementation text, not an inherited review decision.
+
+Stock prepaid framing and the broad bootstrap boundary now agree with Root.
+Dedicated actor/native final-failure paths no longer equate a pre-exec packet
+with a later error. Actual call result/error roots have a same-existing-owner
+receiver; shared PID history charge and rows have call identities. Preowned
+multi-cell publication/factory failures cancel before effects with unique
+generations. Every actual final credit/history release and registration
+removal is checked. Unsupported completion leaves the complete local graph
+held. Native failed-capture receiver/raw/cached preimage correspondence is
+retained; failed ordinary-credit release is never marked confirmed.
+
+Actual primitive/container/bytes/Source-object/traceback/frame/method/view
+preimages and alias references replace result-only descriptions. Root checks
+nested values, roots, counts, indices, sizes, actual credit and FD rows before
+complete acceptance. None callbacks are refused. Native completion checks
+actual root correspondence and full durable body bytes/pin before final
+credit/history/alias settlement; whole adapter roots and attached histories
+are cleared only after that receipt and successful settlement.
+
+This attempt DOES NOT close the publisher. Exact remaining CODE:
+A186-CODE-01 complete stock/bootstrap/fork error transfer before local loss;
+A186-CODE-02 original standalone direct caller accepted finite completion;
+A186-CODE-04 full original reachable graph under unchanged 2M wire;
+A186-CODE-05 complete native/prefix/error-frame/callback alias correspondence;
+A186-CODE-06 complete original8GiB/read/output/time prospective upper bound;
+A186-CODE-09 complete function/class/module/stock/native value bodies.
+The new encoder explicitly rejects unsupported completion. These are actual
+Source limitations, not an invented bug from an absent future image/grant.
+A186-CODE-03 has a local transaction/release implementation, awaiting new
+different-author whole review; no independent acceptance is claimed.
+
+Full current134 before/after equality and changed rows, original58/22 full
+raw preimages, all45 code TEXT declarations/default/cause/call spans, exact
+all69 ordered six-field Source/catalog/A128 tuples, all15, original/current9
+and extra09, original11, schema20/both-side manifests and phase/custody/cost
+matrices are NEW metadata. Original role/cap/oracle/negative/full-positive/
+ABI128/F0-F11/all30/full-gate/live duties remain mandatory and NOT_RUN. TWO
+unsafe historical identities are abstract REQUIRED_NOT_RUN, required=true,
+waiver=false, operational_payload=null; no operational body was generated.
+
+Genuine C07 combined physical/hash guards and VerifiedSource.admit are
+unchanged literal spans. RootObserver.accept_capture remains the genuine
+actual C08 receiver; final native release flags now reflect real release.
+No Root authority, service, process role, resource cap or oracle was changed.
+Old Source/product/Git/config/guards/models/locks were not written.
+
+Only own stock metadata scripts ran. No supplied import, AST, compiler,
+eval, exec, test, native/Root/archive/install/network/UI/model/live/gate ran.
+SourceReady=false; Root_admission=false; compiler/ELF/ABI/runtime/gates/live
+NOT_RUN; GO=false. Unknown whole RAM/implicit IO/CPU remain NOT_ZERO_NOT_PASS.
+New different-author WHOLE review and actual qualified current Root/image/
+compiler process are required before any supplied Source execution.
+
+Own administrative corrections: relative manifest names resolved against
+their exact parent; stock JSON projection accounted for a literal trailing
+comma and the distinct original60+extra09 arrays. These were bounded metadata
+selection defects, not Source executions, gate results or external retries.
+Known failed passes and prior successful build read costs are retained in
+resources-and-effects.json. Timing and final custody are in the single
+protected RESULT. Parent owns acceptance/lifecycle closure. This task stops.

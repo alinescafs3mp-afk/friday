@@ -1,0 +1,165 @@
+# SOL060: inert shared body, pasted into both actual performing actors.
+FD_HISTORY = []
+FD_GENERATION = 0
+FD_SIGNALS = set(signal.valid_signals()) - {signal.SIGKILL, signal.SIGSTOP}
+ERROR_OBJECTS = []
+
+
+def exact_error(exc):
+    # Keep the ORIGINAL Python object/traceback, not just a generic replacement.
+    # Full graph projection can fail to fit; such failure is NOT raw acceptance.
+    ERROR_OBJECTS.append(exc)
+    objects, nodes = [exc], []
+    def ref(value):
+        if value is None:
+            return None
+        for i, old in enumerate(objects):
+            if old is value:
+                return i
+        objects.append(value)
+        return len(objects) - 1
+    i = 0
+    while i < len(objects):
+        obj = objects[i]
+        frames, tb = [], obj.__traceback__
+        while tb is not None:
+            frames.append({"file": tb.tb_frame.f_code.co_filename,
+                           "function": tb.tb_frame.f_code.co_name,
+                           "line": tb.tb_lineno, "lasti": tb.tb_lasti})
+            tb = tb.tb_next
+        nodes.append({"id": i, "module": type(obj).__module__,
+            "type": type(obj).__name__, "message": str(obj), "args": obj.args,
+            "state": vars(obj), "errno": getattr(obj, "errno", None),
+            "filename": getattr(obj, "filename", None),
+            "filename2": getattr(obj, "filename2", None),
+            "notes": getattr(obj, "__notes__", None), "traceback": frames,
+            "cause": ref(obj.__cause__), "context": ref(obj.__context__),
+            "suppress_context": obj.__suppress_context__,
+            "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
+        i += 1
+    return {"schema": "friday.sol060.error-graph.v1", "root": 0, "nodes": nodes}
+
+
+class AllocationFD(int):
+    def __new__(cls, record):
+        result = int.__new__(cls, record["number"])
+        result.allocation = record
+        return result
+
+
+def reserve_allocation(where):
+    global FD_GENERATION
+    FD_GENERATION += 1
+    record = {"generation": FD_GENERATION, "where": where, "number": None,
+              "state": "PLANNED", "attempted_once": False,
+              "acquire_error_object": None, "close_error_object": None,
+              "close_error": None, "token": None}
+    # History/record exist before native effect. There is no post-close add/set.
+    FD_HISTORY.append(record)
+    return record
+
+
+def publish_allocation(record, number):
+    record["number"] = number  # native return is owned before wrapper allocation
+    record["state"] = "RETURNED"
+    require(type(number) is int and number >= 0, "invalid exact returned FD")
+    require(not any(old is not record and old["number"] == number and
+                old["state"] in ("RETURNED", "RETIRE_UNKNOWN") for old in FD_HISTORY),
+            "returned FD conflicts with retained allocation; never guess close")
+    token = AllocationFD(record)
+    record["token"] = token
+    return token
+
+
+def acquire_owned(operation, where, *args, **kwargs):
+    record = reserve_allocation(where)
+    saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
+    try:
+        record["state"] = "ACQUIRE_UNKNOWN"
+        number = operation(*args, **kwargs)
+        return publish_allocation(record, number)
+    except BaseException as exc:
+        record["acquire_error_object"] = exc
+        raise
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+
+
+def acquire_pipe(where):
+    records = [reserve_allocation(where + ":read"), reserve_allocation(where + ":write")]
+    tokens = [None, None]
+    saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
+    try:
+        for record in records:
+            record["state"] = "ACQUIRE_UNKNOWN"
+        numbers = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
+        # BOTH numbers known before ANY wrapper/validation can fail.
+        records[0]["number"], records[1]["number"] = numbers
+        records[0]["state"] = records[1]["state"] = "RETURNED"
+        tokens[0] = publish_allocation(records[0], numbers[0])
+        tokens[1] = publish_allocation(records[1], numbers[1])
+        return tokens
+    except BaseException as exc:
+        for record in records:
+            record["acquire_error_object"] = exc
+        raise
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+
+
+def adopt_exact_fd(number, where):
+    # Only independently verified initial inherited/runtime roles call this.
+    return publish_allocation(reserve_allocation(where), number)
+
+
+def retire_record(record):
+    global STOP
+    if record["attempted_once"]:
+        require(record["state"] == "CONFIRMED_CLOSED",
+                "earlier allocation close unconfirmed; NEVER retry")
+        return
+    require(record["state"] == "RETURNED" and record["number"] is not None,
+            "unknown acquisition is not a known returned allocation")
+    record["attempted_once"] = True
+    record["state"] = "RETIRE_UNKNOWN"  # prospective, sticky before native close
+    try:
+        os.close(record["number"])
+    except BaseException as exc:
+        STOP = True
+        record["close_error_object"] = exc  # stored before fallible projection
+        record["close_error"] = exact_error(exc)
+        raise
+    record["state"] = "CONFIRMED_CLOSED"
+
+
+def close_allocation(fd, where):
+    if fd is None:
+        return
+    require(isinstance(fd, AllocationFD), "unregistered numeric close refused")
+    saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
+    try:
+        return retire_record(fd.allocation)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+
+
+def finish_allocations():
+    global STOP
+    first = None
+    # Finite same-owner graph. Do not reclose retired old aliases or reuse ints.
+    for record in FD_HISTORY:
+        if record["state"] == "RETURNED" and not record["attempted_once"]:
+            try:
+                retire_record(record)
+            except BaseException as exc:
+                first = first or exc
+    unresolved = [record for record in FD_HISTORY if record["state"] not in
+                  ("PLANNED", "CONFIRMED_CLOSED")]
+    R["descriptor_allocation_history"] = [{k: r[k] for k in
+        ("generation", "where", "number", "state", "attempted_once", "close_error")}
+        for r in FD_HISTORY]
+    if unresolved:
+        STOP = True
+    if first is not None:
+        raise first
+    require(not unresolved, "same-owner acquisition/retirement outcomes unresolved")

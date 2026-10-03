@@ -1,0 +1,126 @@
+{
+  "schema": "friday.astra.lab830.independent-whole-delta-source-acceptance.v1",
+  "at_utc": "2026-10-01T15:15:13.722544+00:00",
+  "decision": "ACCEPT_SOURCE_WITH_PENDING_DYNAMIC_ADMISSION",
+  "independent_reviewer": "Astra Root, distinct from Grok Sourceauthor",
+  "source_producer": "ASTRA-E4-NODE-CANONICAL-PATH-REBIND-SOURCE-LAB-830#1",
+  "whole_delta_verification": [
+    {
+      "path": "/var/tmp/friday-lab830-node-canonical-path-rebind-source/source/verifier.py",
+      "old_sha256": "f663aa0b58ee5f44ec4ae91faf9bcf607d8dad04093eb105f8a8c9f1d6d22196",
+      "sha256": "c571ed6114e1fb5231d600718d4a891ab17d1403598eb9172edf61f9c10b56e9",
+      "size": 55895,
+      "whole_performing_source_complement_byte_identical": true,
+      "only_exact_whitelisted_path_hash_size_literals": [
+        {
+          "old_literal": "PREFIX = \"/home/jericho/.jericho/runtime/subagent-lifecycle/\" + ASSIGNMENT + \"-G1\"",
+          "new_literal": "PREFIX = \"/var/tmp/friday-astra-node-root-source-a080-successor-g1\"",
+          "count": 1
+        },
+        {
+          "old_literal": "PREFIX + \"-verifier.py\"",
+          "new_literal": "PREFIX + \"/verifier.py\"",
+          "count": 1
+        },
+        {
+          "old_literal": "PREFIX + \"-launch-contract.json\"",
+          "new_literal": "PREFIX + \"/launch-contract.json\"",
+          "count": 1
+        }
+      ],
+      "raw_delta_sha256": "5f591567e597bc14dede906f88fcc0bcafa928b93ee6f67d42008d1d66cdc889"
+    },
+    {
+      "path": "/var/tmp/friday-lab830-node-canonical-path-rebind-source/source/launch-contract.json",
+      "old_sha256": "e187c1962b86aab08fb58b4f1b91abc8d303196e13539f8a773e48a2f5c15a43",
+      "sha256": "c0f0a9566ef9639d3189d3da65b94d93f2304beb5b15d7232e79ae347967ccd7",
+      "size": 45320,
+      "whole_performing_source_complement_byte_identical": true,
+      "only_exact_whitelisted_path_hash_size_literals": [
+        {
+          "old_literal": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048-G1-verifier.py",
+          "new_literal": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/verifier.py",
+          "count": 2
+        },
+        {
+          "old_literal": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048-G1-launch-contract.json",
+          "new_literal": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/launch-contract.json",
+          "count": 1
+        },
+        {
+          "old_literal": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048-G1-supervisor.py",
+          "new_literal": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/supervisor.py",
+          "count": 1
+        },
+        {
+          "old_literal": "f663aa0b58ee5f44ec4ae91faf9bcf607d8dad04093eb105f8a8c9f1d6d22196",
+          "new_literal": "c571ed6114e1fb5231d600718d4a891ab17d1403598eb9172edf61f9c10b56e9",
+          "count": 3
+        },
+        {
+          "old_literal": "55910",
+          "new_literal": "55895",
+          "count": 2
+        }
+      ],
+      "raw_delta_sha256": "fd99aef819865e523e824c04d1eefd636408d9725f30eb9472f23678a247cde3"
+    },
+    {
+      "path": "/var/tmp/friday-lab830-node-canonical-path-rebind-source/source/supervisor.py",
+      "old_sha256": "6688979d92cd9e93f69380670a0c5813f729753a0ea6098948a82fe38246f896",
+      "sha256": "1a80b686159a348777bfdc4e3281566de331583c29fcc4813c97efb60f5f14e8",
+      "size": 84058,
+      "whole_performing_source_complement_byte_identical": true,
+      "only_exact_whitelisted_path_hash_size_literals": [
+        {
+          "old_literal": "PREFIX = \"/home/jericho/.jericho/runtime/subagent-lifecycle/\" + ASSIGNMENT + \"-G1\"",
+          "new_literal": "PREFIX = \"/var/tmp/friday-astra-node-root-source-a080-successor-g1\"",
+          "count": 1
+        },
+        {
+          "old_literal": "PREFIX + \"-verifier.py\"",
+          "new_literal": "PREFIX + \"/verifier.py\"",
+          "count": 1
+        },
+        {
+          "old_literal": "PREFIX + \"-launch-contract.json\"",
+          "new_literal": "PREFIX + \"/launch-contract.json\"",
+          "count": 1
+        },
+        {
+          "old_literal": "f663aa0b58ee5f44ec4ae91faf9bcf607d8dad04093eb105f8a8c9f1d6d22196",
+          "new_literal": "c571ed6114e1fb5231d600718d4a891ab17d1403598eb9172edf61f9c10b56e9",
+          "count": 1
+        },
+        {
+          "old_literal": "e187c1962b86aab08fb58b4f1b91abc8d303196e13539f8a773e48a2f5c15a43",
+          "new_literal": "c0f0a9566ef9639d3189d3da65b94d93f2304beb5b15d7232e79ae347967ccd7",
+          "count": 1
+        },
+        {
+          "old_literal": "55910",
+          "new_literal": "55895",
+          "count": 1
+        },
+        {
+          "old_literal": "45516",
+          "new_literal": "45320",
+          "count": 1
+        }
+      ],
+      "raw_delta_sha256": "54fba3b761b5b422775cdc9193f56a8c8665e063366a934a2dac5a7520c2b225"
+    }
+  ],
+  "unchanged_source_acceptance": "A077 full A073 source accepted receipt08a8cf43217141c7dbcfe47178a27c3e241da4d5d4f26c315d717ba1b1b63fde; full byte complements rederived here, only legitimate fixedpath/hash/size changes. No old A048 overwrite.",
+  "cycle_policy": "Complete verifierSHA+size->complete contractSHA+size->supervisor literal pins->external Root supervisorSHA+size; FD6DATA notauthority.",
+  "schema_types_limits_own_cleanup_semantics_preserved": true,
+  "source_execute_import_compile": 0,
+  "Root_native_authority": "SEPARATE_ROOT_ACTION_REQUIRED_NOT_DATA_OR_UID_THREAD_SEAL",
+  "future_root": "/var/tmp/friday-astra-node-root-source-a080-successor-g1",
+  "current_root_created": false,
+  "current_Root_run_grant": "NOT_ISSUED",
+  "runtime_NodeGPG": "NOT_RUN",
+  "Rootimage_RAMIO": "NOT_PROVEN_UNKNOWN_NOT_ZERO",
+  "gate_release_credit": false,
+  "unsafe_execution": 0
+}

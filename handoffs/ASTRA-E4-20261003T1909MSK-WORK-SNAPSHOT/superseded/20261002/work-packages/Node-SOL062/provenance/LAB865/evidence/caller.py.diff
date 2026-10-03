@@ -1,0 +1,193 @@
+--- caller.py
++++ caller.py
+@@ -22,15 +22,15 @@
+ import time
+ 
+ # Future package path only. This source does not create that directory.
+-PACKAGE = "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure"
++PACKAGE = "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure"
+ SOURCE = PACKAGE
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+ PRIMARY = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ ARCHIVE = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+-VHASH = "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e"
+-CHASH = "ed4c5043e0c2fbb6022f15b4998dd142cc14eafe3846666f38070f21d27396ff"
+-SHASH = "6b41511574416232d8a5bb6651f48b3fc65e3dc72e6e03b01cb221471f414ac2"
++VHASH = "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60"
++CHASH = "f4af798566916c32ef504f95865faceffadd5e62e247e3c8e2ce64b4cd74bb7d"
++SHASH = "49b507fbc2a4b99791908e92213979056ebaa1da4ddfe733c9eab86738e79d5c"
+ ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+ AS_OUTER = 134217728
+ READ_CAP, PUBLIC_CAP = 268435456, 2097152
+@@ -47,9 +47,9 @@
+     "gpg": ("/usr/bin/gpg", 1186456, "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754", 0, 0o755),
+     "gpgv": ("/usr/bin/gpgv", 302296, "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d", 0, 0o755),
+     "ffi": ("/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0", 64184, "1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa", 0, 0o644),
+-    "supervisor": (SOURCE + "/supervisor.py", 99751, SHASH, 1000, 0o600),
+-    "verifier": (SOURCE + "/verifier.py", 71834, VHASH, 1000, 0o600),
+-    "contract": (SOURCE + "/launch-contract.json", 48583, CHASH, 1000, 0o600),
++    "supervisor": (SOURCE + "/supervisor.py", 101776, SHASH, 1000, 0o600),
++    "verifier": (SOURCE + "/verifier.py", 73847, VHASH, 1000, 0o600),
++    "contract": (SOURCE + "/launch-contract.json", 48792, CHASH, 1000, 0o600),
+     "bill": ("/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json", 466956, "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2", 1000, 0o600),
+     "receipts": (BASE + "/transport-receipts.ndjson", 400979, "180c44ad4439a96f89335a62e35a5668327a228ce164d1f31b503b867b05fe9b", 1000, 0o600),
+     "raw": (BASE + "/metadata/node/SHASUMS256.txt.asc", 4696, "cfcf12eb3146d641be185d08ca018166b98495b1d8e5f7f94ab77f9965b651d2", 1000, 0o600),
+@@ -461,13 +461,20 @@
+     return [s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid]
+ 
+ 
++ERROR_OBJECT_CAP = 256
+ ERROR_OBJECTS = []
++
++
++def retain_error_object(exc):
++    if len(ERROR_OBJECTS) >= ERROR_OBJECT_CAP:
++        raise Refusal("prefunded error-object arena exhausted; original exception retained") from exc
++    ERROR_OBJECTS.append(exc)
+ 
+ 
+ def exact_error(exc):
+     # Original native Python objects/tracebacks stay in the same owner lifetime.
+     # Lossless stock value graph includes UnicodeDecodeError's original bytes.
+-    ERROR_OBJECTS.append(exc)
++    retain_error_object(exc)
+     objects, nodes, values, cells = [exc], [], [], []
+     def ref(value):
+         if value is None:
+@@ -475,6 +482,8 @@
+         for i, old in enumerate(objects):
+             if old is value:
+                 return i
++        if len(objects) >= 128:
++            raise Refusal("prefunded exception-node arena exhausted") from exc
+         objects.append(value)
+         return len(objects) - 1
+     def val(value):
+@@ -488,6 +497,8 @@
+                 return {"value_ref": i}
+         require(type(value) in (bytes, bytearray, list, tuple, dict),
+                 "unsupported native error value; original object retained, not proof")
++        if len(values) >= 128:
++            raise Refusal("prefunded error-value arena exhausted") from exc
+         values.append(value)
+         return {"value_ref": len(values) - 1}
+     i = 0
+@@ -495,6 +506,8 @@
+         obj = objects[i]
+         frames, tb = [], obj.__traceback__
+         while tb is not None:
++            if len(frames) >= 128:
++                raise Refusal("prefunded traceback arena exhausted") from exc
+             frames.append({"file": tb.tb_frame.f_code.co_filename,
+                            "function": tb.tb_frame.f_code.co_name,
+                            "line": tb.tb_lineno, "lasti": tb.tb_lasti})
+@@ -522,11 +535,32 @@
+             cell = {"id": i, "kind": "dict", "pairs": [[val(k), val(v)] for k, v in obj.items()]}
+         cells.append(cell)
+         i += 1
++    require(nodes and nodes[0]["id"] == 0, "error-graph root missing")
++    stock = {"type": nodes[0]["type"], "message": nodes[0]["message"]}
+     return {"schema": "friday.sol060.error-graph.v2", "root": 0,
+-            "nodes": nodes, "values": cells, "native_object_reconstruction": "NOT_QUALIFIED"}
+-
+-
+-FD_ALLOCATION_HISTORY = []
++            "nodes": nodes, "values": cells, "stock_cause": stock,
++            "native_object_reconstruction": "NOT_QUALIFIED"}
++
++
++def original_stock_cause(graph):
++    # Recompute the original stock type and message from the retained root.
++    # The graph remains the failure value. A two-key dict is not the receipt.
++    require(type(graph) is dict and graph.get("schema") == "friday.sol060.error-graph.v2"
++            and type(graph.get("root")) is int and type(graph.get("nodes")) is list
++            and type(graph.get("values")) is list and 0 <= graph["root"] < len(graph["nodes"]),
++            "exact error-graph.v2 root required")
++    node = graph["nodes"][graph["root"]]
++    require(type(node) is dict and node.get("id") == graph["root"]
++            and type(node.get("type")) is str and type(node.get("message")) is str,
++            "error-graph root lacks original stock type/message")
++    stock = {"type": node["type"], "message": node["message"]}
++    require(graph.get("stock_cause") == stock, "stock_cause is not the retained root type/message")
++    return stock
++
++
++FD_ALLOCATION_CAP = 256
++FD_ALLOCATION_USED = 0
++FD_ALLOCATION_HISTORY = [None] * FD_ALLOCATION_CAP
+ SELECT_CLOSE = {"attempted": False, "state": "NOT_ATTEMPTED", "error_object": None}
+ 
+ 
+@@ -560,9 +594,13 @@
+ 
+ 
+ def preown_fd(role):
++    global FD_ALLOCATION_USED
+     record = {"role": role, "number": None, "lease": None, "state": "PLANNED",
+               "attempted": False, "error_object": None, "error": None}
+-    FD_ALLOCATION_HISTORY.append(record)  # before any native acquisition
++    require(FD_ALLOCATION_USED < FD_ALLOCATION_CAP,
++            "prefunded caller allocation arena exhausted before native acquire")
++    FD_ALLOCATION_HISTORY[FD_ALLOCATION_USED] = record
++    FD_ALLOCATION_USED += 1
+     return record
+ 
+ 
+@@ -672,12 +710,14 @@
+         # cause a second close on a potentially already reused numeric slot.
+         fd.close_failed = True
+         STOP = True
++        graph = exact_error(exc)
+         if record is not None:
+             record["error_object"] = exc
+-            record["error"] = exact_error(exc)
++            record["error"] = graph
+         require(len(FD_CLOSE_FAILURES) < 256, "bounded closure failure evidence exceeded")
+-        FD_CLOSE_FAILURES.append({"fd":int(fd),"lease_generation":fd.lease_generation,
+-            "role":fd.role,"type":type(exc).__name__,"errno":getattr(exc,"errno",None),"error":exact_error(exc),"error":exact_error(exc)})
++        FD_CLOSE_FAILURES.append({"fd": int(fd), "lease_generation": fd.lease_generation,
++            "role": fd.role, "type": type(exc).__name__, "errno": getattr(exc, "errno", None),
++            "error": graph})
+         raise
+     FD_CLOSE_SUCCESSES += 1
+     if record is not None:
+@@ -2092,7 +2132,7 @@
+         require(outer["status"] == "STARTUP_CONTROL_CAUSE_CONFIRMED" and
+                 outer["startup_control"]["passed"] is True and
+                 validation["intended_cause_validated"] is True and
+-                inner["failure"] == {"type": "Refusal", "message": message} and
++                original_stock_cause(inner["failure"]) == {"type": "Refusal", "message": message} and
+                 inner["status"] == "NOT_PROVEN" and inner["calls"] == [] and
+                 outer["parent_exit"]["exit_code"] == 2 and
+                 inner["private_home_intent"]["state"] == "NOT_ATTEMPTED" and
+@@ -2143,7 +2183,7 @@
+         receipt["full_supervisor_receipt"] = outer
+         require(receipt["exit_code"] == 2 and receipt["stderr_text"] == "" and
+                 outer["schema"] == "friday.e4.node.actual-supervisor.sol060.v1" and
+-                outer["failure"] == {"type": "Refusal", "message": "unknown bootstrap inherited descriptor"} and
++                original_stock_cause(outer["failure"]) == {"type": "Refusal", "message": "unknown bootstrap inherited descriptor"} and
+                 outer["status"] == "NOT_PROVEN" and outer["qualified"] is False and
+                 outer["fork_state"] == "NOT_ATTEMPTED" and outer["process_history"] == [] and
+                 "actual_launch" not in outer and "inner_complete_evidence" not in outer and
+@@ -2473,7 +2513,7 @@
+     # A failed wrapper/map/fstat must not erase an already returned allocation.
+     # These never-published records are exact original native returns, not guessed
+     # integer slots and not admitted input/proc leases with relaxed identity.
+-    for record in FD_ALLOCATION_HISTORY:
++    for record in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]:
+         lease = record["lease"]
+         if record["state"] != "RETURNED" or record["attempted"]:
+             continue
+@@ -2524,9 +2564,9 @@
+         "implicit_IO":"UNKNOWN_NOT_ZERO"}
+     R["all_known_owned_fds_closed"] = (len(OWN) == 0 and not FD_CLOSE_FAILURES
+         and SELECT_META is not None and 3 in closed
+-        and all(r["state"] in ("PLANNED", "CONFIRMED_CLOSED") for r in FD_ALLOCATION_HISTORY))
++        and all(r["state"] in ("PLANNED", "CONFIRMED_CLOSED") for r in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]))
+     R["descriptor_allocation_history"] = [{k:r[k] for k in
+-        ("role", "number", "state", "attempted", "error")} for r in FD_ALLOCATION_HISTORY]
++        ("role", "number", "state", "attempted", "error")} for r in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]]
+ 
+ 
+ def encode_complete():

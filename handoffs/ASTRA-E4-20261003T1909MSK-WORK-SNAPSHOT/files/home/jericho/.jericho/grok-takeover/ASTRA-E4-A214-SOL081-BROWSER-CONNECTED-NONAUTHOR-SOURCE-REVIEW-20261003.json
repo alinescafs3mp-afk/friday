@@ -1,0 +1,544 @@
+{
+  "schema": "friday.e4.a214.sol081.browser.changed-context-independent-source-review.v1",
+  "owner": "Astra active Lead Architect epoch4",
+  "recorded_utc": "2026-10-03 03:43:00 UTC",
+  "assignment": "ASTRA-E4-SOL080-BROWSER-ACTUAL-CALLER-STREAM-ROUTE-DEADLINE-CONNECTED-CLOSURE-SOL081",
+  "generation": 1,
+  "manifest": {
+    "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/manifest.json",
+    "bytes": 14366,
+    "sha256": "a5d86fe006d6f8162de01b01fbf7827e9e42dc62d4ed7ac5462f0f301b42ba48",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226892",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "14366",
+      "1790997925914585955",
+      "1790997944518652281"
+    ],
+    "stable9": true
+  },
+  "received": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL081-BROWSER-CONNECTED-SOURCE-RESULT-RECEIVED-20261003.json",
+    "bytes": 63865,
+    "sha256": "9cf49ea42d186b66d9ff4d862bd1ad330fe34319153808ea63df035927e603b4",
+    "identity9_decimal_strings": [
+      "2050",
+      "8531922",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "63865",
+      "1790998249661141968",
+      "1790998249714145005"
+    ],
+    "stable9": true
+  },
+  "owned25": [
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/manifest.json",
+      "bytes": 14366,
+      "sha256": "a5d86fe006d6f8162de01b01fbf7827e9e42dc62d4ed7ac5462f0f301b42ba48",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226892",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14366",
+        "1790997925914585955",
+        "1790997944518652281"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/connected-implementation-matrix.json",
+      "bytes": 10104,
+      "sha256": "b2a65a2b156264b5e1d9cd1a267d1f6a308ffe1a238e206c0f5d1a1b55468baf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226887",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10104",
+        "1790997605447371593",
+        "1790997766325438855"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/current-source-join.json",
+      "bytes": 282150,
+      "sha256": "0d34a04707724e070aab475e3ec017bda11c1b4834458219655aa96203cf5365",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226884",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "282150",
+        "1790997426192943626",
+        "1790997426289949185"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/effects-and-costs.json",
+      "bytes": 4366,
+      "sha256": "082d1c577f47008e3c41443bedc894a208b3b1eea97de0635011cb27e488c97a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226889",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4366",
+        "1790997766208432148",
+        "1790997766326438912"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/final-external-snapshot.json",
+      "bytes": 129094,
+      "sha256": "31112e984bb97d2fabeaa7a67e96eca8ce47fa0d1ad5f9641d44c44c808dd80e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226886",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129094",
+        "1790997605400215177",
+        "1790997766326438912"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/full-gapless-parts.json",
+      "bytes": 180924,
+      "sha256": "aa444ffc372aeb808aa5c2154bb98598870f7d3271815ab8916d482ec52f4f28",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226883",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "180924",
+        "1790997426190943511",
+        "1790997426289949185"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/initial-pin-checks.json",
+      "bytes": 128839,
+      "sha256": "f72428eb8e4d10d41820cac358941176e5909598cf5b9d0d85d13858c2d88a9d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226866",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "128839",
+        "1790996337838562975",
+        "1790996956520023636"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/literal-bindings.json",
+      "bytes": 1900,
+      "sha256": "b3cf1b1f54f0aab647966dc376262ff5d4f2ff3c33d9790cc28f4fac57fa8252",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226881",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1900",
+        "1790997492658753217",
+        "1790997492658753217"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/method-context-rejoin.json",
+      "bytes": 32011,
+      "sha256": "0db73d497ba99174bf02a7cc9fc9d6478f569d73c254193034d1da28262878a1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226885",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32011",
+        "1790997492507744561",
+        "1790997766326438912"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/original-obligations-preserved.json",
+      "bytes": 3863,
+      "sha256": "2fcbb0229851244dc9856227b25742e4a27dcb59d37255c4848651c7a0a5c105",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226888",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3863",
+        "1790997704529896939",
+        "1790997766326438912"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/shared-interfaces.json",
+      "bytes": 3834,
+      "sha256": "a1139b58c2d14cf72c1fb4de248d9fb99916966acddaee904f5be028428df855",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226882",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3834",
+        "1790997314515542697",
+        "1790997426289949185"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/pathset.json",
+      "bytes": 1310,
+      "sha256": "376374c934481a40f27c87ee982d2d845f1ad526ee551d30d7044c00f26eacfa",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226891",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1310",
+        "1790997766255434843",
+        "1790997766325438855"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/received.json",
+      "bytes": 1241,
+      "sha256": "f445ac69441af765b23913b6b7fbc7444144a51bb176f43d73151299c9bb0f87",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226854",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1241",
+        "1790996232938266048",
+        "1790996232986553337"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/result.json",
+      "bytes": 3853,
+      "sha256": "25cd3b6a06906b4f74b189c2ec8e3498dbdf745bb8cc64295bd18da60fdcff36",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226890",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3853",
+        "1790997766209432206",
+        "1790997766325438855"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+      "bytes": 57488,
+      "sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226855",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57488",
+        "1790997245331577317",
+        "1790997245331577317"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1.py",
+      "bytes": 101856,
+      "sha256": "c18c296f1c5f349a063e2657e1d2a53fd2b4c07dccabf12f7a117608281cc24f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226856",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101856",
+        "1790997245220570954",
+        "1790997245220570954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A069-DATA-CODEC.py",
+      "bytes": 30108,
+      "sha256": "2aa56db8c3521cf5e56ea0307bb4a5c23d3a2240830d925a790559bfb7a3ffa2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226857",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30108",
+        "1790996337568547498",
+        "1790996337658552658"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-ABI-MAPPING.json",
+      "bytes": 69099,
+      "sha256": "f52f64e693d2d71b1cef16bcb63332f29c42ae4afb97a18cdcc14e40af552f08",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226858",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "69099",
+        "1790997314324531749",
+        "1790997314324531749"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-BUILD-RECIPE.json",
+      "bytes": 89364,
+      "sha256": "317086d49f3f84b0fb227befe20c3c45b44a37caf88ea8f73c44f7bf1e71319e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226859",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "89364",
+        "1790997314328531979",
+        "1790997314328531979"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-EXECUTOR.py",
+      "bytes": 75320,
+      "sha256": "868d4c93f76c15e0fae23ba9e1db4b9b5316492123043719b7ecd15bba9eba48",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226860",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75320",
+        "1790997245436583335",
+        "1790997245436583335"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+      "bytes": 9774,
+      "sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226865",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9774",
+        "1790996759397725275",
+        "1790996759397725275"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-SUPERVISOR.py",
+      "bytes": 123038,
+      "sha256": "c5a3d1ead2990e2482c1c30b7eac0ff785e63452e39e3c89678d24625f99206d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226861",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "123038",
+        "1790997138129079962",
+        "1790997138129079962"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-WORKER.py",
+      "bytes": 9557,
+      "sha256": "571da66c347d9c3ec941f4c3b146be98dfacceb132eed325b135c1c2238d790e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226862",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9557",
+        "1790997245333577431",
+        "1790997245333577431"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 200423,
+      "sha256": "a1d2097212ae19c585f8fa696c32c80eab73ba411542b44441f6799883ac8d86",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226863",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "200423",
+        "1790997138131432957",
+        "1790997138131432957"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A118-CONNECTED-CONTRACT.json",
+      "bytes": 75243,
+      "sha256": "f767514f37b0b9a833997460e7301bca90a231c490ef60c3014d6e9bf8d207e5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226864",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75243",
+        "1790997314489541207",
+        "1790997314489541207"
+      ],
+      "stable9": true
+    }
+  ],
+  "Source15_part_proof_metadata": {
+    "name": "evidence/current-source-join.json",
+    "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/current-source-join.json",
+    "bytes": 282150,
+    "sha256": "0d34a04707724e070aab475e3ec017bda11c1b4834458219655aa96203cf5365",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226884",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "282150",
+      "1790997426192943626",
+      "1790997426289949185"
+    ]
+  },
+  "full_gapless_parts": 353,
+  "current209": {
+    "changed": 8,
+    "equal": 201,
+    "prior_Root_received_before_exact_match": true
+  },
+  "aux3": {
+    "changed": 2,
+    "equal": 1
+  },
+  "authorship": "Sol081 delta authored by Sol. Root did not author it. Narrow Source text review only, no self whole baseline credit.",
+  "decision": "E01_E02_E04_SCOPED_SOURCE_CREDIT_E03_REJECT_FRESH_FD_PRODUCER_BYPASSES_OWNED_GENERATION",
+  "closed_scoped_source": [
+    {
+      "id": "SOL080-E01",
+      "invariant": "Every actual selected R4 helper called by Executor/Owner must be loaded into the seeded module namespace.",
+      "path": "A071-EXECUTOR.py:53-59 R4_NAMES and :261-288 load_helpers",
+      "validation": "All17 exact selected definitions include publisher/end/decoder/rebuilder/snapshot; same module gets required os/stat/sys/time/json/hashlib/types/re/signal/select/ssl/UNCERTAIN_RECEIPT; actual R4 collect and NativeOwner.wave call the selected publisher via r. Metadata/literal code pins rejoined; no AST/import/runtime proof.",
+      "state": "CREDIT_SCOPED_SOURCE_NOT_WHOLE"
+    },
+    {
+      "id": "SOL080-E02",
+      "invariant": "Actual Caller->actual NativeOwner child/ordinary journal->material route/PID->both receiver relation must agree.",
+      "path": "A071-OWNER.py:20-79/107-157; A071-EXECUTOR.py:1048-1068; A071-SUPERVISOR.py:445-511 and A087-PUBLIC-DRIVER.py:146-212",
+      "validation": "Actual native-intention PID remains original, ordinary journal is created before body/pipe/config calls, both exact3 PID+route sets and final launch/material/physical retained joins are checked. Native pidfd is not adopted by ordinary closer; BOTH native body retirement flags remain false.",
+      "state": "CREDIT_ACTUAL_ORDINARY_RELATION_NOT_NATIVE_CUSTODY"
+    },
+    {
+      "id": "SOL080-E04",
+      "invariant": "Original deadline_receipt_write must reach the actual receipt_write effect using the unchanged finite clock.",
+      "path": "A025-G1-R4.py:648-660 durable; unchanged A071-CONTROLS.py:953/967 selector",
+      "validation": "Both provisional/candidate durable writes call guarded_write(...receipt_write,True); finer labels do not replace original stage or refresh clock. Original negative remains REQUIRED_NOT_RUN.",
+      "state": "CREDIT_SCOPED_SOURCE_STAGE_NOT_EXECUTED"
+    }
+  ],
+  "remaining_same_root": [
+    {
+      "id": "SOL081-E03-FDGEN",
+      "group": "Original SOL080-E03 connected finite ordinary completion, not a new product defect",
+      "invariant": "A true close confirmation must belong to the newly acquired descriptor generation before finite_end_confirmed may become true.",
+      "path": "A071-EXECUTOR.py:918-919 direct os.open -> :933 close_owned_fd; FDJournal.close :106-117 uses current[fd]; close_record :120-121 returns on old close_attempted; close_owned_fd :172-177 returns cached closed/error flags.",
+      "finding": "Final retained readback opens a fresh ordinary descriptor without FDJournal.acquire. current[fd] may still refer to an earlier closed acquisition when the OS legitimately reuses a descriptor number. close_record then returns for that old attempted row and close_owned_fd can return true for the old close rather than close this new file. The explicit True check therefore does not establish fresh-generation cleanup. No Source execution or reproduction was performed.",
+      "required_correction": "Route this actual fresh producer through the existing same-run journal's prospective acquisition before the readback/close, then rejoin actual loop, ordinary-error cleanup, both final stream consumers and active source/metadata bindings. Do not add a service, blindly close an ambiguous number, retry uncertain closes or assume old history is a new lease.",
+      "credit_kept": "Nonfinal physical candidates, exact witness/full metadata reconstruction, actual both decoder/guard invocation and delayed ordinary qualification are source improvements; they do not cure this acquisition/close relation.",
+      "state": "CODE_OPEN_CONNECTED_ORDINARY_PATH"
+    }
+  ],
+  "not_new_findings": [
+    "NativeOwner mode4 gate constructor precedes the new run's ordinary journal; no cached-FD-generation failure is claimed there merely because it is unjournaled.",
+    "Nested journalled_launch output acquisition needs whole history/cost context; it is not certified or asserted as a new executed product failure."
+  ],
+  "original_obligations": "Original216/29/all6/all9/Source19/C01-C08/M01/capsule848/packet96/child32 remain required. Original native/stock/raw/error/preencode full bodies/aliases/BOTH outside native finite ends CODE; inclusive costs/fit UNKNOWN_NOT_ZERO.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "Source_execution": 0,
+  "AST_compile_import_tests": "NOT_RUN",
+  "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false",
+  "Sol075": "No denied action continuation/rephrase/implementation."
+}

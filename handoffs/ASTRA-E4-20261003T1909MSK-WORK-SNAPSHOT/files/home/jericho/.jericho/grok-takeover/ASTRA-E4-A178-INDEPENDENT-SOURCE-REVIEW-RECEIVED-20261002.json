@@ -1,0 +1,627 @@
+{
+  "schema": "friday.e4.a178.node-new-whole35-error-raw-review-root-received.v1",
+  "assignment": "ASTRA-E4-LAB863-NODE-WHOLE6-ALL35-ALL6-ERROR-RAW-ONCECLOSE-INDEPENDENT-SOURCE-REVIEW-A178",
+  "generation": 1,
+  "received_msk": "2026-10-02T12:57:11.189998+03:00",
+  "status": "AUTHENTIC_WHOLE_INDEPENDENT_SOURCE_REVIEW_RECEIVED_SOURCE_CONTRADICTIONS_FOUND",
+  "protected_pins": [
+    {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/bounds.json",
+      "bytes": 6725,
+      "sha256": "4f387f5ba9504031011efb58e50796747d54a46314f59b2a8b24ae547ec63630",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979719",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6725",
+        "1790934335928706995",
+        "1790934445981021303"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/costs.json",
+      "bytes": 1758,
+      "sha256": "2f242a1b21c98a78a7f74db162ffa237e7500df6b963e3cae73e6991694e2b93",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979773",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1758",
+        "1790934445930018377",
+        "1790934445981021303"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/findings.json",
+      "bytes": 4821,
+      "sha256": "299cfb4cf9d0438761f73fd670840a98b9dfc0f20acb28eb89ae68712fe83e17",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979717",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4821",
+        "1790934258737278078",
+        "1790934445980021245"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/future-current-facts.json",
+      "bytes": 2152,
+      "sha256": "ae95871746102a4a285a79d5b21757db2af43e608e3281d0d19d92a04e9c0904",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979720",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2152",
+        "1790934335947708085",
+        "1790934445981021303"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/input-read-audit.json",
+      "bytes": 129942,
+      "sha256": "19e187a331f16a7e8bcc620537b6a83b64367db4b50eecdf6b4eafbf40aa0972",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979696",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129942",
+        "1790933894453558209",
+        "1790934445980021245"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/review.txt",
+      "bytes": 9486,
+      "sha256": "ac569d63803f108902bd860a74a68344cfa96e96c0f6a12e41055dd34f53fdc4",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979704",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9486",
+        "1790934089698579383",
+        "1790934445980021245"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/whole-matrix.json",
+      "bytes": 88444,
+      "sha256": "715ec47ebe7775200cfaace80d412a109f99ae75912703279f7acd5c2202170b",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979718",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "88444",
+        "1790934258769279914",
+        "1790934445981021303"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/manifest.json",
+      "bytes": 5374,
+      "sha256": "f888a236baa5473d6b3e2bdb914305d162159b32efc550660bfd01fa94fe8402",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979775",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5374",
+        "1790934510798740251",
+        "1790934510852743350"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/exact-pathset.json",
+      "bytes": 1295,
+      "sha256": "ec44e008872ea3e4c933ab1cc8663936e2926c71b0be0e3ab66291a3c2ebe730",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979776",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1295",
+        "1790934510926747596",
+        "1790934537631279779"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-LAB863-NODE-WHOLE6-ALL35-ALL6-ERROR-RAW-ONCECLOSE-INDEPENDENT-SOURCE-REVIEW-A178-G1-RESULT.json",
+      "bytes": 18086,
+      "sha256": "9488188faf28f248046e222ed7d188ce609786f04e4e8893f9aaa9724b464c8b",
+      "identity9_decimal_strings": [
+        "2050",
+        "9177324",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18086",
+        "1790934590088289517",
+        "1790934610881482545"
+      ],
+      "stable9": true
+    }
+  ],
+  "full_SHA9_private_exact_pathset_acyclic_DAG": true,
+  "Source30_held_named9_unchanged": true,
+  "terminal": {
+    "schema": "friday.a178.independent-whole-source-terminal-result.v1",
+    "assignment": "ASTRA-E4-LAB863-NODE-WHOLE6-ALL35-ALL6-ERROR-RAW-ONCECLOSE-INDEPENDENT-SOURCE-REVIEW-A178",
+    "generation": 1,
+    "context": "fresh",
+    "owner_scope": "goal",
+    "REVIEW_KEY": "LAB863-c8cf17d3653cf7a9-current6-changed5-all35-all6-F1F2",
+    "status": "RESULT_COMPLETE",
+    "decision": "SOURCE_CONTRADICTIONS_FOUND",
+    "accepted_msk": "2026-10-02T12:31:46+03:00",
+    "finished_msk": "2026-10-02T12:49:50+03:00",
+    "elapsed_seconds": 1084,
+    "input_pin": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A178-INPUT-20261002.json",
+      "bytes": 82439,
+      "sha256": "c7d2d1c4264d79f03a6ab7f406e57aa63258314625f71e1a7a0ce20e893d28ed",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533586",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "82439",
+        "1790933478782527721",
+        "1790933478852465230"
+      ],
+      "stable_before_held_after9": true,
+      "mode": "0600",
+      "nlink": 1
+    },
+    "source_root": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure",
+    "frozen_snapshot": "0.208.64/schema50 cecd28a9 (assignment pin, untouched)",
+    "installed_snapshot": "0.208.58 (untouched)",
+    "findings": [
+      {
+        "id": "F1a",
+        "parent": "F1",
+        "severity": "HIGH",
+        "kind": "SOURCE_CODE",
+        "fact": "UNCERTAIN_FDS and RETIRED_FDS have no definition in the complete pinned verifier; close_once and close_own necessarily NameError before the native close.",
+        "refs": [
+          "verifier.py:114",
+          "verifier.py:370",
+          "verifier.py:374",
+          "verifier.py:376",
+          "verifier.py:390",
+          "verifier.py:391",
+          "verifier.py:1198",
+          "verifier.py:1213"
+        ],
+        "result": "Cannot qualify startup controls or publisher route; cleanup records STOP_UNCONFIRMED.",
+        "required": "Initialize and own exact allocation generation state before effects; no guessed-free state or unconfirmed-success."
+      },
+      {
+        "id": "F1b",
+        "parent": "F1",
+        "severity": "HIGH",
+        "kind": "SOURCE_CODE",
+        "fact": "Supervisor closure history is keyed only by reusable integer, not exact allocation; fresh numeric-slot owner can silently skip closure. Outcome markers are recorded after native close.",
+        "refs": [
+          "supervisor.py:42",
+          "supervisor.py:398",
+          "supervisor.py:422",
+          "supervisor.py:581",
+          "supervisor.py:587",
+          "supervisor.py:600",
+          "supervisor.py:1632"
+        ],
+        "result": "Lost fresh ownership or false all-descriptors-closed remains possible in ordinary bounded control flow.",
+        "required": "Preowned attempted-once allocation objects/generations, actual acquisition/transfer/retirement proof and separate sticky ambiguous outcome; preserve both parent and child allocation ownership."
+      },
+      {
+        "id": "F2a",
+        "parent": "F2",
+        "severity": "HIGH",
+        "kind": "SOURCE_CODE",
+        "fact": "Call retention follows reap; a failed reap skips capture and still reaches close. Error reaping does not record rc. Finalizer can replace first fault; no independent complete secondary-error/first-fault cells.",
+        "refs": [
+          "verifier.py:561",
+          "verifier.py:578",
+          "verifier.py:609",
+          "verifier.py:624",
+          "verifier.py:627",
+          "verifier.py:643",
+          "caller.py:1744",
+          "caller.py:1760"
+        ],
+        "result": "Raw, terminal return code and true initiating cause are not closed across all failure/default/partial-construction branches.",
+        "required": "Keep preowned call/capture state, original failure, independent bounded secondary failures, actual rc or explicit unknown reason, bytes/count/SHA/produced charges before every first close."
+      },
+      {
+        "id": "F2b",
+        "parent": "F2",
+        "severity": "HIGH",
+        "kind": "SOURCE_CODE",
+        "fact": "Writable result records retain hashes only; partial retained stream prevents completion; verifier overflow/deadline replaces raw with summaries; supervisor invalid/partial/stderr transport exposes hashes only and incomplete refusal drops inner raw.",
+        "refs": [
+          "verifier.py:400",
+          "verifier.py:413",
+          "verifier.py:439",
+          "verifier.py:455",
+          "verifier.py:466",
+          "verifier.py:1228",
+          "verifier.py:1236",
+          "verifier.py:1239",
+          "supervisor.py:615",
+          "supervisor.py:650",
+          "supervisor.py:1692",
+          "supervisor.py:1707",
+          "caller.py:1848"
+        ],
+        "result": "No complete new lossless raw graph or complete required-raw 2MiB proof exists; downstream cannot reconstruct omitted bytes.",
+        "required": "Durable lossless stdout/stderr/status/writable custody including normal/error/default/oversize/prefix branches under original caps; qualified out-of-band custody only if explicitly part of original accepted graph."
+      },
+      {
+        "id": "D1",
+        "severity": "METADATA_CORRECTION",
+        "kind": "DOCUMENTARY_CONTRADICTION",
+        "fact": "Author GPG matrix says CPU30/FSIZE32768; actual source and contract are CPU20/wall30/dynamic quota <=21845 first call.",
+        "refs": [
+          "resource-raw-custody-matrix.json:matrices.GPG_original6.unchanged",
+          "verifier.py:531",
+          "verifier.py:559",
+          "verifier.py:565",
+          "launch-contract.json:child_exec.preexec_limits"
+        ],
+        "executable_cap_raised": false
+      },
+      {
+        "id": "D2",
+        "severity": "METADATA_CORRECTION",
+        "kind": "DOCUMENTARY_CONTRADICTION",
+        "fact": "Author new read buckets sum268479282; actual caller computes hash_subsets93172690/fixed247043595/running21391861 to total268435456.",
+        "refs": [
+          "performing-read-budget.json:buckets",
+          "caller.py:318",
+          "caller.py:321",
+          "caller.py:344"
+        ],
+        "executable_cap_raised": false
+      }
+    ],
+    "scope_complete": {
+      "current_Source6": true,
+      "changed5_equal1": true,
+      "pinned_original_A172_A175_LAB863_A134_all35_A164_A169_LAB861": true,
+      "whole_source_text_lines": 5289,
+      "all35_rows": 35,
+      "all6_rows": 6,
+      "GPG6_rows": 6,
+      "all3_rows": 3,
+      "F1_F2_whole_normal_error_default_prefix_secondary_capture_close_public_graph": true,
+      "current_path_size_SHA_schema_chain": true,
+      "exact_current_int9_preserved": true,
+      "prior_A175_proof_or_acceptance_transfer": false
+    },
+    "genuine_partial_repairs": [
+      "Supervisor takes reserve slots before close, avoiding old retained-slot reclose on that path",
+      "Caller child gate/sweep tracks successful numeric close within its one fork table",
+      "Verifier observed stream strict-decoding fallback keeps observed bytes as base64 with partial/count/SHA",
+      "Supervisor retains produced transport prefixes in its private buffer before first terminal transport close"
+    ],
+    "F1": "NOT_CLOSED: verifier undefined retirement globals; supervisor numeric-slot history is not exact allocation generation or preowned attempted-once state.",
+    "F2": "NOT_CLOSED: firstfault/secondary/rc and reap-failure captures incomplete; writable hash-only; partial retained flag prevents completion; verifier/supervisor cap/end/error defaults discard required raw without accepted out-of-band owner.",
+    "all35": "All35 current catches/roots/full-message disjoint2048 cells reconciled anew under explicit stock900/class32/native32/path160/clock32/two-byte escape condition. Full firstfault and required upstream raw custody still fails; current provider qualification NOT_RUN.",
+    "all6": "Original order/roles/causes/oracles/caps/clocks retained; current runtime NOT_RUN and whole acceptance denied.",
+    "GPG6": "Original six sequential authentication routes retained; no-keyring first2 only, remaining explicit sealed rings including distinct gpgv; readonly0500/NPROC0/public key/body/archive/BADSIG/current validity/crosscert mandatory; LAB8614 future effects remain pending.",
+    "all3": "Typed resource map/consumer joins, two-call keyless recipe and caller narrow terminal proc generation token are coherent conditional prospective source correspondence. A169 missing final changed fstat field remains UNKNOWN, endedRED is not upgraded.",
+    "publication": {
+      "fresh_current_conditional_encoded_reserve_bytes": 2095321,
+      "cap_bytes": 2097152,
+      "margin_bytes": 1831,
+      "metadata_bytes": 489472,
+      "all_case_payload_bytes": 1605848,
+      "complete_new_required_lossless_bound": "NOT_ESTABLISHED_SOURCE_CONTRADICTIONS_F2A_F2B",
+      "conditional_encoded_receipt_is_not_fullraw_proof": true,
+      "old_bound_acceptance_transferred": false,
+      "complete_new_default_error_producer_fit_qualified": false
+    },
+    "performing_read_plan": {
+      "full19_bytes": 72386093,
+      "supervisor_subset7_bytes": 7768998,
+      "verifier_subset7_bytes": 7741313,
+      "hash_initial": 72386112,
+      "hash_terminal": 72386112,
+      "hash_subsets_formula": "10*(7768998+7)+2*(7741313+7)",
+      "hash_subsets": 93172690,
+      "fixed_nonrunning": 247043595,
+      "proc_running": 21391861,
+      "total_reserved": 268435456,
+      "author_hash_subsets": 93130191,
+      "author_fixed_nonrunning": 246957270,
+      "author_running": 21478186,
+      "author_actual_bucket_sum": 268479282,
+      "author_bucket_sum_over_cap": 43826,
+      "code_install_plan_correct": true,
+      "executable_caps_raised": false,
+      "new_proc_retirement_content_reads": 0,
+      "native_or_implicit_IO": "UNKNOWN_NOT_ZERO; no zero inference"
+    },
+    "historical_A169": "ENDED_RED_STOP_UNCONFIRMED; original all6 invoked/3 causes/3 notproven, ten pre-close Refusals and zero recorded unconfirmed native closes; Root cleanup not Source GREEN.",
+    "future_direction": "Repair whole exact allocation/attempt/firstfault/raw output/custody/public/default graph and D1/D2 metadata as one Source package under original roles/caps; then different-author whole review/current provider qualification/new existing Root finite assignment and original actual all6/gates. Missing future Root/provider alone was not called a CODE defect.",
+    "artifacts": [
+      {
+        "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/bounds.json",
+        "bytes": 6725,
+        "sha256": "4f387f5ba9504031011efb58e50796747d54a46314f59b2a8b24ae547ec63630",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979719",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6725",
+          "1790934335928706995",
+          "1790934445981021303"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      {
+        "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/costs.json",
+        "bytes": 1758,
+        "sha256": "2f242a1b21c98a78a7f74db162ffa237e7500df6b963e3cae73e6991694e2b93",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979773",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1758",
+          "1790934445930018377",
+          "1790934445981021303"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      {
+        "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/findings.json",
+        "bytes": 4821,
+        "sha256": "299cfb4cf9d0438761f73fd670840a98b9dfc0f20acb28eb89ae68712fe83e17",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979717",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4821",
+          "1790934258737278078",
+          "1790934445980021245"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      {
+        "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/future-current-facts.json",
+        "bytes": 2152,
+        "sha256": "ae95871746102a4a285a79d5b21757db2af43e608e3281d0d19d92a04e9c0904",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979720",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2152",
+          "1790934335947708085",
+          "1790934445981021303"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      {
+        "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/input-read-audit.json",
+        "bytes": 129942,
+        "sha256": "19e187a331f16a7e8bcc620537b6a83b64367db4b50eecdf6b4eafbf40aa0972",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979696",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "129942",
+          "1790933894453558209",
+          "1790934445980021245"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      {
+        "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/review.txt",
+        "bytes": 9486,
+        "sha256": "ac569d63803f108902bd860a74a68344cfa96e96c0f6a12e41055dd34f53fdc4",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979704",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9486",
+          "1790934089698579383",
+          "1790934445980021245"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      {
+        "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/whole-matrix.json",
+        "bytes": 88444,
+        "sha256": "715ec47ebe7775200cfaace80d412a109f99ae75912703279f7acd5c2202170b",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979718",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "88444",
+          "1790934258769279914",
+          "1790934445981021303"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      }
+    ],
+    "manifest_pin": {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/manifest.json",
+      "bytes": 5374,
+      "sha256": "f888a236baa5473d6b3e2bdb914305d162159b32efc550660bfd01fa94fe8402",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979775",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5374",
+        "1790934510798740251",
+        "1790934510852743350"
+      ],
+      "stable_before_held_after9": true,
+      "mode": "0600",
+      "nlink": 1
+    },
+    "pathset_pin": {
+      "path": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1/exact-pathset.json",
+      "bytes": 1295,
+      "sha256": "ec44e008872ea3e4c933ab1cc8663936e2926c71b0be0e3ab66291a3c2ebe730",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979776",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1295",
+        "1790934510926747596",
+        "1790934537631279779"
+      ],
+      "stable_before_held_after9": true,
+      "mode": "0600",
+      "nlink": 1
+    },
+    "seal": {
+      "root": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1",
+      "root_mode": "0700",
+      "private600_nlink1": true,
+      "exact_pathset": true,
+      "full_decimal_SHA9": true,
+      "acyclic": true,
+      "files": 9,
+      "bytes": 249997,
+      "all210_input_metadata9_unchanged": true,
+      "complete_postseal_rehash": true
+    },
+    "actual_costs": {
+      "schema": "friday.a178.independent-review-costs.v1",
+      "accepted_msk": "2026-10-02 12:31:46 MSK",
+      "known_complete_stock_pin_hash_reads": {
+        "initial_paths": 145,
+        "initial_bytes": 75676380,
+        "supplemental_paths": 65,
+        "supplemental_bytes": 1283452,
+        "total_paths": 210,
+        "total_bytes": 76959832
+      },
+      "direct_text_JSON_reads_and_helper_metadata_bytes": "UNKNOWN_NOT_EXHAUSTIVELY_INSTRUMENTED_NOT_ZERO",
+      "direct_text_JSON_read_conservative_reservation_bytes": 33554432,
+      "seal_own_data_and_terminal_read_conservative_reservation_bytes": 16777216,
+      "conservative_read_total_reservation_bytes": 127291480,
+      "task_read_ceiling_bytes": 268435456,
+      "task_memory_allowance_bytes": 8589934592,
+      "task_output_allowance_bytes": 16777216,
+      "wall_seconds": 6600,
+      "seal_reserve_seconds": 600,
+      "source_body_text_lines_read": {
+        "caller": 2313,
+        "supervisor": 1719,
+        "verifier": 1257
+      },
+      "local_workers_max": 1,
+      "local_workers_cap": 4,
+      "model_children": 0,
+      "network_calls": 0,
+      "Source_import_AST_compile_eval_exec_tests_native_Root_GPG_Node_archiveparse_UI_gates": 0,
+      "target_effect_retries": 0,
+      "stock_pin_hash_repeat": "Initial large display truncation did not rerun hashing; verified matches were preserved in audit with same named9. Supplemental hash pass read only new transitive receipt leaves.",
+      "own_validation": "Own inert JSON/count/arithmetic only; no candidate execution.",
+      "whole_RAM_IO_CPU_model_tokens_cost_money": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "resource_PASS": false,
+      "original_Source_or_Git_config_guard_lock_settings_models_mutation": 0,
+      "scope": "Only named new own review output plus named protected RESULT; task resource allowances never transfer to performing Source or Root."
+    },
+    "effects": "Own inert Source TEXT/JSON review and bounded trusted stock read/hash9 only; own named output/protected terminal writes. NO supplied import/AST/compiler/eval/exec/tests/native/Root/GPG/GPGV/Node/archiveparse/extract/network/install/live/UI/model/gates or Source/Git/config/guards/models/locks writes.",
+    "dangerous_historical": "ABSTRACT_REQUIRED_NOT_RUN_NO_OPERATIONAL_PAYLOAD_FIXTURE_GENERATOR_REPRODUCTION_EXPLOITATION_OR_WAIVER",
+    "SourceReady": false,
+    "Root_admission": false,
+    "Root_Image": false,
+    "RAM_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "compiler_ELF_ABI": "NOT_RUN",
+    "runtime": "NOT_RUN",
+    "gates": "NOT_RUN",
+    "GO": false,
+    "lifecycle": "One protected RESULT. Assignment ends and child stops; parent receives and closes lifecycle/tree."
+  },
+  "known_Root_read_bytes": 350522,
+  "Root_disposition": "Whole current6/all35/all6/all3 exact factories verified. Conditional encoded bound2095321/margin1831 is NOT complete required lossless raw-bound. Undefined verifier registries, supervisor numeric without allocation generation, dropped raw/writable/firstfault/rc/reaperror/secondaryerror remainactualCODE. D1D2 resource documentary errors must be fixed but actual dynamiccap retained. FutureRoot/provider facts separate. Sol060 already executing same original package with these precise preliminary cause groups; final evidence INFO samegeneration only, no restart/recompact/expired Sourceeffects.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ELF_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

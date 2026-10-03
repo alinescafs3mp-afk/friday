@@ -1,0 +1,27 @@
+{
+  "findings": [
+    "B01",
+    "B02",
+    "B03",
+    "B04",
+    "B05"
+  ],
+  "preserved": [
+    "outer_terminal_sink",
+    "length_prefixed_raw_frames",
+    "sticky_dependency_cleanup",
+    "unchanged_caps"
+  ],
+  "repairs": {
+    "B01": "Supervisor retirement is consumed once. The coordinator does not signal a retired owner and does not block in waitpid.",
+    "B02": "supervise_owned returns the complete stdout and stderr bytes inside the existing 1048576 stream bound. Outer and registration observations require both stream records.",
+    "B03": "The token classifier is gone. Benign exact29 obligations are not excluded. Historical operational bodies are not copied.",
+    "B04": "G1.resources and acquisition_resources call the original observers before any delegated join or prepare. The 256MiB and 192MiB conditions stay inside those functions.",
+    "B05": "write_all resolves from the original module symbol. Deadline calls Run.guard and does not invent hashes or generic children. Registration calls supervise_owned and does not invent fixture causes."
+  },
+  "schema": "friday.grok.lab866.connected-join.v1",
+  "source_sha256": {
+    "A071-CONTROLS.py": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+    "A071-SUPERVISOR.py": "a419700a042c4718245a23e27e78ee7ae9b5f1e3838f886ff3e0ced226140ce3"
+  }
+}

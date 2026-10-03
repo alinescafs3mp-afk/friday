@@ -1,0 +1,9 @@
+# Whole independent review request — A061
+
+This package is SOURCE_INCOMPLETE. Do not compile/import/load/execute/probe or run controls/GET under this handoff. A separate independently authorized final consumer must read the whole manifest-pinned source, build recipe, ABI/schema and fixture/control mappings; reviewer cannot treat self-check or missing root/image alone as acceptance/source failure.
+
+Review corrections: public five benign negatives exact state/cause/byte/hash/resources and actual positive-first wrapper; failure gate role2 after prefix positives; source/output FD permutation and finite owned cleanup; actual credentials including GID; ABORT_ACK14 and sticky lost reap ACK; same protected runtime117/index111 view; producer loader executable mode and alias membership; bounded pre-interpreter cache/ELF/import closure linked into both native targets; authentic OS stage granularity; unchanged aggregate accounting including startup overhead.
+
+Mandatory missing source is listed in CONTROL-MATRIX. In particular check every216 actual caller and every owned-fork producer against authoritative coordinator registry. Neither legacy Python seam controls nor production guards substitute for full public native registry controls. New63 expected guard labels do not substitute for actual inert DATA delta builders and independently expected complete consumer fixtures. Negative native executable seal control intentionally not provided: execute only original independently pinned executable, modify capsule expected DATA pin after actual fresh positive; no foreign handle signal or operational unsafe payload.
+
+Preserve original limits, topology, CA/hostname/GET policy and fail evidence. Whole independent final review before any compiler admission; compile is separately scoped future permission, not current GO. All observations NOT_RUN.

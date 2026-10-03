@@ -1,0 +1,17 @@
+{
+  "schema":"friday.a087.native-public-ABI.v1",
+  "status":"SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "architecture":"Linux x86_64; fixed packed little-endian wire; native x86_64 C/ctypes public copies",
+  "unchanged_wire":{"capsule":848,"OS":208,"image_header":56,"image_member":1088,"packet":96,"packet_types":"1..14 unchanged","source_roles":19},
+  "unchanged_public":{"fr_child":32,"fr_observation":96,"fr_fixture_wait":"int(int,int,int,int*)"},
+  "new_public":{"fr_receive_receipt":24,"fr_evidence":344,"fr_own_fork":"int(int,unsigned,uint64_t,fr_child*)","fr_own_observe":"int(fr_child*,fr_observation*)","fr_own_evidence":"int(fr_child*,fr_evidence*)","fr_session_evidence":"int(fr_evidence*)","fr_session_close":"int(void)","fr_local_restrict":"int(unsigned,int)"},
+  "evidence_layout":{"prefix":"version,phase,stage:u32;primitive_errno:i32; observed_pid/uid/gid,expected_pid/uid/gid:i32; rights,rights_closed:u32;rights_close_errno:i32; ready_released,signal_attempts,close_attempts,transport_close_attempts,status_redacted:u32","timestamps":"10*u64: intent_ack,clone,register_send,register_ack,release,wait4,reap_ack,signal,close,transport_close","suffix":"expected and observed packed96-byte packets","privacy":"Unacknowledged kernel wait status is zeroed in both packet projections and status_redacted=1; no public status/ownership authority is conferred."},
+  "stages":{"1":"INPUT","2":"CAPSULE","3":"OWNER_PROC","4":"SOCKET","5":"RECEIVE","6":"ORIGIN_PID","7":"ORIGIN_UID","8":"ORIGIN_GID","9":"FRAME","10":"TYPE","11":"SEQUENCE","12":"ROLE","13":"PID","14":"OWNER","15":"BIRTH","16":"OWNER_BIRTH","17":"DEADLINE","18":"STATUS","19":"RIGHTS","20":"RIGHT_CLOSE","21":"COPY","22":"HANDLE","23":"SIGNAL","24":"WAIT4","25":"HANDLE_CLOSE","26":"TRANSPORT_CLOSE","27":"CREATE_PIPE","28":"CREATE_CLONE","29":"BARRIER"},
+  "authority":"Actual original FR_START, fixed SO_PEERCRED plus SCM_CREDENTIALS full PID/UID/GID, capsule SHA/full bytes, proc parent/birth and socket inode remain exact. Public fr_child copies and read-only evidence cannot adopt a PID, pidfd, wait status or generation.",
+  "fork":"Ordinary public API uses real CLONE_PIDFD and PyOS fork hooks; children return only after exact REGISTER_ACK and real barrier release. Legacy fixture route delegates to it while retaining its original controls-only guard.",
+  "close":"Only successful close sets handle_closed and publishes pidfd=-1. On close failure durable native storage retains the exact handle and UNKNOWN; NativeOwner retains truthful projection and makes no second release attempt.",
+  "Root_controller":"Existing held110 --held-a061 only; strict held119 canonical own benign DATA selectors in mode1. No new Root service, privileged image, LSM, grant writer or reset seam.",
+  "restriction":"Local kernel seccomp only reduces the calling owner's own pidfd_send_signal or exact-fd close permission. No userspace errno injection or permission restoration.",
+  "residual":"Receiving-side Root registry full controls remain absent; A087 start/ACK receiving-side controls cannot replace them. ALL216 integration remains separately unresolved.",
+  "SourceReady":false,"current_GO":false,"performed_now":false,"independent_final_byte_review":"REQUIRED_NOT_PERFORMED"
+}

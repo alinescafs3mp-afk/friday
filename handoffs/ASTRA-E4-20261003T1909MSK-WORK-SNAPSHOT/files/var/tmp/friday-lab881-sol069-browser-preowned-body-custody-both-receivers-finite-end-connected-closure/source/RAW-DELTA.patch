@@ -1,0 +1,2584 @@
+--- A079/A071-ABI-MAPPING.json
++++ A087/A071-ABI-MAPPING.json
+@@ -1,5 +1,7 @@
+ {
+-  "schema": "friday.a079.actual-fixed-native-session-source-dataflow.v1",
++  "schema": "friday.a087.actual-fixed-native-session-source-dataflow.v1",
++  "current_extension": "A087-ABI-CONTRACT.json; A087-CALLER-MAP.json; A087-EXPECTED-CONTROLS.json",
++  "whole_native_cause_closed": false,
+   "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+   "wire": "A061 v1 fixed848/208/56/1088/96B unchanged;19 roles; types1..14 unchanged",
+   "public_entry": "held110 --held-a061",
+--- A079/A071-BOOTSTRAP.c
++++ A087/A071-BOOTSTRAP.c
+@@ -5,6 +5,7 @@
+ #include <linux/magic.h>
+ #include <linux/capability.h>
+ #include <linux/securebits.h>
++#include <linux/memfd.h>
+ #include <sys/syscall.h>
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+@@ -43,6 +44,79 @@
+ static unsigned char stop_seen[513];
+ static const char*failure;
+ static int sticky;
++static char control_case[64];
++static int control_reply_used,control_helper_created,control_helper_reaped,control_helper_closed;
++static int control_plain_created,control_plain_closed,control_credential_transitions;
++static unsigned control_ack_type,control_reply_rights;
++static int control_reply_pid,control_reply_uid,control_reply_gid;
++static uint64_t control_reply_ns;
++static int control_input(const struct fr_cap*c){
++ if(c->mode!=FR_CONTROLS)return 0;
++ char b[4097];struct stat st;if(fstat(119,&st)||st.st_size<0||st.st_size>4096||pread(119,b,st.st_size,0)!=st.st_size)return -EIO;b[st.st_size]=0;
++ const char prefix[]="{\"schema\":\"friday.a087.native-public-input.v1\",\"case\":\"";
++ if(strncmp(b,prefix,sizeof(prefix)-1))return 0;
++ static const char*cases[]={"positive","start_origin_pid","start_origin_uid","start_origin_gid","start_owner","start_owner_birth","start_deadline","start_role","start_sequence","start_rights", "ack_origin_pid","ack_origin_uid","ack_origin_gid","ack_owner","ack_owner_birth","ack_session","ack_role","ack_sequence_replay","ack_sequence_future","ack_deadline","ack_rights","ack_many_rights", "register_invalid_ACK","register_lost_ACK","register_delayed_ACK", "abort_positive","abort_invalid_ACK","abort_lost_ACK", "reap_invalid_ACK","reap_lost_ACK", "copy_pid","copy_pidfd","copy_birth","copy_role","pidfd_plaintext","pidfd_closed","signal_denied","close_denied","transport_closed","role_invalid","deadline_expired","session_restart","wait_flags_DATA","caller_status_DATA"};
++ for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);i++){
++  char expected[1024];int n=snprintf(expected,sizeof(expected),"%s%s\",\"workers\":[{\"payload\":\"ordinary-owned-a087/0\\n\",\"exit\":23},{\"payload\":\"ordinary-owned-a087/1\\n\",\"exit\":24},{\"payload\":\"ordinary-owned-a087/2\\n\",\"exit\":25}]}\n",prefix,cases[i]);
++  if(n>0&&(size_t)n<sizeof(expected)&&st.st_size==n&&!memcmp(b,expected,n)){strcpy(control_case,cases[i]);return 0;}
++ }
++ return -EINVAL;
++}
++static int control_at(unsigned type){
++ if(control_reply_used||!control_case[0])return 0;
++ if(!strncmp(control_case,"start_",6))return type==FR_START;
++ if(!strncmp(control_case,"ack_",4))return type==FR_INTENT_ACK;
++ if(!strncmp(control_case,"register_",9))return type==FR_REGISTER_ACK;
++ if(!strncmp(control_case,"abort_",6))return type==FR_ABORT_ACK&&strcmp(control_case,"abort_positive");
++ if(!strncmp(control_case,"reap_",5))return type==FR_REAP_ACK;
++ return 0;
++}
++static int controlled_reply(int sock,const struct fr_packet*original,unsigned type,uint64_t end){
++ struct fr_packet q=*original;q.type=type;
++ if(!control_at(type))return fr_send(sock,&q,-1,end);
++ control_reply_used=1;control_ack_type=type;
++ if(strstr(control_case,"lost_ACK")){control_reply_ns=fr_now();return 1;/* no ACK sent and no sequence credit */}
++ if(!strcmp(control_case,"register_delayed_ACK")){uint64_t until=fr_now()+100000000ull;while(fr_now()<until&&fr_now()<end)poll(0,0,1);}
++ if(strstr(control_case,"invalid_ACK"))q.type=FR_STOP;
++ if(strstr(control_case,"owner_birth"))q.owner_birth++;
++ else if(strstr(control_case,"owner"))q.owner++;
++ if(strstr(control_case,"session"))q.session[0]^=1;
++ if(strstr(control_case,"role"))q.role++;
++ if(strstr(control_case,"sequence_replay"))q.sequence--;
++ else if(strstr(control_case,"sequence_future")||!strcmp(control_case,"start_sequence"))q.sequence++;
++ if(strstr(control_case,"deadline"))q.deadline_ns--;
++ int plain=-1,passes[2]={-1,-1};unsigned count=0;
++ if(strstr(control_case,"rights")){
++  plain=syscall(SYS_memfd_create,"ordinary-public-right-a087",MFD_CLOEXEC|MFD_ALLOW_SEALING);if(plain<0)return -errno;control_plain_created++;
++  const char text[]="ordinary-owned-plaintext-a087\n";
++  if(write(plain,text,sizeof(text)-1)!=sizeof(text)-1||fcntl(plain,F_ADD_SEALS,FR_SEALS)<0){int saved=errno;close(plain);return -saved;}
++  count=strstr(control_case,"many_rights")?2:1;passes[0]=passes[1]=plain;
++ }
++ int r=0;unsigned real_uid=getuid(),real_gid=getgid();
++ if(strstr(control_case,"origin_uid")){if(setresuid(1000,0,0)){r=-errno;goto close_plain;}control_credential_transitions++;}
++ if(strstr(control_case,"origin_gid")){if(setresgid(1000,0,0)){r=-errno;goto restore_uid;}control_credential_transitions++;}
++ control_reply_uid=getuid();control_reply_gid=getgid();control_reply_rights=count;
++ control_reply_ns=fr_now();
++ if(strstr(control_case,"origin_pid")){
++  int handle=-1;struct clone_args a={0};a.flags=CLONE_PIDFD|CLONE_INTO_CGROUP;a.pidfd=(uintptr_t)&handle;a.cgroup=121;a.exit_signal=SIGCHLD;
++  pid_t child=syscall(SYS_clone3,&a,sizeof(a));
++  if(child==0){if(fr_limits(FR_COORD,180)||prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0))_exit(125);int sent=fr_send_rights(sock,&q,passes,count,end);_exit(sent?125:0);}
++  if(child<0){r=-errno;goto restore_gid;}
++  control_helper_created++;control_reply_pid=child;int parent=0;uint64_t birth=0;
++  if(handle<0||fr_proc(child,&parent,&birth)||parent!=getpid()||fr_pidfd_pid(handle)!=child){r=-ESTALE;}
++  int status=0;struct rusage usage;uint64_t stop=fr_now()+1000000000ull;if(stop>end)stop=end;
++  while(fr_now()<stop){pid_t waited=wait4(child,&status,WNOHANG,&usage);if(waited==child){control_helper_reaped++;if(!WIFEXITED(status)||WEXITSTATUS(status))r=-EIO;break;}if(waited<0){r=-errno;break;}poll(0,0,1);}
++  if(!control_helper_reaped){/* the exact direct intention is retained; no guessed PID */
++   int p=0;uint64_t b=0;if(handle>=0&&fr_pidfd_pid(handle)==child&&!fr_proc(child,&p,&b)&&p==getpid()&&b==birth)syscall(SYS_pidfd_send_signal,handle,SIGKILL,0,0);
++   while(fr_now()<end){pid_t waited=wait4(child,&status,WNOHANG,&usage);if(waited==child){control_helper_reaped++;break;}if(waited<0)break;poll(0,0,1);}r=-ETIMEDOUT;
++  }
++  if(handle>=0){if(close(handle))r=-errno;else control_helper_closed++;}
++ }else {control_reply_pid=getpid();r=fr_send_rights(sock,&q,passes,count,end);}
++restore_gid:if(getgid()!=real_gid&&setresgid(real_gid,0,0))r=-errno;
++restore_uid:if(getuid()!=real_uid&&setresuid(real_uid,0,0))r=-errno;
++close_plain:if(plain>=0){if(close(plain))r=-errno;else control_plain_closed++;}
++ return r;
++}
+ static void fail(const char*s,int unknown){if(!failure)failure=s;if(unknown)sticky=1;}
+ static int text_at(int root,const char*name,char*b,size_t cap){int fd=openat(root,name,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd<0)return -errno;struct stat st;if(fstat(fd,&st)||st.st_uid||st.st_gid){close(fd);return -EPERM;}ssize_t n=read(fd,b,cap);close(fd);if(n<0||(size_t)n>=cap)return -EFBIG;while(n>0&&(b[n-1]=='\n'||b[n-1]==' '))n--;b[n]=0;return 0;}
+ static int value_at(int fd,const char*key,uint64_t*value){char b[128],*e;if(text_at(fd,key,b,sizeof(b)))return -EIO;errno=0;unsigned long long v=strtoull(b,&e,10);if(errno||*e||!b[0])return -EBADMSG;*value=v;return 0;}
+@@ -83,7 +157,7 @@
+  if(syscall(SYS_pidfd_send_signal,r->pidfd,SIGKILL,0,0)&&errno!=ESRCH)fail("OWNED_SIGNAL_FAILED",1);
+  }else if(i==0){int status;struct rusage usage;pid_t p=wait4(r->pid,&status,WNOHANG,&usage);if(p==r->pid){r->reaped=1;r->status=status;r->kernel_status_known=1;}else if(p==0){if(kill(r->pid,SIGKILL)&&errno!=ESRCH)fail("OWNED_SIGNAL_FAILED",1);}else fail("OWNED_WAIT_CUSTODY_LOST",1);}else fail("OWNED_HANDLE_MISSING",1);}}
+ static void reap_owned(void){for(unsigned i=0;i<used;i++){struct owned*r=&records[i];if(r->reaped||r->pid<=0)continue;int status;struct rusage usage;pid_t p=wait4(r->pid,&status,WNOHANG,&usage);if(p==r->pid){r->reaped=1;r->status=status;r->kernel_status_known=1;}else if(p<0&&errno!=ECHILD)fail("OWNED_WAIT_FAILED",1);else if(p<0&&i==0)fail("OWNED_WAIT_CUSTODY_LOST",1);/* ECHILD and caller labels grant no kernel status credit. */}}
+-static int send_ack(int sock,struct fr_packet*q,unsigned type,uint64_t end){q->type=type;int r=fr_send(sock,q,-1,end);if(!r){if(registry_sequence==UINT32_MAX)return -EOVERFLOW;registry_sequence++;}return r;}
++static int send_ack(int sock,struct fr_packet*q,unsigned type,uint64_t end){q->type=type;int r=controlled_reply(sock,q,type,end);if(!r){if(registry_sequence==UINT32_MAX)return -EOVERFLOW;registry_sequence++;}return r<0?r:0;}
+ static int registry(int sock,const struct fr_cap*c,int*pending,uint64_t*pending_end,int*finished,int*draining){struct fr_packet q;int pass=-1,pid=-1,uid=-1,gid=-1;int r=fr_recv(sock,&q,&pass,&pid,&uid,&gid,fr_now()+10000000ull);if(r)return r;
+  const char*cause=0;int idx=-1,parent;uint64_t birth;unsigned max=c->mode==FR_CONTROLS?512:3;
+  if(failure){cause="REG_GENERATION_ALREADY_POISONED";goto out;}
+@@ -114,10 +188,10 @@
+   int src[]={out[1],err[1],reg[1],python},dst[]={1,2,123,130},tmp[4];for(int i=0;i<4;i++){tmp[i]=fcntl(src[i],F_DUPFD_CLOEXEC,400);if(tmp[i]<0)_exit(125);}for(int i=0;i<4;i++){if(dup3(tmp[i],dst[i],0)<0)_exit(125);close(tmp[i]);}
+   for(int fd=0;fd<512;fd++){int keep=fd==1||fd==2||fd==100||fd==111||fd==120||fd==121||fd==123||fd==130;for(unsigned i=0;i<FR_SOURCES;i++)if(fd==fr_source_fd[i])keep=1;if(keep){if(fcntl(fd,F_SETFD,0)<0)_exit(125);}else close(fd);}
+   /* Root-controlled cgroup descriptors are O_PATH, never writable attach fds. */
+-  char*argv[]={"/usr/bin/python3.14","-I","-S","-B","-c","import os,sys,types;d=os.pread(103,1048577,0);m=types.ModuleType('a061_supervisor');m.__file__='/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-SUPERVISOR.py';sys.modules[m.__name__]=m;exec(compile(d,m.__file__,'exec'),m.__dict__);sys.exit(m.main())",(char*)pin,0};char*env[]={"PATH=/usr/bin:/bin","LANG=C","LC_ALL=C",0};fexecve(130,argv,env);_exit(125);
++  char*argv[]={"/usr/bin/python3.14","-I","-S","-B","-c","import os,sys,types;d=os.pread(103,1048577,0);m=types.ModuleType('a061_supervisor');m.__file__='/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071-SUPERVISOR.py';sys.modules[m.__name__]=m;exec(compile(d,m.__file__,'exec'),m.__dict__);sys.exit(m.main())",(char*)pin,0};char*env[]={"PATH=/usr/bin:/bin","LANG=C","LC_ALL=C",0};fexecve(130,argv,env);_exit(125);
+  }
+  close(out[1]);close(err[1]);close(reg[1]);close(barrier[0]);int parent;if(fr_proc(pid,&parent,&records[0].birth)||parent!=getpid()||pidfd<0||fr_pidfd_pid(pidfd)!=pid)fail("COORD_CLONE_IDENTITY",1);
+- struct fr_packet start;packet(&start,c,FR_START,0);start.pid=pid;start.birth=records[0].birth;start.owner=getpid();fr_proc(getpid(),&parent,&start.owner_birth);if(!failure&&fr_send(reg[0],&start,-1,c->work_ns))fail("COORD_START_PACKET",1);unsigned char release=0xa5;if(!failure&&write(barrier[1],&release,1)!=1)fail("COORD_START_BARRIER",1);close(barrier[1]);
++ struct fr_packet start;packet(&start,c,FR_START,0);start.pid=pid;start.birth=records[0].birth;start.owner=getpid();fr_proc(getpid(),&parent,&start.owner_birth);if(!failure&&controlled_reply(reg[0],&start,FR_START,c->work_ns)<0)fail("COORD_START_PACKET",1);unsigned char release=0xa5;if(!failure&&write(barrier[1],&release,1)!=1)fail("COORD_START_BARRIER",1);close(barrier[1]);
+  fcntl(out[0],F_SETFL,O_NONBLOCK);fcntl(err[0],F_SETFL,O_NONBLOCK);
+  uint8_t*buffers[2]={calloc(1,1048577),calloc(1,1048577)};size_t counts[2]={0,0};int pipes[2]={out[0],err[0]},openpipes=2,pending=-1,finished=0,draining=0,stopped=0;uint64_t pending_end=0,peak=0,current_outer=0,current_inner=0;
+  if(!buffers[0]||!buffers[1])fail("OUTER_ALLOCATION",1);
+@@ -133,10 +207,15 @@
+   reap_owned();int all=1;for(unsigned i=0;i<used;i++)if(!records[i].reaped)all=0;
+   if(records[0].reaped&&(!WIFEXITED(records[0].status)||WEXITSTATUS(records[0].status)))fail("COORD_EXIT",0);
+   if(all&&!openpipes)break;
++  /* A dead worker handle is not a wait receipt. It only permits ending this
++   * rejected own contour without waiting out the work budget; the terminal
++   * unreaped check below still makes uncertainty sticky and grants no status. */
++  if(records[0].reaped&&!openpipes){int live=0;for(unsigned i=1;i<used;i++)if(!records[i].reaped&&(records[i].pidfd<0||fr_pidfd_pid(records[i].pidfd)!=-1))live=1;if(!live)break;}
+  }
+  if(!failure){if(!finished)fail("MISSING_FINISH_REGISTRATION",1);if(pending>=0)fail("REG_PENDING_TERMINAL",1);for(unsigned i=0;i<used;i++)if(!records[i].reaped)fail("OWNED_REAP_UNCONFIRMED",1);if(openpipes)fail("OUTER_DRAIN_UNCONFIRMED",1);if(counts[1])fail("INNER_STDERR",0);int ps[16];if(list_members(121,ps)!=0)fail("INNER_CGROUP_NOT_EMPTY",1);if(!counts[0]||buffers[0][counts[0]-1]!='\n'||memchr(buffers[0],'\n',counts[0]-1))fail("PARTIAL_OR_MULTIPLE_TERMINAL",0);}
+  if(failure)stop_known();uint64_t reap_end=fr_now()+500000000ull;if(reap_end>c->hard_ns-1500000000ull)reap_end=c->hard_ns-1500000000ull;while(fr_now()<reap_end){reap_owned();int complete=1;for(unsigned i=0;i<used;i++)if(!records[i].reaped)complete=0;if(complete)break;poll(0,0,5);}reap_owned();for(unsigned i=0;i<used;i++)if(!records[i].reaped)fail("OWNED_REAP_UNCONFIRMED",1);for(int i=0;i<2;i++)if(pipes[i]>=0&&close(pipes[i]))fail("OWNED_PIPE_CLOSE_UNCONFIRMED",1);if(close(reg[0]))fail("REG_CLOSE_UNCONFIRMED",1);
+  for(unsigned i=0;i<used;i++)if(records[i].pidfd>=0){int fd=records[i].pidfd;records[i].pidfd=-1;if(close(fd))fail("OWNED_PIDFD_CLOSE_UNCONFIRMED",1);}
++ if(pending>=0)fail("REG_PENDING_TERMINAL",1);
+  uint8_t sha[32];struct fr_sha hash;fr_sha_init(&hash);if(buffers[0])fr_sha_update(&hash,buffers[0],counts[0]);fr_sha_end(&hash,sha);char hex[65];for(unsigned i=0;i<32;i++)snprintf(hex+2*i,3,"%02x",sha[i]);
+  unsigned reaped_workers=0;for(unsigned i=1;i<used;i++)if(records[i].reaped)reaped_workers++;char head[2048];struct rusage raw;getrusage(RUSAGE_SELF,&raw);int n=snprintf(head,sizeof(head),"{\"state\":\"%s\",\"reason\":%s%s%s,\"body_complete\":false,\"acceptance_complete\":false,\"terminal_completion\":%s,\"uncertainty_sticky\":%s,\"registered_workers\":%u,\"reaped_workers\":%u,\"aggregate_raw_RSS_peak_bytes\":%llu,\"raw_self_peak_KiB\":%ld,\"outer_memory_current\":%llu,\"inner_memory_current\":%llu,\"inner_terminal_sha256\":\"%s\",\"inner_terminal\":",
+   sticky?"STOP_UNCONFIRMED":failure?"OUTER_FAILED":"OUTER_BOUNDED_DRAINED_FINISHED",failure?"\"":"",failure?failure:"null",failure?"\"":"",failure?"false":"true",sticky?"true":"false",started_workers,reaped_workers,(unsigned long long)peak,raw.ru_maxrss,(unsigned long long)current_outer,(unsigned long long)current_inner,hex);
+@@ -151,6 +230,7 @@
+   static const char digits[]="0123456789abcdef";char encoded[32768];for(size_t i=0;i<counts[0];i++){encoded[2*i]=digits[buffers[0][i]>>4];encoded[2*i+1]=digits[buffers[0][i]&15];}
+   emitted=!write_bounded(1,"\"",1,c->hard_ns-1000000000ull)&&!write_bounded(1,encoded,2*counts[0],c->hard_ns-1000000000ull)&&!write_bounded(1,"\"",1,c->hard_ns-1000000000ull);
+  }else if(emitted)emitted=!write_bounded(1,"null",4,c->hard_ns-1000000000ull);
++ if(emitted&&control_case[0]){char controls[1536];int own_parent=0;uint64_t own_birth=0;int generation=fr_proc(getpid(),&own_parent,&own_birth);int nc=snprintf(controls,sizeof(controls),",\"public_control\":{\"case\":\"%s\",\"reply_used\":%d,\"reply_type\":%u,\"reply_pid\":%d,\"reply_uid\":%d,\"reply_gid\":%d,\"reply_rights\":%u,\"reply_ns\":%llu,\"helper_created\":%d,\"helper_reaped\":%d,\"helper_closed\":%d,\"plaintext_created\":%d,\"plaintext_closed\":%d,\"credential_transitions\":%d,\"origin_pid\":%d,\"origin_parent\":%d,\"origin_birth\":%llu,\"coordinator_pid\":%d,\"coordinator_birth\":%llu,\"pending_role\":%d}",control_case,control_reply_used,control_ack_type,control_reply_pid,control_reply_uid,control_reply_gid,control_reply_rights,(unsigned long long)control_reply_ns,control_helper_created,control_helper_reaped,control_helper_closed,control_plain_created,control_plain_closed,control_credential_transitions,getpid(),generation?-1:own_parent,(unsigned long long)(generation?0:own_birth),records[0].pid,(unsigned long long)records[0].birth,pending);emitted=nc>0&&(size_t)nc<sizeof(controls)&&!write_bounded(1,controls,nc,c->hard_ns-1000000000ull);}
+  if(emitted)emitted=!write_bounded(1,"}\n",2,c->hard_ns-1000000000ull);
+  free(buffers[0]);free(buffers[1]);return emitted&&!failure?0:-EIO;
+ }
+@@ -190,6 +270,7 @@
+  int members[16];if(list_members(120,members)!=1||members[0]!=getpid())return pre_refused("OUTER_KERNEL_MEMBERSHIP",-EPERM);
+  r=fr_image_verify(111,122,c.image_sha,c.manifest_sha,c.work_ns);if(r)return pre_refused("EXACT_RUNTIME_IMAGE",r);
+  int python=fr_open_beneath(122,"/usr/bin/python3.14",O_RDONLY);if(python<0||fr_sealed(python,1))return pre_refused("HELD_INTERPRETER",python<0?python:-EPERM);
++ r=control_input(&c);if(r)return pre_refused("PUBLIC_CONTROL_INPUT",r);
+  /* chroot is scoped to independently supplied, verified protected runtime.
+   * No namespace, cgroup, mount, image or authority is created by this launcher. */
+  if(fchdir(122)||chroot(".")||chdir("/"))return pre_refused("KERNEL_RUNTIME_ROOT",-errno);
+--- A079/A071-BUILD-RECIPE.json
++++ A087/A071-BUILD-RECIPE.json
+@@ -1,7 +1,7 @@
+ {
+   "schema": "friday.a061.future-bounded-build-recipe.v1",
+   "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+-  "admission": "Independent WHOLE A079 changed-byte review required before any build; full registry controls remain SOURCE_INCOMPLETE and this recipe is NOT admitted now.",
++  "admission": "Independent WHOLE final-byte A087 review required before any build; Root receiving-side registry controls remain SOURCE_INCOMPLETE and this recipe is NOT admitted now. Original two target/link topology and all mandatory build bounds are unchanged.",
+   "allowed_output": "A NEW independently chosen private0700 build directory; outputs0600 regular nlink1; never overwrite this sealed source package or frozen A046/candidate/quarantine.",
+   "compiler": "Exact independently reviewed held compiler executable FD200 with its SAME protected complete compiler/loader/library/toolchain view; no named-host compiler or shell fallback.",
+   "entry": "Future reviewed build owner calls execve(200, argv, exact_environment), holds exact source descriptor bytes at fixed paths in that same admitted source view, drains both outputs continuously, tracks only actual owned compiler process/generations and exact owned child tools.",
+@@ -70,6 +70,14 @@
+   "ABI_changes": {
+     "fr_recv": "int(int,packet*,passfd*,pid*,uid*,gid*,uint64_deadline)",
+     "fr_own_spawn": "int(int_sock,unsigned_role,int_config,int_body,int_event,int_python,int_gate,uint64_deadline,child*)",
+-    "abort_ack": 14
++    "abort_ack": 14,
++    "fr_receive_receipt_bytes": 24,
++    "fr_evidence_bytes": 344,
++    "fr_own_fork": "int(int_sock,unsigned_role,uint64_scheduler_deadline,child32*)",
++    "fr_own_observe": "int(child32*,observation96*)",
++    "fr_own_evidence": "int(child32*,evidence344*) with unconfirmed wait status redacted",
++    "fr_session_evidence": "int(evidence344*)",
++    "fr_session_close": "int(void)",
++    "fr_local_restrict": "int(unsigned_operation,int_exact_own_fd); irreversible reduction of own kernel syscall permission"
+   }
+ }
+--- A079/A071-COMMON.c
++++ A087/A071-COMMON.c
+@@ -58,8 +58,33 @@
+  if(c->start_ns>fr_now()||fr_now()>=c->work_ns||c->hard_ns-c->start_ns!=wall*1000000000ull||c->hard_ns-c->work_ns!=reserve*1000000000ull)return -ETIMEDOUT;return 0;}
+ int fr_limits(uint64_t as,unsigned cpu){struct {int k;rlim_t v;} rows[]={{RLIMIT_AS,as},{RLIMIT_CPU,cpu},{RLIMIT_FSIZE,2147483648ull},{RLIMIT_NOFILE,512},{RLIMIT_CORE,0},{RLIMIT_STACK,8*1024*1024}};for(unsigned i=0;i<sizeof(rows)/sizeof(rows[0]);i++){struct rlimit inherited;if(getrlimit(rows[i].k,&inherited))return -errno;if(rows[i].v>inherited.rlim_max){if(rows[i].k!=RLIMIT_CPU)return -EPERM;rows[i].v=inherited.rlim_max;}struct rlimit x={rows[i].v,rows[i].v},actual;if(setrlimit(rows[i].k,&x)||getrlimit(rows[i].k,&actual)||actual.rlim_cur!=x.rlim_cur||actual.rlim_max!=x.rlim_max)return -errno;}umask(077);return 0;}
+ static int ready(int fd,short events,uint64_t end){while(fr_now()<end){uint64_t left=end-fr_now();int ms=left/1000000;if(ms>10)ms=10;if(ms<1)ms=1;struct pollfd p={fd,events,0};int r=poll(&p,1,ms);if(r>0){if(p.revents&(POLLERR|POLLNVAL))return -EIO;if(p.revents&(events|POLLHUP))return 0;}if(r<0&&errno!=EINTR)return -errno;}return -ETIMEDOUT;}
+-int fr_send(int fd,const struct fr_packet*p,int pass,uint64_t end){if(ready(fd,POLLOUT,end))return -ETIMEDOUT;struct iovec io={(void*)p,sizeof(*p)};char control[CMSG_SPACE(sizeof(int))]={0};struct msghdr m={0};m.msg_iov=&io;m.msg_iovlen=1;if(pass>=0){m.msg_control=control;m.msg_controllen=sizeof(control);struct cmsghdr*c=CMSG_FIRSTHDR(&m);c->cmsg_level=SOL_SOCKET;c->cmsg_type=SCM_RIGHTS;c->cmsg_len=CMSG_LEN(sizeof(int));memcpy(CMSG_DATA(c),&pass,sizeof(pass));}return sendmsg(fd,&m,MSG_NOSIGNAL|MSG_DONTWAIT)==sizeof(*p)?0:-EIO;}
+-int fr_recv(int fd,struct fr_packet*p,int*pass,int*pid,int*uid,int*gid,uint64_t end){if(ready(fd,POLLIN,end))return -ETIMEDOUT;char control[CMSG_SPACE(sizeof(struct ucred))+CMSG_SPACE(sizeof(int)*4)]={0};struct iovec io={p,sizeof(*p)};struct msghdr m={0};m.msg_iov=&io;m.msg_iovlen=1;m.msg_control=control;m.msg_controllen=sizeof(control);*pass=-1;*pid=-1;*uid=-1;*gid=-1;ssize_t n=recvmsg(fd,&m,MSG_DONTWAIT|MSG_CMSG_CLOEXEC);int bad=n!=sizeof(*p)||(m.msg_flags&(MSG_TRUNC|MSG_CTRUNC));unsigned rights=0,creds=0;for(struct cmsghdr*c=CMSG_FIRSTHDR(&m);c;c=CMSG_NXTHDR(&m,c)){if(c->cmsg_level!=SOL_SOCKET){bad=1;continue;}if(c->cmsg_type==SCM_CREDENTIALS&&c->cmsg_len==CMSG_LEN(sizeof(struct ucred))){struct ucred v;memcpy(&v,CMSG_DATA(c),sizeof(v));*pid=v.pid;*uid=v.uid;*gid=v.gid;creds++;}else if(c->cmsg_type==SCM_RIGHTS&&c->cmsg_len>=CMSG_LEN(0)){size_t bytes=c->cmsg_len-CMSG_LEN(0);if(bytes%sizeof(int))bad=1;size_t count=bytes/sizeof(int);int*v=(void*)CMSG_DATA(c);for(size_t i=0;i<count;i++){rights++;if(*pass==-1)*pass=v[i];else close(v[i]);}}else bad=1;}if(creds!=1||rights>1)bad=1;if(bad){if(*pass>=0)close(*pass);*pass=-1;return -EBADMSG;}return 0;}
++int fr_send_rights(int fd,const struct fr_packet*p,const int*passes,unsigned count,uint64_t end){
++ if(!p||count>2||(count&&!passes))return -EINVAL;
++ int r=ready(fd,POLLOUT,end);if(r)return r;
++ struct iovec io={(void*)p,sizeof(*p)};char control[CMSG_SPACE(sizeof(int)*2)]={0};struct msghdr m={0};m.msg_iov=&io;m.msg_iovlen=1;
++ if(count){m.msg_control=control;m.msg_controllen=CMSG_SPACE(sizeof(int)*count);struct cmsghdr*c=CMSG_FIRSTHDR(&m);c->cmsg_level=SOL_SOCKET;c->cmsg_type=SCM_RIGHTS;c->cmsg_len=CMSG_LEN(sizeof(int)*count);memcpy(CMSG_DATA(c),passes,sizeof(int)*count);}
++ ssize_t n=sendmsg(fd,&m,MSG_NOSIGNAL|MSG_DONTWAIT);return n==sizeof(*p)?0:n<0?-errno:-EIO;
++}
++int fr_send(int fd,const struct fr_packet*p,int pass,uint64_t end){return fr_send_rights(fd,p,pass>=0?&pass:0,pass>=0?1:0,end);}
++static void receipt_close(int fd,struct fr_receive_receipt*t){if(close(fd)){if(!t->close_errno)t->close_errno=errno;}else t->closed++;}
++int fr_recv_receipt(int fd,struct fr_packet*p,int*pass,int*pid,int*uid,int*gid,uint64_t end,struct fr_receive_receipt*t){
++ if(!p||!pass||!pid||!uid||!gid||!t)return -EINVAL;
++ memset(t,0,sizeof(*t));memset(p,0,sizeof(*p));*pass=*pid=*uid=*gid=-1;
++ int r=ready(fd,POLLIN,end);if(r)return r;
++ char control[CMSG_SPACE(sizeof(struct ucred))+CMSG_SPACE(sizeof(int)*4)]={0};struct iovec io={p,sizeof(*p)};struct msghdr m={0};m.msg_iov=&io;m.msg_iovlen=1;m.msg_control=control;m.msg_controllen=sizeof(control);
++ ssize_t n=recvmsg(fd,&m,MSG_DONTWAIT|MSG_CMSG_CLOEXEC);if(n<0)return -errno;t->bytes=n;t->flags=m.msg_flags;
++ int bad=n!=sizeof(*p)||(m.msg_flags&(MSG_TRUNC|MSG_CTRUNC));
++ for(struct cmsghdr*c=CMSG_FIRSTHDR(&m);c;c=CMSG_NXTHDR(&m,c)){
++  if(c->cmsg_level!=SOL_SOCKET){bad=1;continue;}
++  if(c->cmsg_type==SCM_CREDENTIALS&&c->cmsg_len==CMSG_LEN(sizeof(struct ucred))){struct ucred v;memcpy(&v,CMSG_DATA(c),sizeof(v));*pid=v.pid;*uid=v.uid;*gid=v.gid;t->credentials++;}
++  else if(c->cmsg_type==SCM_RIGHTS&&c->cmsg_len>=CMSG_LEN(0)){size_t bytes=c->cmsg_len-CMSG_LEN(0);if(bytes%sizeof(int))bad=1;size_t count=bytes/sizeof(int);int*v=(void*)CMSG_DATA(c);for(size_t i=0;i<count;i++){t->rights++;if(*pass<0)*pass=v[i];else receipt_close(v[i],t);}}
++  else bad=1;
++ }
++ if(t->credentials!=1||t->rights>1)bad=1;
++ if(bad||t->close_errno){if(*pass>=0)receipt_close(*pass,t);*pass=-1;return t->close_errno?-EIO:-EBADMSG;}
++ return 0;
++}
++int fr_recv(int fd,struct fr_packet*p,int*pass,int*pid,int*uid,int*gid,uint64_t end){struct fr_receive_receipt t;return fr_recv_receipt(fd,p,pass,pid,uid,gid,end,&t);}
+ int fr_open_beneath(int root,const char*path,int flags){if(!path||path[0]!='/'||strlen(path)>=512)return -EINVAL;struct open_how h={.flags=(uint64_t)(flags|O_CLOEXEC),.resolve=RESOLVE_IN_ROOT|RESOLVE_NO_MAGICLINKS};int fd=syscall(SYS_openat2,root,path,&h,sizeof(h));return fd<0?-errno:fd;}
+ static int grammar(const char*p){if(p[0]!='/'||!memchr(p,0,512)||strlen(p)>511)return 0;if(!strcmp(p,"/"))return 1;const char*x=p+1;while(*x){const char*e=strchr(x,'/');size_t n=e?(size_t)(e-x):strlen(x);if(!n||(n==1&&*x=='.')||(n==2&&x[0]=='.'&&x[1]=='.'))return 0;for(size_t i=0;i<n;i++)if(!((x[i]>='a'&&x[i]<='z')||(x[i]>='A'&&x[i]<='Z')||(x[i]>='0'&&x[i]<='9')||strchr("_.+-",x[i])))return 0;if(!e)break;x=e+1;}return 1;}
+ static int child_named(struct fr_member*r,unsigned count,const char*parent,const char*name){char p[512];int n=snprintf(p,sizeof(p),!strcmp(parent,"/")?"/%s":"%s/%s",!strcmp(parent,"/")?name:parent,name);if(n<0||n>=512)return 0;for(unsigned i=0;i<count;i++)if(!strcmp(r[i].path,p))return 1;return 0;}
+@@ -80,4 +105,3 @@
+  fr_stage_set("image_total_required_roles");if(total!=h.total||!interp||!stdlib||!cache)goto out;result=fr_runtime_verify(root,r,h.count,end);
+ out:free(r);return result;
+ }
+-
+--- A079/A071-CONTRACT.py
++++ A087/A071-CONTRACT.py
+@@ -18,7 +18,7 @@
+ import time
+ import types
+ 
+-BASE = "/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071"
++BASE = "/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071"
+ SOURCE_FDS = (101,102,103,104,105,106,107,108,109,110,112,113,114,115,116,117,118,119,127)
+ SOURCE_ROLES = ("executor","controls","supervisor","bill","G1","R4","owner","inventory","CA",
+                 "native","worker","bridge","producer","schema","os","manifest","contract","fixture","owned_consumer")
+@@ -33,6 +33,7 @@
+ ADMISSION = None
+ NATIVE = None
+ OBSERVATIONS = []
++START_REFUSAL = None
+ 
+ class Refused(Exception):
+     pass
+@@ -149,7 +150,7 @@
+     raise Refused("REG_ACTUAL_NATIVE_SESSION_REQUIRED")
+ 
+ def startup(expected_sha):
+-    global ADMISSION
++    global ADMISSION, START_REFUSAL
+     cap=decode_capsule(held(100,expected_sha,CAP.size),expected_sha)
+     need(sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode and dict(os.environ)==ENV,"A061_START_ENV")
+     need(os.getuid()==cap["uid"] and os.getgid()==cap["gid"] and os.getgroups()==[],"A061_START_CREDENTIALS")
+@@ -168,6 +169,21 @@
+     validate_runtime_input(cap);check_loaded_runtime(cap)
+     library=native_bridge(cap);start=NativePacket()
+     result=library.fr_session_start(123,expected_sha.encode("ascii"),ctypes.byref(start))
++    if result:
++        trace=NativeEvidence();need(library.fr_session_evidence(ctypes.byref(trace))==0,"A087_NATIVE_START_EVIDENCE")
++        data=json.loads(held(119,cap["pins"]["fixture"],4096))
++        need(type(data) is dict and data.get("schema")=="friday.a087.native-public-input.v1" and
++             type(data.get("case")) is str and data["case"].startswith("start_"),"A087_START_REFUSAL_ADMITTED_INPUT")
++        START_REFUSAL={"schema":"friday.a087.native-public-result.v1","case":data["case"],
++            "native_registry_only":True,"phase":"START","refusal_errno":result,"evidence":evidence_DATA(trace),
++            "ordinary_rows":[],"body_complete":False,"acceptance_complete":False,"current_GO":False,
++            "terminal_completion":False,"all216":"NOT_RUN_SEPARATE_UNRESOLVED_OBLIGATION",
++            "full_authoritative_registry_controls":"SOURCE_INCOMPLETE","F10_waiver":False,
++            "resources":{"self_peak_bytes":resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
++                "children_peak_bytes":resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss*1024,
++                "AS":list(resource.getrlimit(resource.RLIMIT_AS)),"NOFILE":list(resource.getrlimit(resource.RLIMIT_NOFILE)),
++                "CPU":list(resource.getrlimit(resource.RLIMIT_CPU)),"FSIZE":list(resource.getrlimit(resource.RLIMIT_FSIZE)),
++                "CORE":list(resource.getrlimit(resource.RLIMIT_CORE))}}
+     need(result==0,"REG_NATIVE_SESSION_START:%d"%result)
+     p=packet_decode(bytes(start),cap)
+     parent,birth=proc(os.getpid());outer_parent,outer_birth=proc(parent)
+@@ -258,6 +274,19 @@
+             "status_known","cleanup_reaped","handle_closed","stop_attempted")]+[
+         ("status",ctypes.c_int32),("reserved",ctypes.c_int32)]
+ 
++class NativeEvidence(ctypes.Structure):
++    _pack_=1
++    _fields_=[(k,ctypes.c_uint32) for k in ("version","phase","stage")]+[("primitive_errno",ctypes.c_int32)]+[
++        (k,ctypes.c_int32) for k in ("observed_pid","observed_uid","observed_gid","expected_pid","expected_uid","expected_gid")]+[
++        ("rights",ctypes.c_uint32),("rights_closed",ctypes.c_uint32),("rights_close_errno",ctypes.c_int32)]+[
++        (k,ctypes.c_uint32) for k in ("ready_released","signal_attempts","close_attempts","transport_close_attempts","status_redacted")]+[
++        (k,ctypes.c_uint64) for k in ("intent_ack_ns","clone_ns","register_send_ns","register_ack_ns","release_ns","wait4_ns","reap_ack_ns","signal_ns","close_ns","transport_close_ns")]+[
++        ("expected",NativePacket),("observed",NativePacket)]
++
++def evidence_DATA(trace):
++    return {key:bytes(getattr(trace,key)).hex() if key in ("expected","observed") else getattr(trace,key)
++            for key,_ in trace._fields_}
++
+ def native_bridge(cap):
+     global NATIVE
+     if NATIVE is not None:
+@@ -286,6 +315,14 @@
+     lib.fr_own_release.argtypes=[ctypes.POINTER(Child)];lib.fr_own_release.restype=ctypes.c_int
+     lib.fr_fixture_observe.argtypes=[ctypes.c_int,ctypes.POINTER(NativeObservation)];lib.fr_fixture_observe.restype=ctypes.c_int
+     lib.fr_fixture_stop.argtypes=[ctypes.c_int,ctypes.c_int,ctypes.c_uint64];lib.fr_fixture_stop.restype=ctypes.c_int
++    need(ctypes.sizeof(Child)==32 and ctypes.sizeof(NativePacket)==96 and
++         ctypes.sizeof(NativeObservation)==96 and ctypes.sizeof(NativeEvidence)==344,"A087_STRICT_NATIVE_ABI")
++    lib.fr_own_fork.argtypes=[ctypes.c_int,ctypes.c_uint,ctypes.c_uint64,ctypes.POINTER(Child)];lib.fr_own_fork.restype=ctypes.c_int
++    lib.fr_own_observe.argtypes=[ctypes.POINTER(Child),ctypes.POINTER(NativeObservation)];lib.fr_own_observe.restype=ctypes.c_int
++    lib.fr_own_evidence.argtypes=[ctypes.POINTER(Child),ctypes.POINTER(NativeEvidence)];lib.fr_own_evidence.restype=ctypes.c_int
++    lib.fr_session_evidence.argtypes=[ctypes.POINTER(NativeEvidence)];lib.fr_session_evidence.restype=ctypes.c_int
++    lib.fr_session_close.argtypes=[];lib.fr_session_close.restype=ctypes.c_int
++    lib.fr_local_restrict.argtypes=[ctypes.c_uint,ctypes.c_int];lib.fr_local_restrict.restype=ctypes.c_int
+     check_loaded_runtime(cap);NATIVE=lib;return lib
+ 
+ def enable_fixture_forks(cap,lib):
+--- A079/A071-CONTROLS.py
++++ A087/A071-CONTROLS.py
+@@ -12,7 +12,9 @@
+ 
+ import ctypes
+ import os
++import resource
+ import select
++import struct
+ import time
+ import a061_contract as c
+ 
+@@ -140,6 +142,190 @@
+         fixture=c.held(119,cap["pins"]["fixture"],1048576)
+         decoded=x.m.inert_json(fixture,1048576)
+         if type(decoded) is dict and decoded.get("schema")==NATIVE_INPUT_SCHEMA:return controls_native(fixture)
++        if type(decoded) is dict and decoded.get("schema")==PUBLIC_INPUT_SCHEMA:return controls_public(fixture)
+     # The protected native mode1 caller reaches a precise, persistent refusal.
+     # Invented native ownership/cause labels cannot fulfill the 216 obligations.
+     raise s.Refused("SOURCE_INCOMPLETE_INHERITED_NATIVE_CONTROLS_NOT_ADMITTED")
++
++PUBLIC_INPUT_SCHEMA="friday.a087.native-public-input.v1"
++PUBLIC_CASES=("positive","start_origin_pid","start_origin_uid","start_origin_gid","start_owner","start_owner_birth",
++    "start_deadline","start_role","start_sequence","start_rights","ack_origin_pid","ack_origin_uid","ack_origin_gid",
++    "ack_owner","ack_owner_birth","ack_session","ack_role","ack_sequence_replay","ack_sequence_future","ack_deadline",
++    "ack_rights","ack_many_rights","register_invalid_ACK","register_lost_ACK","register_delayed_ACK","abort_positive",
++    "abort_invalid_ACK","abort_lost_ACK","reap_invalid_ACK","reap_lost_ACK","copy_pid","copy_pidfd","copy_birth","copy_role",
++    "pidfd_plaintext","pidfd_closed","signal_denied","close_denied","transport_closed","role_invalid","deadline_expired",
++    "session_restart","wait_flags_DATA","caller_status_DATA")
++PUBLIC_BYTES=tuple(("ordinary-owned-a087/%d\n"%i).encode("ascii") for i in range(3))
++READY=struct.Struct("<QiiiiQQ")
++
++def public_observe(child):
++    out=c.NativeObservation();c.need(c.NATIVE.fr_own_observe(ctypes.byref(child),ctypes.byref(out))==0,"A087_NATIVE_BOUND_OBSERVATION")
++    return {key:getattr(out,key) for key,_ in out._fields_}
++
++def public_evidence(child=None):
++    out=c.NativeEvidence()
++    result=c.NATIVE.fr_session_evidence(ctypes.byref(out)) if child is None else c.NATIVE.fr_own_evidence(ctypes.byref(child),ctypes.byref(out))
++    c.need(result==0,"A087_PRIVATE_NATIVE_EVIDENCE");return c.evidence_DATA(out)
++
++def public_wait(child,end):
++    while time.monotonic_ns()<end:
++        result=c.NATIVE.fr_own_wait(123,ctypes.byref(child),1)
++        if result:return result
++        select.select([],[],[],.002)
++    raise c.Refused("A087_OWN_WAIT_DEADLINE")
++
++def public_resources():
++    return {"self_peak_bytes":resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
++        "children_peak_bytes":resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss*1024,
++        "AS":list(resource.getrlimit(resource.RLIMIT_AS)),"CPU":list(resource.getrlimit(resource.RLIMIT_CPU)),
++        "NOFILE":list(resource.getrlimit(resource.RLIMIT_NOFILE)),"FSIZE":list(resource.getrlimit(resource.RLIMIT_FSIZE)),
++        "CORE":list(resource.getrlimit(resource.RLIMIT_CORE)),"affinity":sorted(os.sched_getaffinity(0))}
++
++def controls_public(raw):
++    data=x.m.inert_json(raw,4096)
++    c.need(type(data) is dict and set(data)=={"schema","case","workers"} and data["schema"]==PUBLIC_INPUT_SCHEMA and
++        data["case"] in PUBLIC_CASES and data["workers"]==[{"payload":v.decode("ascii"),"exit":23+i} for i,v in enumerate(PUBLIC_BYTES)],
++        "A087_ORDINARY_PUBLIC_INPUT")
++    case=data["case"];cap=c.ADMISSION;lib=c.NATIVE
++    c.need(cap is not None and cap["mode_id"]==1 and lib is not None and not case.startswith("start_"),"A087_REAL_NATIVE_START")
++    before=observation();c.need(before["session_ready"]==1 and before["creation_poisoned"]==0 and before["next_sequence"]==2,
++        "A087_PUBLIC_PREREQUISITE")
++    end=min(cap["work_ns"],time.monotonic_ns()+20*10**9)
++    children=[];pipes=set();rows=[];attempts=[];primary=None;transport=None;closed_plaintext=False
++    completed=case in ("positive","register_delayed_ACK","abort_positive")
++    try:
++        if case.startswith("abort_"):
++            # Exhaust only this coordinator's own descriptor allowance AFTER
++            # startup. One slot is left for actual proc/socket verification;
++            # native pipe2 needs two and fails in the real kernel with EMFILE.
++            old=resource.getrlimit(resource.RLIMIT_NOFILE);held=[];target=256
++            c.need(old==(512,512),"A087_ORIGINAL_DESCRIPTOR_ENVELOPE")
++            resource.setrlimit(resource.RLIMIT_NOFILE,(target,old[1]))
++            try:
++                while True:
++                    try:held.append(os.dup(100))
++                    except OSError as exc:
++                        c.need(exc.errno==24,"A087_ACTUAL_EMFILE");break
++                c.need(bool(held),"A087_EXHAUSTION_PREREQUISITE");os.close(held.pop())
++                failed=c.Child();result=lib.fr_own_fork(123,0,end,ctypes.byref(failed))
++                c.need(failed.pid==0 and failed.pidfd==-1 and failed.creation_errno==24,"A087_REAL_NO_CHILD_CREATION_FAILURE")
++                primary={"operation":"creation","result":result,"record":public_observe(failed),"evidence":public_evidence(failed)}
++                attempts.append(primary)
++            finally:
++                for fd in held:os.close(fd)
++                resource.setrlimit(resource.RLIMIT_NOFILE,old)
++            if not completed:
++                c.need(result<0,"A087_ABORT_REPLY_REFUSAL")
++                other=c.Child();again=lib.fr_own_fork(123,0,end,ctypes.byref(other))
++                attempts.append({"operation":"after_refusal_creation","result":again,"created_pid":other.pid})
++                c.need(again<0 and other.pid==0,"A087_ABORT_UNKNOWN_NO_SECOND_CLONE")
++                return public_terminal(case,before,rows,attempts,primary,transport,False)
++            c.need(result==-24 and failed.state==0,"A087_ABORT_ACK_CONFIRMED_NO_CLONE")
++        count=3 if completed else 1
++        for role in range(count):
++            ready_read,ready_write=os.pipe2(os.O_CLOEXEC|os.O_NONBLOCK)
++            gate_read,gate_write=os.pipe2(os.O_CLOEXEC|os.O_NONBLOCK);pipes.update((ready_read,ready_write,gate_read,gate_write))
++            intention=c.Child();pid=lib.fr_own_fork(123,role,end,ctypes.byref(intention))
++            if pid==0:
++                try:
++                    for fd in pipes:
++                        if fd not in (ready_write,gate_read):os.close(fd)
++                    parent,birth=c.proc(os.getpid());_,parent_birth=c.proc(parent)
++                    message=READY.pack(time.monotonic_ns(),os.getpid(),parent,os.getuid(),os.getgid(),birth,parent_birth)+PUBLIC_BYTES[role]
++                    c.need(os.write(ready_write,message)==len(message),"A087_REAL_POST_ACK_READY");os.close(ready_write)
++                    while time.monotonic_ns()<end:
++                        if select.select([gate_read],[],[],.002)[0]:
++                            value=os.read(gate_read,1)
++                            if value==b"G":os.close(gate_read);os._exit(23+role)
++                            os._exit(124)
++                    os._exit(124)
++                except BaseException:os._exit(125)
++            for fd in (ready_write,gate_read):os.close(fd);pipes.remove(fd)
++            row={"role":role,"spawn_result":pid,"intention":intention,"read":ready_read,"gate":gate_write,
++                "registered":public_observe(intention),"spawn_evidence":public_evidence(intention),"ready":None,"payload":""}
++            children.append(row)
++            if pid<0:
++                primary={"operation":"fork","result":pid,"record":row["registered"],"evidence":row["spawn_evidence"]}
++                c.need(intention.pid>=0,"A087_DURABLE_ACTUAL_CLONE_INTENTION");break
++        for child in children:
++            content=bytearray()
++            while time.monotonic_ns()<end:
++                if select.select([child["read"]],[],[],.002)[0]:
++                    part=os.read(child["read"],129)
++                    if not part:break
++                    content.extend(part);c.need(len(content)<=128,"A087_ORDINARY_READY_BOUND")
++            else:raise c.Refused("A087_READY_DRAIN_DEADLINE")
++            os.close(child["read"]);pipes.remove(child["read"])
++            if child["spawn_result"]>0:
++                c.need(len(content)==READY.size+len(PUBLIC_BYTES[child["role"]]) and content[READY.size:]==PUBLIC_BYTES[child["role"]],"A087_INDEPENDENT_ORDINARY_PAYLOAD")
++                child["ready"]=list(READY.unpack(content[:READY.size]));child["payload"]=content[READY.size:].decode("ascii")
++            else:c.need(not content,"A087_NO_READY_BEFORE_REGISTER_ACK")
++        if completed:
++            for child in children:c.need(os.write(child["gate"],b"G")==1,"A087_OWN_GATE_RELEASE")
++            for child in children:
++                result=public_wait(child["intention"],end);released=lib.fr_own_release(ctypes.byref(child["intention"]))
++                child.update(wait_result=result,release_result=released)
++        elif primary is None:
++            child=children[0];record=child["intention"]
++            operation="wait";result=None
++            if case.startswith("copy_"):
++                field=case[5:];setattr(record,field,getattr(record,field)+1)
++                result=lib.fr_own_wait(123,ctypes.byref(record),1)
++            elif case in ("pidfd_plaintext","pidfd_closed"):
++                native_fd=record.pidfd
++                if case=="pidfd_plaintext":
++                    plain=os.memfd_create("ordinary-own-plaintext-a087",os.MFD_CLOEXEC)
++                    os.write(plain,b"ordinary-owned-plaintext-a087\n");os.dup2(plain,native_fd);os.close(plain)
++                    # Actual descriptor number now names an owned plain file;
++                    # native cleanup must not close it as if it were a pidfd.
++                    pipes.add(native_fd)
++                else:os.close(native_fd)
++                operation="stop";result=lib.fr_own_stop(123,ctypes.byref(record),min(end,time.monotonic_ns()+10**9))
++                c.need(os.write(child["gate"],b"G")==1,"A087_STALE_HANDLE_CHILD_ORDINARY_EXIT")
++            elif case=="signal_denied":
++                c.need(lib.fr_local_restrict(1,-1)==0,"A087_REAL_LOCAL_SIGNAL_RESTRICTION")
++                operation="stop";result=lib.fr_own_stop(123,ctypes.byref(record),min(end,time.monotonic_ns()+500000000))
++                c.need(os.write(child["gate"],b"G")==1,"A087_RESTRICTED_SIGNAL_OWN_EXIT")
++            elif case in ("reap_invalid_ACK","reap_lost_ACK","close_denied"):
++                c.need(os.write(child["gate"],b"G")==1,"A087_OWN_EXIT_BEFORE_PRIVATE_WAIT")
++                result=public_wait(record,end)
++                if case=="close_denied":
++                    c.need(result==1 and lib.fr_local_restrict(2,record.pidfd)==0,"A087_REAL_LOCAL_CLOSE_RESTRICTION")
++                    operation="release";result=lib.fr_own_release(ctypes.byref(record))
++            elif case=="transport_closed":
++                operation="transport";result=lib.fr_session_close();transport=public_evidence()
++            elif case=="role_invalid":
++                other=c.Child();operation="fork_role";result=lib.fr_own_fork(123,512,end,ctypes.byref(other));transport=public_evidence()
++            elif case=="deadline_expired":
++                other=c.Child();operation="fork_deadline";result=lib.fr_own_fork(123,1,time.monotonic_ns()-1,ctypes.byref(other));transport=public_evidence(other)
++            elif case=="session_restart":
++                start=c.NativePacket();operation="start_again";result=lib.fr_session_start(123,cap["capsule_sha"].encode("ascii"),ctypes.byref(start));transport=public_evidence()
++            elif case=="wait_flags_DATA":result=lib.fr_own_wait(123,ctypes.byref(record),2)
++            elif case=="caller_status_DATA":result=lib.fr_fixture_reap(123,record.pid,23<<8)
++            else:raise c.Refused("A087_UNIMPLEMENTED_ORDINARY_CASE")
++            primary={"operation":operation,"result":result,"record":public_observe(record),"evidence":public_evidence(record),
++                "call_DATA":{key:getattr(record,key) for key,_ in record._fields_}}
++        for child in children:
++            record=child["intention"];state=public_observe(record);stop=None
++            if record.pid>0 and (not state["cleanup_reaped"] or not state["handle_closed"]) and case!="close_denied":
++                stop=lib.fr_own_stop(123,ctypes.byref(record),min(end,time.monotonic_ns()+10**9))
++            child.update(stop_result=stop,final=public_observe(record),final_evidence=public_evidence(record))
++            rows.append({key:value for key,value in child.items() if key not in ("intention","read","gate")})
++        if not completed:
++            other=c.Child();again=lib.fr_own_fork(123,1,end,ctypes.byref(other))
++            attempts.append({"operation":"after_refusal_creation","result":again,"created_pid":other.pid})
++            c.need(again<0 and other.pid==0,"A087_STICKY_NO_SECOND_CLONE")
++        return public_terminal(case,before,rows,attempts,primary,transport,completed)
++    finally:
++        for child in children:
++            state=public_observe(child["intention"])
++            if child["intention"].pid>0 and not state["cleanup_reaped"]:
++                lib.fr_own_stop(123,ctypes.byref(child["intention"]),min(cap["hard_ns"]-10**9,time.monotonic_ns()+10**9))
++        for fd in pipes:os.close(fd)
++
++def public_terminal(case,before,rows,attempts,primary,transport,completed):
++    return {"schema":"friday.a087.native-public-result.v1","native_registry_only":True,"case":case,"phase":"SESSION",
++        "ordinary_rows":rows,"attempts":attempts,"primary":primary,"transport_evidence":transport,
++        "session_before":before,"session_after":observation(),"resources":public_resources(),
++        "terminal_completion":completed,"body_complete":False,"acceptance_complete":False,"current_GO":False,
++        "all216":"NOT_RUN_SEPARATE_UNRESOLVED_OBLIGATION","full_authoritative_registry_controls":"SOURCE_INCOMPLETE","F10_waiver":False}
+--- A079/A071-EXECUTOR.py
++++ A087/A071-EXECUTOR.py
+@@ -21,7 +21,7 @@
+ import urllib.parse
+ 
+ BASE = "/home/jericho/.jericho/runtime/subagent-lifecycle/"
+-STEM = "/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071"
++STEM = "/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071"
+ BILL = STEM + "-BILL.json"
+ BILL_SHA = "b9173a3b8eac8d0bd255081cd01fdd76f809601bcca70dccf8ba10c884e47ef5"
+ CONTROLS = STEM + "-CONTROLS.py"
+--- A079/A071-NATIVE.h
++++ A087/A071-NATIVE.h
+@@ -71,12 +71,36 @@
+ _Static_assert(sizeof(struct fr_packet)==96,"registration wire mismatch");
+ _Static_assert(sizeof(struct fr_child)==32,"owned child ABI mismatch");
+ enum {FR_EMPTY=0,FR_CREATED=1,FR_REGISTERED=2,FR_REAPED=3,FR_UNKNOWN=4};
++/* Public read-only receipts describe real syscall results, never authority.
++ * The fixed v1 packet/capsule/child/observation ABIs above remain unchanged. */
++struct __attribute__((packed)) fr_receive_receipt {
++ uint32_t credentials,rights,closed,flags;int32_t close_errno,bytes;
++};
++enum {FR_E_INPUT=1,FR_E_CAPSULE,FR_E_OWNER_PROC,FR_E_SOCKET,FR_E_RECEIVE,
++ FR_E_ORIGIN_PID,FR_E_ORIGIN_UID,FR_E_ORIGIN_GID,FR_E_FRAME,FR_E_TYPE,
++ FR_E_SEQUENCE,FR_E_ROLE,FR_E_PID,FR_E_OWNER,FR_E_BIRTH,FR_E_OWNER_BIRTH,
++ FR_E_DEADLINE,FR_E_STATUS,FR_E_RIGHTS,FR_E_RIGHT_CLOSE,FR_E_COPY,
++ FR_E_HANDLE,FR_E_SIGNAL,FR_E_WAIT4,FR_E_HANDLE_CLOSE,FR_E_TRANSPORT_CLOSE,
++ FR_E_CREATE_PIPE,FR_E_CREATE_CLONE,FR_E_BARRIER};
++struct __attribute__((packed)) fr_evidence {
++ uint32_t version,phase,stage;int32_t primitive_errno;
++ int32_t observed_pid,observed_uid,observed_gid,expected_pid,expected_uid,expected_gid;
++ uint32_t rights,rights_closed;int32_t rights_close_errno;
++ uint32_t ready_released,signal_attempts,close_attempts,transport_close_attempts,status_redacted;
++ uint64_t intent_ack_ns,clone_ns,register_send_ns,register_ack_ns,release_ns,
++          wait4_ns,reap_ack_ns,signal_ns,close_ns,transport_close_ns;
++ struct fr_packet expected,observed;
++};
++_Static_assert(sizeof(struct fr_receive_receipt)==24,"receive receipt ABI mismatch");
++_Static_assert(sizeof(struct fr_evidence)==344,"private evidence ABI mismatch");
+ struct fr_sha {uint32_t h[8];uint64_t bits;uint8_t b[64];size_t used;};
+ void fr_sha_init(struct fr_sha*);void fr_sha_update(struct fr_sha*,const void*,size_t);void fr_sha_end(struct fr_sha*,uint8_t[32]);
+ uint64_t fr_now(void);int fr_hash_fd(int,uint64_t,uint8_t[32]);int fr_sealed(int,int);
+ int fr_proc(int,int*,uint64_t*);int fr_pidfd_pid(int);int fr_cap_read(int,const char*,struct fr_cap*);
+ int fr_limits(uint64_t,unsigned);int fr_send(int,const struct fr_packet*,int,uint64_t);
+ int fr_recv(int,struct fr_packet*,int*,int*,int*,int*,uint64_t);
++int fr_recv_receipt(int,struct fr_packet*,int*,int*,int*,int*,uint64_t,struct fr_receive_receipt*);
++int fr_send_rights(int,const struct fr_packet*,const int*,unsigned,uint64_t);
+ int fr_own_spawn(int,unsigned,int,int,int,int,int,uint64_t,struct fr_child*);
+ int fr_own_wait(int,struct fr_child*,int);int fr_own_stop(int,struct fr_child*,uint64_t);
+ int fr_fixture_fork(int);int fr_fixture_reap(int,int,int);
+@@ -87,6 +111,18 @@
+ int fr_own_release(struct fr_child*);
+ int fr_fixture_observe(int,struct fr_observation*);
+ int fr_fixture_stop(int,int,uint64_t);
++/* Ordinary owned fork is a real public API, used by the new ordinary caller.
++ * It returns a real native-bound child copy even on post-clone refusal. No
++ * supplied PID/status/pidfd can be adopted. Children return only after ACK. */
++int fr_own_fork(int,unsigned,uint64_t,struct fr_child*);
++int fr_own_observe(struct fr_child*,struct fr_observation*);
++int fr_own_evidence(struct fr_child*,struct fr_evidence*);
++int fr_session_evidence(struct fr_evidence*);
++int fr_session_close(void);
++/* Restricts this calling process's own syscall capability in the kernel.
++ * operation1 denies pidfd_send_signal; operation2 denies close of exact fd.
++ * This cannot restore permissions and does not fabricate a syscall result. */
++int fr_local_restrict(unsigned,int);
+ int fr_open_beneath(int,const char*,int);int fr_image_verify(int,int,const uint8_t*,const uint8_t*,uint64_t);
+ int fr_runtime_verify(int,struct fr_member*,unsigned,uint64_t);
+ void fr_stage_set(const char*);const char *fr_stage_get(void);
+--- A079/A071-OWNED.c
++++ A087/A071-OWNED.c
+@@ -1,5 +1,8 @@
+ #include "A071-NATIVE.h"
+ #include <linux/sched.h>
++#include <linux/filter.h>
++#include <linux/seccomp.h>
++#include <linux/audit.h>
+ #include <sys/syscall.h>
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+@@ -29,6 +32,9 @@
+ static uint32_t session_sequence=2;
+ static int session_ready;
+ static struct stat session_socket_stat;
++static struct fr_evidence session_evidence;
++static struct fr_evidence *active_evidence=&session_evidence;
++static int evidence_error(unsigned stage,int result){if(!active_evidence->stage){active_evidence->stage=stage;active_evidence->primitive_errno=result;}return result;}
+ static int creation_owner(void){
+  if(!session_ready||native_owner!=getpid())return -EPERM;
+  if(native_creation_poisoned)return -EUCLEAN;
+@@ -39,9 +45,17 @@
+  struct fr_child*public_copy;struct fr_child actual;pid_t owner;
+  int wait_observed,kernel_status,cleanup_reaped,handle_closed,stop_attempted;
+  struct stat handle;
++ struct fr_evidence evidence;
+ };
+ static struct owned_binding owned_bindings[515];
+ static unsigned owned_binding_count;
++static void poison_generation(void){
++ native_creation_poisoned=1;
++ for(unsigned i=0;i<owned_binding_count;i++)if(owned_bindings[i].owner==getpid()&&owned_bindings[i].actual.state!=FR_REAPED){
++  if(!owned_bindings[i].evidence.stage){owned_bindings[i].evidence.stage=active_evidence->stage;owned_bindings[i].evidence.primitive_errno=active_evidence->primitive_errno;}
++  poison(&owned_bindings[i].actual);
++ }
++}
+ static struct owned_binding *binding_find(struct fr_child*copy){
+  for(unsigned i=0;i<owned_binding_count;i++)if(owned_bindings[i].public_copy==copy&&owned_bindings[i].owner==getpid())return &owned_bindings[i];
+  return 0;
+@@ -55,14 +69,14 @@
+ }
+ static struct fr_child *binding_actual(struct fr_child*copy){
+  struct owned_binding *entry=binding_find(copy);
+- if(!entry||memcmp(copy,&entry->actual,sizeof(*copy))){poison(entry?&entry->actual:0);return 0;}
++ if(!entry||memcmp(copy,&entry->actual,sizeof(*copy))){if(entry){active_evidence=&entry->evidence;evidence_error(FR_E_COPY,-EPERM);active_evidence=&session_evidence;}poison(entry?&entry->actual:0);return 0;}
+  return &entry->actual;
+ }
+ static struct owned_binding *binding_record(struct fr_child*actual){
+  for(unsigned i=0;i<owned_binding_count;i++)if(&owned_bindings[i].actual==actual&&owned_bindings[i].owner==getpid())return &owned_bindings[i];
+  return 0;
+ }
+-static int publish_fixture(struct fr_child*copy,struct fr_child*actual,int result){*copy=*actual;return result;}
++static int publish_fixture(struct fr_child*copy,struct fr_child*actual,int result){*copy=*actual;active_evidence=&session_evidence;return result;}
+ static int cap_get(struct fr_cap*c){struct stat s;int parent;uint64_t birth;
+  if(!session_ready||native_owner!=getpid()||fr_sealed(100,1)||fstat(100,&s)||s.st_size!=sizeof(*c)||pread(100,c,sizeof(*c),0)!=sizeof(*c)||memcmp(c,&session_cap,sizeof(*c))||getuid()!=c->uid||getgid()!=c->gid||fr_proc(getpid(),&parent,&birth)||parent!=session_origin||birth!=session_owner_birth)return -EPERM;
+  return 0;
+@@ -72,23 +86,39 @@
+  return 0;
+ }
+ int fr_session_start(int sock,const char*sha,struct fr_packet*start){
+- if(session_ready||native_creation_poisoned||!start||sock!=FR_REG_FD){native_creation_poisoned=1;return -EPERM;}
++ native_owner=getpid();active_evidence=&session_evidence;session_evidence.version=1;session_evidence.phase=FR_START;
++ if(session_ready||native_creation_poisoned||!start||sock!=FR_REG_FD){int result=evidence_error(FR_E_INPUT,-EPERM);poison_generation();return result;}
+  struct fr_cap c;struct stat st;struct ucred peer;socklen_t n=sizeof(peer),z=sizeof(int);int type=0,pass=0,parent=0,outer_parent=0;uint64_t own_birth=0,outer_birth=0;
+- int r=fr_cap_read(100,sha,&c);if(r)goto bad;
+- if(getuid()!=c.uid||getgid()!=c.gid||fr_proc(getpid(),&parent,&own_birth)||parent!=getppid()||fr_proc(parent,&outer_parent,&outer_birth)||fstat(sock,&st)||!S_ISSOCK(st.st_mode)||getsockopt(sock,SOL_SOCKET,SO_PEERCRED,&peer,&n)||n!=sizeof(peer)||peer.pid!=parent||peer.uid||peer.gid||getsockopt(sock,SOL_SOCKET,SO_TYPE,&type,&z)||type!=SOCK_SEQPACKET||getsockopt(sock,SOL_SOCKET,SO_PASSCRED,&pass,&z)||pass!=1){r=-EPERM;goto bad;}
+- struct fr_packet p;int fd=-1,pid=-1,uid=-1,gid=-1;uint64_t end=fr_now()+15000000000ull;if(end>c.work_ns)end=c.work_ns;
+- r=fr_recv(sock,&p,&fd,&pid,&uid,&gid,end);
+- if(fd>=0&&close(fd))r=-EIO;
+- if(r)goto bad;
+- if(fd>=0||pid!=parent||uid||gid||memcmp(p.magic,"FRA061P1",8)||memcmp(p.session,c.session,32)||p.version!=1||p.type!=FR_START||p.sequence!=1||p.role||p.pid!=getpid()||p.owner!=parent||p.status||p.detail||p.birth!=own_birth||p.owner_birth!=outer_birth||p.deadline_ns!=c.work_ns){r=-EBADMSG;goto bad;}
++ int r=fr_cap_read(100,sha,&c);if(r){evidence_error(FR_E_CAPSULE,r);goto bad;}
++ if(getuid()!=c.uid||getgid()!=c.gid||fr_proc(getpid(),&parent,&own_birth)||parent!=getppid()||fr_proc(parent,&outer_parent,&outer_birth)){r=evidence_error(FR_E_OWNER_PROC,-EPERM);goto bad;}
++ if(fstat(sock,&st)||!S_ISSOCK(st.st_mode)||getsockopt(sock,SOL_SOCKET,SO_PEERCRED,&peer,&n)||n!=sizeof(peer)||peer.pid!=parent||peer.uid||peer.gid||getsockopt(sock,SOL_SOCKET,SO_TYPE,&type,&z)||type!=SOCK_SEQPACKET||getsockopt(sock,SOL_SOCKET,SO_PASSCRED,&pass,&z)||pass!=1){r=evidence_error(FR_E_SOCKET,-EPERM);goto bad;}
++ struct fr_packet p;struct fr_receive_receipt receipt;int fd=-1,pid=-1,uid=-1,gid=-1;uint64_t end=fr_now()+15000000000ull;if(end>c.work_ns)end=c.work_ns;
++ r=fr_recv_receipt(sock,&p,&fd,&pid,&uid,&gid,end,&receipt);
++ session_evidence.observed=p;session_evidence.observed_pid=pid;session_evidence.observed_uid=uid;session_evidence.observed_gid=gid;session_evidence.expected_pid=parent;
++ session_evidence.rights=receipt.rights;session_evidence.rights_closed=receipt.closed;session_evidence.rights_close_errno=receipt.close_errno;
++ struct fr_packet*w=&session_evidence.expected;memset(w,0,sizeof(*w));memcpy(w->magic,"FRA061P1",8);memcpy(w->session,c.session,32);w->version=1;w->type=FR_START;w->sequence=1;w->pid=getpid();w->owner=parent;w->birth=own_birth;w->owner_birth=outer_birth;w->deadline_ns=c.work_ns;
++ if(fd>=0){if(close(fd)){session_evidence.rights_close_errno=errno;r=-EIO;}else session_evidence.rights_closed++;}
++ if(r){evidence_error(receipt.rights>1?FR_E_RIGHTS:session_evidence.rights_close_errno?FR_E_RIGHT_CLOSE:FR_E_RECEIVE,r);goto bad;}
++ unsigned stage=fd>=0?FR_E_RIGHTS:pid!=parent?FR_E_ORIGIN_PID:uid?FR_E_ORIGIN_UID:gid?FR_E_ORIGIN_GID:
++  memcmp(p.magic,w->magic,8)||memcmp(p.session,w->session,32)||p.version!=1?FR_E_FRAME:p.type!=w->type?FR_E_TYPE:p.sequence!=1?FR_E_SEQUENCE:p.role?FR_E_ROLE:
++  p.pid!=w->pid?FR_E_PID:p.owner!=w->owner?FR_E_OWNER:p.birth!=w->birth?FR_E_BIRTH:p.owner_birth!=w->owner_birth?FR_E_OWNER_BIRTH:p.deadline_ns!=w->deadline_ns?FR_E_DEADLINE:p.status||p.detail?FR_E_STATUS:0;
++ if(stage){r=evidence_error(stage,-EBADMSG);goto bad;}
+  session_cap=c;session_origin=parent;session_origin_birth=outer_birth;session_owner_birth=own_birth;session_socket_stat=st;native_owner=getpid();session_ready=1;*start=p;return 0;
+ bad:native_creation_poisoned=1;return r;
+ }
+ static void packet(struct fr_packet*p,const struct fr_cap*c,unsigned type,unsigned role){memset(p,0,sizeof(*p));memcpy(p->magic,"FRA061P1",8);memcpy(p->session,c->session,32);p->version=1;p->type=type;p->role=role;p->sequence=session_sequence;p->owner=native_owner;p->owner_birth=session_owner_birth;p->deadline_ns=c->work_ns;}
+ static int ack(int sock,const struct fr_packet*q,unsigned expected,uint64_t end){
+- struct fr_packet p;int fd=-1,pid=-1,uid=-1,gid=-1;int r=session_socket(sock);if(r)return r;
+- r=fr_recv(sock,&p,&fd,&pid,&uid,&gid,end);if(fd>=0&&close(fd))r=-EIO;if(r)return r;
+- if(pid!=session_origin||uid!=0||gid!=0||fd>=0||memcmp(p.magic,q->magic,8)||memcmp(p.session,q->session,32)||p.version!=1||p.type!=expected||p.role!=q->role||p.sequence!=q->sequence||q->sequence!=session_sequence||p.owner!=q->owner||p.owner_birth!=q->owner_birth||p.pid!=q->pid||p.birth!=q->birth||p.status!=q->status||p.detail!=q->detail||p.deadline_ns!=q->deadline_ns)return -EBADMSG;
++ struct fr_packet p;struct fr_receive_receipt receipt;int fd=-1,pid=-1,uid=-1,gid=-1;active_evidence->phase=q->type;active_evidence->expected=*q;active_evidence->expected.type=expected;active_evidence->expected_pid=session_origin;active_evidence->expected_uid=active_evidence->expected_gid=0;
++ int r=session_socket(sock);if(r)return evidence_error(FR_E_SOCKET,r);
++ r=fr_recv_receipt(sock,&p,&fd,&pid,&uid,&gid,end,&receipt);active_evidence->observed=p;active_evidence->observed_pid=pid;active_evidence->observed_uid=uid;active_evidence->observed_gid=gid;
++ active_evidence->rights=receipt.rights;active_evidence->rights_closed=receipt.closed;active_evidence->rights_close_errno=receipt.close_errno;
++ if(fd>=0){if(close(fd)){active_evidence->rights_close_errno=errno;r=-EIO;}else active_evidence->rights_closed++;}
++ if(r)return evidence_error(receipt.rights>1?FR_E_RIGHTS:active_evidence->rights_close_errno?FR_E_RIGHT_CLOSE:FR_E_RECEIVE,r);
++ unsigned stage=fd>=0?FR_E_RIGHTS:pid!=session_origin?FR_E_ORIGIN_PID:uid?FR_E_ORIGIN_UID:gid?FR_E_ORIGIN_GID:
++  memcmp(p.magic,q->magic,8)||memcmp(p.session,q->session,32)||p.version!=1?FR_E_FRAME:p.type!=expected?FR_E_TYPE:p.role!=q->role?FR_E_ROLE:p.sequence!=q->sequence||q->sequence!=session_sequence?FR_E_SEQUENCE:
++  p.owner!=q->owner?FR_E_OWNER:p.owner_birth!=q->owner_birth?FR_E_OWNER_BIRTH:p.pid!=q->pid?FR_E_PID:p.birth!=q->birth?FR_E_BIRTH:p.status!=q->status||p.detail!=q->detail?FR_E_STATUS:p.deadline_ns!=q->deadline_ns?FR_E_DEADLINE:0;
++ if(stage)return evidence_error(stage,-EBADMSG);
++ if(expected==FR_INTENT_ACK)active_evidence->intent_ack_ns=fr_now();else if(expected==FR_REGISTER_ACK)active_evidence->register_ack_ns=fr_now();else if(expected==FR_REAP_ACK)active_evidence->reap_ack_ns=fr_now();
+  if(session_sequence==UINT32_MAX)return -EOVERFLOW;session_sequence++;return 0;
+ }
+ static int abort_creation(int sock,struct fr_packet*q,int error,uint64_t end,struct fr_child*rec){
+@@ -123,7 +153,7 @@
+   if(fr_limits(FR_WORKER,330)||prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0))_exit(125);
+   close_except(body,event,config,python,gate);
+   char*argv[]={"/usr/bin/python3.14","-I","-S","-B","-c",
+-   "import os,sys;d=os.pread(112,1048577,0);exec(compile(d,'/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-WORKER.py','exec'),{'__name__':'__main__','__file__':'/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-WORKER.py'})",0};
++   "import os,sys;d=os.pread(112,1048577,0);exec(compile(d,'/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071-WORKER.py','exec'),{'__name__':'__main__','__file__':'/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071-WORKER.py'})",0};
+   char*env[]={"PATH=/usr/bin:/bin","LANG=C","LC_ALL=C",0};fexecve(130,argv,env);_exit(125);
+  }
+  if(close(barrier[0])){int saved=errno;close(barrier[1]);poison(rec);return -saved;}int parent=0;r=fr_proc(pid,&parent,&rec->birth);
+@@ -135,11 +165,14 @@
+ }
+ static int own_wait_impl(int sock,struct fr_child*rec,int nonblock){
+  if(!rec||rec->pid<=0||rec->state==FR_EMPTY)return -EINVAL;if(rec->state==FR_UNKNOWN)return -EUCLEAN;if(rec->state==FR_REAPED)return 1;
+- struct owned_binding *entry=binding_record(rec);if(!entry||native_owner!=getpid()||(nonblock!=0&&nonblock!=1)||session_socket(sock)){poison(rec);return -EPERM;}
+- int status=0;struct rusage usage;pid_t p=wait4(rec->pid,&status,WNOHANG,&usage);if(p==0)return 0;if(p<0){int saved=errno;poison(rec);return -saved;}
++ struct owned_binding *entry=binding_record(rec);if(!entry||native_owner!=getpid()){poison(rec);return evidence_error(FR_E_OWNER_PROC,-EPERM);}
++ if(nonblock!=0&&nonblock!=1){poison(rec);return evidence_error(FR_E_INPUT,-EINVAL);}
++ int socket_result=session_socket(sock);if(socket_result){poison(rec);return evidence_error(FR_E_SOCKET,socket_result);}
++ int status=0;struct rusage usage;pid_t p=wait4(rec->pid,&status,WNOHANG,&usage);if(p==0)return 0;if(p<0){int saved=errno;poison(rec);return evidence_error(FR_E_WAIT4,-saved);}
+  /* The kernel result is PRIVATE and durable. Public status is UNKNOWN until
+   * the exact fixed-origin REAP_ACK; cleanup cannot manufacture that ACK. */
+  entry->wait_observed=entry->cleanup_reaped=1;entry->kernel_status=status;rec->status=0;rec->state=FR_UNKNOWN;
++ entry->evidence.wait4_ns=fr_now();
+  struct fr_cap c;if(cap_get(&c)){poison(rec);return -EPERM;}struct fr_packet q;packet(&q,&c,FR_REAP,rec->role);q.pid=rec->pid;q.birth=rec->birth;q.status=status;
+  uint64_t end=fr_now()+1000000000ull;if(end>c.hard_ns-1000000000ull)end=c.hard_ns-1000000000ull;
+  int r=fr_send(sock,&q,-1,end);if(r){poison(rec);return r;}
+@@ -153,8 +186,9 @@
+  if(entry->handle_closed||entry->actual.pidfd<0)return -EUCLEAN;
+  struct stat st;int fd=entry->actual.pidfd;
+  if(fstat(fd,&st)||st.st_dev!=entry->handle.st_dev||st.st_ino!=entry->handle.st_ino)return -ESTALE;
+- entry->handle_closed=1;entry->actual.pidfd=-1;
+- return close(fd)?-errno:-EUCLEAN;
++ entry->evidence.close_attempts++;
++ if(close(fd)){int saved=errno;evidence_error(FR_E_HANDLE_CLOSE,-saved);return -saved;}
++ entry->handle_closed=1;entry->actual.pidfd=-1;entry->evidence.close_ns=fr_now();return -EUCLEAN;
+ }
+ static int local_cleanup(struct owned_binding*entry,uint64_t end){
+  struct fr_child *rec=&entry->actual;if(entry->owner!=getpid()||rec->pid<=0)return -EPERM;
+@@ -163,14 +197,14 @@
+   * Failed handle checks never fall back to a guessed numeric PID. */
+  if(!entry->stop_attempted){entry->stop_attempted=1;
+   int status=0;struct rusage usage;pid_t p=wait4(rec->pid,&status,WNOHANG,&usage);
+-  if(p==rec->pid){entry->wait_observed=entry->cleanup_reaped=1;entry->kernel_status=status;return close_cleanup_handle(entry);}
++  if(p==rec->pid){entry->wait_observed=entry->cleanup_reaped=1;entry->kernel_status=status;entry->evidence.wait4_ns=fr_now();return close_cleanup_handle(entry);}
+   if(p<0)return -errno;
+   /* An unverified handle is never signalled. Direct-child wait custody still
+    * permits observing the barrier-aborted actual clone within the deadline. */
+-  if(!handle_identity(entry)&&syscall(SYS_pidfd_send_signal,rec->pidfd,SIGKILL,0,0)&&errno!=ESRCH)return -errno;
++  if(!handle_identity(entry)){entry->evidence.signal_attempts++;entry->evidence.signal_ns=fr_now();if(syscall(SYS_pidfd_send_signal,rec->pidfd,SIGKILL,0,0)&&errno!=ESRCH)return evidence_error(FR_E_SIGNAL,-errno);}
+  }
+  while(fr_now()<end){int status=0;struct rusage usage;pid_t p=wait4(rec->pid,&status,WNOHANG,&usage);
+-  if(p==rec->pid){entry->wait_observed=entry->cleanup_reaped=1;entry->kernel_status=status;return close_cleanup_handle(entry);}
++  if(p==rec->pid){entry->wait_observed=entry->cleanup_reaped=1;entry->kernel_status=status;entry->evidence.wait4_ns=fr_now();return close_cleanup_handle(entry);}
+   if(p<0)return -errno;poll(0,0,5);}
+  return -ETIMEDOUT;
+ }
+@@ -180,9 +214,9 @@
+  if(rec->state==FR_UNKNOWN){poison(rec);return local_cleanup(entry,end);}if(rec->state==FR_REAPED)return 1;
+  int r=own_wait_impl(sock,rec,1);if(r<0){local_cleanup(entry,end);return r;}if(r)return r;
+  if(rec->pidfd>=0){
+-  if(handle_identity(entry)){poison(rec);return -ESTALE;}
++  if(handle_identity(entry)){poison(rec);return evidence_error(FR_E_HANDLE,-ESTALE);}
+   if(!entry->stop_attempted){entry->stop_attempted=1;
+-   if(syscall(SYS_pidfd_send_signal,rec->pidfd,SIGKILL,0,0)&&errno!=ESRCH){int saved=errno;poison(rec);local_cleanup(entry,end);return -saved;}}}
++   entry->evidence.signal_attempts++;entry->evidence.signal_ns=fr_now();if(syscall(SYS_pidfd_send_signal,rec->pidfd,SIGKILL,0,0)&&errno!=ESRCH){int saved=errno;evidence_error(FR_E_SIGNAL,-saved);poison(rec);local_cleanup(entry,end);return -saved;}}}
+  else { /* Exact unreaped direct clone intention is the sole numeric fallback. */
+   int status;struct rusage usage;pid_t p=wait4(rec->pid,&status,WNOHANG,&usage);if(p<0){poison(rec);return -errno;}if(p>0){entry->wait_observed=entry->cleanup_reaped=1;entry->kernel_status=status;poison(rec);return -EUCLEAN;}if(kill(rec->pid,SIGKILL)&&errno!=ESRCH){poison(rec);return -errno;}
+  }
+@@ -191,65 +225,78 @@
+ int fr_own_spawn(int sock,unsigned role,int config,int body,int event,int python,int gate,uint64_t end,struct fr_child*copy){
+  if(!copy)return -EINVAL;int owner_result=creation_owner();if(owner_result)return owner_result;
+  struct owned_binding *entry=binding_new(copy,role);if(!entry){native_creation_poisoned=1;return -EUCLEAN;}
+- int r=own_spawn_impl(sock,role,config,body,event,python,gate,end,&entry->actual);*copy=entry->actual;return r;
++ entry->evidence=session_evidence;active_evidence=&entry->evidence;int r=own_spawn_impl(sock,role,config,body,event,python,gate,end,&entry->actual);*copy=entry->actual;active_evidence=&session_evidence;return r;
+ }
+ int fr_own_wait(int sock,struct fr_child*copy,int nonblock){
+  if(!copy)return -EINVAL;struct fr_child *actual=binding_actual(copy);if(!actual)return -EPERM;
+- int r=own_wait_impl(sock,actual,nonblock);*copy=*actual;return r;
++ struct owned_binding *entry=binding_record(actual);active_evidence=&entry->evidence;int r=own_wait_impl(sock,actual,nonblock);if(r<0&&!entry->evidence.stage)evidence_error(r==-EPERM?FR_E_SOCKET:FR_E_WAIT4,r);*copy=*actual;active_evidence=&session_evidence;return r;
+ }
+ int fr_own_stop(int sock,struct fr_child*copy,uint64_t end){
+  if(!copy)return -EINVAL;struct owned_binding *entry=binding_find(copy);if(!entry){native_creation_poisoned=1;return -EPERM;}
+- struct fr_child *actual=&entry->actual;if(memcmp(copy,actual,sizeof(*copy)))poison(actual);
+- if(end<=fr_now()){poison(actual);uint64_t cleanup=fr_now()+1000000000ull;if(cleanup>session_cap.hard_ns-1000000000ull)cleanup=session_cap.hard_ns-1000000000ull;int r=local_cleanup(entry,cleanup);*copy=*actual;return r;}
+- int r=own_stop_impl(sock,actual,end);*copy=*actual;return r;
++ struct fr_child *actual=&entry->actual;if(memcmp(copy,actual,sizeof(*copy))){active_evidence=&entry->evidence;evidence_error(FR_E_COPY,-EPERM);poison(actual);}
++ active_evidence=&entry->evidence;
++ if(end<=fr_now()){evidence_error(FR_E_DEADLINE,-ETIMEDOUT);poison(actual);uint64_t cleanup=fr_now()+1000000000ull;if(cleanup>session_cap.hard_ns-1000000000ull)cleanup=session_cap.hard_ns-1000000000ull;int r=local_cleanup(entry,cleanup);*copy=*actual;active_evidence=&session_evidence;return r;}
++ int r=own_stop_impl(sock,actual,end);*copy=*actual;active_evidence=&session_evidence;return r;
+ }
+ int fr_own_release(struct fr_child*copy){
+  if(!copy)return -EINVAL;struct fr_child *rec=binding_actual(copy);if(!rec)return -EPERM;
+  struct owned_binding *entry=binding_record(rec);
+- if(rec->state==FR_UNKNOWN&&entry->cleanup_reaped){int r=close_cleanup_handle(entry);*copy=*rec;return r;}
+- if(rec->state!=FR_REAPED||!entry->wait_observed||!entry->cleanup_reaped){poison(rec);return -EUCLEAN;}
++ active_evidence=&entry->evidence;
++ if(rec->state==FR_UNKNOWN&&entry->cleanup_reaped){int r=close_cleanup_handle(entry);*copy=*rec;active_evidence=&session_evidence;return r;}
++ if(rec->state!=FR_REAPED||!entry->wait_observed||!entry->cleanup_reaped){evidence_error(FR_E_WAIT4,-EUCLEAN);poison(rec);active_evidence=&session_evidence;return -EUCLEAN;}
+  if(!entry->handle_closed&&rec->pidfd>=0){struct stat st;
+-  if(fstat(rec->pidfd,&st)||st.st_dev!=entry->handle.st_dev||st.st_ino!=entry->handle.st_ino){poison(rec);*copy=*rec;return -ESTALE;}
+-  int fd=rec->pidfd;rec->pidfd=-1;entry->handle_closed=1;
+-  if(close(fd)){int saved=errno;poison(rec);*copy=*rec;return -saved;}}
+- *copy=*rec;return 0;
++  if(fstat(rec->pidfd,&st)||st.st_dev!=entry->handle.st_dev||st.st_ino!=entry->handle.st_ino){evidence_error(FR_E_HANDLE,-ESTALE);poison(rec);*copy=*rec;active_evidence=&session_evidence;return -ESTALE;}
++  int fd=rec->pidfd;entry->evidence.close_attempts++;
++  if(close(fd)){int saved=errno;evidence_error(FR_E_HANDLE_CLOSE,-saved);poison(rec);*copy=*rec;active_evidence=&session_evidence;return -saved;}
++  rec->pidfd=-1;entry->handle_closed=1;entry->evidence.close_ns=fr_now();}
++ *copy=*rec;active_evidence=&session_evidence;return 0;
+ }
+ static struct fr_child fixture_children[512];
+ static unsigned fixture_count;
+ static pid_t fixture_owner;
+ static int fixture_poisoned;
+-int fr_fixture_fork(int sock){
+- struct fr_cap c;if(cap_get(&c)||session_socket(sock)||c.mode!=FR_CONTROLS||fixture_count>=512||(fixture_owner&&fixture_owner!=getpid())){native_creation_poisoned=1;return -EPERM;}
++int fr_own_fork(int sock,unsigned role,uint64_t scheduler_end,struct fr_child*copy){
++ if(!copy)return -EINVAL;int owner_result=creation_owner();if(owner_result)return owner_result;struct fr_cap c;int r=cap_get(&c);if(r){evidence_error(FR_E_CAPSULE,r);poison_generation();return r;}
++ r=session_socket(sock);if(r){native_creation_poisoned=1;return evidence_error(FR_E_SOCKET,r);}
++ if(c.mode!=FR_CONTROLS&&c.mode!=FR_EXECUTE&&c.mode!=FR_BENIGN){int result=evidence_error(FR_E_INPUT,-EPERM);poison_generation();return result;}
++ if(role>=(c.mode==FR_CONTROLS?512u:3u)){int result=evidence_error(FR_E_ROLE,-EINVAL);poison_generation();return result;}
+  if(fr_now()>=c.work_ns){native_creation_poisoned=1;fixture_poisoned=1;return -ETIMEDOUT;}
+- if(fixture_poisoned)return -EUCLEAN;
+- int owner_result=creation_owner();if(owner_result)return owner_result;
+- fixture_owner=getpid();
+- unsigned role=fixture_count;struct fr_child*copy=&fixture_children[role];
+  struct owned_binding *entry=binding_new(copy,role);if(!entry){native_creation_poisoned=1;fixture_poisoned=1;return -EUCLEAN;}
++ memset(&entry->evidence,0,sizeof(entry->evidence));entry->evidence.version=1;active_evidence=&entry->evidence;
+  struct fr_child*rec=&entry->actual;memset(rec,0,sizeof(*rec));rec->pidfd=-1;rec->role=role;
+- uint64_t end=fr_now()+15000000000ull;if(end>c.work_ns)end=c.work_ns;
++ uint64_t end=fr_now()+15000000000ull;if(end>c.work_ns)end=c.work_ns;if(end>scheduler_end)end=scheduler_end;
++ if(end<=fr_now()){int result=evidence_error(FR_E_DEADLINE,-ETIMEDOUT);poison_generation();active_evidence=&session_evidence;return publish_fixture(copy,rec,result);}
+  struct fr_packet q;packet(&q,&c,FR_INTENT,role);if(!q.owner_birth)return -ESTALE;
+  fixture_poisoned=1;
+- int r=fr_send(sock,&q,-1,end);if(r){poison(rec);return publish_fixture(copy,rec,r);}r=ack(sock,&q,FR_INTENT_ACK,end);if(r){poison(rec);return publish_fixture(copy,rec,r);}
++ r=fr_send(sock,&q,-1,end);if(r){poison(rec);evidence_error(FR_E_RECEIVE,r);return publish_fixture(copy,rec,r);}r=ack(sock,&q,FR_INTENT_ACK,end);if(r){poison(rec);return publish_fixture(copy,rec,r);}
+  int barrier[2];if(pipe2(barrier,O_CLOEXEC)){int saved=errno;int result=abort_creation(sock,&q,saved,end,rec);if(rec->state!=FR_UNKNOWN)fixture_poisoned=0;return publish_fixture(copy,rec,result);}
+  int pidfd=-1;struct clone_args a={0};a.flags=CLONE_PIDFD;a.pidfd=(uintptr_t)&pidfd;a.exit_signal=SIGCHLD;
+  PyOS_BeforeFork();pid_t pid=syscall(SYS_clone3,&a,sizeof(a));int clone_errno=pid<0?errno:0;
+- if(pid>0){rec->pid=pid;rec->pidfd=pidfd;rec->state=FR_CREATED;fixture_count++;if(fstat(pidfd,&entry->handle))native_creation_poisoned=1;}
++ if(pid>0){rec->pid=pid;rec->pidfd=pidfd;rec->state=FR_CREATED;entry->evidence.clone_ns=fr_now();if(fstat(pidfd,&entry->handle))native_creation_poisoned=1;}
+  if(pid!=0)PyOS_AfterFork_Parent();
+  if(pid<0){int saved=clone_errno;int a=close(barrier[0]),b=close(barrier[1]);if(a||b){poison(rec);return publish_fixture(copy,rec,-EIO);}int result=abort_creation(sock,&q,saved,end,rec);if(rec->state!=FR_UNKNOWN)fixture_poisoned=0;return publish_fixture(copy,rec,result);}
+  if(pid==0){close(barrier[1]);struct pollfd p={barrier[0],POLLIN,0};int released=0;while(fr_now()<end){int n=poll(&p,1,10);if(n>0){unsigned char b=0;released=read(barrier[0],&b,1)==1&&b==0xa5;break;}if(n<0&&errno!=EINTR)break;}close(barrier[0]);if(!released)_exit(124);PyOS_AfterFork_Child();return 0;}
+  if(close(barrier[0])){int saved=errno;close(barrier[1]);poison(rec);uint64_t cleanup=fr_now()+1000000000ull;if(cleanup>c.hard_ns-1000000000ull)cleanup=c.hard_ns-1000000000ull;local_cleanup(entry,cleanup);return publish_fixture(copy,rec,-saved);}int parent;r=fr_proc(pid,&parent,&rec->birth);
+  if(r||native_creation_poisoned||parent!=getpid()||pidfd<0||fr_pidfd_pid(pidfd)!=pid){close(barrier[1]);poison(rec);uint64_t cleanup=fr_now()+1000000000ull;if(cleanup>c.hard_ns-1000000000ull)cleanup=c.hard_ns-1000000000ull;local_cleanup(entry,cleanup);return publish_fixture(copy,rec,r?r:-ESTALE);}
+- q.type=FR_REGISTER;q.sequence=session_sequence;q.pid=pid;q.birth=rec->birth;r=fr_send(sock,&q,pidfd,end);if(!r)r=ack(sock,&q,FR_REGISTER_ACK,end);
+- if(!r){rec->state=FR_REGISTERED;unsigned char release=0xa5;if(write(barrier[1],&release,1)!=1)r=-EIO;}
++ q.type=FR_REGISTER;q.sequence=session_sequence;q.pid=pid;q.birth=rec->birth;entry->evidence.register_send_ns=fr_now();r=fr_send(sock,&q,pidfd,end);if(!r)r=ack(sock,&q,FR_REGISTER_ACK,end);
++ if(!r){rec->state=FR_REGISTERED;unsigned char release=0xa5;entry->evidence.release_ns=fr_now();if(write(barrier[1],&release,1)!=1)r=evidence_error(FR_E_BARRIER,-EIO);else entry->evidence.ready_released=1;}
+  if(close(barrier[1])&&!r)r=-errno;if(r){poison(rec);/* The exact native intention survives until finite disposal. */
+   uint64_t stop=fr_now()+1000000000ull;if(stop>c.hard_ns-1000000000ull)stop=c.hard_ns-1000000000ull;own_stop_impl(sock,rec,stop);return publish_fixture(copy,rec,r);}
+- fixture_poisoned=0;return publish_fixture(copy,rec,pid);
++ fixture_poisoned=0;active_evidence=&session_evidence;return publish_fixture(copy,rec,pid);
++}
++int fr_fixture_fork(int sock){
++ struct fr_cap c;if(cap_get(&c)||c.mode!=FR_CONTROLS){native_creation_poisoned=1;return -EPERM;}
++ if(fixture_count>=512||(fixture_owner&&fixture_owner!=getpid())){native_creation_poisoned=1;return -EPERM;}
++ if(fixture_poisoned)return -EUCLEAN;fixture_owner=getpid();
++ struct fr_child*copy=&fixture_children[fixture_count];int result=fr_own_fork(sock,fixture_count,session_cap.work_ns,copy);
++ if(result!=0&&copy->pid>0)fixture_count++;return result;
+ }
+ int fr_fixture_reap(int sock,int pid,int status){
+  /* Retained ABI symbol cannot turn a caller-supplied status into a kernel
+   * wait receipt. The actual fixed coordinator now consumes fr_fixture_wait. */
+  (void)sock;(void)status;fixture_poisoned=1;native_creation_poisoned=1;
++ for(unsigned i=0;i<owned_binding_count;i++)if(owned_bindings[i].owner==getpid()&&owned_bindings[i].actual.pid==pid&&owned_bindings[i].actual.state!=FR_REAPED){active_evidence=&owned_bindings[i].evidence;evidence_error(FR_E_INPUT,-EPERM);poison(&owned_bindings[i].actual);*owned_bindings[i].public_copy=owned_bindings[i].actual;}
++ active_evidence=&session_evidence;
+  for(unsigned i=0;i<fixture_count;i++)if(fixture_children[i].pid==pid&&fixture_children[i].state!=FR_REAPED){struct owned_binding *entry=binding_find(&fixture_children[i]);if(entry)poison(&entry->actual);fixture_children[i].state=FR_UNKNOWN;}
+  return -EPERM;
+ }
+@@ -303,3 +350,39 @@
+   int r=fr_own_stop(sock,rec,end);if(r==1){int release=fr_own_release(rec);if(release)return release;}else fixture_poisoned=1;return r;}
+  native_creation_poisoned=1;fixture_poisoned=1;return -ECHILD;
+ }
++int fr_own_observe(struct fr_child*copy,struct fr_observation*out){
++ struct owned_binding*entry=binding_find(copy);if(!copy||!out||!entry)return -EPERM;observe(entry,out);return 0;
++}
++int fr_own_evidence(struct fr_child*copy,struct fr_evidence*out){
++ struct owned_binding*entry=binding_find(copy);if(!copy||!out||!entry)return -EPERM;*out=entry->evidence;
++ if(entry->actual.state!=FR_REAPED&&entry->wait_observed){out->expected.status=out->observed.status=0;out->status_redacted=1;}
++ return 0;
++}
++int fr_session_evidence(struct fr_evidence*out){if(!out||native_owner!=getpid())return -EPERM;*out=session_evidence;return 0;}
++int fr_session_close(void){
++ active_evidence=&session_evidence;session_evidence.transport_close_attempts++;
++ int r=session_socket(FR_REG_FD);if(r){native_creation_poisoned=1;return evidence_error(FR_E_SOCKET,r);}
++ if(close(FR_REG_FD)){int result=evidence_error(FR_E_TRANSPORT_CLOSE,-errno);poison_generation();return result;}
++ session_evidence.transport_close_ns=fr_now();poison_generation();return 0;
++}
++int fr_local_restrict(unsigned operation,int fd){
++ if(creation_owner()||operation<1||operation>2||(operation==2&&fd<0))return -EPERM;
++ /* Filter the actual syscall in this current native owner; no userspace errno
++  * injection, authority impersonation, LSM change or permission restoration. */
++ struct sock_filter filter[]={
++  BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,arch)),
++  BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AUDIT_ARCH_X86_64,1,0),
++  BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_KILL_PROCESS),
++  BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)),
++  BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,operation==1?SYS_pidfd_send_signal:SYS_close,0,3),
++  BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[0])),
++  BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,operation==1?0:(unsigned)fd,0,1),
++  BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EPERM),
++  BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW)
++ };
++ /* For signal restriction there is no fd-specific allow branch. */
++ if(operation==1){filter[5]=(struct sock_filter)BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EPERM);}
++ struct sock_fprog program={sizeof(filter)/sizeof(filter[0]),filter};
++ if(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)||prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,&program))return -errno;
++ return 0;
++}
+--- A079/A071-OWNER.py
++++ A087/A071-OWNER.py
+@@ -70,10 +70,13 @@
+         child["lifecycle"]="STOP_UNCONFIRMED";run.fail("NATIVE_STOP:%d"%result,True);return False
+ 
+     def release_handle(self,child,run):
+-        if child["pidfd"] is None:return
++        if child["pidfd"] is None or child.get("release_attempted"):return
++        child["release_attempted"]=True
+         result=self.lib.fr_own_release(ctypes.byref(child["native_intention"]))
+-        child["pidfd"]=None
+-        if result<0:run.fail("NATIVE_CLOSE:%d"%result,True)
++        child["pidfd"]=child["native_intention"].pidfd if child["native_intention"].pidfd>=0 else None
++        if result<0:
++            child.update(lifecycle="STOP_UNCONFIRMED",wait_status=None)
++            run.fail("NATIVE_CLOSE:%d"%result,True)
+ 
+     def wave(self,entries,out,context,run,receipt,worker):
+         x=self.x;active=[];index=0
+--- A079/A071-PRODUCER.py
++++ A087/A071-PRODUCER.py
+@@ -52,9 +52,9 @@
+         self.index_DATA_override=False
+         need(hashlib.sha256(raw_manifest).hexdigest()==manifest_sha and hashlib.sha256(supervisor_source).hexdigest()==supervisor_sha and
+              hashlib.sha256(contract_source).hexdigest()==contract_sha,"PRODUCER_EXTERNAL_INPUT_PINS")
+-        s=types.ModuleType("a061_approved_runtime_parser");s.__file__="/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-SUPERVISOR.py"
++        s=types.ModuleType("a061_approved_runtime_parser");s.__file__="/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071-SUPERVISOR.py"
+         exec(compile(supervisor_source,s.__file__,"exec"),s.__dict__)
+-        c=types.ModuleType("a061_approved_image_codec");c.__file__="/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-CONTRACT.py"
++        c=types.ModuleType("a061_approved_image_codec");c.__file__="/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071-CONTRACT.py"
+         exec(compile(contract_source,c.__file__,"exec"),c.__dict__)
+         self.s,self.c=s,c
+         doc=s.inert(raw_manifest)
+@@ -99,7 +99,7 @@
+                 hashlib.sha256(control_source).hexdigest()==control_sha,
+                 "PRODUCER_INDEPENDENT_CONTROL_SOURCE_PIN")
+             ctrl=types.ModuleType("a071_pinned_inert_guard_codec")
+-            ctrl.__file__="/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-FULL-CONTROLS.py"
++            ctrl.__file__="/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071-FULL-CONTROLS.py"
+             exec(compile(control_source,ctrl.__file__,"exec"),ctrl.__dict__)
+             self.control=ctrl
+             before={p:blob.bytes(134217728,deadline/1e9) for p,blob in holds.items()}
+@@ -218,7 +218,7 @@
+             hashlib.sha256(control_source).hexdigest()==control_sha,
+             "PRODUCER_INDEX_CONTROL_ADMISSION")
+         ctrl=types.ModuleType("a071_pinned_index_DATA_codec")
+-        ctrl.__file__="/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-FULL-CONTROLS.py"
++        ctrl.__file__="/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071-FULL-CONTROLS.py"
+         exec(compile(control_source,ctrl.__file__,"exec"),ctrl.__dict__)
+         delta=ctrl.guard_data_request(case,image_bytes=self.index_bytes)
+         replacement=freeze(delta["replacement_index_DATA"],"friday-a071-index-refusal-data")
+--- A079/A071-SUPERVISOR.py
++++ A087/A071-SUPERVISOR.py
+@@ -20,7 +20,7 @@
+ import types
+ 
+ BASE = "/home/jericho/.jericho/runtime/subagent-lifecycle/"
+-STEM = "/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071"
++STEM = "/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071"
+ EXECUTOR, CONTROLS, BILL = (STEM + s for s in ("-EXECUTOR.py", "-CONTROLS.py", "-BILL.json"))
+ RUNTIME = STEM + "-TRUSTED-RUNTIME.json"
+ PYTHON = "/usr/bin/python3.14"
+@@ -872,7 +872,12 @@
+     need(len(raw) == 848 and raw[:8] == b"FRA061C1", "A061_CAPSULE_SIZE")
+     contract_sha = raw[752:784].hex()
+     c = load_held_module("a061_contract", 118, contract_sha, STEM + "-CONTRACT.py")
+-    cap = c.startup(sys.argv[1])
++    try:
++        cap = c.startup(sys.argv[1])
++    except c.Refused:
++        if c.START_REFUSAL is None: raise
++        write_terminal(c.START_REFUSAL)
++        return 2
+     native = c.native_bridge(cap)
+     x = load_held_module("a061_executor", 101, cap["pins"]["executor"], EXECUTOR)
+     admitted = x.install_held_capsule()
+@@ -892,7 +897,7 @@
+                     raise x.m.Refused("OFFLINE_NETWORK_EXEC_DENIED")
+             sys.addaudithook(deny)
+             result = ctr.controls(plan, plan_raw)
+-            if result.get("native_registry_only") and result.get("case")!="positive":
++            if result.get("native_registry_only") and result.get("terminal_completion") is not True:
+                 need(result.get("all216")=="NOT_RUN_SEPARATE_UNRESOLVED_OBLIGATION" and
+                     result.get("full_authoritative_registry_controls")=="SOURCE_INCOMPLETE" and
+                     result.get("acceptance_complete") is False and result.get("current_GO") is False,
+@@ -934,7 +939,7 @@
+                  result.get("charged_body_bytes",956301313)<=956301312,
+                  "BENIGN_OWNED_TERMINAL")
+         elif cap["mode_id"]==1 and result.get("native_registry_only"):
+-            need(result.get("case")=="positive" and len(result.get("ordinary_rows",[]))==3 and
++            need(result.get("case") in ("positive","register_delayed_ACK","abort_positive") and len(result.get("ordinary_rows",[]))==3 and
+                 result.get("terminal_completion") is True and result.get("all216")=="NOT_RUN_SEPARATE_UNRESOLVED_OBLIGATION" and
+                 result.get("full_authoritative_registry_controls")=="SOURCE_INCOMPLETE" and
+                 result.get("acceptance_complete") is False and result.get("current_GO") is False,
+--- A079/A071-WORKER.py
++++ A087/A071-WORKER.py
+@@ -17,7 +17,7 @@
+ 
+ G1_SHA="ba70d584ab4b145195283456b17d98a8ff129a8f7bb3be3595c711fe97d6c223"
+ CA_SHA="80eedd808e4cbd6fd42e125da2ea225fd1365d8e29edef8bcc45ff8bc7044ce2"
+-SOURCE="/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-CONTRACT.py"
++SOURCE="/var/tmp/friday-astra-browser-native-full-public-controls-a087-g1/A071-CONTRACT.py"
+ REQUIRED=fcntl.F_SEAL_WRITE|fcntl.F_SEAL_GROW|fcntl.F_SEAL_SHRINK|fcntl.F_SEAL_SEAL
+ 
+ def raw(fd,cap,root):
+--- /dev/null
++++ A087/A087-PUBLIC-DRIVER.py
+@@ -0,0 +1,303 @@
++"""Source only: qualified stock caller of actual held110 --held-a061.
++
++The caller consumes independently supplied Root-selected typed admission and
++oracle read-only descriptors. It cannot create Root, images, grants or receipts.
++All its Source and cases are NOT_RUN. This corpus does not close the receiving
++side Root-registry residual recorded in A087-EXPECTED-CONTROLS.json.
++"""
++import fcntl
++import hashlib
++import json
++import os
++import resource
++import select
++import signal
++import stat
++import struct
++import time
++
++SOURCES=(101,102,103,104,105,106,107,108,109,110,112,113,114,115,116,117,118,119,127)
++PACKET=struct.Struct("<8s32sIIIIiiiiQQQ")
++PAYLOADS=tuple(("ordinary-owned-a087/%d\n"%i).encode("ascii") for i in range(3))
++
++def need(ok,cause):
++    if not ok:raise RuntimeError(cause)
++
++def json_DATA(raw):
++    def unique(items):
++        out={}
++        for key,value in items:need(key not in out,"A087_DUPLICATE_KEY");out[key]=value
++        return out
++    return json.loads(raw,object_pairs_hook=unique,parse_constant=lambda _:(_ for _ in ()).throw(RuntimeError("A087_NONFINITE")))
++
++def identity(st):
++    return (st.st_dev,st.st_ino,st.st_mode,st.st_uid,st.st_gid,st.st_nlink,st.st_size,st.st_mtime_ns,st.st_ctime_ns)
++
++def proc(pid):
++    fd=os.open("/proc/%d/stat"%pid,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW)
++    try:raw=os.read(fd,4097)
++    finally:os.close(fd)
++    need(0<len(raw)<=4096 and b")" in raw,"A087_ACTUAL_PROC")
++    fields=raw.rsplit(b")",1)[1].split();need(len(fields)>=20,"A087_PROC_SIZE")
++    return int(fields[1]),int(fields[19])
++
++def pidfd_pid(fd):
++    read=os.open("/proc/self/fdinfo/%d"%fd,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW)
++    try:raw=os.read(read,4097)
++    finally:os.close(read)
++    need(len(raw)<=4096,"A087_FDINFO_BOUND")
++    values=[int(v[4:].strip()) for v in raw.splitlines() if v.startswith(b"Pid:")]
++    need(len(values)==1,"A087_ACTUAL_PIDFD");return values[0]
++
++def pinned(fd,expected,maximum):
++    need(type(fd) is int and fd>=0 and type(expected) is str and len(expected)==64 and
++        all(v in "0123456789abcdef" for v in expected),"A087_EXTERNAL_PIN_TYPE")
++    before=os.fstat(fd)
++    need(stat.S_ISREG(before.st_mode) and before.st_uid==before.st_gid==0 and
++        0<=before.st_size<=maximum and fcntl.fcntl(fd,fcntl.F_GETFL)&os.O_ACCMODE==os.O_RDONLY and
++        fcntl.fcntl(fd,fcntl.F_GET_SEALS)==15,"A087_ACTUAL_ROOT_READONLY_SEALED_INPUT")
++    raw=os.pread(fd,before.st_size+1,0)
++    need(len(raw)==before.st_size and hashlib.sha256(raw).hexdigest()==expected and identity(os.fstat(fd))==identity(before),
++        "A087_COMPLETE_INDEPENDENT_PINNED_BYTES")
++    return raw,(identity(before),expected)
++
++def prepare(bundle):
++    need(type(bundle) is dict and set(bundle)=={"schema","fds","capsule_sha256","source_sha256","image_sha256",
++        "admission_fd","admission_sha256","oracle_fd","oracle_sha256","case"} and
++        bundle["schema"]=="friday.a087.stock-public-call.v1","A087_TYPED_PUBLIC_INPUT")
++    fds=bundle["fds"];expected=bundle["source_sha256"]
++    need(type(fds) is dict and set(fds)==set((100,111,120,121,122)+SOURCES) and set(expected)==set(SOURCES),"A087_FULL_FD_ROLE_GRAPH")
++    admission,admission_snap=pinned(bundle["admission_fd"],bundle["admission_sha256"],65536)
++    admission=json_DATA(admission)
++    need(set(admission)=={"schema","expected_driver","resource_class","own_reply_helper","own_real_uid_transition","own_real_gid_transition",
++        "own_local_syscall_restriction","Root_selected_expected_inputs"} and
++        admission["schema"]=="friday.a087.external-stock-actor-admission.v1" and
++        admission["resource_class"]=="ordinary180_reserve10_outer1_inner4_rss256MiB" and
++        admission["Root_selected_expected_inputs"] is True,"A087_EXTERNAL_TYPED_ADMISSION")
++    parent,birth=proc(os.getpid())
++    need(admission["expected_driver"]=={"pid":os.getpid(),"parent":parent,"birth":birth,"uid":os.getuid(),"gid":os.getgid()} and
++        os.getuid()==os.geteuid()==os.getgid()==os.getegid()==0,"A087_ACTUAL_SELECTED_STOCK_ACTOR")
++    case=bundle["case"]
++    if "origin_pid" in case:need(admission["own_reply_helper"] is True,"A087_SEPARATE_HELPER_ADMISSION")
++    if "origin_uid" in case:need(admission["own_real_uid_transition"] is True,"A087_SEPARATE_REAL_UID_ADMISSION")
++    if "origin_gid" in case:need(admission["own_real_gid_transition"] is True,"A087_SEPARATE_REAL_GID_ADMISSION")
++    if case in ("signal_denied","close_denied"):need(admission["own_local_syscall_restriction"] is True,"A087_SEPARATE_OWN_RESTRICTION_ADMISSION")
++    raw_oracle,oracle_snap=pinned(bundle["oracle_fd"],bundle["oracle_sha256"],131072)
++    matrix=json_DATA(raw_oracle)
++    need(matrix["schema"]=="friday.a087.independent-public-oracles.v1" and matrix["full_scoped_cause_closed"] is False and
++        matrix["source_ready"] is False and matrix["GO"] is False,"A087_EXPECTED_SCOPE_NO_WAIVER")
++    matches=[row for row in matrix["rows"] if row["case"]==case];need(len(matches)==1,"A087_EXACT_PRESELECTED_CASE")
++    snapshots={};raws={}
++    for role in (100,111)+SOURCES:
++        pin=bundle["capsule_sha256"] if role==100 else bundle["image_sha256"] if role==111 else expected[role]
++        raw,snap=pinned(fds[role],pin,16777216 if role in (110,111) else 1048576)
++        raws[role]=raw;snapshots[role]=snap
++    cap=raws[100]
++    need(len(cap)==848 and cap[:8]==b"FRA061C1" and struct.unpack_from("<6I",cap,8)==(1,1,1,1000,1000,19),"A087_PREREQUISITE_VALID_CAPSULE")
++    start,work,hard=struct.unpack_from("<3Q",cap,32)
++    need(start<=time.monotonic_ns() and time.monotonic_ns()+30*10**9<=work<hard and hard-start==180*10**9 and hard-work==10*10**9,"A087_REAL_LIFETIME_AND_PREREQUISITE_HEADROOM")
++    need(cap[112:144]!=b"\0"*32 and cap[144:176].hex()==bundle["image_sha256"] and
++        cap[176:208].hex()==expected[117] and cap[208:240].hex()==expected[116] and
++        all(cap[240+32*i:272+32*i].hex()==expected[role] for i,role in enumerate(SOURCES)),"A087_ENTIRE_CAPSULE_SOURCE_IMAGE_BINDING")
++    root,outer,inner=(os.fstat(fds[v]) for v in (122,120,121))
++    need(all(stat.S_ISDIR(v.st_mode) and v.st_uid==v.st_gid==0 for v in (root,outer,inner)) and
++        struct.unpack_from("<7Q",cap,56)==(root.st_dev,root.st_ino,os.stat("/proc/self/ns/mnt").st_ino,
++            outer.st_dev,outer.st_ino,inner.st_dev,inner.st_ino),"A087_ACTUAL_SELECTED_ROOT_GROUPS")
++    ordinary={"schema":"friday.a087.native-public-input.v1","case":case,
++        "workers":[{"payload":v.decode("ascii"),"exit":23+i} for i,v in enumerate(PAYLOADS)]}
++    need(raws[119]==(json.dumps(ordinary,separators=(",",":"))+"\n").encode("ascii"),"A087_EXACT_CANONICAL_BENIGN_INPUT")
++    snapshots["admission"]=(admission_snap,bundle["admission_fd"]);snapshots["oracle"]=(oracle_snap,bundle["oracle_fd"])
++    return snapshots,work,hard,matches[0]
++
++def complement(bundle,snapshots):
++    for role,value in snapshots.items():
++        if type(role) is int:
++            snap=value;fd=bundle["fds"][role]
++        else:snap,fd=value
++        raw,_=pinned(fd,snap[1],16777216 if role in (110,111) else 1048576)
++        need(identity(os.fstat(fd))==snap[0],"A087_WHOLE_SAME_HELD_COMPLEMENT")
++
++def evidence(trace,stage,errno,phase=None):
++    need(trace["version"]==1 and trace["stage"]==stage and trace["primitive_errno"]==errno and
++        (phase is None or trace["phase"]==phase) and len(bytes.fromhex(trace["expected"]))==96 and
++        len(bytes.fromhex(trace["observed"]))==96,"A087_EXACT_ACTUAL_PRIMITIVE_PHASE_STAGE")
++    need(trace["rights_close_errno"]==0 and trace["rights_closed"]==trace["rights"],"A087_ALL_ACTUAL_RECEIVED_RIGHTS_CLOSED")
++
++def reply_oracle(trace,case,ctl,owned):
++    need((trace["expected_pid"],trace["expected_uid"],trace["expected_gid"])==(owned["pid"],0,0),"A087_EXACT_EXPECTED_PID_UID_GID")
++    expected=PACKET.unpack(bytes.fromhex(trace["expected"]));observed=PACKET.unpack(bytes.fromhex(trace["observed"]))
++    if "lost_ACK" in case:
++        need((trace["observed_pid"],trace["observed_uid"],trace["observed_gid"])==(-1,-1,-1) and
++            bytes.fromhex(trace["observed"])==bytes(96),"A087_ACTUAL_LOST_REPLY_NO_FABRICATED_OBSERVATION");return
++    need((trace["observed_pid"],trace["observed_uid"],trace["observed_gid"])==
++        ((ctl["reply_pid"],ctl["reply_uid"],ctl["reply_gid"]) if ctl["reply_used"] else (owned["pid"],0,0)),"A087_ACTUAL_FULL_CONTROLLER_ORIGIN_CREDENTIALS")
++    wanted=list(expected)
++    if "owner_birth" in case:wanted[11]+=1
++    elif "owner" in case:wanted[7]+=1
++    if "session" in case:wanted[1]=bytes((expected[1][0]^1,))+expected[1][1:]
++    if "role" in case:wanted[5]+=1
++    if "sequence_replay" in case:wanted[4]-=1
++    elif "sequence_future" in case or case=="start_sequence":wanted[4]+=1
++    if "deadline" in case:wanted[12]-=1
++    if "invalid_ACK" in case:wanted[3]=11
++    need(observed==tuple(wanted),"A087_SINGLE_CONTROLLED_ARGUMENT_AND_EXACT_PACKET_COMPLEMENT")
++    need(trace["rights"]==(2 if case=="ack_many_rights" else 1 if "rights" in case else 0),"A087_EXACT_ACTUAL_RIGHT_COUNT")
++
++def oracle(outer,expected,owned):
++    case=expected["case"];positive=expected["completion"]
++    need(outer["state"]==expected["outer_state"] and outer["reason"]==expected["outer_cause"] and
++        outer["terminal_completion"] is positive and outer["uncertainty_sticky"] is expected["outer_uncertainty"] and
++        outer["registered_workers"]==expected["root_registered_workers"] and outer["reaped_workers"]==expected["root_borrowed_reaped_workers"] and
++        outer["registry_next_sequence"]==expected["root_sequence"] and outer["coordinator_kernel_status_known"] is True and
++        outer["borrowed_status_kernel_credit"] is False and outer["body_complete"] is False and outer["acceptance_complete"] is False,
++        "A087_FULL_ROOT_PHASE_COUNT_CAUSE_TERMINAL")
++    ctl=outer["public_control"]
++    need(ctl["case"]==case and ctl["origin_pid"]==owned["pid"] and ctl["origin_parent"]==owned["owner"] and
++        ctl["origin_birth"]==owned["birth"] and ctl["coordinator_pid"]>0 and ctl["coordinator_birth"]>0,"A087_INDEPENDENT_ACTUAL_ORIGIN_BINDINGS")
++    helper=1 if "origin_pid" in case else 0;plain=1 if "rights" in case else 0
++    need(ctl["helper_created"]==ctl["helper_reaped"]==ctl["helper_closed"]==helper and
++        ctl["plaintext_created"]==ctl["plaintext_closed"]==plain and
++        ctl["credential_transitions"]==(1 if "origin_uid" in case or "origin_gid" in case else 0),"A087_REAL_HELPER_PLAINTEXT_CREDENTIAL_CLEANUP")
++    encoded=outer["native_inner_DATA_hex"];need(type(encoded) is str and 0<len(encoded)<=32768,"A087_RAW_INNER_BOUND")
++    raw=bytes.fromhex(encoded)
++    need(raw.endswith(b"\n") and raw.count(b"\n")==1 and hashlib.sha256(raw).hexdigest()==outer["inner_terminal_sha256"],"A087_EXACT_BYTES_FRAME_AND_DIGEST")
++    inner=json_DATA(raw)
++    need(inner["schema"]=="friday.a087.native-public-result.v1" and inner["case"]==case and inner["native_registry_only"] is True and
++        inner["terminal_completion"] is positive and inner["body_complete"] is False and inner["acceptance_complete"] is False and
++        inner["current_GO"] is False and inner["F10_waiver"] is False and inner["all216"]=="NOT_RUN_SEPARATE_UNRESOLVED_OBLIGATION" and
++        inner["full_authoritative_registry_controls"]=="SOURCE_INCOMPLETE","A087_SOURCE_RESIDUAL_NO_BROWSER_CREDIT")
++    resources=inner["resources"]
++    need(resources["AS"]==[50331648,50331648] and resources["CPU"]==[180,180] and resources["NOFILE"]==[512,512] and
++        resources["FSIZE"]==[2147483648,2147483648] and resources["CORE"]==[0,0] and
++        0<resources["self_peak_bytes"]<=50331648 and 0<=resources["children_peak_bytes"]<=201326592 and
++        type(outer["aggregate_raw_RSS_peak_bytes"]) is int and 0<outer["aggregate_raw_RSS_peak_bytes"]<=268435456 and
++        0<outer["raw_self_peak_KiB"]*1024<=67108864 and 0<=outer["outer_memory_current"]<=67108864 and
++        0<=outer["inner_memory_current"]<=201326592,"A087_ACTUAL_COMPLETE_RESOURCE_ORACLE")
++    need(outer["aggregate_raw_RSS_peak_bytes"]+resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024<=268435456,"A087_CALLER_INCLUDED_RSS_CAP")
++    if case.startswith("start_"):
++        need(inner["phase"]=="START" and inner["refusal_errno"]==expected["expected_primitive_errno"] and inner["ordinary_rows"]==[],"A087_START_CAUSE_NO_CHILD")
++        trace=inner["evidence"];evidence(trace,expected["expected_native_stage"],expected["expected_primitive_errno"],1)
++        need(trace["expected_pid"]==owned["pid"] and trace["expected_uid"]==trace["expected_gid"]==0,"A087_FULL_EXPECTED_ORIGIN")
++        reply_oracle(trace,case,ctl,owned)
++        return inner
++    before,after=inner["session_before"],inner["session_after"]
++    need(before["origin"]==owned["pid"] and before["origin_birth"]==owned["birth"] and
++        before["owner"]==ctl["coordinator_pid"] and before["owner_birth"]==ctl["coordinator_birth"] and
++        before["uid"]==before["gid"]==1000 and before["session_ready"]==1 and before["creation_poisoned"]==0 and before["next_sequence"]==2 and
++        after["next_sequence"]==expected["native_sequence_before_drain_finish"] and
++        all(before[k]==after[k] for k in ("owner","origin","uid","gid","owner_birth","origin_birth")),"A087_NATIVE_PRIVATE_FIXED_ORIGIN_SEQUENCE")
++    rows=inner["ordinary_rows"]
++    need(sum(row["registered"]["pid"]>0 for row in rows)==expected["actual_children_created"] and
++        sum(row["ready"] is not None for row in rows)==expected["ordinary_READY_count"],"A087_REAL_CREATION_READY_COUNTS")
++    if not positive or case=="abort_positive":
++        primary=inner["primary"];need(primary["result"]==expected["expected_primitive_errno"],"A087_EXACT_PRIMARY_CALL_RESULT")
++        evidence(primary["evidence"],expected["expected_native_stage"],0 if case=="abort_positive" else expected["expected_primitive_errno"],expected["expected_phase"])
++        if case.startswith(("ack_","register_","abort_","reap_")):reply_oracle(primary["evidence"],case,ctl,owned)
++    for role,row in enumerate(rows):
++        initial,final=row["registered"],row["final"];trace=row["final_evidence"]
++        need(initial["status_known"]==initial["wait_observed"]==0 and
++            all(initial[k]==final[k] for k in ("owner","origin","pid","role","birth","owner_birth","origin_birth")),"A087_NO_PID_PARENT_GENERATION_ADOPTION")
++        if initial["pid"]<=0:
++            need(row["ready"] is None and final["state"]==4 and final["status_known"]==0,"A087_PRECLONE_REFUSAL");continue
++        if row["ready"] is not None:
++            ready_ns,pid,parent,uid,gid,birth,parent_birth=row["ready"]
++            need((pid,parent,uid,gid,birth,parent_birth)==(initial["pid"],initial["owner"],1000,1000,initial["birth"],initial["owner_birth"]) and
++                row["payload"].encode("ascii")==PAYLOADS[role] and row["spawn_evidence"]["ready_released"]==1 and
++                0<row["spawn_evidence"]["intent_ack_ns"]<=row["spawn_evidence"]["clone_ns"]<=row["spawn_evidence"]["register_send_ns"]<=
++                row["spawn_evidence"]["register_ack_ns"]<=row["spawn_evidence"]["release_ns"]<=ready_ns,"A087_ACTUAL_REGISTER_ACK_BEFORE_READY")
++        else:need(trace["ready_released"]==0 and trace["register_ack_ns"]==0,"A087_NO_EARLY_BODY_OR_READY")
++        need(final["wait_observed"]==final["cleanup_reaped"]==1 and trace["wait4_ns"]>0,"A087_ACTUAL_PRIVATE_WAIT_BEFORE_TERMINAL")
++        lost_handle=case in ("pidfd_plaintext","pidfd_closed","close_denied")
++        need(final["handle_closed"]==(0 if lost_handle else 1) and (lost_handle or final["pidfd"]==-1),"A087_PRECISE_CONFIRMED_OR_UNCONFIRMED_HANDLE_CLOSE")
++        if positive:
++            need(row["wait_result"]==1 and row["release_result"]==0 and final["state"]==3 and final["status_known"]==1 and
++                final["status"]==(23+role)<<8 and 0<trace["wait4_ns"]<=trace["reap_ack_ns"]<=trace["close_ns"],"A087_INDEPENDENT_PRIVATE_KERNEL_EXIT_AND_ACK")
++        else:need(final["state"]==4 and final["status_known"]==0 and final["status"]==0 and final["creation_poisoned"]==1 and
++            trace["status_redacted"]==1 and PACKET.unpack(bytes.fromhex(trace["expected"]))[8]==PACKET.unpack(bytes.fromhex(trace["observed"]))[8]==0,
++            "A087_STICKY_UNKNOWN_NEVER_PUBLIC_OR_DATA_STATUS")
++    if not positive:
++        again=inner["attempts"][-1];need(again["operation"]=="after_refusal_creation" and again["result"]==-117 and again["created_pid"]==0,"A087_NO_RESET_OR_RETRY_CREATION")
++    if case=="register_delayed_ACK":need(rows[0]["spawn_evidence"]["register_ack_ns"]-rows[0]["spawn_evidence"]["register_send_ns"]>=100000000,"A087_REAL_ACK_DELAY_BARRIER")
++    if case.startswith("reap_"):need(inner["primary"]["record"]["wait_observed"]==1 and inner["primary"]["record"]["status_known"]==0 and
++        inner["primary"]["evidence"]["wait4_ns"]>0 and inner["primary"]["evidence"]["reap_ack_ns"]==0,"A087_WAIT4_STAYS_PRIVATE_AFTER_INVALID_OR_LOST_ACK")
++    if case=="signal_denied":need(rows[0]["final_evidence"]["signal_attempts"]==1,"A087_ONE_REAL_SIGNAL_NO_RETRY")
++    if case=="close_denied":need(rows[0]["final_evidence"]["close_attempts"]==1 and rows[0]["final_evidence"]["close_ns"]==0,"A087_FAILED_CLOSE_NOT_CONFIRMED")
++    if case=="transport_closed":need(inner["transport_evidence"]["transport_close_attempts"]==1 and inner["transport_evidence"]["transport_close_ns"]>0,"A087_REAL_OWN_TRANSPORT_CLOSE")
++    return inner
++
++def run_public(bundle):
++    snapshots,work,hard,expected=prepare(bundle);fds=bundle["fds"]
++    out=os.pipe2(os.O_CLOEXEC);err=os.pipe2(os.O_CLOEXEC);barrier=os.pipe2(os.O_CLOEXEC)
++    owned={"owner":os.getpid(),"pid":None,"pidfd":None,"birth":None,"reaped":False,"kernel_status":None,"handle_closed":False}
++    pid=os.fork()
++    if pid==0:
++        os.close(out[0]);os.close(err[0]);os.close(barrier[1])
++        while time.monotonic_ns()<work:
++            if select.select([barrier[0]],[],[],.002)[0]:
++                if os.read(barrier[0],1)!=b"A":os._exit(124)
++                break
++        else:os._exit(124)
++        os.close(barrier[0]);mapping={**fds,1:out[1],2:err[1]}
++        copies={dst:fcntl.fcntl(src,fcntl.F_DUPFD_CLOEXEC,400) for dst,src in mapping.items()}
++        for dst,src in copies.items():os.dup2(src,dst,inheritable=True)
++        for src in copies.values():os.close(src)
++        attach=os.open("cgroup.procs",os.O_WRONLY|os.O_CLOEXEC|os.O_NOFOLLOW,dir_fd=120)
++        try:need(os.write(attach,str(os.getpid()).encode("ascii"))>0,"A087_ACTUAL_SELF_ATTACH")
++        finally:os.close(attach)
++        for name in os.listdir("/proc/self/fd"):
++            fd=int(name)
++            if fd not in mapping:
++                try:os.close(fd)
++                except OSError:pass
++        os.execve(110,["friday-approved-native-browser3","--held-a061",bundle["capsule_sha256"]],{"PATH":"/usr/bin:/bin","LANG":"C","LC_ALL":"C"});os._exit(125)
++    owned["pid"]=pid
++    os.close(out[1]);os.close(err[1]);os.close(barrier[0]);gate=barrier[1]
++    pipes={out[0]:0,err[0]:1};buffers=[bytearray(),bytearray()];result=None
++    try:
++        owned["pidfd"]=os.pidfd_open(pid,0);parent,birth=proc(pid);owned["birth"]=birth
++        need(parent==owned["owner"] and pidfd_pid(owned["pidfd"])==pid and proc(pid)==(parent,birth),"A087_ACTUAL_OWNED_ORIGIN_BEFORE_RELEASE")
++        need(os.write(gate,b"A")==1,"A087_PUBLIC_RELEASE");os.close(gate);gate=-1
++        for fd in pipes:os.set_blocking(fd,False)
++        while pipes or not owned["reaped"]:
++            need(time.monotonic_ns()<hard-10**9,"A087_FINITE_CONTINUOUS_DRAIN")
++            for fd in select.select(list(pipes),[],[],.002)[0]:
++                part=os.read(fd,65536)
++                if not part:os.close(fd);del pipes[fd];continue
++                buffers[pipes[fd]].extend(part);need(len(buffers[pipes[fd]])<=1048576,"A087_OUTPUT_CAP")
++            if not owned["reaped"]:
++                done,status=os.waitpid(pid,os.WNOHANG)
++                if done==pid:owned.update(reaped=True,kernel_status=status)
++        raw=bytes(buffers[0]);need(not buffers[1] and raw.endswith(b"\n") and raw.count(b"\n")==1,"A087_FULL_PUBLIC_OUTPUT_FRAME")
++        outer=json_DATA(raw);inner=oracle(outer,expected,owned)
++        need(os.WIFEXITED(owned["kernel_status"]) and os.WEXITSTATUS(owned["kernel_status"])==expected["outer_exit"],"A087_ACTUAL_OWN_KERNEL_WAIT_STATUS")
++        complement(bundle,snapshots)
++        result={"case":bundle["case"],"outer":outer,"inner":inner,"owned":owned,"stdout_sha256":hashlib.sha256(raw).hexdigest(),
++            "source_ready":False,"current_GO":False,"whole_native_cause_closed":False,"body_credit":False,"F10_waiver":False}
++    finally:
++        if not owned["reaped"]:
++            done,status=os.waitpid(pid,os.WNOHANG)
++            if done==pid:owned.update(reaped=True,kernel_status=status)
++            else:
++                need(done==0 and owned["pidfd"] is not None and pidfd_pid(owned["pidfd"])==pid and
++                    proc(pid)==(owned["owner"],owned["birth"]),"A087_EXACT_OWN_HANDLE_BEFORE_SIGNAL")
++                signal.pidfd_send_signal(owned["pidfd"],signal.SIGKILL)
++                stop=min(hard,time.monotonic_ns()+10**9)
++                while time.monotonic_ns()<stop:
++                    done,status=os.waitpid(pid,os.WNOHANG)
++                    if done==pid:owned.update(reaped=True,kernel_status=status);break
++                    select.select([],[],[],.002)
++        for fd in list(pipes)+([gate] if gate>=0 else []):os.close(fd)
++        if owned["pidfd"] is not None:os.close(owned["pidfd"]);owned["handle_closed"]=True
++        need(owned["reaped"] and owned["handle_closed"],"A087_STOP_UNCONFIRMED")
++    return result
++
++def run_positive_first(positive,controlled):
++    need(positive["case"]=="positive" and controlled["case"]!="positive" and positive["capsule_sha256"]!=controlled["capsule_sha256"],"A087_FRESH_POSITIVE_FIRST_PAIR")
++    # Actual OS/runtime-index/capsule bindings can differ between independently
++    # selected views; all program/consumer Source pins must remain identical.
++    need(all(positive["source_sha256"][role]==controlled["source_sha256"][role] for role in SOURCES if role not in (116,117,119)) and
++        positive["oracle_sha256"]==controlled["oracle_sha256"],"A087_PROGRAM_AND_INDEPENDENT_ORACLE_COMPLEMENT")
++    a,b=(os.fstat(v["fds"][122]) for v in (positive,controlled))
++    need((a.st_dev,a.st_ino)!=(b.st_dev,b.st_ino),"A087_FRESH_ACTUAL_PROTECTED_VIEWS")
++    ordinary=run_public(positive);negative=run_public(controlled)
++    return {"positive":ordinary,"controlled":negative,"full_scoped_cause_closed":False,"source_ready":False,"current_GO":False}
+--- /dev/null
++++ A087/A087-ABI-CONTRACT.json
+@@ -0,0 +1,17 @@
++{
++  "schema":"friday.a087.native-public-ABI.v1",
++  "status":"SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
++  "architecture":"Linux x86_64; fixed packed little-endian wire; native x86_64 C/ctypes public copies",
++  "unchanged_wire":{"capsule":848,"OS":208,"image_header":56,"image_member":1088,"packet":96,"packet_types":"1..14 unchanged","source_roles":19},
++  "unchanged_public":{"fr_child":32,"fr_observation":96,"fr_fixture_wait":"int(int,int,int,int*)"},
++  "new_public":{"fr_receive_receipt":24,"fr_evidence":344,"fr_own_fork":"int(int,unsigned,uint64_t,fr_child*)","fr_own_observe":"int(fr_child*,fr_observation*)","fr_own_evidence":"int(fr_child*,fr_evidence*)","fr_session_evidence":"int(fr_evidence*)","fr_session_close":"int(void)","fr_local_restrict":"int(unsigned,int)"},
++  "evidence_layout":{"prefix":"version,phase,stage:u32;primitive_errno:i32; observed_pid/uid/gid,expected_pid/uid/gid:i32; rights,rights_closed:u32;rights_close_errno:i32; ready_released,signal_attempts,close_attempts,transport_close_attempts,status_redacted:u32","timestamps":"10*u64: intent_ack,clone,register_send,register_ack,release,wait4,reap_ack,signal,close,transport_close","suffix":"expected and observed packed96-byte packets","privacy":"Unacknowledged kernel wait status is zeroed in both packet projections and status_redacted=1; no public status/ownership authority is conferred."},
++  "stages":{"1":"INPUT","2":"CAPSULE","3":"OWNER_PROC","4":"SOCKET","5":"RECEIVE","6":"ORIGIN_PID","7":"ORIGIN_UID","8":"ORIGIN_GID","9":"FRAME","10":"TYPE","11":"SEQUENCE","12":"ROLE","13":"PID","14":"OWNER","15":"BIRTH","16":"OWNER_BIRTH","17":"DEADLINE","18":"STATUS","19":"RIGHTS","20":"RIGHT_CLOSE","21":"COPY","22":"HANDLE","23":"SIGNAL","24":"WAIT4","25":"HANDLE_CLOSE","26":"TRANSPORT_CLOSE","27":"CREATE_PIPE","28":"CREATE_CLONE","29":"BARRIER"},
++  "authority":"Actual original FR_START, fixed SO_PEERCRED plus SCM_CREDENTIALS full PID/UID/GID, capsule SHA/full bytes, proc parent/birth and socket inode remain exact. Public fr_child copies and read-only evidence cannot adopt a PID, pidfd, wait status or generation.",
++  "fork":"Ordinary public API uses real CLONE_PIDFD and PyOS fork hooks; children return only after exact REGISTER_ACK and real barrier release. Legacy fixture route delegates to it while retaining its original controls-only guard.",
++  "close":"Only successful close sets handle_closed and publishes pidfd=-1. On close failure durable native storage retains the exact handle and UNKNOWN; NativeOwner retains truthful projection and makes no second release attempt.",
++  "Root_controller":"Existing held110 --held-a061 only; strict held119 canonical own benign DATA selectors in mode1. No new Root service, privileged image, LSM, grant writer or reset seam.",
++  "restriction":"Local kernel seccomp only reduces the calling owner's own pidfd_send_signal or exact-fd close permission. No userspace errno injection or permission restoration.",
++  "residual":"Receiving-side Root registry full controls remain absent; A087 start/ACK receiving-side controls cannot replace them. ALL216 integration remains separately unresolved.",
++  "SourceReady":false,"current_GO":false,"performed_now":false,"independent_final_byte_review":"REQUIRED_NOT_PERFORMED"
++}
+--- /dev/null
++++ A087/A087-CALLER-MAP.json
+@@ -0,0 +1,14 @@
++{
++  "schema":"friday.a087.current-actual-caller-map.v1",
++  "status":"SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
++  "public":"A087-PUBLIC-DRIVER.run_positive_first -> exact Root-selected readonly admission/oracle/input pins -> actual owned public origin PID/pidfd/proc before release -> held110 --held-a061",
++  "start":"BOOTSTRAP original Source/OS/image/cgroup/Root checks -> original actual coordinator clone3 -> controlled_reply FR_START on original socket -> CONTRACT.startup exact current runtime/bridge -> OWNED.fr_session_start exact original parent/credentials/start",
++  "ordinary":"SUPERVISOR mode1 -> same held102 A071-CONTROLS.controls -> controls_public -> actual general public OWNED.fr_own_fork -> INTENT/ACK -> actual pipe2/clone3 -> native durable PID/pidfd/proc binding -> Root registry REGISTER/ACK -> actual barrier -> ordinary child payload and gate",
++  "creation_failure":"controls_public reduces only own NOFILE soft allowance and fills own duplicated read-only FDs; one free slot preserves proc/session prerequisites, actual native pipe2 needs two and returns EMFILE; exact ABORT/ABORT_ACK on same public route, no forged clone outcome",
++  "reap":"public_wait -> OWNED.fr_own_wait real private wait4 -> UNKNOWN/zero -> actual REAP -> BOOTSTRAP registry original valid receipt -> controlled actual/invalid/omitted ACK -> only exact ACK publishes status -> native release",
++  "cleanup":"Exact native binding, at most one actual pidfd signal, finite direct-child wait4, no guessed PID, no plaintext descriptor closed as pidfd, confirmed-only handle close, then existing Root owned coordinator kernel wait and transport close",
++  "credentials":"PID cases use actual Root-owned short helper inside unchanged inner4 group, private own pidfd/proc/wait4/close. UID/GID cases use actual existing Root's own real-ID transition for the send and restoration, only after separate future admission; actual automatic SCM_CREDENTIALS, no credential field fabrication.",
++  "consumer_preservation":"Production and original mode4 NativeOwner remain connected to fr_own_spawn/wait/stop/release; worker held112/G1/CA transport remains unchanged except current Source path label. Producer runtime117 -> exact same image111 inode closure remains connected; full original A071-FULL-CONTROLS and A071-CONTROL-COVERAGE bytes are unchanged.",
++  "Root_remaining":"No actual public receiving-side Root registry negative caller currently emits its full wrong-peer/SCM_RIGHTS/pidfd/parent/generation/pending-deadline/signal/transport-close prerequisites. New ACK-side witnesses do not close that residual.",
++  "all_runtime":"NOT_RUN","compile_AST_import_native_GET_body_image_gates_release":"NOT_RUN_NOT_PROVEN","GO":false
++}
+--- /dev/null
++++ A087/A087-EXPECTED-CONTROLS.json
+@@ -0,0 +1,1008 @@
++{
++  "schema": "friday.a087.independent-public-oracles.v1",
++  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
++  "literal_expectations_fixed_before_output": true,
++  "rows": [
++    {
++      "case": "positive",
++      "expected_native_stage": 0,
++      "expected_primitive_errno": 0,
++      "expected_phase": 0,
++      "actual_children_created": 3,
++      "ordinary_READY_count": 3,
++      "root_registered_workers": 3,
++      "root_borrowed_reaped_workers": 3,
++      "root_sequence": 13,
++      "native_sequence_before_drain_finish": 11,
++      "outer_state": "OUTER_BOUNDED_DRAINED_FINISHED",
++      "outer_cause": null,
++      "outer_exit": 0,
++      "outer_uncertainty": false,
++      "native_status_known": true,
++      "public_status_after_refusal": "actual independent exit23/24/25 <<8",
++      "completion": true,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "start_origin_pid",
++      "expected_native_stage": 6,
++      "expected_primitive_errno": -74,
++      "expected_phase": 1,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 2,
++      "native_sequence_before_drain_finish": 0,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "start_origin_uid",
++      "expected_native_stage": 7,
++      "expected_primitive_errno": -74,
++      "expected_phase": 1,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 2,
++      "native_sequence_before_drain_finish": 0,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "start_origin_gid",
++      "expected_native_stage": 8,
++      "expected_primitive_errno": -74,
++      "expected_phase": 1,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 2,
++      "native_sequence_before_drain_finish": 0,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "start_owner",
++      "expected_native_stage": 14,
++      "expected_primitive_errno": -74,
++      "expected_phase": 1,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 2,
++      "native_sequence_before_drain_finish": 0,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "start_owner_birth",
++      "expected_native_stage": 16,
++      "expected_primitive_errno": -74,
++      "expected_phase": 1,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 2,
++      "native_sequence_before_drain_finish": 0,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "start_deadline",
++      "expected_native_stage": 17,
++      "expected_primitive_errno": -74,
++      "expected_phase": 1,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 2,
++      "native_sequence_before_drain_finish": 0,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "start_role",
++      "expected_native_stage": 12,
++      "expected_primitive_errno": -74,
++      "expected_phase": 1,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 2,
++      "native_sequence_before_drain_finish": 0,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "start_sequence",
++      "expected_native_stage": 11,
++      "expected_primitive_errno": -74,
++      "expected_phase": 1,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 2,
++      "native_sequence_before_drain_finish": 0,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "start_rights",
++      "expected_native_stage": 19,
++      "expected_primitive_errno": -74,
++      "expected_phase": 1,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 2,
++      "native_sequence_before_drain_finish": 0,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_origin_pid",
++      "expected_native_stage": 6,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_origin_uid",
++      "expected_native_stage": 7,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_origin_gid",
++      "expected_native_stage": 8,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_owner",
++      "expected_native_stage": 14,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_owner_birth",
++      "expected_native_stage": 16,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_session",
++      "expected_native_stage": 9,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_role",
++      "expected_native_stage": 12,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_sequence_replay",
++      "expected_native_stage": 11,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_sequence_future",
++      "expected_native_stage": 11,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_deadline",
++      "expected_native_stage": 17,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_rights",
++      "expected_native_stage": 19,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "ack_many_rights",
++      "expected_native_stage": 19,
++      "expected_primitive_errno": -74,
++      "expected_phase": 2,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 2,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "register_invalid_ACK",
++      "expected_native_stage": 10,
++      "expected_primitive_errno": -74,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 3,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "register_lost_ACK",
++      "expected_native_stage": 5,
++      "expected_primitive_errno": -110,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 3,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "register_delayed_ACK",
++      "expected_native_stage": 0,
++      "expected_primitive_errno": 0,
++      "expected_phase": 4,
++      "actual_children_created": 3,
++      "ordinary_READY_count": 3,
++      "root_registered_workers": 3,
++      "root_borrowed_reaped_workers": 3,
++      "root_sequence": 13,
++      "native_sequence_before_drain_finish": 11,
++      "outer_state": "OUTER_BOUNDED_DRAINED_FINISHED",
++      "outer_cause": null,
++      "outer_exit": 0,
++      "outer_uncertainty": false,
++      "native_status_known": true,
++      "public_status_after_refusal": "actual independent exit23/24/25 <<8",
++      "completion": true,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "abort_positive",
++      "expected_native_stage": 0,
++      "expected_primitive_errno": -24,
++      "expected_phase": 6,
++      "actual_children_created": 3,
++      "ordinary_READY_count": 3,
++      "root_registered_workers": 3,
++      "root_borrowed_reaped_workers": 3,
++      "root_sequence": 15,
++      "native_sequence_before_drain_finish": 13,
++      "outer_state": "OUTER_BOUNDED_DRAINED_FINISHED",
++      "outer_cause": null,
++      "outer_exit": 0,
++      "outer_uncertainty": false,
++      "native_status_known": true,
++      "public_status_after_refusal": "actual independent exit23/24/25 <<8",
++      "completion": true,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "abort_invalid_ACK",
++      "expected_native_stage": 10,
++      "expected_primitive_errno": -74,
++      "expected_phase": 6,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 3,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "abort_lost_ACK",
++      "expected_native_stage": 5,
++      "expected_primitive_errno": -110,
++      "expected_phase": 6,
++      "actual_children_created": 0,
++      "ordinary_READY_count": 0,
++      "root_registered_workers": 0,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 3,
++      "native_sequence_before_drain_finish": 3,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "no actual child/pidfd exists; no invented cleanup receipt",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "reap_invalid_ACK",
++      "expected_native_stage": 10,
++      "expected_primitive_errno": -74,
++      "expected_phase": 7,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 1,
++      "root_sequence": 5,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "reap_lost_ACK",
++      "expected_native_stage": 5,
++      "expected_primitive_errno": -110,
++      "expected_phase": 7,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 1,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "copy_pid",
++      "expected_native_stage": 21,
++      "expected_primitive_errno": -1,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "copy_pidfd",
++      "expected_native_stage": 21,
++      "expected_primitive_errno": -1,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "copy_birth",
++      "expected_native_stage": 21,
++      "expected_primitive_errno": -1,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "copy_role",
++      "expected_native_stage": 21,
++      "expected_primitive_errno": -1,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "pidfd_plaintext",
++      "expected_native_stage": 22,
++      "expected_primitive_errno": -116,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "private wait observed; native handle close UNCONFIRMED; actual calling process kernel-reaped before external terminal",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "pidfd_closed",
++      "expected_native_stage": 22,
++      "expected_primitive_errno": -116,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "private wait observed; native handle close UNCONFIRMED; actual calling process kernel-reaped before external terminal",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "signal_denied",
++      "expected_native_stage": 23,
++      "expected_primitive_errno": -1,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "close_denied",
++      "expected_native_stage": 25,
++      "expected_primitive_errno": -1,
++      "expected_phase": 7,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 1,
++      "root_sequence": 5,
++      "native_sequence_before_drain_finish": 5,
++      "outer_state": "OUTER_FAILED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": false,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "private wait observed; native handle close UNCONFIRMED; actual calling process kernel-reaped before external terminal",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "transport_closed",
++      "expected_native_stage": 0,
++      "expected_primitive_errno": 0,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "role_invalid",
++      "expected_native_stage": 12,
++      "expected_primitive_errno": -22,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "deadline_expired",
++      "expected_native_stage": 17,
++      "expected_primitive_errno": -110,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "session_restart",
++      "expected_native_stage": 1,
++      "expected_primitive_errno": -1,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "wait_flags_DATA",
++      "expected_native_stage": 1,
++      "expected_primitive_errno": -22,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    },
++    {
++      "case": "caller_status_DATA",
++      "expected_native_stage": 1,
++      "expected_primitive_errno": -1,
++      "expected_phase": 4,
++      "actual_children_created": 1,
++      "ordinary_READY_count": 1,
++      "root_registered_workers": 1,
++      "root_borrowed_reaped_workers": 0,
++      "root_sequence": 4,
++      "native_sequence_before_drain_finish": 4,
++      "outer_state": "STOP_UNCONFIRMED",
++      "outer_cause": "COORD_EXIT",
++      "outer_exit": 2,
++      "outer_uncertainty": true,
++      "native_status_known": false,
++      "public_status_after_refusal": 0,
++      "completion": false,
++      "own_cleanup": "actual native private direct wait and exact native pidfd close",
++      "whole_native_cause_credit": false,
++      "observed": "NOT_RUN"
++    }
++  ],
++  "required_prerequisite": {
++    "same_public": "held110 --held-a061",
++    "ordinary_positive_first": "positive",
++    "fresh_generation_and_actual_root_view": true,
++    "complete_external_capsule_source_image_and_actor_admission": true,
++    "privileges": "UID/GID transition cases require future separately admitted existing Root's actual own real-credential transition; no unprivileged UID change is assumed",
++    "helper": "PID cases require future separately admitted actual Root-owned clone3/pidfd helper into the same original inner4 envelope, wait4 and close before its next checkpoint"
++  },
++  "resources": {
++    "wall_sec": 180,
++    "reserve_sec": 10,
++    "outer_AS": 67108864,
++    "inner_total": 201326592,
++    "coordinator_AS": 50331648,
++    "worker_AS": 50331648,
++    "aggregate_RSS": 268435456,
++    "inner_pids": 4,
++    "outer_pids": 1,
++    "output_each": 1048576,
++    "raw_inner": 16384,
++    "plain_memfd_bytes_max": 64,
++    "GET": 0,
++    "body_files": 0
++  },
++  "source_residual": [
++    "Root registry receiving-side independently controlled actual peer PID/UID/GID/parent/proc/pidfd and rejected descriptor controls are not yet produced by this corpus. Native ACK/start receiving-side pairs are not interchangeable with these Root registry pairs.",
++    "Real expiration of the current Root registry pending deadline and independently observed invalid/lost ABORT_ACK/REAP_ACK cleanup transport failures need final review; current expiry case is an ordinary scheduler argument expiry, not Root's pending timeout.",
++    "ALL216_NESTED_OWNERSHIP_INTEGRATION remains separate and unchanged."
++  ],
++  "GO": false,
++  "source_ready": false,
++  "full_scoped_cause_closed": false,
++  "independent_final_byte_review": "REQUIRED_NOT_PERFORMED"
++}
+--- /dev/null
++++ A087/A087-SCOPE-PRESERVATION.json
+@@ -0,0 +1,15 @@
++{
++  "schema":"friday.a087.exact-mandatory-scope-preservation.v1",
++  "input_manifest":"INPUT-A079-MANIFEST.json",
++  "input_manifest_sha256":"395c6e3e0ba12324e158730d5918a1bf77e61fea95a23ba3d2b62f6bdd1dd674",
++  "exact_maps":{"216_plus8":{"file":"A071-CONTROL-COVERAGE.json","sha256":"615c6db31e76e053bbb91972b29051595f997bfc4d653f44850b89a073418d4c","inherited":216,"A051":8,"integration":"SEPARATE_UNRESOLVED_NOT_RUN"},"original_mode4_and5_HTTP_and63_guard_and_current9":{"file":"A071-FULL-CONTROLS.py","bytes":"EXACT_INPUT_SHA_BOUND_BY_DELTA_COMPLEMENT_AND_MANIFEST","original_mode":4,"HTTP_negatives":5,"guards":63,"new_runtime_DATA":9},"bill":{"file":"A071-BILL.json","sha256":"b9173a3b8eac8d0bd255081cd01fdd76f809601bcca70dccf8ba10c884e47ef5"}},
++  "unchanged_contract_counts":{"source_pins":19,"source_seal_guard_cases":18,"OS":9,"image":17,"source_OS_image_guards":63,"runtime_manifest_fd":117,"same_actual_image_fd":111},
++  "new_native_source_cases":44,"new_cases_replace_no_old_obligation":true,
++  "whole_original_sources":"All current changed original Sources archived byte-identically as INPUT-A079-CURRENT-*; unchanged Source complement and all UPSTREAM-A066-SNAPSHOT-* retained under exact original bytes.",
++  "original_limits":{"GET":3,"copies":0,"regular_files":6,"directories":3,"workers_global":4,"aggregate_RSS":268435456,"wall_sec":1200,"reserve_sec":60,"connect_sec":15,"request_sec":300,"header_bytes":65536,"body_bytes":956301312,"disk_bytes":2147483648,"retries":0},
++  "native_controls_limits":{"outer_AS":67108864,"inner":201326592,"coordinator_and_worker_AS_each":50331648,"outer_pids":1,"inner_pids":4,"wall_sec":180,"reserve_sec":10,"output_each":1048576,"GET":0,"body_files":0},
++  "historical_unsafe":"Inert copied Source/DATA only; no attack/payload/exploit/vulnerability reproduction was implemented or run.",
++  "all_runtime_native_browser_GET_image_216_gate_release":"NOT_RUN_NOT_PROVEN",
++  "Root_image_or_current_grant_absence_is_source_bug":false,
++  "full_native_cause_closed":false,"SourceReady":false,"F10_waiver":false,"GO":false
++}
+--- /dev/null
++++ A087/A087-RESOURCES.json
+@@ -0,0 +1,15 @@
++{
++  "schema":"friday.a087.source-only-resource-contract.v1",
++  "accepted_UTC":"2026-10-01T16:49:53Z","accepted_MSK":"2026-10-01T19:49:53+03:00",
++  "source_cutoff_UTC":"2026-10-01T18:09:53Z","hard_cutoff_UTC":"2026-10-01T18:19:53Z",
++  "wall_sec":5400,"source_work_sec_max":4800,"seal_reserve_sec_min":600,
++  "read_cap":67108864,"output_cap":16777216,"RAM_cap":4294967296,
++  "source_worker_models":1,"child_models":0,"source_runtime_workers":0,"initial_independent_read_utilities_parallel_max":3,
++  "ledger":"READ-LEDGER.tsv",
++  "physical_block_IO":"UNKNOWN_NOT_ZERO","implicit_IO":"UNKNOWN_NOT_ZERO","actual_RAM_peak":"UNKNOWN_NOT_ZERO","CPU_affinity_quota_pressure":"UNKNOWN_NOT_ZERO",
++  "counting":"All physical repeat reads are charged conservatively by entire-file upper bounds for sed/rg/apply_patch, full copy/hash/diff and final seals. Kernel cache does not reduce charged input; these are explicit upper allowances, not a claim of measured block IO.",
++  "current_effects":{"Source_edits_and_mechanical_path_labels":true,"owned_private_copy_hash_metadata":true,"Source_import":0,"AST":0,"compile":0,"eval_Source":0,"execute_Source":0,"native_build":0,"tests_controls":0,"Root_kernel_probes":0,"network_GET":0,"body_read":0,"product_Git":0,"build_install_live_gates_release":0,"model_settings_or_authority_writes":0},
++  "future_helper":"Separate actual Root-owned short reply helper in original inner4, AS48MiB and CPU180, real direct wait4/pidfd close. UID/GID transitions are actual existing Root's own real-ID transitions only under separate future typed admission.",
++  "future_own_syscall_restriction":"Actual irreversible local kernel filter; no mocked errno/credentials/receipt; failed close remains unconfirmed until owned actor kernel termination.",
++  "all_future_effects":"NOT_RUN_NOT_PROVEN","GO":false
++}
+--- /dev/null
++++ A087/REVIEW-A087.md
+@@ -0,0 +1,11 @@
++# A087 frozen Source review request
++
++Source INCOMPLETE, unexecuted, do not load. Review the entire final manifest and changed Source graph before any later import, AST, build, control or effect. A087 has no current execution admission, native/runtime/browser/image/GET/F10/release proof or GO.
++
++The current public caller is A087-PUBLIC-DRIVER.py. It consumes separately supplied Root-selected sealed read-only actor/oracle/input descriptors and calls actual held110 --held-a061. It performs the full ordinary three-child positive before each fresh controlled generation. All44 independently fixed case DATA files and A087-EXPECTED-CONTROLS.json are Source only. Three complete positive contours cover ordinary operation, real delayed REGISTER_ACK and real descriptor-exhaustion creation failure with ABORT_ACK and subsequent ordinary operation. The other41 contours target actual start/ACK identity or field refusal, rights closure, invalid/lost register/abort/reap ACK, public copy refusal, actual stale/plaintext descriptor, actual local kernel signal/close restriction, owned transport close and sticky generation refusal.
++
++Mandatory residual: this is still not ENTIRE AUTHORITATIVE_NATIVE_REGISTRY_FULL_CONTROLS closure. The receiving side of the existing Root registry lacks independent same-public wrong-peer/rights/pidfd/parent/proc-generation/pending-deadline/Root-signal/transport-close pairs. ACK/start receiving-side observations are a different boundary. Scheduler argument expiry does not prove Root pending deadline expiry. Honest incomplete status is required even if every written contour later passes. ALL216_NESTED_OWNERSHIP_INTEGRATION is a separate unchanged unresolved obligation.
++
++Review real ownership, full fixed origin PID/UID/GID and parent/birth, monotonic private sequence, exact ACK full packet complement, descriptor close outcomes, actual creation error custody, private wait4 before ACK, and UNKNOWN cleanup. Check that diagnostic expected/observed packet status is redacted whenever kernel wait is unconfirmed. Check legacy mode1 fixture guard, production/mode4 NativeOwner, original wire and full19/18/9/17/63/216+8 maps. Check the observed resources and terminal oracles, including genuinely different Root view bindings. Wrong stage, early refusal, generic COORD_EXIT without its exact native phase witness, DATA labels or self-chosen actor pins must not count as a passing pair.
++
++No attack, unsafe payload, vulnerability reproduction, Root service, Root image, LSM or authority writer was added or run. Historical bodies remain inert unchanged Source/DATA. Whole manifest, raw delta, exact unchanged complement, read/resource ledger and terminal pins are required for final-byte review. None of the written Source was compiled, parsed with AST, imported or executed here.
+--- /dev/null
++++ A087/A087-INPUT-positive.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"positive","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-start_origin_pid.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"start_origin_pid","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-start_origin_uid.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"start_origin_uid","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-start_origin_gid.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"start_origin_gid","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-start_owner.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"start_owner","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-start_owner_birth.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"start_owner_birth","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-start_deadline.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"start_deadline","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-start_role.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"start_role","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-start_sequence.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"start_sequence","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-start_rights.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"start_rights","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_origin_pid.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_origin_pid","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_origin_uid.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_origin_uid","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_origin_gid.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_origin_gid","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_owner.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_owner","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_owner_birth.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_owner_birth","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_session.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_session","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_role.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_role","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_sequence_replay.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_sequence_replay","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_sequence_future.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_sequence_future","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_deadline.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_deadline","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_rights.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_rights","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-ack_many_rights.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"ack_many_rights","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-register_invalid_ACK.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"register_invalid_ACK","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-register_lost_ACK.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"register_lost_ACK","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-register_delayed_ACK.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"register_delayed_ACK","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-abort_positive.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"abort_positive","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-abort_invalid_ACK.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"abort_invalid_ACK","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-abort_lost_ACK.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"abort_lost_ACK","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-reap_invalid_ACK.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"reap_invalid_ACK","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-reap_lost_ACK.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"reap_lost_ACK","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-copy_pid.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"copy_pid","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-copy_pidfd.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"copy_pidfd","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-copy_birth.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"copy_birth","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-copy_role.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"copy_role","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-pidfd_plaintext.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"pidfd_plaintext","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-pidfd_closed.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"pidfd_closed","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-signal_denied.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"signal_denied","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-close_denied.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"close_denied","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-transport_closed.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"transport_closed","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-role_invalid.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"role_invalid","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-deadline_expired.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"deadline_expired","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-session_restart.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"session_restart","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-wait_flags_DATA.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"wait_flags_DATA","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}
+--- /dev/null
++++ A087/A087-INPUT-caller_status_DATA.json
+@@ -0,0 +1 @@
++{"schema":"friday.a087.native-public-input.v1","case":"caller_status_DATA","workers":[{"payload":"ordinary-owned-a087/0\n","exit":23},{"payload":"ordinary-owned-a087/1\n","exit":24},{"payload":"ordinary-owned-a087/2\n","exit":25}]}

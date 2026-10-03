@@ -1,0 +1,94 @@
+{
+  "leaf_count": 15,
+  "leaves": [
+    {
+      "bytes": 160495,
+      "path": "caller.py",
+      "sha256": "c55272828f5f1100ec057a9fcfc3e984014d210ade6979415bfa7a42b8539def"
+    },
+    {
+      "bytes": 5859,
+      "path": "evidence/current6-delta.json",
+      "sha256": "436e992fce903692aa43bcc71b79f188a11db2da5be06017ca7129f3828cab4f"
+    },
+    {
+      "bytes": 1283,
+      "path": "evidence/custody-relation.json",
+      "sha256": "e07d4df225101e74d1d9ede2e4b5799e548c3b9e40a6c3ae60a5aaca74194755"
+    },
+    {
+      "bytes": 99,
+      "path": "evidence/proc-io.txt",
+      "sha256": "3e649a694e2b67ab1de36f127925bcb51d567a9f66bb31f97a97e415eaff8ce1"
+    },
+    {
+      "bytes": 296,
+      "path": "evidence/proc-stat.txt",
+      "sha256": "35cc4d0be2abbf4945acab3ae591206da778a9874c3ef8e1abc260b2ae5e8e93"
+    },
+    {
+      "bytes": 1574,
+      "path": "evidence/proc-status.txt",
+      "sha256": "710238309650146bf92b60aef5ed77afe6d16fbd4a52ed1ab7f161cb6ed60abf"
+    },
+    {
+      "bytes": 477,
+      "path": "evidence/prospective-bounds.json",
+      "sha256": "38fa7f9bb2b5f330608dfab55ae1b007c64178b68f06ab09b8d04f84647cb380"
+    },
+    {
+      "bytes": 9500,
+      "path": "evidence/read-ledger.json",
+      "sha256": "25f5e903319df4396736854969c8a6712ac2dcb06c109743f9a0b719beb90a23"
+    },
+    {
+      "bytes": 10414,
+      "path": "evidence/source19-verification.json",
+      "sha256": "096fa7702f1ebffb892be761fa97ec60abc533c676a1c1ce38197da5132c86aa"
+    },
+    {
+      "bytes": 2024,
+      "path": "evidence/typed-joins.json",
+      "sha256": "26b4bfbb15ff41c6148d43e342d84059dcdb578c18daa85cf16312bc98c00480"
+    },
+    {
+      "bytes": 11522,
+      "path": "expectations.json",
+      "sha256": "412b8c793206a24ece6e78f16a333dac57e598e5d34a3a6f728fcc02cb7f0922"
+    },
+    {
+      "bytes": 50081,
+      "path": "launch-contract.json",
+      "sha256": "c13d260aeed62fb6143513ad56900a25f9f9910ec090aab6077fbcb3bff95683"
+    },
+    {
+      "bytes": 158,
+      "path": "ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    {
+      "bytes": 127537,
+      "path": "supervisor.py",
+      "sha256": "a8eb16fd7164f4afb2541ff90c3686130e30ed306fe8b4fc919b056d2a217051"
+    },
+    {
+      "bytes": 99683,
+      "path": "verifier.py",
+      "sha256": "3eee3d7b74eab52e87b7dd211e8796c77e5c5ec35a6da28810b12870b3ecb4fe"
+    }
+  ],
+  "pathset_bytes": 6565,
+  "pathset_identity9_decimal_strings": [
+    "2050",
+    "4225922",
+    "33152",
+    "1000",
+    "1000",
+    "1",
+    "6565",
+    "1790974791803474322",
+    "1790974791803474322"
+  ],
+  "pathset_sha256": "1ad568cabd4a5b9955f582acfacf85a3f7a689351c16c7fa6c0df07f3cd739c1",
+  "schema": "friday.grok.lab880.manifest.v1"
+}

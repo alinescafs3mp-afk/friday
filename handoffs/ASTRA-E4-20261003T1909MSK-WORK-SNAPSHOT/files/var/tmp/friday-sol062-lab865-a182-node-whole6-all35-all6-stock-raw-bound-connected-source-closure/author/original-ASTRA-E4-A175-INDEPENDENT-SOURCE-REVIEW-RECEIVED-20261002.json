@@ -1,0 +1,640 @@
+{
+  "schema": "friday.e4.a175.node-whole6-all35-all6-all3-independent-review-root-received.v1",
+  "assignment": "ASTRA-E4-A172-NODE-WHOLE6-ALL35-ALL6-ALL3-INDEPENDENT-SOURCE-REVIEW-A175",
+  "generation": 1,
+  "received_msk": "2026-10-02T12:28:27.282223+03:00",
+  "status": "AUTHENTIC_WHOLE_INDEPENDENT_SOURCE_REVIEW_RECEIVED_SOURCE_CONTRADICTIONS_FOUND",
+  "full_SHA9_private_pathset_acyclic_DAG": true,
+  "source33_held_named9_unchanged": true,
+  "protected_pins": [
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/all3-matrix.json",
+      "bytes": 2594,
+      "sha256": "77925f7862755846ca59c2df36b386869244326cfc2645742e849e0ba7e46899",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979627",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2594",
+        "1790932171495575335",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/all35-matrix.json",
+      "bytes": 37600,
+      "sha256": "5c7a9c26ae60173fd4078bfb8c81494eab245eba91b8751b6cd43ef121247452",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979636",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "37600",
+        "1790932436395742026",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/all6-matrix.json",
+      "bytes": 4454,
+      "sha256": "0da7b899bde62d649219a02b0e8b0584986b04ddc53dca87f765089b3ed13aa4",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979628",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4454",
+        "1790932171495575335",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/bounds.json",
+      "bytes": 9061,
+      "sha256": "8c29a8f335388aa6536eb2f8574a8a038511163b96fd44885ef4fc969fb8b3ea",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979674",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9061",
+        "1790932732255695315",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/costs.json",
+      "bytes": 1904,
+      "sha256": "75306852b9df169719df30b01f52e2a31cbed5280c8ceba0934a9112d1cef6cd",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979678",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1904",
+        "1790932955466502164",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/exact-pathset.json",
+      "bytes": 1957,
+      "sha256": "fd3fdac6792691b72a7a8e999463979df8dea136c8875d2ea4c6a84127dc1d08",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979679",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1957",
+        "1790932980753953041",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/future-root-facts.json",
+      "bytes": 3326,
+      "sha256": "f60ea07a0390ebd4dc63de4cdbf837a4b71d7f5895c108c4e89de3336a7effef",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979677",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3326",
+        "1790932955447501074",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/gpg6-template-matrix.json",
+      "bytes": 3492,
+      "sha256": "dd0354003245e3d74fe3b67f03eeebe412e30a07f3f00b1a2079e5e1efc1311a",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979638",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3492",
+        "1790932615243981866",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/historical-a169-proc-join.json",
+      "bytes": 7017,
+      "sha256": "d57d67880fe495189c1f152c739c3f1fa58935d7789afa52a27d9361584e6fbe",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979676",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7017",
+        "1790932955427499927",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/input-read-audit.json",
+      "bytes": 62714,
+      "sha256": "0bed3a04f43d5ee46367673fced07a420d10b183d4f372ef0e7c9c3c0db38d5f",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979675",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "62714",
+        "1790932857655890223",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/resource-custody-phase-matrix.json",
+      "bytes": 9362,
+      "sha256": "e5656957e18b32d94660d4da5687b9fe3765d45ee7fce12d35f78452eb5fb18a",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979637",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9362",
+        "1790932615220086964",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/review.txt",
+      "bytes": 9216,
+      "sha256": "4b603dee2af33bb633249dc69f0215151b3466b4ce34af23d03ccc57983b3cdc",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979626",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9216",
+        "1790932171494575278",
+        "1790932980801955795"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/manifest.json",
+      "bytes": 7246,
+      "sha256": "9809966a578d68d74aced2b4e83fc09d3b6c055e1fe43c49f340fa54360caaf9",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979680",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7246",
+        "1790933043655562063",
+        "1790933043655562063"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-A172-NODE-WHOLE6-ALL35-ALL6-ALL3-INDEPENDENT-SOURCE-REVIEW-A175-G1-RESULT.json",
+      "bytes": 13119,
+      "sha256": "ee56e03f3a85b799d59e44313b0b1a2bcd2ae7ee3160c4650a290bade1a7ecd1",
+      "identity9_decimal_strings": [
+        "2050",
+        "9177318",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13119",
+        "1790933125659267068",
+        "1790933125707269822"
+      ],
+      "stable9": true
+    }
+  ],
+  "result": {
+    "schema": "friday.astra.a175.whole-source-independent-terminal-result.v1",
+    "assignment": "ASTRA-E4-A172-NODE-WHOLE6-ALL35-ALL6-ALL3-INDEPENDENT-SOURCE-REVIEW-A175",
+    "generation": 1,
+    "context": "fresh",
+    "owner_scope": "goal",
+    "REVIEW_KEY": "A172-b695a4dac362fbe7-manifest1e136aa16b4e6b1e-current6-all35-all6",
+    "status": "RESULT_COMPLETE",
+    "decision": "SOURCE_CONTRADICTIONS_FOUND",
+    "accepted_msk": "2026-10-02 11:50:05 MSK",
+    "finished_msk": "2026-10-02 12:25:25 MSK",
+    "elapsed_seconds": 2120,
+    "acceptance_clock_note": "initial displayed23:03 erroneous, actual11:50:05 corrected before review",
+    "input_pin": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A175-INPUT-20261002.json",
+      "bytes": 86905,
+      "sha256": "80ccbbcd58cea5ccbc4de1688421692eb824310caff4fa1b4dd654de2a33015c",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533518",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "86905",
+        "1790930955988989730",
+        "1790930956055993565"
+      ],
+      "stable_before_held_after9": true,
+      "mode": "0600",
+      "nlink": 1
+    },
+    "source_root": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1",
+    "frozen_snapshot": "0.208.64/schema50 cecd28a9",
+    "installed_snapshot": "0.208.58 unchanged",
+    "findings": [
+      {
+        "id": "F1",
+        "severity": "HIGH",
+        "kind": "PINNED_SOURCE_CONTROL_FLOW",
+        "source_refs": [
+          "supervisor.py:565",
+          "supervisor.py:821",
+          "supervisor.py:865",
+          "supervisor.py:885",
+          "supervisor.py:1555",
+          "verifier.py:364",
+          "verifier.py:522",
+          "verifier.py:730"
+        ],
+        "fact": "State retired only after native close; raised close leaves old slots/OWN and explicit common cleanup can reclose them.",
+        "required": "prospective exact allocation retirement before firstclose; sticky ambiguous outcome; no retry/stale-slot close; finite known-owned cleanup",
+        "runtime_claim": "NOT_RUN; no hostile provider assumed"
+      },
+      {
+        "id": "F2",
+        "severity": "HIGH",
+        "kind": "PINNED_SOURCE_RAW_ERROR_CUSTODY",
+        "source_refs": [
+          "verifier.py:449",
+          "verifier.py:509",
+          "verifier.py:522"
+        ],
+        "fact": "Failure before normal capture tail settles/closes GPG streams without complete terminal raw/writable snapshot; rc/channels/output accounting can remain absent.",
+        "required": "bounded complete error/firstfault/terminal capture before firstclose; original quota/end; unknowns explicit notzero",
+        "runtime_claim": "NOT_RUN; faithful outer bytes cannot recover absent inner output"
+      },
+      {
+        "id": "D1",
+        "severity": "METADATA_CORRECTION",
+        "fact": "author resource matrix says GPGCPU30/FSIZE32768; actual code/contract GPGCPU20/wall30/dynamic quota <=21845 firstcall",
+        "executable_cap_changed": false
+      }
+    ],
+    "all3_delta": "COHERENT_PROSPECTIVE_CONDITIONAL_STATIC_CHANGES; no whole acceptance from subset",
+    "all6": "ORIGINAL_CASES_ROLES_ORACLES_CAPS_PRESERVED_CURRENT_RUNTIME_NOT_RUN",
+    "all35": "COMPLETE35_DISJOINT_ERROR_CELLS_71680_CONDITIONAL_FIXED_STOCK900_GRAPH; no old acceptance transferred",
+    "publication": {
+      "complete_bound": 2095321,
+      "cap": 2097152,
+      "margin": 1831,
+      "lossless_raw": true,
+      "fixed_metadata_independent": 27496,
+      "owned_optional_uniform_conservative": 4606,
+      "owned_cell": 5120
+    },
+    "performing_read_plan": {
+      "full19_bytes": 72375597,
+      "fixed_nonrunning": 246957270,
+      "running": 21478186,
+      "total": 268435456
+    },
+    "historical_A169": "IMMUTABLE_RED_STOP_UNCONFIRMED; ten pre-close Refusals, zero unconfirmed native closes, failed fstat field UNKNOWN; no rerun/upgrade",
+    "future_facts": "After F1/F2 cohesive repair + independent whole new Source review: exact new-current19/fd3 numeric int9, actual current stock factory/image/env aliases, fresh existing Root finite clock/caps, exact proc terminal provider relation, LAB8614 effect gaps, actual complete inner fit/all6 raw/resource/custody. Missing future fact alone not CODE defect; no new Root role.",
+    "artifacts": {
+      "review": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/review.txt",
+        "bytes": 9216,
+        "sha256": "4b603dee2af33bb633249dc69f0215151b3466b4ce34af23d03ccc57983b3cdc",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979626",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9216",
+          "1790932171494575278",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "all3": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/all3-matrix.json",
+        "bytes": 2594,
+        "sha256": "77925f7862755846ca59c2df36b386869244326cfc2645742e849e0ba7e46899",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979627",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2594",
+          "1790932171495575335",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "all6": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/all6-matrix.json",
+        "bytes": 4454,
+        "sha256": "0da7b899bde62d649219a02b0e8b0584986b04ddc53dca87f765089b3ed13aa4",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979628",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4454",
+          "1790932171495575335",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "all35": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/all35-matrix.json",
+        "bytes": 37600,
+        "sha256": "5c7a9c26ae60173fd4078bfb8c81494eab245eba91b8751b6cd43ef121247452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979636",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37600",
+          "1790932436395742026",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "resources_custody_phases": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/resource-custody-phase-matrix.json",
+        "bytes": 9362,
+        "sha256": "e5656957e18b32d94660d4da5687b9fe3765d45ee7fce12d35f78452eb5fb18a",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979637",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9362",
+          "1790932615220086964",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "GPG6": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/gpg6-template-matrix.json",
+        "bytes": 3492,
+        "sha256": "dd0354003245e3d74fe3b67f03eeebe412e30a07f3f00b1a2079e5e1efc1311a",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979638",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3492",
+          "1790932615243981866",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "bounds": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/bounds.json",
+        "bytes": 9061,
+        "sha256": "8c29a8f335388aa6536eb2f8574a8a038511163b96fd44885ef4fc969fb8b3ea",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979674",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9061",
+          "1790932732255695315",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "input_audit": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/input-read-audit.json",
+        "bytes": 62714,
+        "sha256": "0bed3a04f43d5ee46367673fced07a420d10b183d4f372ef0e7c9c3c0db38d5f",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979675",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "62714",
+          "1790932857655890223",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "historical_join": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/historical-a169-proc-join.json",
+        "bytes": 7017,
+        "sha256": "d57d67880fe495189c1f152c739c3f1fa58935d7789afa52a27d9361584e6fbe",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979676",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7017",
+          "1790932955427499927",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "future_facts": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/future-root-facts.json",
+        "bytes": 3326,
+        "sha256": "f60ea07a0390ebd4dc63de4cdbf837a4b71d7f5895c108c4e89de3336a7effef",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979677",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3326",
+          "1790932955447501074",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      },
+      "costs": {
+        "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/costs.json",
+        "bytes": 1904,
+        "sha256": "75306852b9df169719df30b01f52e2a31cbed5280c8ceba0934a9112d1cef6cd",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979678",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1904",
+          "1790932955466502164",
+          "1790932980801955795"
+        ],
+        "stable_before_held_after9": true,
+        "mode": "0600",
+        "nlink": 1
+      }
+    },
+    "manifest_pin": {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/manifest.json",
+      "bytes": 7246,
+      "sha256": "9809966a578d68d74aced2b4e83fc09d3b6c055e1fe43c49f340fa54360caaf9",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979680",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7246",
+        "1790933043655562063",
+        "1790933043655562063"
+      ],
+      "stable_before_held_after9": true,
+      "mode": "0600",
+      "nlink": 1
+    },
+    "pathset_pin": {
+      "path": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1/exact-pathset.json",
+      "bytes": 1957,
+      "sha256": "fd3fdac6792691b72a7a8e999463979df8dea136c8875d2ea4c6a84127dc1d08",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979679",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1957",
+        "1790932980753953041",
+        "1790932980801955795"
+      ],
+      "stable_before_held_after9": true,
+      "mode": "0600",
+      "nlink": 1
+    },
+    "seal": {
+      "root": "/var/tmp/friday-astra-a172-node-whole6-all35-all6-all3-independent-source-review-a175-g1",
+      "root_mode": "0700",
+      "private600_nlink1": true,
+      "exact_pathset": true,
+      "full_decimal_SHA9": true,
+      "acyclic": true,
+      "root_files": 13,
+      "known_root_bytes_without_external_terminal": 159943,
+      "source_all33_final_metadata9_unchanged": true
+    },
+    "actual_costs": {
+      "known_two_complete_pin_audit_content_bytes": 25138326,
+      "known_manifest_seal_helper_content_bytes": 455396,
+      "known_final_helper_content_bytes": 246848,
+      "direct_tool_content_exact": "UNKNOWN_NOT_EXHAUSTIVELY_INSTRUMENTED_NOT_ZERO",
+      "conservative_read_accounting_reservation_bytes": 75469974,
+      "read_cap": 268435456,
+      "model_children": 0,
+      "network_calls": 0,
+      "target_operation_retries": 0,
+      "local_workers_max_observed": 3,
+      "local_workers_cap": 4,
+      "whole_RAM_IO_CPU_model_tokens_money": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "memory_cap": 8589934592,
+      "output_cap": 16777216,
+      "trusted_local_selector_validation_corrections": "recorded honestly in costs; no target execution retry",
+      "wall_cap": 6600,
+      "seal_reserve": 600
+    },
+    "effects": "inert own TEXT/JSON review + trusted metadata/hash only; NO supplied import/AST/compiler/exec/tests/native/Root/GPG/GPGV/Node/archiveparse/network/install/live/UI/model/gates or Source/Git/config/guards/settings/locks changes",
+    "dangerous_historical_obligations": "ABSTRACT_REQUIRED_NOT_RUN_NO_OPERATIONAL_PAYLOAD_FIXTURE_GENERATOR_REPRODUCTION_WAIVER",
+    "SourceReady": false,
+    "Root_admission": false,
+    "Root_Image": false,
+    "RAM_IO": false,
+    "runtime": "NOT_RUN",
+    "gates": "NOT_RUN",
+    "GO": false,
+    "lifecycle": "single protected RESULT; child stops; parent receives and closes lifecycle"
+  },
+  "known_Root_read_bytes": 261924,
+  "Root_disposition": "F1 onceclose and F2 produced raw-error custody are actual normal/error code gaps, no malicious provider assumption. Original ALL3 coherent, complete2MiB2095321/margin1831 valid only exact prior A172 factories/closed shape. D1 author metadata should reflect actualCPU20/wall30/dynamicquota. LAB863 already returned new5 bytes before A175 final; need fresh different-author fullnewSource/35/6 review, not transfer A175 bound/acceptance to new bytes. Future Root/currentstock/provider/image/clock facts remain.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

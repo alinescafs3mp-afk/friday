@@ -1,0 +1,73 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "acyclic_order": [
+    "verifier bytes",
+    "contract binds verifier",
+    "supervisor binds verifier+contract",
+    "caller binds supervisor+verifier+contract",
+    "external manifest binds all six Source/DATA",
+    "independent WHOLE review then NEW actual Root materialization/qualification/admission; NOT done here"
+  ],
+  "candidate_import_AST_compile_exec_tests": 0,
+  "checks": {
+    "all6_original": true,
+    "caller_CHASH": true,
+    "caller_SHASH": true,
+    "caller_VHASH": true,
+    "caller_contract_size": true,
+    "caller_supervisor_size": true,
+    "caller_verifier_size": true,
+    "contract_inherited_source_exact": true,
+    "contract_sha_acyclic_rule": true,
+    "contract_source_argv_exact": true,
+    "contract_source_exact": true,
+    "current_resource_DATA": true,
+    "keyless_only_first_two": true,
+    "new_package_path": true,
+    "no_error_message_slices": true,
+    "old_acceptance_not_transferred": true,
+    "six_original_GPG_labels": true,
+    "supervisor_CONTRACT_SHA": true,
+    "supervisor_SOURCE_SHA": true
+  },
+  "current_byte_text_relations_only": true,
+  "gates": "NOT_RUN",
+  "lab863": "Finite once-close and error-prefix raw retention authored. Source execution not run.",
+  "pins": {
+    "caller.py": {
+      "bytes": 116904,
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/caller.py",
+      "sha256": "d739a7e3705c5f76563fdf1a0dfff5bd90490689037b5eb6e187086c5d4d1236"
+    },
+    "expectations.json": {
+      "bytes": 9128,
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/expectations.json",
+      "sha256": "c6c2635abb11aa3df34d662ef0d7495e0c96ce4940664af62a01f343085eb5cc"
+    },
+    "launch-contract.json": {
+      "bytes": 48250,
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/launch-contract.json",
+      "sha256": "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418"
+    },
+    "ordinary-surplus.txt": {
+      "bytes": 158,
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    "supervisor.py": {
+      "bytes": 89782,
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/supervisor.py",
+      "sha256": "bcd0fb9f0c5d68468aa896b4a6f9a36f5e32a5d62dc11c6c3bc3787cfa128d10"
+    },
+    "verifier.py": {
+      "bytes": 62097,
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
+      "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9"
+    }
+  },
+  "plain_bytes_equal_old": true,
+  "runtime": "NOT_RUN",
+  "schema": "friday.a172.inert-text-relations.v1"
+}

@@ -1,0 +1,127 @@
+{
+  "schema": "friday.a061.terminal-source-package.v1",
+  "assignment": "ASTRA-E4-BROWSER-WHOLE-CONTROL-NATIVE-SOURCE-CLOSURE-A061",
+  "generation": 1,
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "terminal": true,
+  "source_ready": false,
+  "current_GO": false,
+  "package": "/var/tmp/friday-astra-browser-whole-control-native-a061-g1",
+  "accepted_MSK": "2026-10-01T11:11:30+03:00",
+  "substantive_completed_MSK": "2026-10-01T12:15:59+03:00",
+  "sealed_MSK": "SEE_EXTERNAL_REGISTRY_TERMINAL_RESULT",
+  "completed_MSK": "SEE_EXTERNAL_REGISTRY_TERMINAL_RESULT",
+  "elapsed_seconds": "SEE_EXTERNAL_REGISTRY_TERMINAL_RESULT",
+  "whole_independent_final_review_required": true,
+  "changed_source": [
+    "Five exact same-public benign negative byte/hash/state/cause/resource oracles; actual positive-first public wrapper",
+    "Role2 finite gate avoids early prefix positive preemption; owned output/descriptor permutation and bounded parent barrier/reap",
+    "Supervisor emits actual terminal benign failure without success-only preemption",
+    "Credentials actual UID+GID, SCM_RIGHTS closure, ABORT_ACK14 and sticky missing reap ACK",
+    "Same held runtime117/index111 mapping, producer executable loader and canonical alias membership",
+    "Native bounded same-view cache/ELF/import DATA parser wired into BOTH build targets",
+    "Authentic OS values split exact native primitive stages, source and image guard stage dataflow"
+  ],
+  "source_remaining": [
+    {
+      "id": "GUARD_DATA_CORPUS",
+      "cause": "Complete new same-public per-delta independently expected inert DATA constructors and admitted fresh fixture handoff remain absent; names/stages or externally proposed bundles alone are not meaningful complete controls."
+    },
+    {
+      "id": "AUTHORITATIVE_NATIVE_REGISTRY_FULL_CONTROLS",
+      "cause": "Complete independently expected same public registry/session/credentials/role/deadline/SCM_RIGHTS/PID/pidfd/generation/barrier/abort/reap/unknown-cleanup positive+negative callers absent; actual guards do not substitute."
+    },
+    {
+      "id": "ALL216_NESTED_OWNERSHIP_INTEGRATION",
+      "cause": "Preserved216 exact source mappings require complete owned-fork producer review against fixed coordinator native registry; Python seam/label assertions are not final ownership proof."
+    }
+  ],
+  "inherited_obligations": {
+    "old": 157,
+    "new": 59,
+    "total": 216,
+    "A051_additions": 8,
+    "preserved": true,
+    "executed": false
+  },
+  "new_guards": {
+    "source_pin": 19,
+    "source_seal": 18,
+    "OS": 9,
+    "image": 17,
+    "total": 63,
+    "credit": "PARTIAL_SOURCE_ONLY; complete DATA corpus absent"
+  },
+  "evidence_inputs": {
+    "A051_result_SHA256": "4d7be3cb7c665404bec337d98b2c5ce0cf15bd0291259c90e195507fdc150e72",
+    "A051_manifest_SHA256": "e5b12334de02633ab06c8707c55cd6635a6d3f3065e444104a84f7dcc292e2d3",
+    "A051_receipt_SHA256": "935ce713844820ef543a9022cc6b5a30a5ffc5a20d0f36749d3c85021cde9ed7",
+    "A046_result_SHA256": "b24da632338f9136f812b0441c8187da42dcb95572981089d7cc2db65a2f4356",
+    "whole_required_reads": "Whole pinned A051/A046 source and exact inherited A037/A039/A042 contracts and canonical contracts; G1/R4 and CA consumers; ledger from start. No archive bodies/history/active peer outputs."
+  },
+  "frozen_snapshot": {
+    "candidate": "cecd28a92ac4fd4e34c4d3813d0c598debe09436",
+    "tree": "e7e86c7796a3db6571ffea715e666247f8876d63",
+    "original_GET": "207_ABORTED_NOT_210_COMPLETE",
+    "retained": "316files13dirs_QUALIFIED_ONLY",
+    "browser3": "NOT_RUN",
+    "prior_inputs": "UNTOUCHED",
+    "future_acquisition_target_created": false
+  },
+  "limits": {
+    "wall_assignment_seconds": 4200,
+    "seal_reserve_seconds": 300,
+    "explicit_reads_cap": 67108864,
+    "explicit_reads_conservative_upper": 8580666,
+    "read_ledger": "READ-LEDGER.tsv",
+    "RAM_contract_bytes": 4294967296,
+    "actual_RAM_peak": "UNKNOWN_NOT_ZERO",
+    "implicit_IO": "UNKNOWN_NOT_ZERO",
+    "package_output_cap": 16777216,
+    "local_workers_max": 2,
+    "child_models": 0,
+    "configured_model_reasoning_tier_provider": "UNCHANGED"
+  },
+  "preserved_future_limits": {
+    "HTTPS_GET": 3,
+    "copy": 0,
+    "files": 6,
+    "dirs": 3,
+    "workers": 3,
+    "inner_processes_max": 4,
+    "aggregate_raw_RSS": 268435456,
+    "outer_memory": 67108864,
+    "inner_memory": 201326592,
+    "coordinator_AS": 50331648,
+    "worker_AS_each": 50331648,
+    "body_sum": 956301312,
+    "disk": 2147483648,
+    "headers": 65536,
+    "connect": 15,
+    "request": 300,
+    "work": 1140,
+    "hard": 1200,
+    "reserve": 60,
+    "policy": "Original canonical CPU/affinity/CA/hostname/HTTP200/0redirect/proxy/cookie/auth/retry; no startup overhead waiver or RSS reset/subtraction",
+    "historical_raw_RSS_KiB": 366080
+  },
+  "actual_effects": {
+    "compile": 0,
+    "import": 0,
+    "AST_compile": 0,
+    "generated_source_exec": 0,
+    "tests": 0,
+    "native": 0,
+    "root_or_kernel_probes": 0,
+    "cgroup_namespace": 0,
+    "network": 0,
+    "GET": 0,
+    "archive_body_read": 0,
+    "GPG": 0,
+    "product_Git_host_peer_changes": 0,
+    "acquisition_target_created": 0
+  },
+  "all_actual_observations": "NOT_RUN / NOT_PROVEN; lack of current root/kernel/image is NOT by itself remaining source defect",
+  "safety": "No operational attacks/bypasses/vulnerability reproductions/malicious payloads. Unsafe historical controls only inherited inert source; no execution. No foreign handle signal/guessed PID. Unknown cleanup stickySTOP_UNCONFIRMED.",
+  "seal": "MANIFEST.json enumerates every regular member except itself with exact bytes/SHA/mode/nlink/uid/gid; registry adds manifest SHA and actual seal/completion time."
+}

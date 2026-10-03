@@ -1,0 +1,1 @@
+Unchanged common caps stay body 80000000, metadata 2000000, whole output 33554432, whole read 40960000000, whole RAM 8589934592, FD 128, workers 4, wall 4200. The changed files do not reassign them. One extra dup2 row is charged on the same pre-fork stdio reservation, slots 3 instead of 2. That is not a measured whole fit.

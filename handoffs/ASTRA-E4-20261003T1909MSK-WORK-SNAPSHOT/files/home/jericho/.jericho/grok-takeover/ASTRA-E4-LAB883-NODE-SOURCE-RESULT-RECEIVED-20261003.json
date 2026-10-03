@@ -1,0 +1,950 @@
+{
+  "schema": "friday.astra.lab883.node.connected.source.result.received.v1",
+  "assignment": "ASTRA-E4-A200-LAB880-NODE-PREOWNED-PHYSICAL-BODY-BOTH-ENDPOINTS-FINITE-ERROR-CLOSURE-LAB-883",
+  "generation": 1,
+  "received_msk": "2026-10-03T01:20:45.125235+03:00",
+  "job_id": "job_b4747d1467aa44059d6fa7cf9e1d3523",
+  "run_message": "msg_24a8806069c2429b840d7dc7cdace654",
+  "result_message": "msg_34a85df888a8498aa66c73f2808c390e",
+  "message": {
+    "pin": {
+      "path": "/home/jericho/jericho/.git/friday-lab/v2/messages/msg_34a85df888a8498aa66c73f2808c390e.json",
+      "bytes": 393,
+      "sha256": "13244f88b47b5fb5db2fed95419114eba3e9b74e24ec7866b664da65d6f38645",
+      "identity9_decimal_strings": [
+        "2050",
+        "7800747",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "393",
+        "1790978626253822903",
+        "1790978626254822960"
+      ],
+      "stable9": true
+    },
+    "value": {
+      "auth": {
+        "cwd": "/home/jericho/jericho",
+        "euid": 1000,
+        "pid": 744376,
+        "uid": 1000
+      },
+      "created_at": "2026-10-02T22:03:46.254204Z",
+      "from": "grok-lab",
+      "job_id": "job_b4747d1467aa44059d6fa7cf9e1d3523",
+      "message_id": "msg_34a85df888a8498aa66c73f2808c390e",
+      "payload": {
+        "sha256": "fed023ecfef22b8116efedadb6fa6cd6eba44f5b0143f3efa0d301a72febc840",
+        "size": 2906
+      },
+      "protocol": "friday-lab/2",
+      "to": "astra",
+      "type": "RESULT"
+    }
+  },
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB883-INPUT-20261003.json",
+    "bytes": 35854,
+    "sha256": "92384d9489da2ec487c79e6c7acfb456ababa3449651f3319badea2bb145e079",
+    "identity9_decimal_strings": [
+      "2050",
+      "8526154",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "35854",
+      "1790977522141161671",
+      "1790977522210378482"
+    ],
+    "stable9": true
+  },
+  "run": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB883-RUN-20261003.json",
+    "bytes": 3914,
+    "sha256": "d20076df7fc79cb272a858f4ecf4d0f00a3a20f7aa46ec924aac5f8d6b74e665",
+    "identity9_decimal_strings": [
+      "2050",
+      "8526155",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3914",
+      "1790977522348386412",
+      "1790977522407280835"
+    ],
+    "stable9": true
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/seal/manifest.json",
+    "bytes": 2906,
+    "sha256": "fed023ecfef22b8116efedadb6fa6cd6eba44f5b0143f3efa0d301a72febc840",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226303",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "2906",
+      "1790978594462541110",
+      "1790978594462541110"
+    ],
+    "stable9": true
+  },
+  "pins": [
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/seal/manifest.json",
+      "bytes": 2906,
+      "sha256": "fed023ecfef22b8116efedadb6fa6cd6eba44f5b0143f3efa0d301a72febc840",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226303",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2906",
+        "1790978594462541110",
+        "1790978594462541110"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/caller.py",
+      "bytes": 172584,
+      "sha256": "091e8f70eb3d0fed01b65d9129ee36dcb639b5e7ce74bc833a14b1b38d2a36ba",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849484",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "172584",
+        "1790978594459525336",
+        "1790978594459525336"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/current6-delta.json",
+      "bytes": 1898,
+      "sha256": "0a4416372723a0962a32bb3115496b9399ce16c132cd415664cf2b6a22d027a7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226294",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1898",
+        "1790978594460447389",
+        "1790978594460447389"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/custody-relation.json",
+      "bytes": 1637,
+      "sha256": "437c6d20cd066637f4eaa7494179cb258bb8719daf4f57aa7375d13d20f478a9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226295",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1637",
+        "1790978594460508492",
+        "1790978594460508492"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/proc-io.txt",
+      "bytes": 106,
+      "sha256": "6921decab61877087b2307352baa072e569daa3485d0433e776c9510f523560a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226291",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "106",
+        "1790978594459994363",
+        "1790978594459994363"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/proc-stat.txt",
+      "bytes": 292,
+      "sha256": "abe4ae30922874fbd8e56224a05fb36e02843896ba4af92d6275ac9ef6ea0bc1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226293",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "292",
+        "1790978594460094668",
+        "1790978594460094668"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/proc-status.txt",
+      "bytes": 1575,
+      "sha256": "50ea49d42473dc8ee3d6704975f4900b60b70a43b40ca1be3847ce58d3c7b786",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226292",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1575",
+        "1790978594460056866",
+        "1790978594460056866"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/prospective-bounds.json",
+      "bytes": 555,
+      "sha256": "52340e260c6715e74ede5a58f77d8d19d7e8b8716fef2563394df81419bc3a6d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226296",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "555",
+        "1790978594460562895",
+        "1790978594460562895"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/provenance-dag.json",
+      "bytes": 449,
+      "sha256": "05a3facb4de9a9ff3cb7e76862f90e438a898a566248fc08bd94f659b011e8dd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226300",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "449",
+        "1790978594460917716",
+        "1790978594460917716"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/read-ledger.json",
+      "bytes": 11561,
+      "sha256": "83d3ad6578ea4a0b5222a9a2fe4a19f0e418b71503826afafce95fbda874a8db",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226298",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11561",
+        "1790978594460767908",
+        "1790978594460767908"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/source19-verification.json",
+      "bytes": 381,
+      "sha256": "f602c763388464c2555aa262345a162110e82c016050b0816f7d49090d693d80",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226299",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "381",
+        "1790978594460833611",
+        "1790978594460833611"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/evidence/typed-joins.json",
+      "bytes": 1768,
+      "sha256": "851ac5218e2a059684b89fae77d162fee426bd9e231ae8dc806185d66b349398",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226297",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1768",
+        "1790978594460663001",
+        "1790978594460663001"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/expectations.json",
+      "bytes": 11698,
+      "sha256": "ecf2475bd26ff333842996e11a467236f3cd32046af84b5a2621f11220af0b05",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849487",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11698",
+        "1790978594459792251",
+        "1790978594459792251"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/launch-contract.json",
+      "bytes": 50399,
+      "sha256": "3a0ce7a57a4de6741d067c12c6f77ceb77f0c938af0db68a3fa046a1269e8c94",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849488",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "50399",
+        "1790978594459844954",
+        "1790978594459844954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849489",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790978594459901057",
+        "1790978594459901057"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/supervisor.py",
+      "bytes": 138382,
+      "sha256": "37646b7d14646f76448b3ec83ea8bd82687f311935531d4af6eb6a0646d8335a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849485",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "138382",
+        "1790978594459627642",
+        "1790978594459627642"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/verifier.py",
+      "bytes": 109272,
+      "sha256": "bc49721f237a01e95352b69851ebba32660329f6c1b30b1bde21b05a4c86d32d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849486",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "109272",
+        "1790978594459693046",
+        "1790978594459693046"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/seal/pathset.json",
+      "bytes": 6996,
+      "sha256": "06de581965b75bc67199c6f4e9dce558831c03a840b5d180c532fdc8ba33c03a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226302",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6996",
+        "1790978594461995983",
+        "1790978594461995983"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/result.json",
+      "bytes": 4096,
+      "sha256": "53b18ba9f29dd96661865b47320bd4a9878fc2b2b9a4fa13f40b0ce320a88a2d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849490",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4096",
+        "1790978594462996040",
+        "1790978594462996040"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/publish/payload.json",
+      "bytes": 99,
+      "sha256": "4651a0bf785a5ad593f6bb99b00cede2beb2fe510da71c70decc26754a32d1e2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226305",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "99",
+        "1790978594462667017",
+        "1790978594462667017"
+      ],
+      "stable9": true
+    }
+  ],
+  "current6": [
+    {
+      "name": "caller.py",
+      "before": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/caller.py",
+        "bytes": 160495,
+        "sha256": "c55272828f5f1100ec057a9fcfc3e984014d210ade6979415bfa7a42b8539def",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225907",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "160495",
+          "1790974791802330684",
+          "1790974791802330684"
+        ],
+        "stable9": true
+      },
+      "pin": {
+        "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/caller.py",
+        "bytes": 172584,
+        "sha256": "091e8f70eb3d0fed01b65d9129ee36dcb639b5e7ce74bc833a14b1b38d2a36ba",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849484",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "172584",
+          "1790978594459525336",
+          "1790978594459525336"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "expectations.json",
+      "before": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/expectations.json",
+        "bytes": 11522,
+        "sha256": "412b8c793206a24ece6e78f16a333dac57e598e5d34a3a6f728fcc02cb7f0922",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225911",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11522",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      },
+      "pin": {
+        "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/expectations.json",
+        "bytes": 11698,
+        "sha256": "ecf2475bd26ff333842996e11a467236f3cd32046af84b5a2621f11220af0b05",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849487",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11698",
+          "1790978594459792251",
+          "1790978594459792251"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "launch-contract.json",
+      "before": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/launch-contract.json",
+        "bytes": 50081,
+        "sha256": "c13d260aeed62fb6143513ad56900a25f9f9910ec090aab6077fbcb3bff95683",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225910",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "50081",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      },
+      "pin": {
+        "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/launch-contract.json",
+        "bytes": 50399,
+        "sha256": "3a0ce7a57a4de6741d067c12c6f77ceb77f0c938af0db68a3fa046a1269e8c94",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849488",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "50399",
+          "1790978594459844954",
+          "1790978594459844954"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "supervisor.py",
+      "before": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/supervisor.py",
+        "bytes": 127537,
+        "sha256": "a8eb16fd7164f4afb2541ff90c3686130e30ed306fe8b4fc919b056d2a217051",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225908",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "127537",
+          "1790974791802330684",
+          "1790974791802330684"
+        ],
+        "stable9": true
+      },
+      "pin": {
+        "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/supervisor.py",
+        "bytes": 138382,
+        "sha256": "37646b7d14646f76448b3ec83ea8bd82687f311935531d4af6eb6a0646d8335a",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849485",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "138382",
+          "1790978594459627642",
+          "1790978594459627642"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "verifier.py",
+      "before": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/verifier.py",
+        "bytes": 99683,
+        "sha256": "3eee3d7b74eab52e87b7dd211e8796c77e5c5ec35a6da28810b12870b3ecb4fe",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225909",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "99683",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      },
+      "pin": {
+        "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/verifier.py",
+        "bytes": 109272,
+        "sha256": "bc49721f237a01e95352b69851ebba32660329f6c1b30b1bde21b05a4c86d32d",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849486",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "109272",
+          "1790978594459693046",
+          "1790978594459693046"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "ordinary-surplus.txt",
+      "before": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225912",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      },
+      "pin": {
+        "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849489",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790978594459901057",
+          "1790978594459901057"
+        ],
+        "stable9": true
+      },
+      "changed": false
+    }
+  ],
+  "changed": [
+    "caller.py",
+    "expectations.json",
+    "launch-contract.json",
+    "supervisor.py",
+    "verifier.py"
+  ],
+  "equal": 1,
+  "owned_files": 20,
+  "all_owned16_evidence_bound": true,
+  "actual_before_after_fullbytes": true,
+  "declared_delta_baseline_gaps": [
+    {
+      "name": "caller.py",
+      "declared_before_sha": "3a78de1198fa4a1067331d6bb1909968049d20154e4499d8e6038f054a36e0b9",
+      "actual_before_pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/caller.py",
+        "bytes": 160495,
+        "sha256": "c55272828f5f1100ec057a9fcfc3e984014d210ade6979415bfa7a42b8539def",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225907",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "160495",
+          "1790974791802330684",
+          "1790974791802330684"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "expectations.json",
+      "declared_before_sha": "dfd20341ee5851a12922b6c36f9b0efaf8e6b5aa1c712c2c329015c35305eb9f",
+      "actual_before_pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/expectations.json",
+        "bytes": 11522,
+        "sha256": "412b8c793206a24ece6e78f16a333dac57e598e5d34a3a6f728fcc02cb7f0922",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225911",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11522",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "launch-contract.json",
+      "declared_before_sha": "ea8c94fd94a1b460d9d95afc8d64dea07d922600990c2c0251c47ce9f9cdd410",
+      "actual_before_pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/launch-contract.json",
+        "bytes": 50081,
+        "sha256": "c13d260aeed62fb6143513ad56900a25f9f9910ec090aab6077fbcb3bff95683",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225910",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "50081",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "supervisor.py",
+      "declared_before_sha": "406f4c79a33c92ec096e9768a0555393955795ab90630eb5133c1fb4906e6f85",
+      "actual_before_pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/supervisor.py",
+        "bytes": 127537,
+        "sha256": "a8eb16fd7164f4afb2541ff90c3686130e30ed306fe8b4fc919b056d2a217051",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225908",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "127537",
+          "1790974791802330684",
+          "1790974791802330684"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "verifier.py",
+      "declared_before_sha": "ed92e40aa0daaba7fa2635fbcbb62ace2f104a4693d3382b4bf373b21a25ba85",
+      "actual_before_pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/verifier.py",
+        "bytes": 99683,
+        "sha256": "3eee3d7b74eab52e87b7dd211e8796c77e5c5ec35a6da28810b12870b3ecb4fe",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225909",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "99683",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      }
+    }
+  ],
+  "result": {
+    "pin": {
+      "path": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure/result.json",
+      "bytes": 4096,
+      "sha256": "53b18ba9f29dd96661865b47320bd4a9878fc2b2b9a4fa13f40b0ce320a88a2d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849490",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4096",
+        "1790978594462996040",
+        "1790978594462996040"
+      ],
+      "stable9": true
+    },
+    "value": {
+      "GO": false,
+      "Root_admission": false,
+      "SourceReady": false,
+      "accepted": false,
+      "assignment": "ASTRA-E4-A200-LAB880-NODE-PREOWNED-PHYSICAL-BODY-BOTH-ENDPOINTS-FINITE-ERROR-CLOSURE-LAB-883",
+      "author_accepts_own_source": false,
+      "changed_count": 5,
+      "changed_source": [
+        "caller.py",
+        "expectations.json",
+        "launch-contract.json",
+        "supervisor.py",
+        "verifier.py"
+      ],
+      "code_open": [
+        "PIPE_HARD_ERROR_UNWRITTEN_TAIL",
+        "REGULAR_PWRITE_CAN_CLOBBER_PREOWNED_IMAGE",
+        "PREOWNED_IMAGE_STOPPED_AT_EXISTING_CAP",
+        "CALLER_OUTER_PARENT_DECODER_NOT_IN_TREE",
+        "KERNEL_EXIT_REMAINS_OPEN_THROUGH_SIGKILL",
+        "SIGKILL_CANNOT_RUN_HANDLERS",
+        "NATIVE_OBJECT_RECONSTRUCTION_NOT_QUALIFIED",
+        "WHOLE_RAM_IO_UNKNOWN_NOT_ZERO",
+        "FUTURE_ROOT_IMAGE_CLOCK_GPG_ABI_REQUIRED_NOT_RUN",
+        "NOT_RUN"
+      ],
+      "compiler_ELF_ABI": "NOT_RUN",
+      "completed_msk": "2026-10-03T01:03:14.463189+03:00",
+      "costs": {
+        "cumulative_bytes": 74508717,
+        "implicit_IO": "UNKNOWN_NOT_ZERO",
+        "memory_hash_bytes": 512716,
+        "observed_sealer_vmrss_kib": "20904",
+        "physical_read_bytes": 73479189,
+        "proc_read_bytes": 1973,
+        "product_RAM_IO": "UNKNOWN_NOT_ZERO",
+        "sealed_tree_bytes": 516812,
+        "transport_write_bytes": 516812,
+        "whole_RAM": "UNKNOWN_NOT_ZERO"
+      },
+      "delivery_id": "del_eef95037e1354641a2bd826db290fdd3",
+      "elapsed_seconds": 1062.133062,
+      "equal_count": 1,
+      "equal_source": [
+        "ordinary-surplus.txt"
+      ],
+      "executor_ack_at": "2026-10-02T21:45:32.330190Z",
+      "gates": "NOT_RUN",
+      "historical_unsafe": "ABSTRACT_REQUIRED_NOT_RUN",
+      "historical_unsafe_required": true,
+      "historical_unsafe_waiver": false,
+      "input_bytes": 35854,
+      "input_sha256": "92384d9489da2ec487c79e6c7acfb456ababa3449651f3319badea2bb145e079",
+      "job_id": "job_b4747d1467aa44059d6fa7cf9e1d3523",
+      "joined": "AUTHORED_NOT_RUN",
+      "manifest_bytes": 2906,
+      "manifest_sha256": "fed023ecfef22b8116efedadb6fa6cd6eba44f5b0143f3efa0d301a72febc840",
+      "original19_not_current_new_image": true,
+      "original19_verified": 19,
+      "output": "/var/tmp/friday-lab883-a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure",
+      "pathset_bytes": 6996,
+      "pathset_sha256": "06de581965b75bc67199c6f4e9dce558831c03a840b5d180c532fdc8ba33c03a",
+      "payload_bytes": 99,
+      "payload_sha256": "4651a0bf785a5ad593f6bb99b00cede2beb2fe510da71c70decc26754a32d1e2",
+      "pins_verified": 55,
+      "predecessor_manifest_sha256": "dfdc69d86bcd0776c0611fb276d7ae7be52ee1dd36ff47aa0bb4ac345310fd42",
+      "predecessor_result_sha256": "5897bb6dee9d691c0647fad629f9d3eca0f5b23c5fddd8fc896831f9f41cb294",
+      "result_bytes": 4096,
+      "routes": {
+        "R01": "SIX_CALL_FACTORY_BOUND_BEFORE_EFFECT",
+        "R02": "PREOWNED_PARENT_IMAGE_BEFORE_FALLIBLE_ENCODE",
+        "R03": "UNREAD_PREFIX_HELD_THROUGH_SHORT_EOF_ONCECLOSE",
+        "R04": "BEYOND_CAP_RETAINS_NEW_ORIGINAL_FIELDS"
+      },
+      "run_message_id": "msg_24a8806069c2429b840d7dc7cdace654",
+      "runtime": "NOT_RUN",
+      "schema": "friday.grok.lab883.a200-lab880-node-preowned-physical-body-both-endpoints-finite-error-connected-closure.v1",
+      "seal_elapsed_seconds": 0.066747,
+      "sizes": {
+        "caller.py": {
+          "bytes": 172584,
+          "sha256": "091e8f70eb3d0fed01b65d9129ee36dcb639b5e7ce74bc833a14b1b38d2a36ba"
+        },
+        "expectations.json": {
+          "bytes": 11698,
+          "sha256": "ecf2475bd26ff333842996e11a467236f3cd32046af84b5a2621f11220af0b05"
+        },
+        "launch-contract.json": {
+          "bytes": 50399,
+          "sha256": "3a0ce7a57a4de6741d067c12c6f77ceb77f0c938af0db68a3fa046a1269e8c94"
+        },
+        "ordinary-surplus.txt": {
+          "bytes": 158,
+          "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+        },
+        "supervisor.py": {
+          "bytes": 138382,
+          "sha256": "37646b7d14646f76448b3ec83ea8bd82687f311935531d4af6eb6a0646d8335a"
+        },
+        "verifier.py": {
+          "bytes": 109272,
+          "sha256": "bc49721f237a01e95352b69851ebba32660329f6c1b30b1bde21b05a4c86d32d"
+        }
+      },
+      "source_execution": 0,
+      "unique_pin_paths": 48,
+      "verdict": "PREOWNED_PHYSICAL_BODY_BOTH_ENDPOINTS_AUTHORED_NOT_RUN"
+    }
+  },
+  "author_custody": {
+    "b04": "reclaim_confirmed_slot returns unless state is CONFIRMED_CLOSED and unread_prefix_hold is absent",
+    "b05": "deferred_error catches the journal failure and retain_emergency stores the new original without raising",
+    "both_endpoints": "caller peels the supervisor pipe; supervisor peels the verifier memfd or pipe. A missing frame keeps the peeled bodies.",
+    "r01": "SIX_CALL_FACTORY_BOUND_BEFORE_EFFECT",
+    "r02": "PREOWNED_PARENT_IMAGE_BEFORE_FALLIBLE_ENCODE",
+    "r03": "UNREAD_PREFIX_HELD_THROUGH_SHORT_EOF_ONCECLOSE",
+    "r04": "BEYOND_CAP_RETAINS_NEW_ORIGINAL_FIELDS",
+    "receiver": "fd 1 is the receiver the parent already holds. PO880 is placed before encode. A regular file then pwrites the final frame at offset 0 and checks pread and exact size when the frame covers the image. A pipe keeps the PO880 prefix and then the frame. No new fd, parent, or process is added.",
+    "residuals": [
+      "PIPE_HARD_ERROR_UNWRITTEN_TAIL",
+      "REGULAR_PWRITE_CAN_CLOBBER_PREOWNED_IMAGE",
+      "PREOWNED_IMAGE_STOPPED_AT_EXISTING_CAP",
+      "CALLER_OUTER_PARENT_DECODER_NOT_IN_TREE",
+      "KERNEL_EXIT_REMAINS_OPEN_THROUGH_SIGKILL",
+      "SIGKILL_CANNOT_RUN_HANDLERS",
+      "NATIVE_OBJECT_RECONSTRUCTION_NOT_QUALIFIED",
+      "WHOLE_RAM_IO_UNKNOWN_NOT_ZERO",
+      "FUTURE_ROOT_IMAGE_CLOCK_GPG_ABI_REQUIRED_NOT_RUN",
+      "NOT_RUN"
+    ],
+    "schema": "friday.grok.lab883.custody-relation.v1",
+    "short_prefix": "an empty pread inside the memfd size loop sets prefix_end SHORT and does not retry",
+    "source_execution": 0,
+    "transport_length": "produced length is the regular memfd fstat size. Pipe st_size is not a produced-length input."
+  },
+  "classification": "RECEIVED_FINITE_AUTHOR_ATTEMPT_WITH_WRONG_DECLARED_BEFORE_BASELINE_RECONCILED_ACTUAL_BYTES_NOT_WHOLE_ACCEPTED. Five declared delta before-SHAs differ from actual pinnedLAB880; Root independently read actual before/after all6 and verified5changed1equal, author delta remains immutable and not acceptance evidence. Semantic preservation still needs current-call joins. PO880 image is sent over pipe/regular fd before second encoding, NOT actual independently preheld physical original body before fallible publication. Tail/clobber/outerdecoder/full native-body/whole costs remain CODE. SIGKILL/hostilekernel statements not adopted as new roots. R01/R04 rendered-field/factory claims not non-author credited; rendered fields != original errors/aliases. Original B04/B05 credits scoped, no automatic acceptance.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "source_execution": false
+}

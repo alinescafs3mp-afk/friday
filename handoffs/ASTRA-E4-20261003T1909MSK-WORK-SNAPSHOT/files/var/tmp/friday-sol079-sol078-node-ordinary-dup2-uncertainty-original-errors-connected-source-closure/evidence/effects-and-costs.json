@@ -1,0 +1,39 @@
+{
+  "schema": "friday.sol079.effects-and-costs.v1",
+  "accepted_msk": "2026-10-03T05:05:27+03:00",
+  "authorized": "NEW owned inert SAFE Python Source/JSON only in assigned tree + compact official RESULT. Trusted normal native queue/send/lifecycle bookkeeping only.",
+  "performed": {
+    "source_literals_stat_SHA_and_inert_JSON": true,
+    "source_text_authored": true,
+    "source_execution": 0,
+    "AST_compiler_preprocess_eval_tests": 0,
+    "native_Root_Node_GPG_archive_extract": 0,
+    "network": 0,
+    "friday_calls": 0,
+    "model_children": 0,
+    "guards_models_config_Git_original_changes": 0,
+    "queue_inspect_once": {
+      "count": 0,
+      "delete_consume_defer": 0
+    },
+    "retry": 0
+  },
+  "resources": {
+    "wall_seconds": 4200,
+    "seal_reserve_seconds": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 16777216,
+    "local_workers": 4,
+    "children": 0
+  },
+  "cost": "Own original pin hash reads separately instrumented; other source/stat/metadata/transport reads, tool/model output, total RAM peak and physical IO not fully instrumented = UNKNOWN_NOT_ZERO, no precise whole-fit or peak claim.",
+  "known_hash_read_bytes_initial": 85734051,
+  "no_unsafe_material_rendered_or_reconstructed": true,
+  "no_native_or_offensive_guard_action_retried": true,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "known_hash_read_bytes_final": 84171179,
+  "known_external_hash_read_lower_bound_bytes": 169905230
+}

@@ -1,0 +1,42 @@
+{
+  "caller_embeds_own_hash": false,
+  "caller_sha256": "7a065f3aead7f0a7c075b5b42e2d108b5e75f79e5a1823b9c216439afa560282",
+  "contract_embeds_own_hash": false,
+  "contract_sha256": "54cdce4dbc50854fc6b6604f50409c3d178c6aa856aaf668e1df39b530eb91ad",
+  "hash_order": [
+    "verifier.py",
+    "launch-contract.json",
+    "supervisor.py",
+    "caller.py"
+  ],
+  "illustrative_fd_not_a_measured_peak": {
+    "held_component_dirs": 22,
+    "held_inputs": 19,
+    "held_live": 41,
+    "illustrative_launch_fds": 12,
+    "illustrative_live_peak": 53,
+    "note": "ILLUSTRATIVE_NOT_A_MEASURED_PRODUCT_PEAK",
+    "review_lower_bound_one_observe": 262,
+    "review_lower_bound_zero_observe": 255,
+    "under_simultaneous_cap": true
+  },
+  "joined": {
+    "base64_of_65536_exceeds_channel": true,
+    "caller_graph_budget": 49152,
+    "complete_with_newline": 1669337,
+    "graph_ceiling": 8192,
+    "inner": 32768,
+    "inner_non_graph": 24576,
+    "public_cap": 2097152,
+    "public_fixed_reserve": 489472,
+    "public_stream_reserve": 1179864,
+    "simultaneous_nofile": 256,
+    "supervisor_cap": 65536,
+    "supervisor_joined": 57344,
+    "supervisor_non_inner": 24576
+  },
+  "schema": "friday.grok.lab868.connected-join.v1",
+  "supervisor_sha256": "516ce2cabcf140fd4a097a5b47a13f866aaa15d14c50060ddb4fbbb00c581d1f",
+  "verifier_embeds_own_hash": false,
+  "verifier_sha256": "75b58eb3269062e365faef39e8df5ae76968c9b8ffd7a3c5f98aceb0001da89a"
+}

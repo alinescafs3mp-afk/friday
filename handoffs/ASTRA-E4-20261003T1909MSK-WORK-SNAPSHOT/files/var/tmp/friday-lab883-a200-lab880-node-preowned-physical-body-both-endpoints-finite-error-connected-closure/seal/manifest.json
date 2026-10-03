@@ -1,0 +1,99 @@
+{
+  "leaf_count": 16,
+  "leaves": [
+    {
+      "bytes": 172584,
+      "path": "caller.py",
+      "sha256": "091e8f70eb3d0fed01b65d9129ee36dcb639b5e7ce74bc833a14b1b38d2a36ba"
+    },
+    {
+      "bytes": 1898,
+      "path": "evidence/current6-delta.json",
+      "sha256": "0a4416372723a0962a32bb3115496b9399ce16c132cd415664cf2b6a22d027a7"
+    },
+    {
+      "bytes": 1637,
+      "path": "evidence/custody-relation.json",
+      "sha256": "437c6d20cd066637f4eaa7494179cb258bb8719daf4f57aa7375d13d20f478a9"
+    },
+    {
+      "bytes": 106,
+      "path": "evidence/proc-io.txt",
+      "sha256": "6921decab61877087b2307352baa072e569daa3485d0433e776c9510f523560a"
+    },
+    {
+      "bytes": 292,
+      "path": "evidence/proc-stat.txt",
+      "sha256": "abe4ae30922874fbd8e56224a05fb36e02843896ba4af92d6275ac9ef6ea0bc1"
+    },
+    {
+      "bytes": 1575,
+      "path": "evidence/proc-status.txt",
+      "sha256": "50ea49d42473dc8ee3d6704975f4900b60b70a43b40ca1be3847ce58d3c7b786"
+    },
+    {
+      "bytes": 555,
+      "path": "evidence/prospective-bounds.json",
+      "sha256": "52340e260c6715e74ede5a58f77d8d19d7e8b8716fef2563394df81419bc3a6d"
+    },
+    {
+      "bytes": 449,
+      "path": "evidence/provenance-dag.json",
+      "sha256": "05a3facb4de9a9ff3cb7e76862f90e438a898a566248fc08bd94f659b011e8dd"
+    },
+    {
+      "bytes": 11561,
+      "path": "evidence/read-ledger.json",
+      "sha256": "83d3ad6578ea4a0b5222a9a2fe4a19f0e418b71503826afafce95fbda874a8db"
+    },
+    {
+      "bytes": 381,
+      "path": "evidence/source19-verification.json",
+      "sha256": "f602c763388464c2555aa262345a162110e82c016050b0816f7d49090d693d80"
+    },
+    {
+      "bytes": 1768,
+      "path": "evidence/typed-joins.json",
+      "sha256": "851ac5218e2a059684b89fae77d162fee426bd9e231ae8dc806185d66b349398"
+    },
+    {
+      "bytes": 11698,
+      "path": "expectations.json",
+      "sha256": "ecf2475bd26ff333842996e11a467236f3cd32046af84b5a2621f11220af0b05"
+    },
+    {
+      "bytes": 50399,
+      "path": "launch-contract.json",
+      "sha256": "3a0ce7a57a4de6741d067c12c6f77ceb77f0c938af0db68a3fa046a1269e8c94"
+    },
+    {
+      "bytes": 158,
+      "path": "ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    {
+      "bytes": 138382,
+      "path": "supervisor.py",
+      "sha256": "37646b7d14646f76448b3ec83ea8bd82687f311935531d4af6eb6a0646d8335a"
+    },
+    {
+      "bytes": 109272,
+      "path": "verifier.py",
+      "sha256": "bc49721f237a01e95352b69851ebba32660329f6c1b30b1bde21b05a4c86d32d"
+    }
+  ],
+  "pathset_bytes": 6996,
+  "pathset_identity9_decimal_strings": [
+    "2050",
+    "4226302",
+    "33152",
+    "1000",
+    "1000",
+    "1",
+    "6996",
+    "1790978594461995983",
+    "1790978594461995983"
+  ],
+  "pathset_sha256": "06de581965b75bc67199c6f4e9dce558831c03a840b5d180c532fdc8ba33c03a",
+  "schema": "friday.grok.lab883.manifest.v1"
+}

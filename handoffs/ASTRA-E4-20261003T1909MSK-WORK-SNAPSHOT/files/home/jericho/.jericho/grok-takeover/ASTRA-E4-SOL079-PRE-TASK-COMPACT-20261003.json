@@ -1,0 +1,70 @@
+{
+  "GO": false,
+  "after": {
+    "latest_turn": {
+      "completedAt": 1790993028,
+      "durationMs": 114961,
+      "error": null,
+      "id": "01a0ff7f-133b-7800-b5e2-82bf81832d12",
+      "items": [],
+      "itemsView": "notLoaded",
+      "startedAt": 1790992913,
+      "status": "completed"
+    },
+    "queue_count": 0,
+    "queue_has_more": false,
+    "quiescence": {
+      "active_completed_grace_seconds": 0.0,
+      "basis": "strict_idle",
+      "observations": 1,
+      "stability_seconds": 0.0
+    },
+    "thread_status": {
+      "type": "idle"
+    }
+  },
+  "assignment": "ASTRA-E4-SOL078-NODE-ORDINARY-DUP2-UNCERTAINTY-ORIGINAL-ERRORS-CONNECTED-CLOSURE-SOL079",
+  "at": "2026-10-03T02:03:48.262928+00:00",
+  "before": {
+    "latest_turn": {
+      "completedAt": 1790992536,
+      "durationMs": 521223,
+      "error": null,
+      "id": "01a0ff71-5f7d-7412-a241-da71be68e846",
+      "items": [],
+      "itemsView": "notLoaded",
+      "startedAt": 1790992015,
+      "status": "completed"
+    },
+    "queue_count": 0,
+    "queue_has_more": false,
+    "quiescence": {
+      "active_completed_grace_seconds": 5.0,
+      "basis": "strict_idle",
+      "observations": 1,
+      "stability_seconds": 0.0
+    },
+    "thread_status": {
+      "type": "idle"
+    }
+  },
+  "compact_response": {},
+  "compact_turn": "01a0ff7f-133b-7800-b5e2-82bf81832d12",
+  "completion": {
+    "completed_at": 1790993028,
+    "duration_ms": 114961,
+    "error": null,
+    "id": "01a0ff7f-133b-7800-b5e2-82bf81832d12",
+    "item_id": "01a0ff7f-135f-7563-a1c2-ede6be692e39",
+    "item_type": "contextCompaction",
+    "started_at": 1790992913,
+    "status": "completed"
+  },
+  "completion_verified_by": "thread/turns/list itemsView=full contextCompaction",
+  "generation": 1,
+  "next_task_enqueued": false,
+  "profile": "sol",
+  "same_tui": true,
+  "schema": "friday.team.pre-task-compact.v1",
+  "thread_id": "01a0d516-a446-7131-a123-faeea4bb8e8c"
+}

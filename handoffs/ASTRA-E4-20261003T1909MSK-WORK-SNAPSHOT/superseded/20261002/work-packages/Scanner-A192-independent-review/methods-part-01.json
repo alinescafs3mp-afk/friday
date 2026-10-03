@@ -1,0 +1,1175 @@
+{
+  "schema": "friday.a192.independent.whole-methods-text.v1",
+  "part": 1,
+  "all_method_regions": 471,
+  "methods": [
+    {
+      "file": "native/source_owner.c",
+      "symbol": "original_absolute_end",
+      "kind": "C_FUNCTION",
+      "line": 161,
+      "end_exclusive": 171,
+      "signature_defaults_text": "static uint64_t original_absolute_end(void) {",
+      "region_sha256": "524d27d4205750e49dbe28b5fb61cf65667f4b6083955648fd4f4a6b52e8e50b",
+      "calls_text": [
+        "UINT64_C",
+        "original_absolute_end"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "own_current_caller_error",
+      "kind": "C_FUNCTION",
+      "line": 171,
+      "end_exclusive": 179,
+      "signature_defaults_text": "static void own_current_caller_error(const char *operation) {",
+      "region_sha256": "4066678e8d421703b56cd6710b5a6ae39157802ed4abe31d82d64527c90445e4",
+      "calls_text": [
+        "PyErr_Fetch",
+        "PyErr_Occurred",
+        "own_current_caller_error"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 171,
+          "text": "static void own_current_caller_error(const char *operation) {"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "terminal_wall_ms",
+      "kind": "C_FUNCTION",
+      "line": 179,
+      "end_exclusive": 187,
+      "signature_defaults_text": "static uint64_t terminal_wall_ms(void) {",
+      "region_sha256": "c328398986baed4a919ed903f633b21cb6f66a0685f3eda1a88f265ab9e1c447",
+      "calls_text": [
+        "UINT64_C",
+        "terminal_wall_ms"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "emit_final_native_metrics",
+      "kind": "C_FUNCTION",
+      "line": 187,
+      "end_exclusive": 233,
+      "signature_defaults_text": "static int emit_final_native_metrics(int finalized) {",
+      "region_sha256": "2fb40fe88ee177a449c68284a4b06bf01eded1c61ee3c84f9ffef727dac68d5d",
+      "calls_text": [
+        "UINT64_C",
+        "clock_gettime",
+        "emit_final_native_metrics",
+        "memcpy",
+        "syscall"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "hard_deadline",
+      "kind": "C_FUNCTION",
+      "line": 233,
+      "end_exclusive": 257,
+      "signature_defaults_text": "static void hard_deadline(int signal_number) {",
+      "region_sha256": "b7b60bedd780fed978e924f366b05482403a27a1fb1e81cb220b0c90c057f0f9",
+      "calls_text": [
+        "_exit",
+        "hard_deadline",
+        "syscall"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 254,
+          "text": "_exit(125);"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "existing_parent_deadline",
+      "kind": "C_FUNCTION",
+      "line": 257,
+      "end_exclusive": 278,
+      "signature_defaults_text": "static void existing_parent_deadline(int signal_number) {",
+      "region_sha256": "d30014ed7e5fbd91e8dd2466cf5ff4f6df91d03152ecdc009b67fc1880efe547",
+      "calls_text": [
+        "_exit",
+        "existing_parent_deadline",
+        "syscall"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 275,
+          "text": "_exit(125);"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "original_interpreter_work_cutoff",
+      "kind": "C_FUNCTION",
+      "line": 278,
+      "end_exclusive": 318,
+      "signature_defaults_text": "static void original_interpreter_work_cutoff(int signal_number) {",
+      "region_sha256": "638254af95c151e7ce79bdaa80da7a7fb2d6a46d19456476473594b1e349b9a5",
+      "calls_text": [
+        "__builtin_unreachable",
+        "__real_accept4",
+        "__real_close",
+        "__real_dup",
+        "__real_dup2",
+        "__real_dup3",
+        "__real_epoll_create1",
+        "__real_fcntl",
+        "__real_open",
+        "__real_openat",
+        "__real_pipe2",
+        "__real_pread",
+        "__real_read",
+        "__real_recv",
+        "__real_recvmsg",
+        "__real_send",
+        "__real_sendmsg",
+        "__real_socket",
+        "__real_socketpair",
+        "__real_write",
+        "__wrap_calloc",
+        "__wrap_free",
+        "__wrap_malloc",
+        "__wrap_realloc",
+        "atomic_store_explicit",
+        "original_interpreter_work_cutoff",
+        "syscall"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "origin_refusal_to",
+      "kind": "C_FUNCTION",
+      "line": 318,
+      "end_exclusive": 340,
+      "signature_defaults_text": "static int origin_refusal_to(int output_fd,const char *file,int line,const char *operation,const char *message,int saved_errno) {",
+      "region_sha256": "c74f43f3ef33c0d6e4ced91d45055886a574fb36ddb4e5884d9c49e2f7d45217",
+      "calls_text": [
+        "CHILD_REFUSAL",
+        "ENTRY_REFUSAL",
+        "_exit",
+        "origin_refusal_to",
+        "strlen",
+        "syscall"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 338,
+          "text": "#define CHILD_REFUSAL(fd,message) do {origin_refusal_to(fd,__FILE__,__LINE__,__func__,message,errno);_exit(125);}while(0)"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "now_ns",
+      "kind": "C_FUNCTION",
+      "line": 340,
+      "end_exclusive": 345,
+      "signature_defaults_text": "static uint64_t now_ns(void) {",
+      "region_sha256": "03f20f124255e2217a80a678c6c49cc49fcfc28c9d39bc4c6e57241620e706ce",
+      "calls_text": [
+        "UINT64_C",
+        "clock_gettime",
+        "now_ns"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "deadline",
+      "kind": "C_FUNCTION",
+      "line": 345,
+      "end_exclusive": 353,
+      "signature_defaults_text": "static int deadline(void) {",
+      "region_sha256": "0f9c7e3cf2cbcb7dca765715da28149a5e9e0df1682add459c40022ca3582c1f",
+      "calls_text": [
+        "UINT64_C",
+        "deadline",
+        "now_ns",
+        "terminal_wall_ms"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "aligned",
+      "kind": "C_FUNCTION",
+      "line": 353,
+      "end_exclusive": 357,
+      "signature_defaults_text": "static size_t aligned(size_t n) {",
+      "region_sha256": "1bb7a0089558f73f5c055cba67fe1e5c83ad669898cda24f35305247fae30c3b",
+      "calls_text": [
+        "aligned"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "arena_alloc",
+      "kind": "C_FUNCTION",
+      "line": 357,
+      "end_exclusive": 381,
+      "signature_defaults_text": "static void *arena_alloc(struct arena *a,size_t n) {",
+      "region_sha256": "52103b01301362875ada38c22c6827805af1c4628c3a3ed0f8169d013789a2b6",
+      "calls_text": [
+        "aligned",
+        "arena_alloc"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "belongs",
+      "kind": "C_FUNCTION",
+      "line": 381,
+      "end_exclusive": 387,
+      "signature_defaults_text": "static struct arena *belongs(void *p) {",
+      "region_sha256": "a949c600ace6c2e790874efe369fc6f959534c57bfcdb7de391a20379cd403aa",
+      "calls_text": [
+        "belongs"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "friday_malloc",
+      "kind": "C_FUNCTION",
+      "line": 387,
+      "end_exclusive": 401,
+      "signature_defaults_text": "void *friday_malloc(size_t n) {",
+      "region_sha256": "8c921a72ac420432417846d7924849e5e39e8bccdc98f0b8d528b92321364f52",
+      "calls_text": [
+        "arena_alloc",
+        "deadline",
+        "friday_malloc",
+        "getpid",
+        "pthread_mutex_lock",
+        "pthread_mutex_unlock"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "friday_free",
+      "kind": "C_FUNCTION",
+      "line": 401,
+      "end_exclusive": 415,
+      "signature_defaults_text": "void friday_free(void *p) {",
+      "region_sha256": "20090601a7425c8e6362867934444f4638b93c19a29172f4af7d334fa71a345a",
+      "calls_text": [
+        "aligned",
+        "belongs",
+        "friday_free",
+        "pthread_mutex_lock",
+        "pthread_mutex_unlock"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "friday_calloc",
+      "kind": "C_FUNCTION",
+      "line": 415,
+      "end_exclusive": 421,
+      "signature_defaults_text": "void *friday_calloc(size_t n,size_t size) {",
+      "region_sha256": "6714ee127a21b6a5841ad10412ba3597721cb27fd91f83a346f989e478a5369c",
+      "calls_text": [
+        "friday_calloc",
+        "friday_malloc",
+        "memset"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "friday_realloc",
+      "kind": "C_FUNCTION",
+      "line": 421,
+      "end_exclusive": 436,
+      "signature_defaults_text": "void *friday_realloc(void *p,size_t n) {",
+      "region_sha256": "c31fd0b666e0e0d3bae1530647fc88be288e316eb866dc0e8c388aa10d3cec59",
+      "calls_text": [
+        "aligned",
+        "belongs",
+        "friday_free",
+        "friday_malloc",
+        "friday_realloc",
+        "memcpy"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_malloc",
+      "kind": "C_FUNCTION",
+      "line": 436,
+      "end_exclusive": 437,
+      "signature_defaults_text": "void *__wrap_malloc(size_t n) {",
+      "region_sha256": "b70be726f02eebef405ed506b8d3701d609e663135f9a2c3535101d11ec14c45",
+      "calls_text": [
+        "__wrap_malloc",
+        "friday_malloc"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_calloc",
+      "kind": "C_FUNCTION",
+      "line": 437,
+      "end_exclusive": 438,
+      "signature_defaults_text": "void *__wrap_calloc(size_t n,size_t s) {",
+      "region_sha256": "802b60d20675ad8574834dcced18854d3596117f2fa83c6c2c56f0203ef78405",
+      "calls_text": [
+        "__wrap_calloc",
+        "friday_calloc"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_realloc",
+      "kind": "C_FUNCTION",
+      "line": 438,
+      "end_exclusive": 439,
+      "signature_defaults_text": "void *__wrap_realloc(void *p,size_t n) {",
+      "region_sha256": "1a8e54fc544a9d90896168f1091500457d4c73ce0fd11edc66ecefb12d257fd0",
+      "calls_text": [
+        "__wrap_realloc",
+        "friday_realloc"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_free",
+      "kind": "C_FUNCTION",
+      "line": 439,
+      "end_exclusive": 440,
+      "signature_defaults_text": "void __wrap_free(void *p) {",
+      "region_sha256": "374c4f4d5fab666263acc63a1180ef8f9ef1b059fcdddc998e726d0dbb3c73d1",
+      "calls_text": [
+        "__wrap_free",
+        "friday_free"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "py_malloc",
+      "kind": "C_FUNCTION",
+      "line": 440,
+      "end_exclusive": 441,
+      "signature_defaults_text": "static void *py_malloc(void *ctx,size_t n) {",
+      "region_sha256": "98c86e6072197f0c3d2ac198ad80e30bc252fea59036ba01c7dee6c08a83c9ad",
+      "calls_text": [
+        "friday_malloc",
+        "py_malloc"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "py_calloc",
+      "kind": "C_FUNCTION",
+      "line": 441,
+      "end_exclusive": 442,
+      "signature_defaults_text": "static void *py_calloc(void *ctx,size_t n,size_t s) {",
+      "region_sha256": "1c702da9a5d4fac5bd07e6cbbc2962e587840817b0119f5c525d84a1181d888b",
+      "calls_text": [
+        "friday_calloc",
+        "py_calloc"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "py_realloc",
+      "kind": "C_FUNCTION",
+      "line": 442,
+      "end_exclusive": 443,
+      "signature_defaults_text": "static void *py_realloc(void *ctx,void *p,size_t n) {",
+      "region_sha256": "4cc51d1d4321ab1b0c1d41b73bbf2281f267917014d752cc651a38395ade9b84",
+      "calls_text": [
+        "friday_realloc",
+        "py_realloc"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "py_free",
+      "kind": "C_FUNCTION",
+      "line": 443,
+      "end_exclusive": 444,
+      "signature_defaults_text": "static void py_free(void *ctx,void *p) {",
+      "region_sha256": "83ce176d0c46df4a16bb27463cb79328b041861e1bdb0bcb70c6e7d46c451980",
+      "calls_text": [
+        "friday_free",
+        "py_free"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "py_arena",
+      "kind": "C_FUNCTION",
+      "line": 444,
+      "end_exclusive": 445,
+      "signature_defaults_text": "static void *py_arena(void *ctx,size_t n) {",
+      "region_sha256": "daa0fa6cd34600798e2e1a59222ef06e94ceb89ae60f203d60cf69f2119e6307",
+      "calls_text": [
+        "friday_malloc",
+        "py_arena"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "py_arena_free",
+      "kind": "C_FUNCTION",
+      "line": 445,
+      "end_exclusive": 447,
+      "signature_defaults_text": "static void py_arena_free(void *ctx,void *p,size_t n) {",
+      "region_sha256": "6c73ddd6c4a4d083535ce845de1cd92154a15d4476052d909167553ca21db691",
+      "calls_text": [
+        "friday_free",
+        "py_arena_free"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "register_fd",
+      "kind": "C_FUNCTION",
+      "line": 447,
+      "end_exclusive": 458,
+      "signature_defaults_text": "static int register_fd(int fd) {",
+      "region_sha256": "ac7c270a8ba2ac8aef85ff36e150197e2cee3c6fcd2e38347d50fc68fbdfc350",
+      "calls_text": [
+        "register_fd"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "inventory_inherited",
+      "kind": "C_FUNCTION",
+      "line": 458,
+      "end_exclusive": 493,
+      "signature_defaults_text": "static int inventory_inherited(void) {",
+      "region_sha256": "39fcc591992a5943ad72093f012eef62585ff771eca55bd8d1026e0292e9bcf5",
+      "calls_text": [
+        "inventory_inherited",
+        "offsetof",
+        "range",
+        "register_fd",
+        "syscall"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "retire_fd",
+      "kind": "C_FUNCTION",
+      "line": 493,
+      "end_exclusive": 511,
+      "signature_defaults_text": "static int retire_fd(int fd) {",
+      "region_sha256": "08c6b3152c63fcaf41f801c93fd826185391cff53c999fbbb617dee7c3937995",
+      "calls_text": [
+        "__real_close",
+        "retire_fd"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "fd_reserve",
+      "kind": "C_FUNCTION",
+      "line": 511,
+      "end_exclusive": 526,
+      "signature_defaults_text": "static int fd_reserve(int count,int *slots) {",
+      "region_sha256": "7a4b8d3bb4b51f87d8fe23bc6b60e37a47b3a05b2398d01511eed18792fd4925",
+      "calls_text": [
+        "deadline",
+        "fd_reserve",
+        "pthread_mutex_lock",
+        "pthread_mutex_unlock"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "fd_finish",
+      "kind": "C_FUNCTION",
+      "line": 526,
+      "end_exclusive": 531,
+      "signature_defaults_text": "static void fd_finish(int slot,int fd) {",
+      "region_sha256": "348604ec85c588b3f5e0f5dfa8f31132c18d2eece777a122e1da44e5686ca6c0",
+      "calls_text": [
+        "fd_finish",
+        "pthread_mutex_lock",
+        "pthread_mutex_unlock"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_close",
+      "kind": "C_FUNCTION",
+      "line": 531,
+      "end_exclusive": 532,
+      "signature_defaults_text": "int __wrap_close(int fd) {",
+      "region_sha256": "2531d3a95521ab16688dea98c07bcb571665a03374dc4ee49efcddc8d209b50c",
+      "calls_text": [
+        "__real_close",
+        "__wrap_close",
+        "retire_fd"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_open",
+      "kind": "C_FUNCTION",
+      "line": 532,
+      "end_exclusive": 538,
+      "signature_defaults_text": "int __wrap_open(const char *path,int flags,...) {",
+      "region_sha256": "1277cc0999ec5961fe6c663234d1025b21d76fbd500a3f3780d4a169a9f439da",
+      "calls_text": [
+        "__real_open",
+        "__wrap_open",
+        "fd_finish",
+        "fd_reserve",
+        "va_arg",
+        "va_end",
+        "va_start"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_open64",
+      "kind": "C_FUNCTION",
+      "line": 538,
+      "end_exclusive": 542,
+      "signature_defaults_text": "int __wrap_open64(const char *path,int flags,...) {",
+      "region_sha256": "ed3d1c85d6f5674495a8485cac5a83f74b26640a138292fb2f0113c66b104460",
+      "calls_text": [
+        "__wrap_open",
+        "__wrap_open64",
+        "va_arg",
+        "va_end",
+        "va_start"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_openat",
+      "kind": "C_FUNCTION",
+      "line": 542,
+      "end_exclusive": 548,
+      "signature_defaults_text": "int __wrap_openat(int parent,const char *path,int flags,...) {",
+      "region_sha256": "1aa54778e91c228380d8cb577866ba68f5a73b0a25d3a7f6a768283e7d71aeff",
+      "calls_text": [
+        "__real_openat",
+        "__wrap_openat",
+        "fd_finish",
+        "fd_reserve",
+        "va_arg",
+        "va_end",
+        "va_start"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_openat64",
+      "kind": "C_FUNCTION",
+      "line": 548,
+      "end_exclusive": 552,
+      "signature_defaults_text": "int __wrap_openat64(int parent,const char *path,int flags,...) {",
+      "region_sha256": "f3ac3c7f238d6893ce1aa9e933dfed5fb36e4b24c11cbea81f0e3ef25a5cba62",
+      "calls_text": [
+        "__wrap_openat",
+        "__wrap_openat64",
+        "va_arg",
+        "va_end",
+        "va_start"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_socket",
+      "kind": "C_FUNCTION",
+      "line": 552,
+      "end_exclusive": 557,
+      "signature_defaults_text": "int __wrap_socket(int domain,int type,int protocol) {",
+      "region_sha256": "a768a0d93968009e6d6ec2c449881bbede3800712aa61e1aa9dfc1b9be6a1608",
+      "calls_text": [
+        "__real_socket",
+        "__wrap_socket",
+        "fd_finish",
+        "fd_reserve"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_socketpair",
+      "kind": "C_FUNCTION",
+      "line": 557,
+      "end_exclusive": 563,
+      "signature_defaults_text": "int __wrap_socketpair(int domain,int type,int protocol,int pair[2]) {",
+      "region_sha256": "fbf80c8976079488e6e20ee7ed1e825dd21f99e9277924ae80d8b2530d53c778",
+      "calls_text": [
+        "__real_socketpair",
+        "__wrap_socketpair",
+        "fd_finish",
+        "fd_reserve"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_pipe2",
+      "kind": "C_FUNCTION",
+      "line": 563,
+      "end_exclusive": 569,
+      "signature_defaults_text": "int __wrap_pipe2(int pair[2],int flags) {",
+      "region_sha256": "8ac4eb8bdf2644feec50677fe3ac9887a0d226377d8da9d0ec2f81eea8bbb178",
+      "calls_text": [
+        "__real_pipe2",
+        "__wrap_pipe2",
+        "fd_finish",
+        "fd_reserve"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_pipe",
+      "kind": "C_FUNCTION",
+      "line": 569,
+      "end_exclusive": 570,
+      "signature_defaults_text": "int __wrap_pipe(int pair[2]) {",
+      "region_sha256": "c03b8191d96a29f1d3b73c45bea69d02ff27e9149cf534ba2f14abc34135bae2",
+      "calls_text": [
+        "__wrap_pipe",
+        "__wrap_pipe2"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_dup",
+      "kind": "C_FUNCTION",
+      "line": 570,
+      "end_exclusive": 575,
+      "signature_defaults_text": "int __wrap_dup(int oldfd) {",
+      "region_sha256": "2d03495b0c1445cebccd4bf657020f7aea883fe75a3396510d739b65cdbd100e",
+      "calls_text": [
+        "__real_dup",
+        "__wrap_dup",
+        "fd_finish",
+        "fd_reserve"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_dup2",
+      "kind": "C_FUNCTION",
+      "line": 575,
+      "end_exclusive": 582,
+      "signature_defaults_text": "int __wrap_dup2(int oldfd,int newfd) {",
+      "region_sha256": "0c02de6cd29859c2b82cffd095c2caeafe5a304e5ceec470529e40120b6c6d05",
+      "calls_text": [
+        "__real_dup2",
+        "__wrap_dup2",
+        "fd_finish",
+        "fd_reserve"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_dup3",
+      "kind": "C_FUNCTION",
+      "line": 582,
+      "end_exclusive": 588,
+      "signature_defaults_text": "int __wrap_dup3(int oldfd,int newfd,int flags) {",
+      "region_sha256": "e1944e7137801d3a6069915d32fc8a7caec49a7c815b58253fc562a18753cfc0",
+      "calls_text": [
+        "__real_dup3",
+        "__wrap_dup3",
+        "fd_finish",
+        "fd_reserve"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_fcntl",
+      "kind": "C_FUNCTION",
+      "line": 588,
+      "end_exclusive": 601,
+      "signature_defaults_text": "int __wrap_fcntl(int fd,int command,...) {",
+      "region_sha256": "ae96a97919bf36b99b8fc909e30af3800d5d21237faa3286094393e45a34d7fa",
+      "calls_text": [
+        "__real_fcntl",
+        "__wrap_fcntl",
+        "fd_finish",
+        "fd_reserve",
+        "va_arg",
+        "va_end",
+        "va_start"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_accept4",
+      "kind": "C_FUNCTION",
+      "line": 601,
+      "end_exclusive": 606,
+      "signature_defaults_text": "int __wrap_accept4(int fd,struct sockaddr *address,socklen_t *length,int flags) {",
+      "region_sha256": "42430badfe30858b7923093eb1751d8a7481ebf023393ab13808d004da8c7b7e",
+      "calls_text": [
+        "__real_accept4",
+        "__wrap_accept4",
+        "fd_finish",
+        "fd_reserve"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_accept",
+      "kind": "C_FUNCTION",
+      "line": 606,
+      "end_exclusive": 607,
+      "signature_defaults_text": "int __wrap_accept(int fd,struct sockaddr *address,socklen_t *length) {",
+      "region_sha256": "7a3c9e305c5a848f0d21d2a4bcdf9d0329db92781d24227358ed5512a7d51392",
+      "calls_text": [
+        "__wrap_accept",
+        "__wrap_accept4"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_epoll_create1",
+      "kind": "C_FUNCTION",
+      "line": 607,
+      "end_exclusive": 612,
+      "signature_defaults_text": "int __wrap_epoll_create1(int flags) {",
+      "region_sha256": "cf89fada09ad1b6b2b08390be3c0de827a24260ab94635c5034132353ca92311",
+      "calls_text": [
+        "__real_epoll_create1",
+        "__wrap_epoll_create1",
+        "fd_finish",
+        "fd_reserve"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "__wrap_epoll_create",
+      "kind": "C_FUNCTION",
+      "line": 612,
+      "end_exclusive": 613,
+      "signature_defaults_text": "int __wrap_epoll_create(int size) {",
+      "region_sha256": "7e2078629a902d1b2224d765fa9b7e8c3638ddfa4812d01c71dd974aa6af9749",
+      "calls_text": [
+        "__wrap_epoll_create",
+        "__wrap_epoll_create1"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "native/source_owner.c",
+      "symbol": "poll_io_until",
+      "kind": "C_FUNCTION",
+      "line": 613,
+      "end_exclusive": 634,
+      "signature_defaults_text": "static int poll_io_until(int fd,short events,uint64_t selected_end) {",
+      "region_sha256": "919130f3e73fbe7b1315909e5c400b6114bb0f13cf74c8394b978501dfd00d2d",
+      "calls_text": [
+        "UINT64_C",
+        "now_ns",
+        "poll",
+        "poll_io_until",
+        "terminal_wall_ms"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    }
+  ],
+  "files52": [],
+  "reads_bytes": 1437030,
+  "SourceReady": false,
+  "runtime": "NOT_RUN"
+}

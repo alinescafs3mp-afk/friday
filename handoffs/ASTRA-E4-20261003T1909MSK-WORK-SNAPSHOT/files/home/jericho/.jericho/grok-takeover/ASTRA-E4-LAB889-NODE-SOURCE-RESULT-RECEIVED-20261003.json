@@ -1,0 +1,682 @@
+{
+  "schema": "friday.astra.e4.lab889.node.source.received.v1",
+  "assignment": "ASTRA-E4-A206-SOL072-NODE-ACTUAL-ROOT-BODY-CALLER-BOTH-DECODERS-FINITE-ENDS-LAB-889",
+  "generation": 1,
+  "received_utc": "2026-10-03 00:54:18 UTC",
+  "manifest": {
+    "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/manifest.json",
+    "bytes": 1741,
+    "sha256": "fafdfb9d94a774cba4455416a7c71ef22713e004b1ed7bf0fee49bf0bb59e190",
+    "identity9_decimal_strings": [
+      "2050",
+      "3849524",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1741",
+      "1790987976871479524",
+      "1790987976871479524"
+    ],
+    "stable9": true
+  },
+  "message": {
+    "path": "/home/jericho/jericho/.git/friday-lab/v2/messages/msg_a9a21afe85994d81999223897609148a.json",
+    "bytes": 393,
+    "sha256": "04d8fe5c2f9473f19acd528b487ccf408058eba24458a6302dcc630225ab8a6c",
+    "identity9_decimal_strings": [
+      "2050",
+      "7800778",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "393",
+      "1790987987941115476",
+      "1790987987941115476"
+    ],
+    "stable9": true
+  },
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB889-INPUT-PROFILE4200-20261003.json",
+    "bytes": 36632,
+    "sha256": "11dd0a63004b089d70dff341c8ef2f43c93d5fc1811598b2b89e2cba6d20c4c1",
+    "identity9_decimal_strings": [
+      "2050",
+      "8528845",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "36632",
+      "1790986931680433695",
+      "1790986931734436797"
+    ],
+    "stable9": true
+  },
+  "run": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB889-RUN-PROFILE4200-20261003.json",
+    "bytes": 4156,
+    "sha256": "3096c8116de848e9f45060cfa797ec4b326f60cdaf09893aeed20279ecfd35df",
+    "identity9_decimal_strings": [
+      "2050",
+      "8529419",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "4156",
+      "1790986931872444722",
+      "1790986931919636770"
+    ],
+    "stable9": true
+  },
+  "actual_owned_pins": [
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/manifest.json",
+      "bytes": 1741,
+      "sha256": "fafdfb9d94a774cba4455416a7c71ef22713e004b1ed7bf0fee49bf0bb59e190",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849524",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1741",
+        "1790987976871479524",
+        "1790987976871479524"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/caller.py",
+      "bytes": 188629,
+      "sha256": "1c86a4b1141385a87967cb6a15dfa55fc24a643764603b46a6450d044f4df2e9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849492",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "188629",
+        "1790987976870479467",
+        "1790987976870479467"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/supervisor.py",
+      "bytes": 152193,
+      "sha256": "96ac9259e92f9812631ed093c0ef5db34fa3b3611e6c4931b486679eaa70e49b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849493",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "152193",
+        "1790987976870479467",
+        "1790987976870479467"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/verifier.py",
+      "bytes": 121795,
+      "sha256": "bec97b0b194f675738a1ab99fabd9311def266254be85d51dfc7d6ec7b769fca",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849494",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "121795",
+        "1790987976870479467",
+        "1790987976870479467"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/launch-contract.json",
+      "bytes": 51597,
+      "sha256": "4ca1514c1f6bfbf017144ec622aea135dac3670644de58d07e6aff47bdf39bd4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849495",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51597",
+        "1790987976870479467",
+        "1790987976870479467"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/expectations.json",
+      "bytes": 12120,
+      "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849496",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12120",
+        "1790987976870479467",
+        "1790987976870479467"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849497",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790987976870479467",
+        "1790987976870479467"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/evidence/findings.json",
+      "bytes": 2682,
+      "sha256": "c3aceaea4fea203659c153210ed46ae8f6e3953572bf98c612bb6cf7c68b47bb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226631",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2682",
+        "1790987976870479467",
+        "1790987976870479467"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/evidence/partitions.json",
+      "bytes": 88946,
+      "sha256": "eec0dfe37783756a7e5e18faef33bfa030495c4fcc7d6d990da1ea6a4a989990",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226632",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "88946",
+        "1790987976870479467",
+        "1790987976870479467"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/evidence/pin-checks.json",
+      "bytes": 16281,
+      "sha256": "9e56104b4734fe401b17d5679025f8084809c47323f0ab80b1b2bee0fb093e51",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226633",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16281",
+        "1790987976870479467",
+        "1790987976870479467"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/result.json",
+      "bytes": 2478,
+      "sha256": "32b2bdf275fd6208e43b9b683616acb403d7469bb59623844a718c1be6dd131c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849498",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2478",
+        "1790987976871479524",
+        "1790987976871479524"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/pathset.json",
+      "bytes": 1593,
+      "sha256": "784320fee24901bd69ec69b951ef35638da2647b92177e216d9b94bb4d635bb8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849523",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1593",
+        "1790987976871479524",
+        "1790987976871479524"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/publish/payload.json",
+      "bytes": 99,
+      "sha256": "48e578e4968d2dcf749c0b8c4ddeda06307d43788bf425cef5dc673732d9e0c0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226634",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "99",
+        "1790987976871479524",
+        "1790987976871479524"
+      ],
+      "stable9": true
+    }
+  ],
+  "dirs": [
+    "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation",
+    "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/evidence",
+    "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/publish"
+  ],
+  "result": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "accepted": false,
+    "assignment": "ASTRA-E4-A206-SOL072-NODE-ACTUAL-ROOT-BODY-CALLER-BOTH-DECODERS-FINITE-ENDS-LAB-889",
+    "author_accepts_own_source": false,
+    "caller_bytes": 188629,
+    "caller_sha256": "1c86a4b1141385a87967cb6a15dfa55fc24a643764603b46a6450d044f4df2e9",
+    "compiler_ABI": "NOT_RUN",
+    "completed_msk": "2026-10-03T03:39:36.870811+03:00",
+    "contract_bytes": 51597,
+    "contract_sha256": "4ca1514c1f6bfbf017144ec622aea135dac3670644de58d07e6aff47bdf39bd4",
+    "costs": {
+      "cumulative_bytes": 75638189,
+      "implicit_IO": "UNKNOWN_NOT_ZERO",
+      "memory_hash_bytes": 111342,
+      "observed_sealer_vmrss_kib": "27704",
+      "physical_read_bytes": 75413027,
+      "proc_read_bytes": 1976,
+      "product_RAM_IO": "UNKNOWN_NOT_ZERO",
+      "sealed_tree_bytes": 113820,
+      "transport_write_bytes": 113820,
+      "whole_RAM": "UNKNOWN_NOT_ZERO"
+    },
+    "current6_changed": 4,
+    "current6_equal": 2,
+    "decision": "OUTSIDE_BODY_PREHELD_BEFORE_PUBLICATION",
+    "delivery_id": "del_d76ff7d11c04498495e70dc385826209",
+    "elapsed_seconds": 1011.832253,
+    "executor_ack_at": "2026-10-03T00:22:45.038558Z",
+    "gates": "NOT_RUN",
+    "historical_unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "historical_unsafe_required": true,
+    "historical_unsafe_waiver": false,
+    "input_bytes": 36632,
+    "input_sha256": "11dd0a63004b089d70dff341c8ef2f43c93d5fc1811598b2b89e2cba6d20c4c1",
+    "job_id": "job_efaa73b554994cb7ba982dfc1163dde7",
+    "joined": "SCOPED_SOURCE_NOT_WHOLE_ACCEPTED",
+    "manifest_bytes": 1741,
+    "new_dependencies": [],
+    "output": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation",
+    "partitions": 112,
+    "pathset_bytes": 1593,
+    "payload_bytes": 99,
+    "pins_verified": 50,
+    "qualification": "REQUIRED_NOT_RUN",
+    "result_bytes": 2478,
+    "run_message_id": "msg_5d76c439d4834dbba5319bd6af2aeeb3",
+    "runtime": "NOT_RUN",
+    "schema": "friday.e4.lab889.a206.node.actual-root-body-caller.connected-source.run.v1",
+    "seal_elapsed_seconds": 0.238787,
+    "source_execution": 0,
+    "supervisor_bytes": 152193,
+    "supervisor_sha256": "96ac9259e92f9812631ed093c0ef5db34fa3b3611e6c4931b486679eaa70e49b",
+    "unique_pin_paths": 50,
+    "verdict": "FD8_MEMFD_RESERVE_BEFORE_PWRITE_FINITE_END_SEPARATED",
+    "verifier_bytes": 121795,
+    "verifier_sha256": "bec97b0b194f675738a1ab99fabd9311def266254be85d51dfc7d6ec7b769fca",
+    "whole_self_acceptance": false
+  },
+  "author_findings": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "accepted": false,
+    "author_accepts_own_source": false,
+    "body": {
+      "alias_fd": 8,
+      "cap": 32768,
+      "cap_is_existing_stream": true,
+      "created_before_fork": true,
+      "custody": "ORIGINAL_MEMFD_NOT_RENDERED_TRANSPORT",
+      "final_pwrite_at_zero": "REFUSED",
+      "marker": "A206BODY",
+      "po880_is_not_this_body": true,
+      "sealed_only_by_caller_after_children": true
+    },
+    "chain": {
+      "caller_bytes": 188629,
+      "caller_sha256": "1c86a4b1141385a87967cb6a15dfa55fc24a643764603b46a6450d044f4df2e9",
+      "contract_bytes": 51597,
+      "contract_sha256": "4ca1514c1f6bfbf017144ec622aea135dac3670644de58d07e6aff47bdf39bd4",
+      "supervisor_bytes": 152193,
+      "supervisor_sha256": "96ac9259e92f9812631ed093c0ef5db34fa3b3611e6c4931b486679eaa70e49b",
+      "verifier_bytes": 121795,
+      "verifier_sha256": "bec97b0b194f675738a1ab99fabd9311def266254be85d51dfc7d6ec7b769fca"
+    },
+    "compiler_ABI": "NOT_RUN",
+    "current6_changed": 4,
+    "current6_equal": 2,
+    "decision": "OUTSIDE_BODY_PREHELD_BEFORE_PUBLICATION",
+    "edges": {
+      "C1": "Caller creates one memfd, writes the header once, and keeps fd 8 inheritable before any fork or publication. Supervisor and verifier adopt that alias. Both decoders pread it. PO880 on fd 1 stays transport.",
+      "C2": "The same body records factory ordinals F0 through F5 and the existing derived split. Caps 108, 256, 32768, 65536, and 2097152 stay. Overflow faults and does not truncate.",
+      "C3": "Inherited roles disarm the timer without changing the deadline and record a transfer. The caller retires only after seal, consume, and success. os._exit remains process death and is not the custody proof."
+    },
+    "gates": "NOT_RUN",
+    "joined": "SCOPED_SOURCE_NOT_WHOLE_ACCEPTED",
+    "new_dependencies": [],
+    "prefix_rewrites": {
+      "caller.py": 1,
+      "launch-contract.json": 4,
+      "supervisor.py": 1,
+      "verifier.py": 1
+    },
+    "qualification": "REQUIRED_NOT_RUN",
+    "residuals": [
+      "Image, compiler, native ABI, grants, provider, clock, and gates were not run.",
+      "Whole RAM, IO, native, stock, copy, read, header, FD, hash, encoder, decoder, and error overlap stay UNKNOWN_NOT_ZERO.",
+      "32768 is the existing stream cap, not a new grant.",
+      "per_cell 160, per_call 480, non_graph 14592, graph 6058, and raw 12118 remain conditional arithmetic.",
+      "Meaningful positives, negatives, legacy, and live qualification stay REQUIRED_NOT_RUN."
+    ],
+    "runtime": "NOT_RUN",
+    "schema": "friday.e4.lab889.a206.findings.v1",
+    "source_execution": 0,
+    "verdict": "FD8_MEMFD_RESERVE_BEFORE_PWRITE_FINITE_END_SEPARATED",
+    "whole_self_acceptance": false
+  },
+  "actual6": [
+    {
+      "name": "caller.py",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/caller.py",
+        "bytes": 179046,
+        "sha256": "e7801afaa87f593dee61081e846f28e55de4f0cb7d8752258604df62c27e183c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226335",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "179046",
+          "1790981940896456058",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/caller.py",
+        "bytes": 188629,
+        "sha256": "1c86a4b1141385a87967cb6a15dfa55fc24a643764603b46a6450d044f4df2e9",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849492",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "188629",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "Source_execution": 0
+    },
+    {
+      "name": "expectations.json",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/expectations.json",
+        "bytes": 12120,
+        "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226336",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12120",
+          "1790981196515654027",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/expectations.json",
+        "bytes": 12120,
+        "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849496",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12120",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "Source_execution": 0
+    },
+    {
+      "name": "launch-contract.json",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/launch-contract.json",
+        "bytes": 51470,
+        "sha256": "29eceb367d91803c18acb2adc1ee46d865fc7ec7d4c63e21578c10dbc67f844c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226337",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51470",
+          "1790981887598391475",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/launch-contract.json",
+        "bytes": 51597,
+        "sha256": "4ca1514c1f6bfbf017144ec622aea135dac3670644de58d07e6aff47bdf39bd4",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849495",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51597",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "Source_execution": 0
+    },
+    {
+      "name": "supervisor.py",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/supervisor.py",
+        "bytes": 143262,
+        "sha256": "89cb5c6dfbc4c49e86a0237b6e708032a04fcb1ebc36f57c376e81f82966ce9a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226338",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "143262",
+          "1790981931890938257",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/supervisor.py",
+        "bytes": 152193,
+        "sha256": "96ac9259e92f9812631ed093c0ef5db34fa3b3611e6c4931b486679eaa70e49b",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849493",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "152193",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "Source_execution": 0
+    },
+    {
+      "name": "verifier.py",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/verifier.py",
+        "bytes": 113456,
+        "sha256": "db065d2e7e260e5846a9ab43ce2d1da17dbc1d3f6d6e0497fb222895ccf51020",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226339",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "113456",
+          "1790981313826399470",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/verifier.py",
+        "bytes": 121795,
+        "sha256": "bec97b0b194f675738a1ab99fabd9311def266254be85d51dfc7d6ec7b769fca",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849494",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "121795",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "Source_execution": 0
+    },
+    {
+      "name": "ordinary-surplus.txt",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226340",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790980677732672473",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849497",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "Source_execution": 0
+    }
+  ],
+  "full_gapless_parts": 112,
+  "independent_rejection": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A207-LAB889-NODE-ACTUAL-BODY-END-SCOPED-INDEPENDENT-REVIEW-20261003.json",
+    "bytes": 14172,
+    "sha256": "bbd388980a25fe84bfed77844efc9db836d91ddd81ab81226fd2380067acf42e",
+    "identity9_decimal_strings": [
+      "2050",
+      "8530251",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "14172",
+      "1790988858410130226",
+      "1790988858459133041"
+    ],
+    "stable9": true
+  },
+  "decision": "AUTHENTICATED_SOURCE; INDEPENDENT_CONNECTED_BODY_END_REJECT",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "source_execution": 0,
+  "next": "Preserve immutable author source/rejection. No actual native/source acceptance or Root execution; genuine original caller/body/finite endpoints CODE remains."
+}

@@ -1,0 +1,162 @@
+{
+  "schema": "friday.a061.future-bounded-build-recipe.v1",
+  "status": "A171_ACTUAL_PARTIAL_SOURCE_NO_BUILD_ADMISSION",
+  "admission": "Different-author whole final-byte A171 Source review required before any original build/native/Root/runtime/gate effects. Exact current209 graph and original compiler steps/flags/environment/caps/ABI remain. No permission is issued here.",
+  "allowed_output": "A NEW independently chosen private0700 build directory; outputs0600 regular nlink1; never overwrite this sealed source package or frozen A046/candidate/quarantine.",
+  "compiler": "Exact independently reviewed held compiler executable FD200 with its SAME protected complete compiler/loader/library/toolchain view; no named-host compiler or shell fallback.",
+  "entry": "Future reviewed build owner calls execve(200, argv, exact_environment), holds exact source descriptor bytes at fixed paths in that same admitted source view, drains both outputs continuously, tracks only actual owned compiler process/generations and exact owned child tools.",
+  "bounds": {
+    "wall_seconds": 120,
+    "CPU_seconds": 90,
+    "AS_bytes": 1073741824,
+    "aggregate_RSS_bytes": 1073741824,
+    "FSIZE_bytes": 16777216,
+    "NOFILE": 512,
+    "CORE": 0,
+    "output_each_bytes": 1048576,
+    "tools_parallel": 1,
+    "child_models": 0,
+    "network": 0,
+    "install": 0,
+    "setuid_or_capabilities": 0
+  },
+  "environment": {
+    "PATH": "/usr/bin:/bin",
+    "LANG": "C",
+    "LC_ALL": "C",
+    "SOURCE_DATE_EPOCH": "0"
+  },
+  "steps": [
+    {
+      "output": "friday-a061-native",
+      "argv": [
+        "ADMITTED_COMPILER_FD200",
+        "-std=c11",
+        "-O2",
+        "-fstack-protector-strong",
+        "-fno-strict-aliasing",
+        "-static",
+        "-Wl,-z,noexecstack",
+        "-o",
+        "NEW_BUILD/friday-a061-native",
+        "A071-BOOTSTRAP.c",
+        "A071-COMMON.c",
+        "A071-RUNTIME.c"
+      ]
+    },
+    {
+      "output": "libfriday-a061-owned.so",
+      "argv": [
+        "ADMITTED_COMPILER_FD200",
+        "-std=c11",
+        "-O2",
+        "-fPIC",
+        "-fstack-protector-strong",
+        "-fno-strict-aliasing",
+        "-shared",
+        "-Wl,-z,now,-z,relro,-z,noexecstack",
+        "-o",
+        "NEW_BUILD/libfriday-a061-owned.so",
+        "A071-OWNED.c",
+        "A071-COMMON.c",
+        "A071-RUNTIME.c"
+      ]
+    }
+  ],
+  "link_contract": "Shared PyOS_BeforeFork/PyOS_AfterFork_Parent/PyOS_AfterFork_Child are resolved from the exact admitted CPython interpreter, not a separately mutable libpython. Static outer intentionally excludes OWNED.c and needs no interpreter. COMMON.c calls fr_runtime_verify from RUNTIME.c in BOTH targets; exact same header is used. No compile occurred.",
+  "post_build_required": "Independent exact ELF/ABI/symbol/static-link review, exact executable SHA, actual same image inclusion of bridge at /usr/lib/x86_64-linux-gnu/libfriday-a061-owned.so, separate root/kernel/runtime capsule admission. Compilation alone is NOT source readiness or execution acceptance.",
+  "cleanup": "Finite owned-only stop/reap. Unknown descendants or cleanup stays STOP_UNCONFIRMED, no group kill or guessed PID.",
+  "performed_now": false,
+  "ABI_changes": {
+    "fr_recv": "int(int,packet*,passfd*,pid*,uid*,gid*,uint64_deadline)",
+    "fr_own_spawn": "int(int_sock,unsigned_role,int_config,int_body,int_event,int_python,int_gate,uint64_deadline,child*)",
+    "abort_ack": 14,
+    "fr_receive_receipt_bytes": 24,
+    "fr_evidence_bytes": 344,
+    "fr_own_fork": "int(int_sock,unsigned_role,uint64_scheduler_deadline,child32*)",
+    "fr_own_observe": "int(child32*,observation96*)",
+    "fr_own_evidence": "int(child32*,evidence344*) with unconfirmed wait status redacted",
+    "fr_session_evidence": "int(evidence344*)",
+    "fr_session_close": "int(void)",
+    "fr_local_restrict": "int(unsigned_operation,int_exact_own_fd); irreversible reduction of own kernel syscall permission"
+  },
+  "a158_ABI_extension": {
+    "fr_controller_prepare": "int(unsigned exact_original_position); original coordinator request only, no new grant",
+    "fr_controller_join": "int(unsigned exact_original_position,fr_evidence344*); actual fork child consumes separately Root-selected exact START",
+    "fr_controller_finish": "int(fr_evidence344*); same actual producer consumes exact FINISH_ACK, not kernel wait/reap",
+    "fr_controller_observe": "int(fr_observation96*); readonly distinct child context, all wait/status/cleanup fields zero"
+  },
+  "a158_status": {
+    "assignment": "ASTRA-E4-LAB858-SOL057-WHOLE209-ALL216-ACTUAL-SOURCE-IMPLEMENTATION-A171",
+    "generation": 1,
+    "implementation_status": "ACTUAL_PARTIAL_CONNECTED_SOURCE_NOT_RUN",
+    "safe_connected_ID_count": 51,
+    "mandatory_unimplemented_ID_count": 165,
+    "all216_required": true,
+    "all216_credit": false,
+    "SourceReady": false,
+    "Root_Image_execution_admission": false,
+    "runtime": "NOT_RUN",
+    "gates": "NOT_RUN",
+    "F10_waiver": false,
+    "GO": false,
+    "unsafe_historical_IDs": "ABSTRACT_REQUIRED_NOT_RUN: no operational payload, fixture, generator, reproduction or exploitation implementation",
+    "input": {
+      "schema": "friday.a158.whole216-input.v1",
+      "exact_keys": [
+        "schema",
+        "position",
+        "id",
+        "generation",
+        "producer",
+        "arguments"
+      ],
+      "generation": 1,
+      "position": "exact original control_map ordered position 0..215",
+      "id": "exact original ID at position",
+      "producer": "original51 producer or fixed a171_actual for remaining165",
+      "authority": "Root-selected kernel-sealed fd119 pinned by unchanged cap848/source role17; strict typed parsing in actual Controls; Root exact canonical schema/position/ID prefix before coordinator start",
+      "unsupported": "Exact CODE_GAP and per-ID operation/domain residuals; no synthetic reducers and no blanket dangerous classification",
+      "input_origin": "external independent bounded inert bytes, no Source fixture/capsule/Root builder"
+    },
+    "ownership": {
+      "parent": "unchanged original coordinator/native_owner/private native sequence",
+      "child": "one actual fr_own_fork role0; exact PID/birth/private pidfd record; ordinary REGISTER_ACK and child barrier precede child context",
+      "selection": "Root actual records[1], actual proc/pidfd/credential/direct-parent checks; exact separately selected START1 and FINISH2/ACK10",
+      "no_reset": "never reassign original native_owner, clear poison, reset original START/session or adopt caller-provided status",
+      "status": "Root borrowed records and child FINISH are never kernel wait authority; coordinator actual wait4 plus original REAP_ACK publishes status",
+      "special_evidence": "fr_evidence phase1 register_ack_ns means typed START receipt time; phase10 reap_ack_ns means typed FINISH_ACK receipt time. Neither is registration/reap/kernel credit; private child evidence is separate."
+    },
+    "custody": {
+      "normal_public": "A071-FULL-CONTROLS._run_held and A079.run_public call held_capture under a fixed actual-FD ledger before first pipe; immediate acquisition ownership and finite _exit125 child setup; raw both streams frozen before semantics on success/refusal",
+      "typed_inner": "actual producer stdout/stderr drained continuously by same coordinator under original1MiB each; raw bytes frozen before expected cause checks, emitted as bounded raw_hex only when complete; no hash-only credit",
+      "typed_outer": "A087 same repaired four-stream raw transfer/bind_inner_streams receipt, consume_whole216 retains original immutable objects on success/refusal",
+      "incomplete": "missing/preclone unknown raw is null, not invented empty output; overflow/read/retention/close/nonEOF remains false or unknown; original errors and actual auxiliary uncertainty preserved",
+      "persistence": "same-process owned Python objects only; no disk or crash durability asserted"
+    },
+    "resources": {
+      "caps": "original bill limits/outer_supervision, wire848/96/evidence344/observation96/child32/receipt24 and19 Source roles unchanged",
+      "typed_topology": "same outer1 inner coordinator+one actual role0 producer=2, within original inner global4; no extra inner parent, new cgroup or named-host fallback",
+      "ordinary_topology": "original outer1/64MiB plus inner coordinator+3 workers/192MiB/global4; all3 live and positive-first routes unchanged",
+      "clock": "same actual cap work/hard monotonic clocks and original normal180/10, production1200/60; finite child join/finish and cleanup bounded by original ends",
+      "raw": "unchanged1MiB per stream; producer terminal local emission bound32768; existing native-inner and transfer buffers within original cgroups",
+      "startup": "FULL/A079 fixed18 actual-FD ledger before first pipe; typed coordinator fixed4 pipe ledger and empty caller record before pipes; durable native clone intention/actual PID before native post-clone checks",
+      "error_ownership": "one close attempt per owned FD, failed close/error retained; exact actual native/direct child stop/reap only; sticky uncertainty never success",
+      "new_source_bookkeeping": "exact216 abstract contract table and Root ID strings increase Source text; interpreter/native capacity NOT_MEASURED, must remain under unchanged limits",
+      "whole_RAM": "UNKNOWN_NOT_ZERO_NOT_PASS",
+      "implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PASS"
+    },
+    "actual_typed_binding_source": {
+      "Source": "A071-CONTROLS.py WHOLE216_TABLE literal bound to unchanged control_map; A071-BOOTSTRAP.c exact original216 Root ID strings",
+      "rows": 216,
+      "safe_source_written": 51,
+      "open_Source_code_gaps": "See exact A171 matrix; reaching a physical call is not original-domain closure",
+      "missing_disposition": "OPEN_SOURCE_CODE_GAP, not guessed unsafe",
+      "exact_rows_artifact": "TYPED216-CONTRACTS.json; original abstract control_source_bindings remain exact and are not the new runtime dispatcher",
+      "normal_caller_selector_connected": 216,
+      "source_credit_new_ID_count": 0
+    },
+    "author_claimed_complete_new_IDs": 0,
+    "independent_final_byte_review_required": true
+  }
+}

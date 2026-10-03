@@ -1,0 +1,543 @@
+{
+  "schema": "friday.e4.lab861.current-stock-gpg-primary-data-root-received.v1",
+  "assignment": "ASTRA-E4-NODE-STOCK-GPG-READONLY-SIX-CALL-PROVIDER-QUALIFICATION-LAB-861",
+  "generation": 1,
+  "job_id": "job_8aa8ef73e1df42ca95b31dfdeb453861",
+  "result_message_id": "msg_1d4c0f182f3949599b0855d8e9087fe0",
+  "received_msk": "2026-10-02T11:38:28.327607+03:00",
+  "status": "AUTHENTIC_STATIC_PRIMARY_DATA_RECEIVED_NOT_RUNTIME_OR_WHOLE_SOURCE_ACCEPTANCE",
+  "full_private_SHA9_pathset_DAG": true,
+  "pins": [
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/manifest/manifest.json",
+      "bytes": 1305,
+      "sha256": "aafdd683f5be5a6a32f86a1d2fd1d50458025ad73196b4f9f5f30922c772cfd2",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979382",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1305",
+        "1790929154990897377",
+        "1790929154990897377"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/proof/calls.json",
+      "bytes": 7382,
+      "sha256": "8ef5f1b1d6171ae349573a006b1df737276d3280def9fc14f836631b1b0534c7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979372",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7382",
+        "1790929154983896977",
+        "1790929154983896977"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/proof/costs.json",
+      "bytes": 1244,
+      "sha256": "dbc002b8658202f02d484bbd5562803ecfb8c682c34d306136e9aba63cd6689e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979373",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1244",
+        "1790929154984897034",
+        "1790929154984897034"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/proof/gaps.json",
+      "bytes": 1243,
+      "sha256": "60dc76dc07fac55c831f1b87cb1dde9623c2bc0f29c3fd09d28bcb3d39cab4fc",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979374",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1243",
+        "1790929154985897091",
+        "1790929154985897091"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/proof/ledger.json",
+      "bytes": 4831,
+      "sha256": "5ae81ba7938cf253d6bf679594d6ae2a94a65c2ef2d54d9284eefc28e16cb144",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979375",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4831",
+        "1790929154987309492",
+        "1790929154987309492"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/proof/pins.json",
+      "bytes": 3396,
+      "sha256": "17c594f6ccbc8ee9d9094c1914a14b418c171e11e6e53c2abb9ba0052e46a214",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979376",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3396",
+        "1790929154988136940",
+        "1790929154988136940"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/proof/primary.json",
+      "bytes": 17873,
+      "sha256": "e42fd3b503be1569de5ff059002c2ed947d6fc36b77ecf3362067ced545c8e4f",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979377",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17873",
+        "1790929154988986389",
+        "1790929154988986389"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/publish/payload.json",
+      "bytes": 126,
+      "sha256": "2ae0a14b732b5fdf1398153577b66c1c4d891327ed6e294543addf1497647868",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979384",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "126",
+        "1790929154991897435",
+        "1790929154991897435"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/result.json",
+      "bytes": 2098,
+      "sha256": "1afb03c606d8c52c080ae14731a49c7a3b2d392d39a7c9b1a86f297341bbf172",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979378",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2098",
+        "1790929154988986389",
+        "1790929154988986389"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab861-node-stock-gpg-readonly-six-call-provider-qualification/seal/pathset.json",
+      "bytes": 2866,
+      "sha256": "97965ed89fce23932c4c3495a25242862b6cf9c0fe101da56cdd2d7ecb540d11",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979380",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2866",
+        "1790929154989897320",
+        "1790929154989897320"
+      ],
+      "stable9": true
+    }
+  ],
+  "original12_current_full_SHA9": [
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A172-INPUT-20261002.json",
+      "bytes": 89517,
+      "sha256": "b666e8114fa15ae0720f5b7bbc984b6f58ac250c5a7ffac660860fca373e754b",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533450",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "89517",
+        "1790928333858896198",
+        "1790928333929900263"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/usr/bin/gpgv",
+      "bytes": 302296,
+      "sha256": "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d",
+      "identity9_decimal_strings": [
+        "2050",
+        "7603893",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "302296",
+        "1788377917000000000",
+        "1788492749979756867"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/usr/bin/gpg",
+      "bytes": 1186456,
+      "sha256": "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754",
+      "identity9_decimal_strings": [
+        "2050",
+        "7602949",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "1186456",
+        "1788377917000000000",
+        "1788492750343617162"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/source-stdout.native",
+      "bytes": 191279,
+      "sha256": "b2fc3685c24bbb6545fb8f81461c37d26ff7846e131eaeaa6a86148303a1571f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370983",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "191279",
+        "1790927823394677486",
+        "1790927823394677486"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A169-NODE-EXACT-INT9-WHOLE-NATIVE-RESULT-20261002.json",
+      "bytes": 35489,
+      "sha256": "a2c34645498674d15ba07111da729ee55b59913929b6cccda69d1076a2408aa7",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533449",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "35489",
+        "1790928160726986210",
+        "1790928160788989760"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/launch-contract.json",
+      "bytes": 45320,
+      "sha256": "c0f0a9566ef9639d3189d3da65b94d93f2304beb5b15d7232e79ae347967ccd7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980335",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "45320",
+        "1790869065586342022",
+        "1790869065586342022"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/metadata/node/publisher-key.asc",
+      "bytes": 3163,
+      "sha256": "e31e1aa40a8331f01d753cef475f7b9eab934fc25f5f0b36995bfd80bd66ad27",
+      "identity9_decimal_strings": [
+        "2050",
+        "6823493",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3163",
+        "1790815403317057000",
+        "1790815403317057000"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/metadata/node/SHASUMS256.txt.asc",
+      "bytes": 4696,
+      "sha256": "cfcf12eb3146d641be185d08ca018166b98495b1d8e5f7f94ab77f9965b651d2",
+      "identity9_decimal_strings": [
+        "2050",
+        "6823492",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4696",
+        "1790815403055574089",
+        "1790815403055574089"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/supervisor.py",
+      "bytes": 84058,
+      "sha256": "1a80b686159a348777bfdc4e3281566de331583c29fcc4813c97efb60f5f14e8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980336",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "84058",
+        "1790869065589834822",
+        "1790869065589834822"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/verifier.py",
+      "bytes": 55895,
+      "sha256": "c571ed6114e1fb5231d600718d4a891ab17d1403598eb9172edf61f9c10b56e9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980334",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "55895",
+        "1790869065582810120",
+        "1790869065582810120"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A164-ROOT-PREFLIGHT-RESULT-RECEIVED-20261002.json",
+      "bytes": 18362,
+      "sha256": "3f996ff220813f6ac741ddf89549a3796b556dc62c4179b8e208177b0c7d1252",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533218",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18362",
+        "1790925271186565396",
+        "1790925271244568717"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A169-NODE-EXACT-INT9-WHOLE-SCOPE-20261002.json",
+      "bytes": 25006,
+      "sha256": "3435f9526751565165c852b98ccda72de6a533113d3edc52f82d88d5dcc785e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533447",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25006",
+        "1790927657204164831",
+        "1790927657260168037"
+      ],
+      "stable9": true
+    }
+  ],
+  "primary_docs_verified": {
+    "DETAILS.gz": {
+      "pin": {
+        "path": "/usr/share/doc/gnupg/DETAILS.gz",
+        "bytes": 24780,
+        "sha256": "b07a304e70fa94c0d8f2554135164b2ed14be906e90a4278fe4cff3f5016de61",
+        "identity9_decimal_strings": [
+          "2050",
+          "7734258",
+          "33188",
+          "0",
+          "0",
+          "1",
+          "24780",
+          "1788377917000000000",
+          "1788492750419621507"
+        ],
+        "stable9": true
+      },
+      "decoded_bytes": 75977,
+      "decoded_sha256": "83e51cf7dbe13dc4ad95c37785803de0c0d040b8e02151030f814182c826056c",
+      "bounded_primary_DATA_decode": true
+    },
+    "gpg.1.gz": {
+      "pin": {
+        "path": "/usr/share/man/man1/gpg.1.gz",
+        "bytes": 56529,
+        "sha256": "84f8996b777c108987ee472fd1a820d607f1b937c30f034c6ddce4d8067e3884",
+        "identity9_decimal_strings": [
+          "2050",
+          "7896260",
+          "33188",
+          "0",
+          "0",
+          "1",
+          "56529",
+          "1788377917000000000",
+          "1788492750343617162"
+        ],
+        "stable9": true
+      },
+      "decoded_bytes": 181578,
+      "decoded_sha256": "f8f0fbcb0aa1d597a0396004fd44fd57485ea1c529f2a4a30fab917a1ddddbe1",
+      "bounded_primary_DATA_decode": true
+    },
+    "gpgv.1.gz": {
+      "pin": {
+        "path": "/usr/share/man/man1/gpgv.1.gz",
+        "bytes": 2382,
+        "sha256": "f2cc540c3ef40b4001411bdad4faff7f7a56e4760b2d3b5315b73478d2d69203",
+        "identity9_decimal_strings": [
+          "2050",
+          "7865685",
+          "33188",
+          "0",
+          "0",
+          "1",
+          "2382",
+          "1788377917000000000",
+          "1788492749979756867"
+        ],
+        "stable9": true
+      },
+      "decoded_bytes": 5320,
+      "decoded_sha256": "5991f971efb325b2743e8b916c380c887a3d5e1e0a7e09f11590a86e0c531911",
+      "bounded_primary_DATA_decode": true
+    }
+  },
+  "original_six_preserved": true,
+  "provider_route": "Primary DATA supports --no-keyring only for show-raw-key/dearmor without explicit keyrings; original remaining gpg explicit-keyring/no-default-keyring and gpgv explicit-keyring paths retained. Installed docs and exact compressed/decoded bytes/citations Root-verified. Strings alone not semantic proof.",
+  "gaps": [
+    {
+      "id": 1,
+      "statement": "show-keys and dearmor were not executed with --no-keyring. The manual states that --no-keyring uses no keyring at all. Non-creation of pubring.kbx is that stated effect, not a new observation."
+    },
+    {
+      "id": 2,
+      "statement": "check-sigs, both gpg verifies, and gpgv already name one explicit keyring. The manual says that combination avoids the default keyring. It does not prove that trustdb, common.conf, lock files, or an already-running agent stay untouched in a mode 0500 home."
+    },
+    {
+      "id": 3,
+      "statement": "--no-use-agent is documented as a dummy because gpg always requires the agent. --no-autostart skips starting gpg-agent and dirmngr when their service is required. It does not say an already-running agent is never contacted."
+    },
+    {
+      "id": 4,
+      "statement": "The common.conf use-keyboxd creation sentence names the default ~/.gnupg home. Stock /etc and /usr common.conf are absent. Behavior inside an explicit empty --homedir remains unobserved. /proc/self/fd arguments contain a slash, so the bare-name homedir lookup does not apply; the manual does not name that path."
+    }
+  ],
+  "actual_gpg_calls": 0,
+  "actual_gpgv_calls": 0,
+  "signature_verification": 0,
+  "Root_read_bytes": 2167592,
+  "author_result": {
+    "GO": false,
+    "Root_Image": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "Source_execution": 0,
+    "accepted": false,
+    "ack_msk": "2026-10-02T11:13:59.639266+03:00",
+    "ack_utc": "2026-10-02T08:13:59.639266Z",
+    "actual_gpg_calls": 0,
+    "actual_gpgv_calls": 0,
+    "assignment": "ASTRA-E4-NODE-STOCK-GPG-READONLY-SIX-CALL-PROVIDER-QUALIFICATION-LAB-861",
+    "clock_frozen_before_member_write": true,
+    "compiler_ELF_ABI": "NOT_RUN",
+    "completed_msk": "2026-10-02T11:19:14.989693+03:00",
+    "completed_utc": "2026-10-02T08:19:14.989693Z",
+    "cumulative_bytes": 6416361,
+    "deadline_at": "2026-10-02T09:23:59.641754Z",
+    "delivery_id": "del_bebdd5d6f19443978558734a0260f32a",
+    "elapsed_seconds": "315.350427",
+    "evidence_bytes": 3931432,
+    "friday_calls": 0,
+    "gap_count": 4,
+    "gates": "NOT_RUN",
+    "generation": 1,
+    "goal": "ASTRA-E4-NODE-STOCK-GPG-READONLY-SIX-CALL-PROVIDER-QUALIFICATION-LAB-861",
+    "grok_continuations": 1,
+    "input_bytes": 10443,
+    "input_sha256": "b27d1f0ddea11a131d0a0897b3cf6bdb5131446ef75217b61a717fb6a923ed90",
+    "job_id": "job_8aa8ef73e1df42ca95b31dfdeb453861",
+    "manifest_bytes": 1305,
+    "memory_hash_bytes": 2442565,
+    "model_children": 0,
+    "network_gets": 0,
+    "original_trees_mutated": false,
+    "output_bytes_cap": 16777216,
+    "pathset_bytes": 2866,
+    "payload_bytes": 126,
+    "physical_read_bytes": 3931432,
+    "read_cap_bytes": 268435456,
+    "run_message_id": "msg_626163ef8de9404e9420c6ea44a6a154",
+    "run_schema": "friday.astra.e4.lab861.node-stock-gpg-readonly-provider-static-qualification.run.v1",
+    "runtime": "NOT_RUN",
+    "schema": "friday.grok.lab861.node-stock-gpg-readonly-six-call-provider-qualification.v1",
+    "self_issued_root_grant": false,
+    "signature_verify": 0,
+    "six_call_count": 6,
+    "source_executed": false,
+    "transport_output_bytes": 42364,
+    "two_unsafe_historical_cases": "REQUIRED_NOT_RUN",
+    "verdict": "SPLIT_NO_KEYRING_AND_EXPLICIT_KEYRING_ROUTE_FROM_PRIMARY_DATA_RUNTIME_NOT_RUN",
+    "wall_seconds_including_seal_reserve": 4200,
+    "whole_assignment_ram": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "within_read_cap": true
+  },
+  "SourceReady": false,
+  "Root_admission": false,
+  "Root_Image": false,
+  "compiler_ELF_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "next": "A172 same-generation source author may use pinned DATA. New code still requires different-author whole review and exact fresh Root/provider/effects/grant/action; no promotion of readonly/agent/trustdb observation from docs."
+}

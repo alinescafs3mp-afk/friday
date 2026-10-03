@@ -1,0 +1,2 @@
+Ordinary own readonly plaintext for strict inherited-descriptor cause controls.
+This is inert DATA. It grants no execution authority and contains no program.

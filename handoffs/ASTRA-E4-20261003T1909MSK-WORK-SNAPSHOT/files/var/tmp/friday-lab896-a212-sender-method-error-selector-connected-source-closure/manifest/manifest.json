@@ -1,0 +1,43 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "compiler_ABI": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "members": [
+    {
+      "bytes": 11405,
+      "path": "evidence/gapless-rejoin.json",
+      "sha256": "54cf0051edc2d8be5d42df51c0ee57ca863c4b478b61067fd70ec85690ecdf0e"
+    },
+    {
+      "bytes": 6529,
+      "path": "evidence/pin-checks.json",
+      "sha256": "9c2c718e8a4a58ddb0a1cbd908751cda7e71c18295820cb310d21b98d4405d8d"
+    },
+    {
+      "bytes": 1101,
+      "path": "evidence/selector-closure.json",
+      "sha256": "43016086b3d4d252ab055d21df03d1a3855fb8c3e6513bc22a2f2c39605eaf76"
+    },
+    {
+      "bytes": 2757,
+      "path": "result.json",
+      "sha256": "0be6c8d65feced0e22a3cd006d1fc85b7e887a23c0beda25e5bba70db709add5"
+    },
+    {
+      "bytes": 971,
+      "path": "seal/pathset.json",
+      "sha256": "b27ca7df8c0881fa8d5102909af2c53bce8625cf9d6c9894e2504cd0e6a93e5a"
+    },
+    {
+      "bytes": 93844,
+      "path": "source/ordinary_root_consumers.py",
+      "sha256": "814db7af6a4183f5e7ff1f389ffea65a0ef5a02e4e21faa048350d3cca8d6e81"
+    }
+  ],
+  "payload_excluded": true,
+  "runtime": "NOT_RUN",
+  "schema": "friday.e4.lab896.manifest.v1",
+  "self_excluded": true
+}

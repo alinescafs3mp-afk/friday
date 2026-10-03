@@ -1,0 +1,254 @@
+{
+  "schema": "friday.e4.a212.sender.current-connected-r03-r05-scoped-source-decision.v1",
+  "owner": "Astra active Lead Architect epoch4",
+  "generation": 1,
+  "accepted_msk": "2026-10-03T05:41:26.000+03:00",
+  "recorded_utc": "2026-10-03 02:47:06 UTC",
+  "current_manifest": {
+    "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/manifest/manifest.json",
+    "bytes": 7280,
+    "sha256": "fd00045ff696d9c2e19782ec14bdbf7d24dcb78ec245ec2189c67869fbb30404",
+    "identity9_decimal_strings": [
+      "2050",
+      "4225642",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "7280",
+      "1790956169985900491",
+      "1790956169985900491"
+    ],
+    "stable9": true
+  },
+  "current_received": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB873-SENDER-SOURCE-RESULT-RECEIVED-20261002.json",
+    "decision": "AUTHENTICATED_AUTHOR_RESULT_WITH_SCOPED_NONAUTHOR_R02_M01_CREDIT_NOT_WHOLE_ACCEPTANCE"
+  },
+  "safe8_actual_full_SHA9": {
+    "actual_safe8": [
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/caller.py",
+        "bytes": 65491,
+        "sha256": "ff6fd365165a3e94971aabb546d051e1c7cbd313273a1b8917aab0ab1bdb43cc",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225618",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "65491",
+          "1790956169964899288",
+          "1790956169964899288"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/controller.py",
+        "bytes": 30313,
+        "sha256": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225619",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30313",
+          "1790956169966899404",
+          "1790956169966899404"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/native_grammar.py",
+        "bytes": 38131,
+        "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225620",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "38131",
+          "1790956169967899461",
+          "1790956169967899461"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/ordinary_root_consumers.py",
+        "bytes": 91473,
+        "sha256": "27e0f17855fe4945a52aeee9da29829e290406271d3ff9f1c16e7f08a546fafc",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225621",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "91473",
+          "1790956169968899518",
+          "1790956169968899518"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/receipt_physical.py",
+        "bytes": 1963,
+        "sha256": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225622",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1963",
+          "1790956169969899575",
+          "1790956169969899575"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/root_native_launcher.py",
+        "bytes": 115169,
+        "sha256": "567fd7b16329ddb8987413b986ae5086b733367d8b5dccec62c3d2875b8eeff6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225623",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "115169",
+          "1790956169970899632",
+          "1790956169970899632"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/source_grammar.py",
+        "bytes": 127594,
+        "sha256": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225624",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "127594",
+          "1790956169971899690",
+          "1790956169971899690"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/staged_sender.py",
+        "bytes": 65443,
+        "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225634",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "65443",
+          "1790956169972899747",
+          "1790956169972899747"
+        ],
+        "stable9": true
+      }
+    ],
+    "Source_execution": 0,
+    "checked_msk": "2026-10-03T05:47:06.353977+03:00"
+  },
+  "prior_actual_full_review": {
+    "path": "/var/tmp/friday-astra-lab867-sender-whole54-all96-all32-all7-independent-source-review-a193-g1/REVIEW.txt",
+    "bytes": 11154,
+    "sha256": "e56ca29892b2d2b8932d6c3fecda26068d2c2704bbce9e69a9c95a4319e084d3"
+  },
+  "scope": "Finite independent current connected R03/R05 rejoin only. Not another whole-source/project audit, not source-to-execution admission or author implementation.",
+  "credits": [
+    {
+      "id": "R05a_scoped_nested_guard_checks",
+      "invariant": "Actual nested normal/pure wrapper recorder checks retain original order",
+      "actual_path": "caller.scoped1050..1090 -> grammar.install_performing_wrappers1510..1540 -> consumer.run945 + StrictJournal.check/call",
+      "decision": "CREDIT_NARROW_SOURCE_NESTED_CHECK_INSTALLATION_OLD_UNWRAPPED_BODY_FINDING_SUPERSEDED_NOT_WHOLE_CHRONOLOGY"
+    },
+    {
+      "id": "R05b_guard_refused_consumption",
+      "invariant": "Reached ordinary failed predicate guard.refused event cannot remain unconsumed",
+      "actual_path": "staged_sender.require65..83 -> grammar.require64..74 calls TRACE.note -> consumer.run G.TRACE=journal -> StrictJournal.note903..913, JOURNAL contains guard.refused689",
+      "decision": "CREDIT_NARROW_SOURCE_GUARD_EVENT_CONSUMPTION_OLD_MISSING_NOTE_SUPERSEDED_NO_RUNTIME"
+    },
+    {
+      "id": "R05c_nested_state_row_selection",
+      "invariant": "Nested predicate compares actually captured current nested self-state, not forced outer ownership",
+      "actual_path": "consumer.method_sites1011..1032 nested_calls/calls and frame.f_locals['self']; caller.state97..138 uses persistent state_ids/state_owners and local seen",
+      "decision": "CREDIT_NARROW_SOURCE_NESTED_CALL_STATE_SELECTION_NOT_WHOLE_RAW_STATE"
+    },
+    {
+      "id": "R05d_entry_method_end",
+      "invariant": "Reached method entry recorder failure owns an actual end/error cut",
+      "actual_path": "caller.method_enter142..159 except invokes method_end(row,error=error); caller.scoped1080 checks ended; consumer.run951..959 initial checks inside caught body",
+      "decision": "CREDIT_NARROW_SOURCE_ENTRY_END_AND_INITIAL_CHECK_CATCH_NOT_ALL_DAMAGED_GRAPH_CUTS"
+    },
+    {
+      "id": "R05e_waitstatus_and_registered_operations",
+      "invariant": "Original lowercase waitstatus_to_exitcode and selector register/select/close cannot be absent from consumer effect facade",
+      "actual_path": "caller._ObservedModule OPERATIONS includes waitstatus_to_exitcode; consumer.EFFECTS687 + ReplaySelector methods744..753; actual SourceGrammar.Session.cleanup1085,1093",
+      "decision": "CREDIT_NARROW_SOURCE_API_MEMBERSHIP_NOT_FULL_SELECTOR_CLOSURE"
+    }
+  ],
+  "residuals": [
+    {
+      "id": "R03_method_state_constructor",
+      "class": "harness",
+      "existing_invariant": "Original stock filename-bearing error restoration must preserve actual args/filename/filename2/text across BOTH graph entry and effect error restoration paths",
+      "actual_failing_implementation": "ObservedMethodReplay.restore kind=error constructs _cls(*leaf(args)) at725 and compares str at726 before any filename/filename2 restoration. Actual caller.state error node135 stores both fields. API restore_error787..791 is already correctly ordered; A211 narrow credit preserved.",
+      "required_validation": "Connected ordinary actual error state -> restore -> predicate/post-state -> actual error-return consumer rejoin including both restore paths and original alias/causal/full-body requirements. No new payload/fixture or unadmitted runtime.",
+      "closure": "OPEN_CODE_ACTUAL_SECOND_ENDPOINT; no repeat of already-fixed API helper; no whole R03 acceptance",
+      "owner": "Astra integration; next existing Sol connected safe Python package when compatible"
+    },
+    {
+      "id": "R05e_selector_create_context_facade",
+      "class": "harness",
+      "existing_invariant": "Original DefaultSelector create/register/select/close/context and ordinary create/body/close primary-secondary error/alias relation must agree with performing producer",
+      "actual_failing_implementation": "Caller._ObservedSelector354..381 emits selector.create through _E.call and implements __enter__/__exit__ with retained ambiguous-close/no-retry errors. Consumer.EFFECTS683..687 omits selector.create; module.DefaultSelector763 returns ReplaySelector without any create journal call; ReplaySelector744..754 has register/select/close only, no __enter__/__exit__. Original G.Generation.exited511,IO.terminal738,IO.pump774,Session.cleanup1107,perform_staged_send1244 use with selectors.DefaultSelector(). restore facade _ObservedSelector is not a known module name718..739.",
+      "required_validation": "One connected actual producer -> complete effect cut -> typed facade/args/alias -> context creation/body/error/close -> predicate/end consumer package, with original checks and negatives. Do not return supplied expected operands, add dummy native objects, forge __name__ flags or drop meaningful events to pass.",
+      "closure": "OPEN_CODE_CONNECTED_SELECTOR_RELATION; genuine current waitstatus/register/select/close partial repairs retained. Native/raw-body custody and prospective fullfit still separate CODE/UNKNOWN.",
+      "owner": "Astra connected source contract; existing Sol next bounded implementation"
+    }
+  ],
+  "withdrawn_hypotheses": [
+    {
+      "id": "graph_local_ID_collision",
+      "status": "WITHDRAWN_NOT_A_DEFECT",
+      "evidence": "Full caller.state already uses persistent state_ids and state_owners, not local len(nodes) IDs. Earlier partial-window suspicion corrected; do not implement another ID allocator or weaken alias checks."
+    }
+  ],
+  "preserved": {
+    "R02_M01": "current actual settle->seal->lastclose scoped credits retained",
+    "R03_API_helper": "A211 filename-before-str order narrow credit retained",
+    "R01_R04_R06_R07": "Original first operations/full costs/physical vector-large-short-defaults/all32 role-purpose-phase-causality remain original required roots; no new universal theorem",
+    "original_scope": "whole54/current96/all32/all7/132 predicates/16 pure bodies/12 class bodies/72 ordered effect IDs unchanged",
+    "resource_caps": "Source64MiB/CPU300,Sender32MiB,Controller16MiB,CallerSender65536/nativewire262144/workers4/whole8GiB unchanged; Caller65491 margin45,Sender65443 margin93, wholecost UNKNOWN_NOT_ZERO",
+    "qualification": "Actual image/compiler/nativeABI/provider/grants/resources/clocks/SourceRoot/runtime/gates REQUIRED_NOT_RUN"
+  },
+  "next_connected_batch": "Correct actual method-state error restoration plus full ordinary selector create/context/facade/error/end relation together within existing safe Python scope and original caps; no whole source submission with known incompatible caller/receiver. Not the denied Scanner/native body action or any rephrasing/route-around.",
+  "implemented_changes_this_turn": 0,
+  "accepted_whole": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "Source_execution": 0,
+  "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false"
+}

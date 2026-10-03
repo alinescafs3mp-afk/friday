@@ -1,0 +1,251 @@
+{
+  "schema": "friday.sol062.source6-acyclic-bothside-joins.v1",
+  "current6": {
+    "caller.py": {
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+      "bytes": 142411,
+      "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980164",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "142411",
+        "1790940963524031229",
+        "1790941477973909544"
+      ],
+      "stable9": true
+    },
+    "supervisor.py": {
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+      "bytes": 111330,
+      "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980165",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "111330",
+        "1790940963523736912",
+        "1790941477973909544"
+      ],
+      "stable9": true
+    },
+    "verifier.py": {
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+      "bytes": 83369,
+      "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980166",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "83369",
+        "1790940873412305125",
+        "1790941477973909544"
+      ],
+      "stable9": true
+    },
+    "launch-contract.json": {
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/launch-contract.json",
+      "bytes": 49539,
+      "sha256": "04fe265d1136155f5d5786fbaa0ed852ae35e1eff3d970346d37d890cb71beb3",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980167",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49539",
+        "1790940963522462924",
+        "1790941477973909544"
+      ],
+      "stable9": true
+    },
+    "expectations.json": {
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/expectations.json",
+      "bytes": 10863,
+      "sha256": "7bf7a8f30abcb5a0af4e1b3e1b5f74f53228e0f979eaa18b453ddfc96cdc3ece",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980168",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10863",
+        "1790940766651735553",
+        "1790941477973909544"
+      ],
+      "stable9": true
+    },
+    "ordinary-surplus.txt": {
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980169",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790939961078431878",
+        "1790941477973909544"
+      ],
+      "stable9": true
+    }
+  },
+  "DAG": [
+    "verifier full bytes",
+    "contract Source+argv+inherited5",
+    "supervisor SOURCE_SHA CONTRACT_SHA sizes",
+    "caller VHASH CHASH SHASH sizes",
+    "external seal",
+    "external manifest",
+    "external terminal"
+  ],
+  "bothside_actual_envelope_schemas": {
+    "caller": "friday.e4.node.ordinary-stock-outer.sol062.v1",
+    "supervisor": "friday.e4.node.actual-supervisor.sol062.v1",
+    "verifier": "friday.e4.node.bounded-verifier.sol062.v1"
+  },
+  "all_shared_full_functions_equal": {
+    "retain_error_object": [
+      {
+        "file": "caller.py",
+        "line": 475,
+        "body_sha256": "385537cf27322915fa04110406b7d5932fbeb7953f82edd6319e0c88498b4fa0"
+      },
+      {
+        "file": "supervisor.py",
+        "line": 112,
+        "body_sha256": "385537cf27322915fa04110406b7d5932fbeb7953f82edd6319e0c88498b4fa0"
+      },
+      {
+        "file": "verifier.py",
+        "line": 167,
+        "body_sha256": "385537cf27322915fa04110406b7d5932fbeb7953f82edd6319e0c88498b4fa0"
+      }
+    ],
+    "deferred_error": [
+      {
+        "file": "caller.py",
+        "line": 490,
+        "body_sha256": "6f4b3726dd9f02d95306c155caac67b8fc7476d29060b002de1166f7372e532d"
+      },
+      {
+        "file": "supervisor.py",
+        "line": 127,
+        "body_sha256": "6f4b3726dd9f02d95306c155caac67b8fc7476d29060b002de1166f7372e532d"
+      },
+      {
+        "file": "verifier.py",
+        "line": 182,
+        "body_sha256": "6f4b3726dd9f02d95306c155caac67b8fc7476d29060b002de1166f7372e532d"
+      }
+    ],
+    "publish_errors": [
+      {
+        "file": "caller.py",
+        "line": 496,
+        "body_sha256": "ecd6b2e949baacbbf833a9ffb043f8b1eaa075a5c7d0617d16d225d1f700d834"
+      },
+      {
+        "file": "supervisor.py",
+        "line": 133,
+        "body_sha256": "ecd6b2e949baacbbf833a9ffb043f8b1eaa075a5c7d0617d16d225d1f700d834"
+      },
+      {
+        "file": "verifier.py",
+        "line": 188,
+        "body_sha256": "ecd6b2e949baacbbf833a9ffb043f8b1eaa075a5c7d0617d16d225d1f700d834"
+      }
+    ],
+    "validate_stock_error_graph": [
+      {
+        "file": "caller.py",
+        "line": 522,
+        "body_sha256": "6d349dc6cd7e80e43c2d237f4c08d82a966090be847347cbd6884e5f8b81b56b"
+      },
+      {
+        "file": "supervisor.py",
+        "line": 159,
+        "body_sha256": "6d349dc6cd7e80e43c2d237f4c08d82a966090be847347cbd6884e5f8b81b56b"
+      },
+      {
+        "file": "verifier.py",
+        "line": 214,
+        "body_sha256": "6d349dc6cd7e80e43c2d237f4c08d82a966090be847347cbd6884e5f8b81b56b"
+      }
+    ],
+    "exact_error": [
+      {
+        "file": "caller.py",
+        "line": 606,
+        "body_sha256": "e8d4d2e3a3a073c6572f20d6d6c4db6387565d3e89782cc502a44c229a6b575b"
+      },
+      {
+        "file": "supervisor.py",
+        "line": 243,
+        "body_sha256": "e8d4d2e3a3a073c6572f20d6d6c4db6387565d3e89782cc502a44c229a6b575b"
+      },
+      {
+        "file": "verifier.py",
+        "line": 298,
+        "body_sha256": "e8d4d2e3a3a073c6572f20d6d6c4db6387565d3e89782cc502a44c229a6b575b"
+      }
+    ],
+    "validate_received_error_graphs": [
+      {
+        "file": "caller.py",
+        "line": 684,
+        "body_sha256": "b07e1e45c3a9fd0f04281aaebed517b9e1498910d3fbb80e116750298d9107b8"
+      },
+      {
+        "file": "supervisor.py",
+        "line": 321,
+        "body_sha256": "b07e1e45c3a9fd0f04281aaebed517b9e1498910d3fbb80e116750298d9107b8"
+      },
+      {
+        "file": "verifier.py",
+        "line": 376,
+        "body_sha256": "b07e1e45c3a9fd0f04281aaebed517b9e1498910d3fbb80e116750298d9107b8"
+      }
+    ],
+    "original_stock_cause": [
+      {
+        "file": "caller.py",
+        "line": 698,
+        "body_sha256": "fb5417d760744f8248e27515f82a1d2878d75b15d75699bfd464e62d3ac7b033"
+      },
+      {
+        "file": "supervisor.py",
+        "line": 335,
+        "body_sha256": "fb5417d760744f8248e27515f82a1d2878d75b15d75699bfd464e62d3ac7b033"
+      },
+      {
+        "file": "verifier.py",
+        "line": 390,
+        "body_sha256": "fb5417d760744f8248e27515f82a1d2878d75b15d75699bfd464e62d3ac7b033"
+      }
+    ]
+  },
+  "error_shape": "complete v2 both receivers; native_field_presence added, fixed original256 private journal, joint error/value frontiers, complete bytes SHA/base64/count/typed refs, no pending marker durable public evidence",
+  "original_resource_schema_ids": {
+    "supervisor": "friday.e4.node.supervisor-resources.a172.v1",
+    "verifier": "friday.e4.node.verifier-resources.a172.v1"
+  },
+  "all_original_case_literals_preserved": true,
+  "runtime": "NOT_RUN",
+  "SourceReady": false,
+  "CODE": "C01-C05 complete stock factory/full publication proof open"
+}

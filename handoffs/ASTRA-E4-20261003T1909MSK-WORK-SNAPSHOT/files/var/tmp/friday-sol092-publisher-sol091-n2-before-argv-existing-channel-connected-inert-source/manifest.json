@@ -1,0 +1,1997 @@
+{
+  "schema": "friday.sol092.publisher.N2.before-argv.existing-channel.connected-inert-source.v1",
+  "assignment": "ASTRA-E4-PUBLISHER-SOL091-N2-BEFORE-ARGV-EXISTING-CHANNEL-CONNECTED-IMPLEMENTATION-SOL092",
+  "generation": 1,
+  "task_event": "ASTRA-E4-SOL092-TASK",
+  "epochs": {
+    "from": "acba5992-6a22-4e73-b141-30f35bb631a7",
+    "to": "d5afa5e1-60d7-457b-931b-fd12001a35a4"
+  },
+  "TASK": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL092-TASK-20261003.txt",
+    "sha256": "7826a467ea5ec8740ae20ba8e9ad641f532509de9fb98f496ea717b825b646f3"
+  },
+  "INPUT": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL092-INPUT-20261003.json",
+    "sha256": "681e83b5f35510c2021ad1d2f13cb3332ebc08cb7705074e23323fdb95dfdd36",
+    "bytes": 372312
+  },
+  "pre_task_compact": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL092-PRE-TASK-COMPACT-20261003.json",
+    "sha256": "c80454f31d0109d01c84c22cc47da7407902a46332781942baea4bad45d79c32",
+    "confirmed_msk": "2026-10-03T16:56:44.697472+03:00",
+    "same_TUI": true,
+    "once": true
+  },
+  "accepted_msk": "2026-10-03T16:58:53+03:00",
+  "completion": {
+    "utc": "2026-10-03 14:15:18 UTC",
+    "msk": "2026-10-03T17:15:18.000+03:00",
+    "elapsed_seconds": 985
+  },
+  "source_frozen_utc": "2026-10-03 14:07:58 UTC",
+  "root": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source",
+  "manifest_excludes_self": true,
+  "file_count": 17,
+  "bytes_excluding_manifest": 1190576,
+  "files": [
+    {
+      "name": "README.txt",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/README.txt",
+      "bytes": 1789,
+      "sha256": "ce65e696d99d6764da77b65083288ad080473257589af4878f3ae17d9a29c722",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371761",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1789",
+        "1791036729943180756",
+        "1791036811035801404"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/LAB916-interface-request.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/LAB916-interface-request.json",
+      "bytes": 13105,
+      "sha256": "7b9ffea8281f67a970325743e02ec8adae972f5713f31fbdb301ed5d23c24462",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371767",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13105",
+        "1791036730166193463",
+        "1791036811036801462"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/code-conflicts.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/code-conflicts.json",
+      "bytes": 24319,
+      "sha256": "b865df41416987e7cc46b7b358a8a78d82cca457bf1c7adfce506dd764fc80ea",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371763",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24319",
+        "1791036729991183492",
+        "1791036811035801404"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/connected-relations.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/connected-relations.json",
+      "bytes": 5952,
+      "sha256": "d4989a08ad2c462f7c70bf4916862abac677b2c357b4d85afa7a6fe8e8386003",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371762",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5952",
+        "1791036729969182238",
+        "1791036811035801404"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/current134-source-map.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/current134-source-map.json",
+      "bytes": 262305,
+      "sha256": "b2b01f3bf6f3d71c2538f8a9405d7b56c9bc3c354583a916248aaa7f26bb6221",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371764",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "262305",
+        "1791036730035185999",
+        "1791036811035801404"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/current49-source-map.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/current49-source-map.json",
+      "bytes": 32874,
+      "sha256": "dab1c6b4760513a25d3750a7fc2664948e7cea65c6a1362ed82524425b535b4c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371772",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32874",
+        "1791036884969014111",
+        "1791036885059019240"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/data-integrity.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/data-integrity.json",
+      "bytes": 7204,
+      "sha256": "5898592e8b3b72ca7707b3a704acaa160f1a5ae0c385a60d7777813fdbbf14c1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371770",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7204",
+        "1791036884878008926",
+        "1791036885059019240"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/external-final-snapshot.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/external-final-snapshot.json",
+      "bytes": 148845,
+      "sha256": "1aaa2ad7c3019fecc53aef0bb3bb6c3493d83ef579ce8fb4ef21496da1d7a552",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371771",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "148845",
+        "1791036884921011376",
+        "1791036885059019240"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/full-gapless-partitions.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/full-gapless-partitions.json",
+      "bytes": 217760,
+      "sha256": "cf8797b5ac73383106db4ab82873553555afcde52b81d160af41ad3a92e035c9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371765",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "217760",
+        "1791036730106190045",
+        "1791036811035801404"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/original-obligations.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/original-obligations.json",
+      "bytes": 38970,
+      "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371768",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "38970",
+        "1791036811206811149",
+        "1791036811271814853"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/qualification-and-costs.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/qualification-and-costs.json",
+      "bytes": 2695,
+      "sha256": "8d11b28cb816dd6dd6777def96b27d370eb94c850a2379b927e9a72a01abd1c8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371769",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2695",
+        "1791036884848007216",
+        "1791036885059019240"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/source-byte-materialization.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/source-byte-materialization.json",
+      "bytes": 214536,
+      "sha256": "f143f81e395777c9b5562d872de074c8f9726dc8b2cc599ae623abc47c26fc5a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371760",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "214536",
+        "1791036478824838945",
+        "1791036478898843190"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "evidence/validation-plan.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/validation-plan.json",
+      "bytes": 9579,
+      "sha256": "1b7c8be6ffd95afa93a2739fcbd4d5a63b5e3a9d84d39bdabda13836abf22512",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371766",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9579",
+        "1791036730138191869",
+        "1791036811035801404"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "pathset.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/pathset.json",
+      "bytes": 1071,
+      "sha256": "3019b30550af0086e2175e1ae8405c3429f169ad9af54654cbd2512dda33ef9d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371773",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1071",
+        "1791036885119022659",
+        "1791036885173025736"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "received.json",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/received.json",
+      "bytes": 1680,
+      "sha256": "10f4ee95eb372089e5703a3183bbab693ded37ab739093949a1e8c63f5dc3ecc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371755",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1680",
+        "1791035957309100581",
+        "1791035957366098795"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "source/actor_bootstrap.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "bytes": 58684,
+      "sha256": "168fd8a2d1649dfe531c4d938d72f1d356a0afadf849dd4f743223a3da61e85a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371757",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "58684",
+        "1791036478773836019",
+        "1791036478773836019"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "source/root_tool_adapter.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "bytes": 149208,
+      "sha256": "c3709fa05cf5fa1b008e4301ffd6cb39d23cab113eac8052bc9070c6741fbe50",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371758",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "149208",
+        "1791036379916164618",
+        "1791036379916164618"
+      ],
+      "stable9": true
+    }
+  ],
+  "directories": [
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source",
+      "name": ".",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371754",
+        "16832",
+        "1000",
+        "1000",
+        "4",
+        "4096",
+        "1791036885119022659",
+        "1791036885119022659"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence",
+      "name": "evidence",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371759",
+        "16832",
+        "1000",
+        "1000",
+        "2",
+        "4096",
+        "1791036884969014111",
+        "1791036884969014111"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source",
+      "name": "source",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371756",
+        "16832",
+        "1000",
+        "1000",
+        "2",
+        "4096",
+        "1791036277227273434",
+        "1791036277288276933"
+      ]
+    }
+  ],
+  "pathset": {
+    "name": "pathset.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/pathset.json",
+    "bytes": 1071,
+    "sha256": "3019b30550af0086e2175e1ae8405c3429f169ad9af54654cbd2512dda33ef9d",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371773",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1071",
+      "1791036885119022659",
+      "1791036885173025736"
+    ],
+    "stable9": true
+  },
+  "received": {
+    "name": "received.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/received.json",
+    "bytes": 1680,
+    "sha256": "10f4ee95eb372089e5703a3183bbab693ded37ab739093949a1e8c63f5dc3ecc",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371755",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1680",
+      "1791035957309100581",
+      "1791035957366098795"
+    ],
+    "stable9": true
+  },
+  "decision": "GENUINE_FINITE_INERT_N2_IMPLEMENTATION_ATTEMPT_EXACT_REMAINING_CODE_NOT_WHOLE_CLOSURE_OR_INDEPENDENT_ACCEPTANCE",
+  "task_done_scope": "Permitted connected safe Source slice plus original/current SHA9/literal partitions/strict original full-body/error receiver join and exact CODE at earliest-route/finite native-end/cost boundaries. Original earliest/stock/native/BOTH-end duties remain open.",
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "accepted": false,
+  "whole_accepted": false,
+  "not_independent_acceptance": true,
+  "source49_count": 49,
+  "source49": [
+    {
+      "name": "consumer/source/authority.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/authority.py",
+      "bytes": 16580,
+      "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371669",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16580",
+        "1791020794585495108",
+        "1791022242515576001"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/bill.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/bill.py",
+      "bytes": 24098,
+      "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371670",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24098",
+        "1791020794585495108",
+        "1791022242516576058"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/body_scope.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/body_scope.py",
+      "bytes": 7570,
+      "sha256": "2a77cbd725107cfd7526ef411fb98dd4139b794e2b099694a5c0fb60f56792a9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371671",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7570",
+        "1791020794586495165",
+        "1791022242516576058"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/canonical.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/canonical.py",
+      "bytes": 3825,
+      "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371672",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3825",
+        "1791020794587495223",
+        "1791022242516576058"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/capability.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/capability.py",
+      "bytes": 11981,
+      "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371673",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11981",
+        "1791020794587495223",
+        "1791022242516576058"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/contract.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/contract.py",
+      "bytes": 2099,
+      "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371674",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2099",
+        "1791020794588495280",
+        "1791022242516576058"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/declared_controls.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371675",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "39603",
+        "1791020794588495280",
+        "1791022242516576058"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/document_vector.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/document_vector.py",
+      "bytes": 17709,
+      "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371676",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17709",
+        "1791020794589495337",
+        "1791022242516576058"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/document_windows.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/document_windows.py",
+      "bytes": 7707,
+      "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371677",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7707",
+        "1791020794590495395",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/effects.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/effects.py",
+      "bytes": 690,
+      "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371678",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "690",
+        "1791020794590495395",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/formats.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/formats.py",
+      "bytes": 13628,
+      "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371679",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13628",
+        "1791020794591495452",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/ingress.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/ingress.py",
+      "bytes": 3025,
+      "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371680",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3025",
+        "1791020794592495510",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/material_literals.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/material_literals.py",
+      "bytes": 5689,
+      "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371681",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5689",
+        "1791020794635497977",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/performing_contracts.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/performing_contracts.py",
+      "bytes": 18209,
+      "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371682",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18209",
+        "1791020794636498035",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/pins.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/pins.py",
+      "bytes": 9147,
+      "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371683",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9147",
+        "1791020794637498091",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/producer_consumer.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/producer_consumer.py",
+      "bytes": 3243,
+      "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371684",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3243",
+        "1791020794637498091",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/receipt_chain.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/receipt_chain.py",
+      "bytes": 16263,
+      "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371685",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16263",
+        "1791020794638498149",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/recipe_planner.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/recipe_planner.py",
+      "bytes": 102799,
+      "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371686",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "102799",
+        "1791020794638498149",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/resource_meter.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/resource_meter.py",
+      "bytes": 24063,
+      "sha256": "758abaa8abb9dbdc1dae7d50c010ad40f56232a2a6fc869dc9981143a9f3bafa",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371687",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24063",
+        "1791020794639498206",
+        "1791022242517576116"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/runtime_consumer.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/runtime_consumer.py",
+      "bytes": 13297,
+      "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371688",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13297",
+        "1791020794639498206",
+        "1791022242518576173"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/schema_validate.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/schema_validate.py",
+      "bytes": 6776,
+      "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371689",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6776",
+        "1791020794640498264",
+        "1791022242518576173"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/semantics.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/semantics.py",
+      "bytes": 2578,
+      "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371690",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2578",
+        "1791020794641498322",
+        "1791022242518576173"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "consumer/source/whole_join.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source/whole_join.py",
+      "bytes": 18213,
+      "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371691",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18213",
+        "1791020794641498322",
+        "1791022242518576173"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/actor_bootstrap.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "bytes": 58684,
+      "sha256": "168fd8a2d1649dfe531c4d938d72f1d356a0afadf849dd4f743223a3da61e85a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371757",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "58684",
+        "1791036478773836019",
+        "1791036478773836019"
+      ],
+      "stable9": true,
+      "materialized": true,
+      "changed": true
+    },
+    {
+      "name": "source/actor_context.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/actor_context.py",
+      "bytes": 25298,
+      "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371694",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25298",
+        "1791020794688501019",
+        "1791022242520576288"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/admission.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/admission.py",
+      "bytes": 13345,
+      "sha256": "410d3c228e7aac5738d6148e78f2e3a3452a4a1588d10fb3e7707402eb7d9d48",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371695",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13345",
+        "1791020794688501019",
+        "1791022242520576288"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/capacity.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/capacity.py",
+      "bytes": 15736,
+      "sha256": "f3ee1bbca662e16dda25bb896a350e9adf68b0e95ae0bccc3a3e213ff066700b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371696",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15736",
+        "1791020794689501076",
+        "1791022242520576288"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/class_semantics.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/class_semantics.py",
+      "bytes": 19516,
+      "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371697",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19516",
+        "1791020794690501133",
+        "1791022242520576288"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/common.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/common.py",
+      "bytes": 37071,
+      "sha256": "662725486d6ce745b9af588d924b0f095ec68c66150846932eb9831d61806857",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371698",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "37071",
+        "1791020794690501133",
+        "1791022242520576288"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/consumer_bridge.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/consumer_bridge.py",
+      "bytes": 20456,
+      "sha256": "708ba5f38051291236e6bd877785db39aa0361e90b998210511f7f7510aff6c6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371699",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20456",
+        "1791020794691501191",
+        "1791022242521576346"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/custody.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/custody.py",
+      "bytes": 28328,
+      "sha256": "17b5dfcaf070274ded045f3c49d099eb7879e7183833d14a2de6a57ecec2dd1c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371700",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "28328",
+        "1791021085202171750",
+        "1791022242521576346"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/extraction.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/extraction.py",
+      "bytes": 27822,
+      "sha256": "7b0170445b7a11f7eeb42e9cce43b63545b9d62e92a2edbdfd0181bd42ebbeae",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371701",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27822",
+        "1791020794692501248",
+        "1791022242521576346"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/fact_bridge.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/fact_bridge.py",
+      "bytes": 14689,
+      "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371702",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14689",
+        "1791020794693501306",
+        "1791022242521576346"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/independent_selector.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/independent_selector.py",
+      "bytes": 7718,
+      "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371703",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7718",
+        "1791020794693501306",
+        "1791022242521576346"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/launcher.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/launcher.py",
+      "bytes": 11188,
+      "sha256": "1816bf4a533c7110790bc93c7ca15c26801f459b6e2c2dc9f4c002663203d25b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371704",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11188",
+        "1791020794694501363",
+        "1791022242521576346"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/lifetime.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/lifetime.py",
+      "bytes": 42385,
+      "sha256": "2c3f61022a0d581c698debba9f3957bf35f86de91e7252b8201db8ce8e828c46",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371705",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "42385",
+        "1791021678684225237",
+        "1791022242521576346"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/native.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/native.py",
+      "bytes": 42620,
+      "sha256": "d7818812088bd440ab4ba6237fbcdfc41d8885cbdf5b5e510265bb2874574dd4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371706",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "42620",
+        "1791021200480786419",
+        "1791022242521576346"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/normalization.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/normalization.py",
+      "bytes": 12779,
+      "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371707",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12779",
+        "1791020794766505495",
+        "1791022242522576403"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/observer.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/observer.py",
+      "bytes": 100524,
+      "sha256": "994c2f9d46889110cb7835d0d921bff9eec71612c50d19631951cdcd97153769",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371708",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "100524",
+        "1791021399579210482",
+        "1791022242522576403"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/operations.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/operations.py",
+      "bytes": 24309,
+      "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371709",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24309",
+        "1791020794767505552",
+        "1791022242522576403"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/retention.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/retention.py",
+      "bytes": 8465,
+      "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371710",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8465",
+        "1791020794768505610",
+        "1791022242522576403"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/roles.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/roles.py",
+      "bytes": 5018,
+      "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371711",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5018",
+        "1791020794768505610",
+        "1791022242523576460"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/root_tool_adapter.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "bytes": 149208,
+      "sha256": "c3709fa05cf5fa1b008e4301ffd6cb39d23cab113eac8052bc9070c6741fbe50",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371758",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "149208",
+        "1791036379916164618",
+        "1791036379916164618"
+      ],
+      "stable9": true,
+      "materialized": true,
+      "changed": true
+    },
+    {
+      "name": "source/snapshot_producer.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/snapshot_producer.py",
+      "bytes": 4130,
+      "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371713",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4130",
+        "1791020794770505725",
+        "1791022242524576518"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "native/publisher_owned_custody.c",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/native/publisher_owned_custody.c",
+      "bytes": 34618,
+      "sha256": "61d9790b5fa550f55dee8306ffe401f1114173702b0debaef027a8e6c421d2b3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371717",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "34618",
+        "1791022394074270239",
+        "1791022394074270239"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "HASHONLY_NO_C_H_AUTHORING_OR_PARSE"
+    },
+    {
+      "name": "native/publisher_owned_custody.h",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/native/publisher_owned_custody.h",
+      "bytes": 2790,
+      "sha256": "3f2a35410f4ad9955f6c2ded4b4cb95d3ee8cf0a89e33bf8e0dea0c3d35dea50",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371716",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2790",
+        "1791021299680478384",
+        "1791022242520576288"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "HASHONLY_NO_C_H_AUTHORING_OR_PARSE"
+    },
+    {
+      "name": "source/existing_root_caller.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/existing_root_caller.py",
+      "bytes": 16991,
+      "sha256": "b4f788eac928c67b323109a6bb80c77530797f7e246dd3525c75a720775bc943",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371714",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16991",
+        "1791021399638213869",
+        "1791022242521576346"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/owned_prefix_bank.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/owned_prefix_bank.py",
+      "bytes": 9288,
+      "sha256": "7b9449fc2d1d0f27864441abe4523fad54180ee579089ceeb937144b646ba6ae",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371718",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9288",
+        "1791021134440997128",
+        "1791022242522576403"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    },
+    {
+      "name": "source/selected_owned_values.py",
+      "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/selected_owned_values.py",
+      "bytes": 9095,
+      "sha256": "ec2b73b4fbb6cf078ef98a73a098e41868e8e54d28f56e12b17d0680a728cd20",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371719",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9095",
+        "1791021678730227877",
+        "1791022242524576518"
+      ],
+      "stable9": true,
+      "materialized": false,
+      "changed": false,
+      "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+    }
+  ],
+  "source44_count": 44,
+  "original_safe44_count": 44,
+  "new_owned_safe_Python2": [
+    {
+      "name": "source/actor_bootstrap.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "bytes": 58684,
+      "sha256": "168fd8a2d1649dfe531c4d938d72f1d356a0afadf849dd4f743223a3da61e85a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371757",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "58684",
+        "1791036478773836019",
+        "1791036478773836019"
+      ],
+      "stable9": true,
+      "materialized": true,
+      "changed": true
+    },
+    {
+      "name": "source/root_tool_adapter.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "bytes": 149208,
+      "sha256": "c3709fa05cf5fa1b008e4301ffd6cb39d23cab113eac8052bc9070c6741fbe50",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371758",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "149208",
+        "1791036379916164618",
+        "1791036379916164618"
+      ],
+      "stable9": true,
+      "materialized": true,
+      "changed": true
+    }
+  ],
+  "new_owned_Source_bytes": 207892,
+  "unchanged_Source_external47": true,
+  "consumer23_unchanged_external": true,
+  "native_C_H_HASHONLY_external_unchanged": true,
+  "current134_count": 134,
+  "current134": {
+    "name": "evidence/current134-source-map.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/current134-source-map.json",
+    "bytes": 262305,
+    "sha256": "b2b01f3bf6f3d71c2538f8a9405d7b56c9bc3c354583a916248aaa7f26bb6221",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371764",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "262305",
+      "1791036730035185999",
+      "1791036811035801404"
+    ],
+    "stable9": true
+  },
+  "current49": {
+    "name": "evidence/current49-source-map.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/current49-source-map.json",
+    "bytes": 32874,
+    "sha256": "dab1c6b4760513a25d3750a7fc2664948e7cea65c6a1362ed82524425b535b4c",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371772",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32874",
+      "1791036884969014111",
+      "1791036885059019240"
+    ],
+    "stable9": true
+  },
+  "current134_materialized2_external132": true,
+  "original_obligations": {
+    "name": "evidence/original-obligations.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/original-obligations.json",
+    "bytes": 38970,
+    "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371768",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "38970",
+      "1791036811206811149",
+      "1791036811271814853"
+    ],
+    "stable9": true
+  },
+  "original_obligations_exact_SHA": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+  "baseline_manifest": {
+    "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/manifest.json",
+    "bytes": 457860,
+    "sha256": "689764de3aef2930e9b777464cd0ea8dc9107f2ed2ce599f891da1cf04967f2b",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371743",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "457860",
+      "1791022743452312531",
+      "1791022743452312531"
+    ],
+    "stable9": true
+  },
+  "original_source_manifest": {
+    "path": "/var/tmp/friday-sol090-publisher-actual-n1-n4-performing-producer-both-ends-inert-source/manifest.json",
+    "bytes": 261056,
+    "sha256": "62533ad749b8a3574b5f8df571e983ca3e6aa7f3fcfb5dcc56f1fb3bbc132db3",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371664",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "261056",
+      "1791019637450098497",
+      "1791019637450098497"
+    ],
+    "stable9": true
+  },
+  "original_source_received": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL091-RESULT-RECEIVED-20261003.json",
+    "bytes": 56303,
+    "sha256": "5ec4c73366cf45d1dcb149d2a167bee4e32d8f6fea725dd63ff63736cbca56b1",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534177",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "56303",
+      "1791035586937707006",
+      "1791035587010704718"
+    ],
+    "stable9": true
+  },
+  "source_decision": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB914-PUBLISHER-N2-SOURCE-AUTHORITY-RESULT-RECEIVED-20261003.json",
+    "bytes": 34387,
+    "sha256": "624226e222446fa6c6cd2669a0cf8a1d296d7d71a67eac89cd7bd8f49ef78543",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534173",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "34387",
+      "1791022471816729982",
+      "1791022471875733367"
+    ],
+    "stable9": true
+  },
+  "prior_checkpoint": {
+    "path": "/home/jericho/.jericho/runtime/ASTRA-E4-CHECKPOINT-20261003T1318MSK.json",
+    "bytes": 148185,
+    "sha256": "a901e40251b65e182867b7cfb83f8054dabfb3fb2df313c344a90c922f51c762",
+    "identity9_decimal_strings": [
+      "2050",
+      "9068704",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "148185",
+      "1791022998854963865",
+      "1791022998929968168"
+    ],
+    "stable9": true
+  },
+  "source_byte_materialization": {
+    "name": "evidence/source-byte-materialization.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/source-byte-materialization.json",
+    "bytes": 214536,
+    "sha256": "f143f81e395777c9b5562d872de074c8f9726dc8b2cc599ae623abc47c26fc5a",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371760",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "214536",
+      "1791036478824838945",
+      "1791036478898843190"
+    ],
+    "stable9": true
+  },
+  "full_gapless_partitions": {
+    "name": "evidence/full-gapless-partitions.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/full-gapless-partitions.json",
+    "bytes": 217760,
+    "sha256": "cf8797b5ac73383106db4ab82873553555afcde52b81d160af41ad3a92e035c9",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371765",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "217760",
+      "1791036730106190045",
+      "1791036811035801404"
+    ],
+    "stable9": true
+  },
+  "connected_relations": {
+    "name": "evidence/connected-relations.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/connected-relations.json",
+    "bytes": 5952,
+    "sha256": "d4989a08ad2c462f7c70bf4916862abac677b2c357b4d85afa7a6fe8e8386003",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371762",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "5952",
+      "1791036729969182238",
+      "1791036811035801404"
+    ],
+    "stable9": true
+  },
+  "exact_code_conflicts": {
+    "name": "evidence/code-conflicts.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/code-conflicts.json",
+    "bytes": 24319,
+    "sha256": "b865df41416987e7cc46b7b358a8a78d82cca457bf1c7adfce506dd764fc80ea",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371763",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "24319",
+      "1791036729991183492",
+      "1791036811035801404"
+    ],
+    "stable9": true
+  },
+  "residuals": [
+    {
+      "id": "CODE-N2-EARLIEST-READ-ROUTE-TOKEN-AND-STOCK-ALLOCATION",
+      "status": "OPEN",
+      "invariant": "Missing/corrupt earliest seed and all ordinary errors require full original body/alias custody and BOTH finite ends, not a typed failure or process loss.",
+      "boundaries": [
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+          "line": 935,
+          "literal": "stock.seed_preowned(None,0,None)"
+        },
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+          "line": 676,
+          "literal": "try:self.seed_packet=self.read()"
+        },
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+          "line": 686,
+          "literal": "bootstrap-seed-missing-original-route_CODE"
+        },
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+          "line": 720,
+          "literal": "bootstrap-seed-missing-original-token_CODE"
+        },
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+          "line": 984,
+          "literal": "bootstrap-seed-route-before-body-and-end_CODE"
+        }
+      ],
+      "actual_attempt": "Root duplicates SAME existing response pipe onto existing fd0 before exec. main reads original launch_fact and validates actual Root-owned selected rows before argv/constructors, then binds SAME original request endpoint/token. Valid-route later errors use actual fail_prefix/_control/full error arena. Partial raw framing/packet/row/error aliases are retained prospectively, no unbounded reply archive.",
+      "exact_conflict": "Before the first launch_fact framing/JSON/row/token validation succeeds, the original dynamic request FD and export token are unavailable. Fixed response fd0 alone cannot write a full prefix. Pre-exec child_w is CLOEXEC and does not survive exec. Stock __new__/initial field allocation and top-level stock imports can also fail before a usable Source channel exists. This package records original/secondary errors but cannot certify full original body or finite original endpoint retirement at those cuts.",
+      "smallest_original_role_alternative": "Actual already-enrolled original launcher/bootstrap's prospectively owned supplier/receiver for the required earliest selected rows/token/raw errors and both native ends independent of fallible script parse/allocation. Exact existing source has no such after-exec native supplier. Lead must rejoin the original public/table/channel relation within original role/image/fence; no guessed FD/token, new arg/token/grant, descriptor scan, private/native heap, image patch, or typed failure as custody."
+    },
+    {
+      "id": "CODE-N2-FIXED-RESPONSE-SLOT-COLLISION",
+      "status": "OPEN_FOR_ORIGINAL_PROTECTED_SLOT_COLLISION",
+      "boundaries": [
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+          "line": 1276,
+          "literal": "stock_response_slot=0"
+        },
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+          "line": 1279,
+          "literal": "bootstrap_existing_fixed_response_slot_collision_CODE"
+        }
+      ],
+      "exact_conflict": "Original Source explicitly selects fixed 0/1/2 only. Stdout/stderr 1/2 are actual capture receivers and are preserved. Three new hardcoded 3/4/5 slots would contradict LAB914's 'no numbers the source does not already choose'. The same-role single fixed response0 plus launch_fact carrying original dynamic bundle/request is implemented. If 0 is an original protected executable/bootstrap/bundle/request/gate/pre-exec fd, it refuses BEFORE fork; no overwrite or guessed fallback.",
+      "smallest_original_role_alternative": "Lead independently verifies this actual same-channel fd0 arrangement, or supplies an authentic original same-role static-slot layout with collision-proof original row/cap/constructor/error/cost relations. No increased FD128/RAM/body/output cap or new argument/token/role."
+    },
+    {
+      "id": "CODE-N2-FULL-ERROR-PREFIX-AND-BOTH-FINITE-ENDS",
+      "status": "OPEN_DEPENDENT_N1_N3_N4",
+      "boundaries": [
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+          "line": 874,
+          "literal": "'ownership_retired':False"
+        },
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+          "line": 977,
+          "literal": "bootstrap-prefix-finite-retirement-unconfirmed_CODE"
+        },
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+          "line": 974,
+          "literal": "stock.seed_prefix_receipt=stock.fail_prefix"
+        }
+      ],
+      "actual_attempt": "Same current v6 prefix/physical spans/full error/history/Root launch alias readers remain; Root additionally joins its same retained seed/token/argv/actual pre-exec table, not a child flag. Missing/short/noninteger/mismatch argv is checked only after selected stock channel and table binding. main retains original primary and actual receiver/write/ACK errors, never calls retained/complete a finite end.",
+      "exact_conflict": "Actual unchanged Root _consume_early_stock_prefix always returns ownership_retired=False, including an otherwise selected body. Foreign public/native state, self-writing mappings/late errors and missing authentic original native prepared-row supplier remain original N1/N3/N4 CODE. Parent wait4/table cancellation is not full original alias/native outside-end acceptance. Raising the original stock exception likewise is not an accepted native end. No passed result or accepted prefix/end is fabricated.",
+      "smallest_original_role_alternative": "Lead integrates actual same-role full body/alias transfer -> confirmed mapping/source-row/owner closure -> last-error custody -> finite original native end across existing Root/stock paths. LAB916 retains codec/bank/lifetime/capacity ownership. Interface request pins exact call sites and expected receipt; it is not an implemented callback/grant/flag. Preserve original controls and current strict full readers."
+    },
+    {
+      "id": "CODE-N2-WHOLE-COST-QUALIFICATION",
+      "status": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "boundaries": [
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+          "line": 1285,
+          "literal": "slots=3"
+        },
+        {
+          "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+          "line": 678,
+          "literal": "self.seed_read_buffers=self.read_buffers;self.seed_raw=self.last_raw"
+        }
+      ],
+      "exact_conflict": "One added actual dup2 row is charged to SAME original parent reservation before fork, and existing total FD128 remains a COUNT, not a smaller numeric-FD domain. Original body80M/metadata2M/output33554432/read40960000000/RAM8589934592/workers4/clocks/gates preserved. New seed raw buffers, decoded graph/table rows, closure/error aliases and BOTH full readers overlap with original Source/bundle/parent/native banks. Existing before-effect formulas are retained, not reclassified as measured whole fit. Allocator/IO/RSS/CPU/destructor/physical-alias costs and complete last end are not established.",
+      "smallest_original_role_alternative": "Actual canonical before-effect whole layout/count/raw widths and Source+stock+native lifetime costs on independently accepted final bytes, within original pools and all original cases. No width reduction, cap change, mock/live replacement or UNKNOWN=0."
+    },
+    {
+      "id": "N2-STOCK-PRESCRIPT-COMPILER-NATIVE-IMAGE-REQUIRED-OPEN",
+      "status": "REQUIRED_NOT_RUN_CODE_OPEN",
+      "actual_obligation": "Stock launcher/libc/interpreter/top-level stock import failures before the script's main do not gain a native body supplier from this Source-only packet. Source binding flags, stderr/pidfd/process exit and hashes are not custody.",
+      "smallest_original_role_alternative": "Lead reconciles the exact original fence/image/compiler/native ABI/source authority and actual original native supplier/receiver/BOTH ends. No stock image/provider/key/install/live change or Scanner denied route."
+    }
+  ],
+  "unchanged_N1_N3_N4_residuals_ref": {
+    "name": "evidence/code-conflicts.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/code-conflicts.json",
+    "bytes": 24319,
+    "sha256": "b865df41416987e7cc46b7b358a8a78d82cca457bf1c7adfce506dd764fc80ea",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371763",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "24319",
+      "1791036729991183492",
+      "1791036811035801404"
+    ],
+    "stable9": true
+  },
+  "LAB916_nonoverlap_and_exact_interface_request": {
+    "name": "evidence/LAB916-interface-request.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/LAB916-interface-request.json",
+    "bytes": 13105,
+    "sha256": "7b9ffea8281f67a970325743e02ec8adae972f5713f31fbdb301ed5d23c24462",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371767",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "13105",
+      "1791036730166193463",
+      "1791036811036801462"
+    ],
+    "stable9": true
+  },
+  "LAB916_owned_content_and_H2_unchanged": true,
+  "full_v6_prefix_consumer_literal_unchanged": true,
+  "strict_original_owner_token_guard_not_relaxed": true,
+  "original4_argv_count_retained_consistency_not_custody": true,
+  "new_argument_token_channel_role_image_grant_count": 0,
+  "fd0_layout": "Same original response pipe only duplicated onto already selected0; actual dynamic bundle/request Root rows and SAME token carried by SAME launch_fact. Protected fd0 collisions before fork remain CODE. Not an invented3/4/5 fixed-slot table.",
+  "both_finite_original_ends": "REQUIRED_CODE_OPEN_NOT_RETAINED_FLAG_OR_WAIT4",
+  "validation_plan": {
+    "name": "evidence/validation-plan.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/validation-plan.json",
+    "bytes": 9579,
+    "sha256": "1b7c8be6ffd95afa93a2739fcbd4d5a63b5e3a9d84d39bdabda13836abf22512",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371766",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "9579",
+      "1791036730138191869",
+      "1791036811035801404"
+    ],
+    "stable9": true
+  },
+  "new_safe_controls20_required_NOT_RUN": 20,
+  "all_original69_exact6_all15_schema20_current134_controls_caps_clocks_preserved_required": true,
+  "qualification_and_costs": {
+    "name": "evidence/qualification-and-costs.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/qualification-and-costs.json",
+    "bytes": 2695,
+    "sha256": "8d11b28cb816dd6dd6777def96b27d370eb94c850a2379b927e9a72a01abd1c8",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371769",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "2695",
+      "1791036884848007216",
+      "1791036885059019240"
+    ],
+    "stable9": true
+  },
+  "data_integrity": {
+    "name": "evidence/data-integrity.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/data-integrity.json",
+    "bytes": 7204,
+    "sha256": "5898592e8b3b72ca7707b3a704acaa160f1a5ae0c385a60d7777813fdbbf14c1",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371770",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "7204",
+      "1791036884878008926",
+      "1791036885059019240"
+    ],
+    "stable9": true
+  },
+  "external_final_snapshot": {
+    "name": "evidence/external-final-snapshot.json",
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/evidence/external-final-snapshot.json",
+    "bytes": 148845,
+    "sha256": "1aaa2ad7c3019fecc53aef0bb3bb6c3493d83ef579ce8fb4ef21496da1d7a552",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371771",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "148845",
+      "1791036884921011376",
+      "1791036885059019240"
+    ],
+    "stable9": true
+  },
+  "exact_external277_final_SHA9_verified": true,
+  "old_SOL091_full63_files_dirs_pathset_unchanged": true,
+  "source_hash_partitions_scope": "Data integrity/manual literal only, NOT Source syntax/semantic/native/independent acceptance.",
+  "resources": {
+    "deadline_sec": 3600,
+    "seal_sec": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 33554432,
+    "local": 4,
+    "children": 0,
+    "network": 0,
+    "retry": 0,
+    "friday": 0
+  },
+  "original_pool_caps_and_clocks": {
+    "body": 80000000,
+    "metadata": 2000000,
+    "whole_output": 33554432,
+    "whole_read": 40960000000,
+    "whole_RAM": 8589934592,
+    "FD": 128,
+    "workers": 4,
+    "original_clocks_and_gates": true,
+    "all_original_cases_required": true,
+    "unsafe_required_no_waiver": true
+  },
+  "source_deadline_sec": 3000,
+  "seal_reserve_sec": 600,
+  "source_freeze_elapsed_sec": 545,
+  "own_pre_manifest_seal_utility_peak_RSS_KiB": 433040,
+  "RSS_scope": "One bounded trusted metadata/hash utility, NOT whole turn peak/product/C2=0 or resource gate.",
+  "known_primary_read_bytes": 32163192,
+  "other_IO_and_whole_peak_RAM": "NOT_FULLY_AGGREGATED_UNKNOWN_NOT_ZERO",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false,
+    "operational_payload": null
+  },
+  "forbidden_effects": "No Source AST/parser/import/compiler/preprocess/eval/exec/tests/native/Root/archive/GPG/model/network/key/live/install/frozen/original/prod/guard/provider/writer-lock writes, no denied Scanner retry/rephrasing/delegation/route. Only new own inert Python/text/JSON plus pinned byte/hash/stat reads and existing protocol metadata helpers.",
+  "children0_no_delegation": true,
+  "no_Sol_goal": true,
+  "native_queue": {
+    "items": [],
+    "consume": "NONE_EMPTY_QUEUE"
+  },
+  "required_next": "Astra Lead independently review whole new actual Root producer/bootstrap/table/token/strict prefix/body/raw alias/ordinary errors/collision/BOTH ends/whole cost and original unchanged dependencies. Preserve LAB916 ownership and exact remaining Source/stock/native CODE; only then qualify original image/compiler/ABI/admission/gates on accepted final bytes."
+}

@@ -1,0 +1,327 @@
+{
+  "schema": "friday.astra.a207.lab889.node.actual-body-end.scoped-independent-source-review.v1",
+  "assignment": "ASTRA-E4-A207-LAB889-NODE-ACTUAL-BODY-END-SCOPED-INDEPENDENT-REVIEW",
+  "generation": 1,
+  "reviewer": "Astra active Lead Architect epoch4",
+  "recorded_utc": "2026-10-03 00:54:18 UTC",
+  "authorship": "Grok authored LAB889 delta; Astra did not. Previous Sol072/current6 preserved, no ownwholeacceptance.",
+  "review_key": "Actual new outside-body producer/alias/both receiver/final end paths versus original C1/C2/C3 and unchanged caps",
+  "manifest": {
+    "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/manifest.json",
+    "bytes": 1741,
+    "sha256": "fafdfb9d94a774cba4455416a7c71ef22713e004b1ed7bf0fee49bf0bb59e190",
+    "identity9_decimal_strings": [
+      "2050",
+      "3849524",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1741",
+      "1790987976871479524",
+      "1790987976871479524"
+    ],
+    "stable9": true
+  },
+  "actual6": [
+    {
+      "name": "caller.py",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/caller.py",
+        "bytes": 179046,
+        "sha256": "e7801afaa87f593dee61081e846f28e55de4f0cb7d8752258604df62c27e183c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226335",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "179046",
+          "1790981940896456058",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/caller.py",
+        "bytes": 188629,
+        "sha256": "1c86a4b1141385a87967cb6a15dfa55fc24a643764603b46a6450d044f4df2e9",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849492",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "188629",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "Source_execution": 0
+    },
+    {
+      "name": "expectations.json",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/expectations.json",
+        "bytes": 12120,
+        "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226336",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12120",
+          "1790981196515654027",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/expectations.json",
+        "bytes": 12120,
+        "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849496",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12120",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "Source_execution": 0
+    },
+    {
+      "name": "launch-contract.json",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/launch-contract.json",
+        "bytes": 51470,
+        "sha256": "29eceb367d91803c18acb2adc1ee46d865fc7ec7d4c63e21578c10dbc67f844c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226337",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51470",
+          "1790981887598391475",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/launch-contract.json",
+        "bytes": 51597,
+        "sha256": "4ca1514c1f6bfbf017144ec622aea135dac3670644de58d07e6aff47bdf39bd4",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849495",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51597",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "Source_execution": 0
+    },
+    {
+      "name": "supervisor.py",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/supervisor.py",
+        "bytes": 143262,
+        "sha256": "89cb5c6dfbc4c49e86a0237b6e708032a04fcb1ebc36f57c376e81f82966ce9a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226338",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "143262",
+          "1790981931890938257",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/supervisor.py",
+        "bytes": 152193,
+        "sha256": "96ac9259e92f9812631ed093c0ef5db34fa3b3611e6c4931b486679eaa70e49b",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849493",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "152193",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "Source_execution": 0
+    },
+    {
+      "name": "verifier.py",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/verifier.py",
+        "bytes": 113456,
+        "sha256": "db065d2e7e260e5846a9ab43ce2d1da17dbc1d3f6d6e0497fb222895ccf51020",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226339",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "113456",
+          "1790981313826399470",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/verifier.py",
+        "bytes": 121795,
+        "sha256": "bec97b0b194f675738a1ab99fabd9311def266254be85d51dfc7d6ec7b769fca",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849494",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "121795",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "Source_execution": 0
+    },
+    {
+      "name": "ordinary-surplus.txt",
+      "before": {
+        "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226340",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790980677732672473",
+          "1790981941315622131"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "3849497",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790987976870479467",
+          "1790987976870479467"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "Source_execution": 0
+    }
+  ],
+  "full_gapless_parts": 112,
+  "decision": "REJECT_CONNECTED_BODY_AND_FINITE_END_SOURCE; NO_EXECUTION",
+  "findings": [
+    {
+      "id": "SOL072-C1/LAB889-body",
+      "class": "harness",
+      "required": "Original prescribed native/stock/raw/error bodies+aliases outside actual Caller before first fallible production and through both endpoints; readonly outside receiver. Physical transport storage alone not original body.",
+      "actual_path": "caller.open_caller_outside_body -> outside_relation_bytes -> commit_outside_body -> adopt_outside_body/consume_outside_body (copied into supervisor/verifier)",
+      "actual_sites": "caller.py627-776; corresponding new literal copies/dependencies in supervisor/verifier; caller.py3537-3547 actual unprivileged entry",
+      "evidence": "Caller creates memfd and writes marker. Actual producer contains F0-F5 labels, existing derived bounds and render_original_body(exc) bytes; no original Root->Caller preinitialization/native allocator/enrollment/readonly full-body decoder implementation is added. consume_outside_body checks marker/extent, then sets custody ORIGINAL_MEMFD_NOT_RENDERED_TRANSPORT; that label does not establish original body correspondence. All sides share the writable descriptor, not a separately held readonly outside receiver.",
+      "closure": "OPEN; genuine actual original outside body/caller/typed receiver code still needed, not just future image qualification. Native/body custody claim rejected; keep actual Source as transport only."
+    },
+    {
+      "id": "SOL072-C3/LAB889-disarm",
+      "class": "harness",
+      "required": "Retain original min/hard enforcing end until confirmed actual both-owner retirement or legally accepted transfer with full body evidence. A local flag/unchanged deadline variable isn't enforcement.",
+      "actual_path": "finish_outside_end inherited branch and success branch",
+      "actual_sites": "caller.py783-811 and copied supervisor/verifier finish_outside_end",
+      "evidence": "Inherited branch disarms ITIMER_REAL when end>0 and not fault, then labels TRANSFERRED_PARENT_HOLDS_BODY without any native outside-body acceptance. Success branch disarms before close attempts and before confirming every fd closed; late close error leaves timer disabled. outside_timer_refreshed=False does not fix removed enforcement. Source main _exit remains and no genuine native both-end custody added.",
+      "closure": "OPEN; do not disarm on label or prior consumption. All late errors must invalidate accepted end and preserve original enforcement/custody; actual independent full-body receiver is prerequisite."
+    },
+    {
+      "id": "SOL072-C2/LAB889-bounds",
+      "class": "harness/evidence",
+      "required": "All actual six tuples/full raw and secondary catch body/range/cost domains before failure; original caps/cases fixed.",
+      "actual_path": "outside_relation_bytes/commit_outside_body rendered error append under existing32768; derived_stock_bounds remains conditional",
+      "evidence": "Labels F0-F5 and arithmetic are not full tuples/native/body/catch proof. Byte append of the projected error is fallible; not actual prior ownership of raw original. Existing108 conditional cap remains unproved. No ordinary safe positive/negative/native execution was run.",
+      "closure": "OPEN; preserve C2 and UNKNOWN_NOT_ZERO, no hidden new body allowance or reduced cases."
+    },
+    {
+      "id": "SOL072-C1/LAB889-duplex-resource",
+      "class": "harness/evidence",
+      "required": "Every actual descriptor/body alias and publication mutation prospectively owned/counted, no unknown close/retry or overwrite.",
+      "actual_path": "open_caller_outside_body raw dup2(held,8) and three independent OUTSIDE_BODY end cursors using fstat->pwrite; inherited byte-appends",
+      "evidence": "The new numeric8 alias bypasses the original allocate_owned ledger for duplication; all3 writer copies obtain current size and perform positional append without a shared reservation/serialization. They can disagree when original caller/supervisor/verifier overlap. Header/marker and append-only intent do not prove bounded race-free publication or simultaneous FD/body accounting.",
+      "closure": "OPEN connected producer/consumer/resource path, not a new independent project root."
+    },
+    {
+      "id": "LAB889-accounting",
+      "class": "evidence",
+      "required": "Honest author effects/resources and exact materialized pathset bytes; not release progress or runtime fit.",
+      "actual_owned_files": 13,
+      "actual_owned_bytes": 640312,
+      "author_sealed_tree_bytes": 113820,
+      "author_transport_write_bytes": 113820,
+      "evidence": "Author113820 does not equal full Source/evidence13 owned bytes. Keep immutable report; insufficient full write/seal accounting, unknown not zero. No claimed exceeded16MiB output or product budget from this mismatch.",
+      "closure": "EVIDENCE_GAP; no reuse as full author resource accounting or actual runtime fit."
+    }
+  ],
+  "scoped_credit": "Only actual materialized Source/current6 fourchangedtwoequal/112 full gapless byte checks and immutable pathset are verified, no acceptance credit for full-body/end assertions.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "source_execution": 0,
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "new_product_roots": 0,
+  "whole_roots_closed": 0,
+  "unsafe": {
+    "handling": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  },
+  "next": "Actual already permitted outside original native parent body/caller relation and corrected original finite-end enforcement; not another speculative marker/body-label patch, no unadmitted execution. Specific denied Sol075 action remains prohibited; do not bypass guard via another participant."
+}

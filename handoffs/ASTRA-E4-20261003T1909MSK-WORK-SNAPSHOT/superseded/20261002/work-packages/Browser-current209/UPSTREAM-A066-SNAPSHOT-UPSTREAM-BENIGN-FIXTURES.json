@@ -1,0 +1,46 @@
+{
+  "schema": "friday.a061.inert-benign-fixture-spec.v1",
+  "authority": "DATA_ONLY_NOT_ADMITTED",
+  "actual_prepared_or_sealed_fixture": false,
+  "payloads": [
+    "owned-inert:chrome-linux64.zip",
+    "owned-inert:chrome-headless-shell-linux64.zip",
+    "owned-inert:ffmpeg-linux.zip"
+  ],
+  "positive": {
+    "roles": 3,
+    "files": 6,
+    "dirs": 3,
+    "hashes": "sha256 exact literal bytes, computed by independent consumer, not a selfselected authority pin",
+    "mode": "positive"
+  },
+  "negative_expected": {
+    "http404": {
+      "cause": "HTTP_STATUS_404",
+      "third_bytes": "",
+      "state": "CONTOUR_ABORTED"
+    },
+    "certificate": {
+      "cause": "SSLCertVerificationError",
+      "third_bytes": "",
+      "state": "CONTOUR_ABORTED"
+    },
+    "protocol": {
+      "cause": "TLS_EVIDENCE",
+      "third_bytes": "",
+      "state": "CONTOUR_ABORTED"
+    },
+    "truncated": {
+      "cause": "BODY_TRUNCATED",
+      "third_bytes": "owned-inert:ffmpeg-linux.zip",
+      "state": "CONTOUR_ABORTED"
+    },
+    "short_write": {
+      "cause": "SHORT_WRITE",
+      "third_bytes": "",
+      "state": "CONTOUR_ABORTED"
+    }
+  },
+  "oracle": "A061-FULL-CONTROLS.transport_oracle checks exact reason/stage, first2 bodies+hashes, third exact state, file/dir count, accounting, launched/reaped3 and resources. Run_pair actually must complete fresh positive first.",
+  "remaining": "New source/OS/image and registry DATA-delta bundle constructors remain SOURCE_INCOMPLETE. These literals neither create an authority capsule nor an operational adverse payload."
+}

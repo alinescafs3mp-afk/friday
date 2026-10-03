@@ -1,0 +1,78 @@
+{
+  "schema": "friday.e4.a212.sender.method-state.stock-error-order.source-delta.manifest.v1",
+  "output": "/var/tmp/friday-astra-a212-sender-method-state-stock-error-order-source-delta",
+  "files": [
+    {
+      "path": "/var/tmp/friday-astra-a212-sender-method-state-stock-error-order-source-delta/ordinary_root_consumers.py",
+      "bytes": 91885,
+      "sha256": "f813f16bb855e96d970620266260c72f82e24b4822fa2a746910fbef53f0736f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226847",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "91885",
+        "1790995719886145049",
+        "1790995719944148374"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a212-sender-method-state-stock-error-order-source-delta/source-delta.json",
+      "bytes": 2140,
+      "sha256": "5c25f7939df2e33644d7010de3039214e6a206ef30710c30d646e65275dc2f11",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226848",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2140",
+        "1790995798012622846",
+        "1790995798059625539"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a212-sender-method-state-stock-error-order-source-delta/result.json",
+      "bytes": 4118,
+      "sha256": "d98b195b133f06c6c880355cf62e4e538fa90177949391b07bf47b5764fcf954",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226849",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4118",
+        "1790995798100627889",
+        "1790995798148630641"
+      ],
+      "stable9": true
+    }
+  ],
+  "external_immutable_original": {
+    "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/ordinary_root_consumers.py",
+    "bytes": 91473,
+    "sha256": "27e0f17855fe4945a52aeee9da29829e290406271d3ff9f1c16e7f08a546fafc",
+    "identity9_decimal_strings": [
+      "2050",
+      "4225621",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "91473",
+      "1790956169968899518",
+      "1790956169968899518"
+    ],
+    "stable9": true
+  },
+  "not_whole_source": true,
+  "SourceReady": false,
+  "Source_execution": 0,
+  "GO": false
+}

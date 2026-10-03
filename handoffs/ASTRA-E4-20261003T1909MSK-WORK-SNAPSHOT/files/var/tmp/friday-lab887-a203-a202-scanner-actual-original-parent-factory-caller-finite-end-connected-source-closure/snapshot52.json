@@ -1,0 +1,1062 @@
+{
+  "assignment": "ASTRA-E4-A203-A202-SCANNER-ACTUAL-ORIGINAL-PARENT-FACTORY-CALLER-FINITE-END-CONNECTED-CLOSURE-LAB-887",
+  "before_manifest": {
+    "bytes": 51858,
+    "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/manifest.json",
+    "sha256": "1a174283685c764c4e684bc48608ce75b2e0c00d4aab559d651a974ee366e067",
+    "stable9": true
+  },
+  "census": {
+    "changed": 1,
+    "equal": 51,
+    "extra_existing_native_header_changed": 0,
+    "extra_existing_native_header_unchanged": 1,
+    "materialized_here": 1,
+    "new_extra_dependency": 0,
+    "required": 52
+  },
+  "generation": 1,
+  "rows": [
+    {
+      "after": {
+        "bytes": 12103,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/controls/catalog.json",
+        "sha256": "a3a2c499df062b6d9c048416dc8c2dbf3aa4638b23bc47cfe5c5c219bfaa63e2",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 12103,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/controls/catalog.json",
+        "sha256": "a3a2c499df062b6d9c048416dc8c2dbf3aa4638b23bc47cfe5c5c219bfaa63e2",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "controls/catalog.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 1484,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/controls/independent-contract.json",
+        "sha256": "0c45acead7156172974dbf89d8a7044fe90bc420724638501d86f7f927942ca0",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 1484,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/controls/independent-contract.json",
+        "sha256": "0c45acead7156172974dbf89d8a7044fe90bc420724638501d86f7f927942ca0",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "controls/independent-contract.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 21559,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/controls/whole-closure.json",
+        "sha256": "8208d4bc540dce0c0b7eabbd149d14ddc8686a68af851d8b6af22bad048aeced",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 21559,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/controls/whole-closure.json",
+        "sha256": "8208d4bc540dce0c0b7eabbd149d14ddc8686a68af851d8b6af22bad048aeced",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "controls/whole-closure.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 298123,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/all202-identity-map.json",
+        "sha256": "ffddb01d39713c2464856b717b7512733e7d2e68da58250cfc3ff599ea552529",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 298123,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/all202-identity-map.json",
+        "sha256": "ffddb01d39713c2464856b717b7512733e7d2e68da58250cfc3ff599ea552529",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": true,
+      "materialized_here": false,
+      "name": "data/all202-identity-map.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 159,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-admission.json",
+        "sha256": "c276309c7b4ce03626eca641e2bba42bc79036b5f63247ae0c2787eb6e61d5da",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 159,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-admission.json",
+        "sha256": "c276309c7b4ce03626eca641e2bba42bc79036b5f63247ae0c2787eb6e61d5da",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": true,
+      "materialized_here": false,
+      "name": "data/c55-admission.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 356,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-expected-output.json",
+        "sha256": "7ba0a58769f20b0c69d20d66f578ceb3d25b047d96e5103cd8c51101427db126",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 356,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-expected-output.json",
+        "sha256": "7ba0a58769f20b0c69d20d66f578ceb3d25b047d96e5103cd8c51101427db126",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": true,
+      "materialized_here": false,
+      "name": "data/c55-expected-output.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 63,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-held.json",
+        "sha256": "ff7f06af5898b00d8fb17b129906516807ef744f2595a0c0fa0317a18a78b012",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 63,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-held.json",
+        "sha256": "ff7f06af5898b00d8fb17b129906516807ef744f2595a0c0fa0317a18a78b012",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": true,
+      "materialized_here": false,
+      "name": "data/c55-held.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 772,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-index.json",
+        "sha256": "fedcc9aab0857e605f54ea869919a855eebdcab077c035df536fa8882ad9fff0",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 772,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-index.json",
+        "sha256": "fedcc9aab0857e605f54ea869919a855eebdcab077c035df536fa8882ad9fff0",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": true,
+      "materialized_here": false,
+      "name": "data/c55-index.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 16241,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/future-scan-plan/plan.json",
+        "sha256": "083fd2a22e468ab2adcced2a55e33225a6785b1c5dcb0362f139731c28b8f59c",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 16241,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/future-scan-plan/plan.json",
+        "sha256": "083fd2a22e468ab2adcced2a55e33225a6785b1c5dcb0362f139731c28b8f59c",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "future-scan-plan/plan.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 238293,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/input-index/index.json",
+        "sha256": "41781d9297176e57c5b222a3692c737e8953cae175eec17e2477af9a48a31197",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 238293,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/input-index/index.json",
+        "sha256": "41781d9297176e57c5b222a3692c737e8953cae175eec17e2477af9a48a31197",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": true,
+      "materialized_here": false,
+      "name": "input-index/index.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 190300,
+        "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/native/source_owner.c",
+        "sha256": "92a7a8298f4c3390e83b33936755f63e0f608bdbff878f379ddbd9f960fa3493",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 188353,
+        "path": "/var/tmp/friday-astra-a202-sol071-scanner-original-preinit-guard-task-start-and-final-receiver-connected-source/native/source_owner.c",
+        "sha256": "1220d0d6e83ac4668a27e5f415620dc80c495a538c888ca78358edfc0f6bbda3",
+        "stable9": true
+      },
+      "changed": true,
+      "historical_hashonly": false,
+      "materialized_here": true,
+      "name": "native/source_owner.c",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 989,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/archive-expectation.v1.json",
+        "sha256": "75ad747bd30f63ce624d10c789c1a27003e7f8ea38dba0b83a958709d2a67427",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 989,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/archive-expectation.v1.json",
+        "sha256": "75ad747bd30f63ce624d10c789c1a27003e7f8ea38dba0b83a958709d2a67427",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/archive-expectation.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 1919,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/broker-material-provenance.v1.keys.json",
+        "sha256": "16239396207f90a3ab78158ebdd9abd58db304c3bc3061a081fba18d33489503",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 1919,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/broker-material-provenance.v1.keys.json",
+        "sha256": "16239396207f90a3ab78158ebdd9abd58db304c3bc3061a081fba18d33489503",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/broker-material-provenance.v1.keys.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 8823,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/broker-snapshot-manifest.v1.keys.json",
+        "sha256": "0038a130fc6cfc212180ec82f932f8ddd4d4d25ceeda27dda64713e4cf0755fc",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 8823,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/broker-snapshot-manifest.v1.keys.json",
+        "sha256": "0038a130fc6cfc212180ec82f932f8ddd4d4d25ceeda27dda64713e4cf0755fc",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/broker-snapshot-manifest.v1.keys.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 705,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/custody-record.v1.json",
+        "sha256": "4a8d71b72af9ff8fcef74f1de7a29fb20b94087975b347037080a70eedccee16",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 705,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/custody-record.v1.json",
+        "sha256": "4a8d71b72af9ff8fcef74f1de7a29fb20b94087975b347037080a70eedccee16",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/custody-record.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 7833,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/deb-member-observation.v1.json",
+        "sha256": "45924c3191e3197fc94373566bd3d244b2b61d070c580515cbd73989ebf3d0f3",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 7833,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/deb-member-observation.v1.json",
+        "sha256": "45924c3191e3197fc94373566bd3d244b2b61d070c580515cbd73989ebf3d0f3",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/deb-member-observation.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 8050,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/future-scan-manifest.v1.json",
+        "sha256": "671cbc38574acfd4bc05ac74f7c8f0eec7b95fda6ebea39faecb5477655b9f32",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 8050,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/future-scan-manifest.v1.json",
+        "sha256": "671cbc38574acfd4bc05ac74f7c8f0eec7b95fda6ebea39faecb5477655b9f32",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/future-scan-manifest.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 2990,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/held-custody.v1.json",
+        "sha256": "ac77bd4881f968bc58c24198afe0a4eb5befa1d7c0fe2665c2ef5ee7c55ec9b1",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 2990,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/held-custody.v1.json",
+        "sha256": "ac77bd4881f968bc58c24198afe0a4eb5befa1d7c0fe2665c2ef5ee7c55ec9b1",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/held-custody.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 6332,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/input-index.v1.json",
+        "sha256": "8eff7af829f21acc44705e580339bc76ce678fca0dc5475e86a1ed35acefa839",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 6332,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/input-index.v1.json",
+        "sha256": "8eff7af829f21acc44705e580339bc76ce678fca0dc5475e86a1ed35acefa839",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/input-index.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 17438,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/member-record.v1.json",
+        "sha256": "a40f2d7feecdd4298065b879c2c73ce49a3f2d081c1be683a1fdd7fe7e976708",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 17438,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/member-record.v1.json",
+        "sha256": "a40f2d7feecdd4298065b879c2c73ce49a3f2d081c1be683a1fdd7fe7e976708",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/member-record.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 7772,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/scan-admission.v1.json",
+        "sha256": "88c1e2caa20b29c4fe242510b1d59e956c34e8dfd16b11d5a2756f6dd86b1ac7",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 7772,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/scan-admission.v1.json",
+        "sha256": "88c1e2caa20b29c4fe242510b1d59e956c34e8dfd16b11d5a2756f6dd86b1ac7",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/scan-admission.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 966,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/scan-index.v1.json",
+        "sha256": "fee19bd2e81076c01d25479a0144fdfd3f4192c14e66892bd20e9084478a9c85",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 966,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/scan-index.v1.json",
+        "sha256": "fee19bd2e81076c01d25479a0144fdfd3f4192c14e66892bd20e9084478a9c85",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/scan-index.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 39747,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/scan-resource.v1.json",
+        "sha256": "d70d4914ce82272338b3f3972ed258f651743cb56087567e2d2673e6a6b889e4",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 39747,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/scan-resource.v1.json",
+        "sha256": "d70d4914ce82272338b3f3972ed258f651743cb56087567e2d2673e6a6b889e4",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/scan-resource.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 11609,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/scan-result.v1.json",
+        "sha256": "d1f40916d2b2e36c077b28888f9c4dd9712bc7a70b2e5c17c2699bbfd84c31cb",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 11609,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/scan-result.v1.json",
+        "sha256": "d1f40916d2b2e36c077b28888f9c4dd9712bc7a70b2e5c17c2699bbfd84c31cb",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/scan-result.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 17439,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/wheel-metadata-observation.v1.json",
+        "sha256": "5ac922c318c18ab9d3a562bd25c6cac28488a749fbd82b84feaeeaaa421bd875",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 17439,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/schemas/wheel-metadata-observation.v1.json",
+        "sha256": "5ac922c318c18ab9d3a562bd25c6cac28488a749fbd82b84feaeeaaa421bd875",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "schemas/wheel-metadata-observation.v1.json",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 211,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/__init__.py",
+        "sha256": "d27706191c919459d23e8b27f17066132d4ee7311cd0d9630f75a3c1cb179bda",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 211,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/__init__.py",
+        "sha256": "d27706191c919459d23e8b27f17066132d4ee7311cd0d9630f75a3c1cb179bda",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/__init__.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 19120,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/bounds.py",
+        "sha256": "d304b445915461a8f6ea7399cec8ce8861b660e349f45a4017d0fd9b2d9561e1",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 19120,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/bounds.py",
+        "sha256": "d304b445915461a8f6ea7399cec8ce8861b660e349f45a4017d0fd9b2d9561e1",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/bounds.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 18753,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/broker_map.py",
+        "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 18753,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/broker_map.py",
+        "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/broker_map.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 9474,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/canonical.py",
+        "sha256": "492af27f62df7609010bcf40ace91153992f747a514437128dbf030baef39050",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 9474,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/canonical.py",
+        "sha256": "492af27f62df7609010bcf40ace91153992f747a514437128dbf030baef39050",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/canonical.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 10859,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/causes.py",
+        "sha256": "c56f0a84275cad7b9c923ee8c4f84a92724dd0d9926456a6a8fbf664cae7a703",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 10859,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/causes.py",
+        "sha256": "c56f0a84275cad7b9c923ee8c4f84a92724dd0d9926456a6a8fbf664cae7a703",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/causes.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 19552,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/compression.py",
+        "sha256": "81f845b58a41fd5e733a8e062f94f442718253563ceded26e9491fde72434274",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 19552,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/compression.py",
+        "sha256": "81f845b58a41fd5e733a8e062f94f442718253563ceded26e9491fde72434274",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/compression.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 20445,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/context.py",
+        "sha256": "43bbf91da3411a70986fc5e9d8518bc8197901dc74ca771d61fd4103fba12a4b",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 20445,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/context.py",
+        "sha256": "43bbf91da3411a70986fc5e9d8518bc8197901dc74ca771d61fd4103fba12a4b",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/context.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 30961,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/contracts.py",
+        "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 30961,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/contracts.py",
+        "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/contracts.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 9780,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/controls.py",
+        "sha256": "1603b21d0f65c116c3e46e7611e652a8ca2bdd2aa80e273ef212838d72003aef",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 9780,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/controls.py",
+        "sha256": "1603b21d0f65c116c3e46e7611e652a8ca2bdd2aa80e273ef212838d72003aef",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/controls.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 56605,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/custody.py",
+        "sha256": "cba6ab3149298afe0b50dcdc53187bb0c363cc518f90d95b3c816b37bbd132bc",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 56605,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/custody.py",
+        "sha256": "cba6ab3149298afe0b50dcdc53187bb0c363cc518f90d95b3c816b37bbd132bc",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/custody.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 56876,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/deb_archive.py",
+        "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 56876,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/deb_archive.py",
+        "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/deb_archive.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 3970,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/digests.py",
+        "sha256": "fd588bda6e4edbe2fe751ea69ac147a9b2bbd3271096c00b69af31bb70757b1d",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 3970,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/digests.py",
+        "sha256": "fd588bda6e4edbe2fe751ea69ac147a9b2bbd3271096c00b69af31bb70757b1d",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/digests.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 1917,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/filename.py",
+        "sha256": "12d9730bbacfbcf32896c448d9fbaa84c304b62a7b6d24210f3d3339bd2851f7",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 1917,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/filename.py",
+        "sha256": "12d9730bbacfbcf32896c448d9fbaa84c304b62a7b6d24210f3d3339bd2851f7",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/filename.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 1798,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/source/fixtures.py",
+        "sha256": "baa60bba8f6bbb912663569e478d171f16c808ed6ccf9beb811cdd41c2a90762",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 1798,
+        "path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/source/fixtures.py",
+        "sha256": "baa60bba8f6bbb912663569e478d171f16c808ed6ccf9beb811cdd41c2a90762",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": true,
+      "materialized_here": false,
+      "name": "source/fixtures.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 2031,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/guards.py",
+        "sha256": "de34c880bd18b78d2e9b691008950809a31c466d581e3f232939b30d10969806",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 2031,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/guards.py",
+        "sha256": "de34c880bd18b78d2e9b691008950809a31c466d581e3f232939b30d10969806",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/guards.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 1458,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/normalize.py",
+        "sha256": "91053cc6010512819788b5adf11af85286c74ec32f90cbc76721e280cc28a43c",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 1458,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/normalize.py",
+        "sha256": "91053cc6010512819788b5adf11af85286c74ec32f90cbc76721e280cc28a43c",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/normalize.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 4553,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/pins.py",
+        "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 4553,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/pins.py",
+        "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/pins.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 60258,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/public.py",
+        "sha256": "3e791f1a04b0443ae0e377f6cedc0a27e9bb0ca0f4c2d577d066be1ff845885b",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 60258,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/public.py",
+        "sha256": "3e791f1a04b0443ae0e377f6cedc0a27e9bb0ca0f4c2d577d066be1ff845885b",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/public.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 28991,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/raw_relations.py",
+        "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 28991,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/raw_relations.py",
+        "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/raw_relations.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 12176,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/schema_validate.py",
+        "sha256": "57ec66bc4faf68c12576cd34418c7af1a45add88bd0f881f43f7e043401bca15",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 12176,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/schema_validate.py",
+        "sha256": "57ec66bc4faf68c12576cd34418c7af1a45add88bd0f881f43f7e043401bca15",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/schema_validate.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 3622,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/semantics.py",
+        "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 3622,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/semantics.py",
+        "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/semantics.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 63188,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/zip_wheel.py",
+        "sha256": "12c732f0674edf432461c598f5149d65fbde67211e2366fdce4c12b0987133a8",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 63188,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/zip_wheel.py",
+        "sha256": "12c732f0674edf432461c598f5149d65fbde67211e2366fdce4c12b0987133a8",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "source/zip_wheel.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 99214,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/native_owner.py",
+        "sha256": "9f79a3225d5936badaa4fb938df0acd0f09698281451ba03df64a2aacedfdd79",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 99214,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/native_owner.py",
+        "sha256": "9f79a3225d5936badaa4fb938df0acd0f09698281451ba03df64a2aacedfdd79",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "tools/native_owner.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 24555,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/native_support.py",
+        "sha256": "cfd31b3d71c23c243ecad4764f3e4b880d2963c64712e22f825565d53000023f",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 24555,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/native_support.py",
+        "sha256": "cfd31b3d71c23c243ecad4764f3e4b880d2963c64712e22f825565d53000023f",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "tools/native_support.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 32566,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/root_holder.py",
+        "sha256": "c328debde6b321ca9ae091ad21619bc4747ea96def79aa580aa40c848833b6a6",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 32566,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/root_holder.py",
+        "sha256": "c328debde6b321ca9ae091ad21619bc4747ea96def79aa580aa40c848833b6a6",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "tools/root_holder.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 15906,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/state_binding.py",
+        "sha256": "99e43760236702ad53c3fed9f7ed6462d937e8a7f9da38848d58e37b71dfd983",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 15906,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/state_binding.py",
+        "sha256": "99e43760236702ad53c3fed9f7ed6462d937e8a7f9da38848d58e37b71dfd983",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "tools/state_binding.py",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "after": {
+        "bytes": 5919,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/worker_entry.py",
+        "sha256": "112b2fa914daa0e7268945da5818c84b04d8e6240b4f008911331f3574bd8de5",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 5919,
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/worker_entry.py",
+        "sha256": "112b2fa914daa0e7268945da5818c84b04d8e6240b4f008911331f3574bd8de5",
+        "stable9": true
+      },
+      "changed": false,
+      "historical_hashonly": false,
+      "materialized_here": false,
+      "name": "tools/worker_entry.py",
+      "required": true,
+      "waiver": false
+    }
+  ],
+  "schema": "friday.astra.actual-current52.v1"
+}

@@ -1,0 +1,105 @@
+{
+  "schema": "friday.a184.independent-whole-source-matrices.v1",
+  "kind": "INERT_SOURCE_TEXT_ONLY",
+  "whole_verdict": "REJECT_CURRENT_SOURCE_CLOSURE",
+  "runtime": "NOT_RUN",
+  "whole6": [
+    {"name":"caller.py","bytes":132543,"lines":2638,"sha256":"708ed145bbf323edea7b2cf338a6b7c63b63e32b72ab8ec05cdeabc066141554","read":"COMPLETE","role":"ordinary collector; independent selected19; all6 causes/raw/ownership/resource/read/public codec","method_sections":96,"current_CODE":["E01","E02","E03"],"future":"current Root clock/stock/full19 provider qualification"},
+    {"name":"supervisor.py","bytes":101776,"lines":1983,"sha256":"49b507fbc2a4b99791908e92213979056ebaa1da4ddfe733c9eab86738e79d5c","read":"COMPLETE","role":"exact verifier gate/generation/custody/raw/typed resource/cause receiver","method_sections":77,"current_CODE":["E01","E02","E03"],"future":"actual Linux/provider/process/resource behavior"},
+    {"name":"verifier.py","bytes":73847,"lines":1509,"sha256":"2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60","read":"COMPLETE","role":"exact Node publisher chain; six GPG calls; produced raw/error/rc/custody","method_sections":57,"current_CODE":["E01","E02","E03"],"future":"actual six calls/provider behavior"},
+    {"name":"launch-contract.json","bytes":48792,"sha256":"f4af798566916c32ef504f95865faceffadd5e62e247e3c8e2ce64b4cd74bb7d","read":"COMPLETE","role":"acyclic fixed source/capsule/argv/resource/stock scope","current_CODE":"complete changed shape/producer closure not furnished; no approval transferred","future":"separate qualified authority"},
+    {"name":"expectations.json","bytes":10129,"sha256":"a77ad81425bb7abd2ffc954bb3bdccb2784a5b4785ce98f658c649a2755a7b60","read":"COMPLETE","role":"unchanged all6 case/oracle semantics; current resource/reference grammar DATA","case_order_original_equal":true,"cases_original_equal":true},
+    {"name":"ordinary-surplus.txt","bytes":158,"sha256":"a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e","read":"COMPLETE","role":"ordinary own readonly inert surplus DATA","actual_equal":true,"base64_before_after":"ABSENT/null preserved"}
+  ],
+  "all6": [
+    {"case":"startup-env-negative","oracle":"supervisor rc0/STARTUP_CONTROL_CAUSE_CONFIRMED; inner rc2/NOT_PROVEN/Refusal nonroot exact three-variable startup environment required; calls empty/home NOT_ATTEMPTED/null","source_join":"verifier.main guard -> graph.v2 nodes[root] -> supervisor.check_inner -> caller.validate_canonical","new_repair":"A182 schema mismatch closed; full graph retained","optional":"actual LC_CTYPE nonempty allowed only with LC_ALL absent; absent stays absent","remaining":"E01-E03 whole prefix/bounds/delivery; fresh actual observation","actual":"NOT_RUN"},
+    {"case":"startup-as-negative","oracle":"supervisor rc0/STARTUP_CONTROL_CAUSE_CONFIRMED; inner rc2/NOT_PROVEN/Refusal pre-interpreter inherited limit mismatch; AS67108864 pair; calls empty/home NOT_ATTEMPTED/null","source_join":"graph.v2 exact retained root -> supervisor.check_inner -> caller.validate_canonical","new_repair":"A182 schema mismatch closed; original guard/oracle unchanged","remaining":"E01-E03 and fresh actual observation","actual":"NOT_RUN"},
+    {"case":"verify-node","oracle":"supervisor rc0/QUALIFIED_SUPERVISED_NODE_RAW_PUBLISHER_CHAIN_PROVEN; inner rc0/QUALIFIED_NODE_RAW_PUBLISHER_CHAIN_PROVEN; exact six calls/signers/full raw/body/archive/count/custody/reap","source_join":"verifier.call/signature/key_listing/compare -> supervisor full receipt/cause/raw/resource checks -> caller canonical/fullraw/resource checks","remaining":"E01-E03; exact fixed-stock complete inner/supervisor fit and actual provider/native facts","actual":"NOT_RUN"},
+    {"case":"supervisor-entry-fd7","oracle":"rc2/NOT_PROVEN/Refusal unknown bootstrap inherited descriptor; no ctypes callback/fork/inner; own plaintext FD7 readonly","source_join":"strict inherited0..5 guard -> graph.v2 -> caller.original_stock_cause","new_repair":"old graph-vs-two-key equality removed","remaining":"whole graph producer/delivery bound; actual strict control","actual":"NOT_RUN"},
+    {"case":"supervisor-entry-fd127","oracle":"same exact strict supervisor cause at own readonly FD127; original effective64/hard128 retained","source_join":"strict inherited0..5 guard -> graph.v2 -> caller.original_stock_cause","new_repair":"old graph-vs-two-key equality removed","remaining":"whole graph producer/delivery bound; actual strict high-slot control","actual":"NOT_RUN"},
+    {"case":"verifier-entry-fd7","oracle":"rc1/stdout empty/full bounded stderr traceback ending RuntimeError: unknown bootstrap inherited descriptor; no home/GPG/JSON/resource receipt","source_join":"pre-general-import inherited0..6 guard -> caller.validate_entry actual traceback grammar","optional":"inner receipt/resource remain null+reason, never fabricated zero","unchanged":true,"remaining":"actual bounded complete traceback/control","actual":"NOT_RUN"}
+  ],
+  "all3": [
+    {"id":"typed-phase-resources","producer":"supervisor.sample_self/observe_owned/finish_parent plus verifier.resources","receiver":"supervisor.validate_common_inner and caller.supervisor_resources/validate_canonical","normal":"heterogeneous scalar/phase/telemetry cells and exact inner phases checked; current and raw high-water separate","error":"null exited sample+actual reason retained; mandatory missing live refuses; observed violation stays sticky","credit":"SOURCE_PRESERVED","actual":"NOT_RUN"},
+    {"id":"readonly-keyring-recipe","producer":"verifier.main keyless first2, explicit sealed ring other4","receiver":"supervisor.check_inner and caller.validate_canonical count/options","normal":"six original fixed labels,0500 home, no-autostart/no-auto retrieval policy; gpgv exact supported recipe","credit":"SOURCE_PRESERVED","LAB861_four_behaviors":"MANDATORY_FUTURE_NOT_RUN","actual":"NOT_RUN"},
+    {"id":"terminal-proc-lease","producer":"caller.prepare_proc_retirement exact registered held generation with strict detached pidfd exit","receiver":"caller.require_lease(retiring=True)","normal":"same held dev/ino/mode; full terminal9 owner acquired or root pair; token before tracked firstclose","error":"no token/unknown fstat/drift/recycled lease refuses; immutable selected inputs keep exact original9","credit":"SOURCE_PRESERVED","actual_provider_relation":"FUTURE_NOT_RUN"}
+  ],
+  "F1": {
+    "acquisition":"preowned record/slot before native acquire; both pipe endpoints returned before either wrapper",
+    "partial_constructor":"exact returned number retained even when wrapper/map/fstat fails; unreturned remains sticky ACQUIRE_UNKNOWN",
+    "retirement":"unique generation or lease; retire alias/RETIRE_UNKNOWN before first os.close; never native retry on old alias",
+    "normal":"same-owner allocation confirmed closed only after actual successful native close",
+    "primary_secondary":"first object/traceback and later native objects retained; original first rethrow planned",
+    "remaining":"E01 fallible projection can still interrupt continued cleanup/raw and replace rethrow; E02 complete history/error costs/counts unproven",
+    "actual":"NOT_RUN"
+  },
+  "F2": {
+    "normal":"full stdout/stderr/status/writable reversible bytes+count/SHA+identities/production charge+native rc/reaped checked on both sides",
+    "first_fault":"existing cells attempted before stream close; native first and secondary error owners retained",
+    "partial":"attempted before fstat/quota/settlement/read; incomplete/unknown stays partial/null and cannot qualify fullraw",
+    "codec":"UnicodeDecodeError original byte argument plus full base64; writable full base64; pending preowned returned chunks",
+    "delivery":"exact same-object canonical raw preimages with concrete restore/round-trip checks; no hash-only overflow substitute",
+    "remaining":"E01 uninterrupted continuation; E02 new full prefix shape/producer bounds; E03 unread bytes and failed complete publication have no admitted durable receiver",
+    "actual":"NOT_RUN"
+  },
+  "D1": {"CPU":20,"wall_seconds":30,"quota":"floor((65536-TOTAL_OUTPUT)/(3+writable_slots))","first_call_max":21845,"source_contract_same":true,"actual":"NOT_RUN"},
+  "D2": {"new_physical19":72427019,"supervisor_subset":7798174,"verifier_subset":7770245,"hash_subsets":93522314,"fixed":247476072,"running":20959384,"cap":268435456,"executable_dynamic_plan":"CURRENT_FORMULA_RECOMPUTES_TRUE_SIZES","author_plan":"STALE_SOL060_TOTALS_E04","aggregate_resource_fit":"UNKNOWN_NOT_ZERO_NOT_PROVEN"},
+  "stock_cause_alias_optional": {
+    "factory_fence":"exact original qualified stock Python/Linux/libc/stdlib/loader/native suppliers; full messages<=900 ASCII, type/native32,path160,clock32,two-byte escape grammar",
+    "cause":"graph root integer/node id/type/message and stock_cause equality; exact original control messages; full graph remains receipt",
+    "exceptions":"cause/context/suppress_context links retained through ref indices, including exception cycles",
+    "stock_values":"literal primitive values, float_hex, bytes/bytearray/list/tuple/dict indices preserve supported nonprimitive sharing within projection",
+    "optional":"errno/filename/filename2/notes null; cause/context null; groups optional; LC_CTYPE absence and actual reason retained; missing raw/native remains UNKNOWN",
+    "copies":"all35 original copies/stages preserved; graph may duplicate in distinct catches/history/error fields and must be charged anew",
+    "new_complete_bound":"NOT_PROVEN_E02",
+    "not_added_to_domain":["arbitrary custom native values","interpreter-wide C heap serialization","arbitrary frame locals","universal hostile provider","foreign FD adversary","durable arbitrary native object reconstruction"],
+    "native_object_reconstruction_label":"NOT_QUALIFIED_IS_NOT_BY_ITSELF_CODE"
+  },
+  "method_state_prefix": [
+    {"state":"MODULE_ENTRY","normal":"strict inherited descriptor role gates before general native work","fault":"guard refusal retains original uncaught RuntimeError or graph path as specified","limit":"earlier interpreter/import/pre-try failures are qualified stock prerequisites; not fabricated current ownership"},
+    {"state":"DEFAULT_NOT_ATTEMPTED","normal":"case NOT_RUN/reason; home intent NOT_ATTEMPTED/name null; raw fields null/uncreated","fault":"absence remains null or ABSENT; no fake rc/reap/zero bytes","limit":"not acceptance"},
+    {"state":"ACQUIRE_PARTIAL_CONSTRUCTOR","normal":"slot before native, exact returned endpoints before wrapping","fault":"returned acquisition stays owned; unreturned state UNKNOWN","limit":"once-safe cleanup and native identity still required"},
+    {"state":"LIVE_FIRSTFAULT","normal":"native process identity/gate/resource observation; exact source custody","fault":"original first retained, later rc/reap/raw separate; missing live refuses","limit":"E01 projection continuation"},
+    {"state":"RAW_SETTLEMENT","normal":"known reaped producer + fstat size + full EOF/stable identity + charge","fault":"unsettled/short/drift/quota/read/decode pending remains partial","limit":"E03 produced unread bytes are not delivered fullraw"},
+    {"state":"DEADLINE_CLEANUP","normal":"one absolute deadline with withheld cleanup/terminal/read reserves; safe exact known owners only","fault":"unknown remains sticky, no refreshed clock or second native close","limit":"E01 own reporting failure can interrupt later work"},
+    {"state":"CODEC_AND_ACCEPTED_TERMINAL","normal":"full canonical reversible sharing/count/SHA/raw resource/state/rc and complete bounded successful exit","fault":"overflow/partial/nonzero/unknown rejects; private full owners cease at native exit","limit":"E02 producer fit and E03 complete original receiver delivery"}
+  ],
+  "raw_resource_matrix": [
+    {"layer":"verifier GPG buffers","produced_limit":65536,"all_channels":"stdout/stderr/status + binary-key/body writable","producer_cap":32768,"representation":"utf8<=2x escape or base64; full decode error graph","original_ownership":"owned memfd and exact native Popen","gap":"E01/E02/E03"},
+    {"layer":"supervisor inner transport","per_channel_limit":32768,"combined_limit":65536,"producer_cap":65536,"representation":"full base64 or exact same-inner-json-preimage; pending raw separate","original_ownership":"registered held parent/process generations and owned transport","gap":"E01/E02/E03"},
+    {"layer":"caller six transport rows","stdout":65536,"stderr":32768,"producer_cap":2097152,"raw_partition":1179864,"metadata_reservation":489472,"proposed_total_newline":1669337,"margin":427815,"representation":"ASCII bounded escape or full base64; reversible same-raw object references","gap":"E01/E02/E03; partition is not full graph/history shape proof"}
+  ],
+  "caps_preserved": {"whole_wall":900,"outer_AS":134217728,"outer_CPU":[60,120],"outer_NOFILE":256,"outer_FSIZE":2097152,"outer_read":268435456,"supervisor_AS":[33554432,117440512],"supervisor_CPU":120,"supervisor_NOFILE":[64,128],"verifier_AS":117440512,"verifier_CPU":120,"verifier_NOFILE":128,"GPG_AS":67108864,"GPG_NOFILE":128,"GPG_NPROC":0,"aggregate_AS":268435456,"aggregate_FD":320,"native_runtime_read":262144,"child_debit":32768,"verifier_explicit_read":4294967296,"scratch_verifier":16515072},
+  "format_width_headroom": {
+    "original_error_value": {"complete_message_ascii":900,"type_ascii":32,"native_scalar_width":32,"path_ascii":160,"clock_decimal_ascii":32,"escape_factor":2,"old_type_message_value_upper":1894,"old_cell_reserved":2048,"old_cell_margin":154,"new_graph_bound_carried":false},
+    "graph_v2_actual_fields": ["schema","root","nodes","values","stock_cause","native_object_reconstruction"],
+    "node_actual_fields": ["id","module","type","message","args","state","errno","filename","filename2","notes","traceback","cause","context","suppress_context","group"],
+    "node_frame_value_guards": {"exception_nodes":128,"frames_per_node":128,"nonprimitive_values":128,"retained_projection_calls_per_actor":256,"guard_count_is_width_or_reachable_stock_proof":false},
+    "literal_value_width": "original native int/float/string operands retain exact values; no generic arbitrary-Python-value domain added",
+    "byte_value_width": "4*ceil(n/3) base64 plus exact count/SHA/kind/JSON syntax; full original decoder byte args may duplicate already retained raw and must be charged",
+    "container_value_width": "id/kind/items-or-pairs references plus every supported original stock item;128 distinct cells does not bound member counts or raw preimages without per-root factory closure",
+    "frame_width": "file/function/line/lasti field values and syntax; exact reachable stock frame depths/function/file operands need binding; type32 is not automatically a new frame-name bound",
+    "stock_cause_duplicate": "root type/message copied in stock_cause while original node message/args remain; reuse removes extra evaluation, not every serialized copy",
+    "history_width": "256 finite slots; actual role/where/number/generation/state/attempted/error graph fields; repeated copies and whole acquisition-count proof require new bounds",
+    "pending_raw_width": "returned pending chunk can overlap appended data at interrupted commit; extra base64/error preimage copies require explicit count/width analysis",
+    "all35_reservation":71680,
+    "descriptor_error_copy_reservation":131072,
+    "current_outer_raw_partition":1179864,
+    "current_outer_metadata_reservation":489472,
+    "current_outer_partition_newline":1669337,
+    "current_outer_partition_margin":427815,
+    "allowed_raw65536_base64_only":87384,
+    "raw65536_is_actual_fixed_stock_production_claim":false,
+    "new_inner32768_supervisor65536_complete_shape_bound":"NOT_PROVEN_FOR_EXACT_ORIGINAL_STOCK_FACTORY_DOMAIN",
+    "universal_arbitrary_native_maximum_used_as_CODE_witness":false
+  },
+  "unsafe_historical_obligations": {"status":"ABSTRACT_REQUIRED_NOT_RUN","required":true,"waiver":false,"operational_payload":null},
+  "historical_A169": {"status":"ENDED_RED","all6_invoked":true,"preclose_Refusals":10,"recorded_unconfirmed_native_close_list":[],"missing_changed_fstat_field_cause":"UNKNOWN","Root_cleanup_is_Source_green":false,"clock_reused":false},
+  "future_only": ["new genuine finite Root scope/clock/admission","fresh current exact numeric19-int9 DATA","current Source/image/loader/ENV3/namespace/cache/alias/stock factory bindings","same-held Linux terminal proc relation","LAB861 readonly home/trustdb-locks/agent/common.conf four actual behaviors","actual original all6 native fullraw/rc/reap/resources/cleanup"],
+  "mandatory_remaining": ["all35/all6/all3/F1F2/D1D2","full19/numeric19-int9/mode fences","all30/F0-F11","complete final compiler/native/Root/runtime/live/gates/build/install/negative controls"],
+  "SourceReady":false,
+  "Root_admission":false,
+  "Root_Image":false,
+  "GO":false,
+  "aggregate_CPU_RAM_IO_native":"UNKNOWN_NOT_ZERO_NOT_PROVEN"
+}

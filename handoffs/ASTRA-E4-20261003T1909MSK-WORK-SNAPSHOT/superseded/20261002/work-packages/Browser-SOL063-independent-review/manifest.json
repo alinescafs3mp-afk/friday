@@ -1,0 +1,35 @@
+{
+  "schema": "friday.sol063.independent-review-manifest.v1",
+  "assignment": "ASTRA-E4-LAB866-BROWSER-WHOLE209-ALL216-ALL29-INDEPENDENT-SOURCE-REVIEW-SOL063",
+  "generation": 1,
+  "event": "ASTRA-SOL-E4-SOL063-T1",
+  "input_sha256": "541ef5fa6d0a386ca29c3f69c1020fb9bcc39a388a23be96a7300cb613f58109",
+  "task_sha256": "af88460e12461a27632ef9e29c6121c82935c24efe09b20f0c0af294ece53ebb",
+  "sealed_payload_pathset_pin": {
+    "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/seal/pathset.json",
+    "bytes": 11964,
+    "sha256": "33c6ef44b1208c0b979b0c696578f0eea791b1d1877bfdee333e3fd5d639874e",
+    "identity9_decimal_strings": [
+      "2050",
+      "6980660",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "11964",
+      "1790944797207496617",
+      "1790944797207496617"
+    ]
+  },
+  "payload_leaf_count": 23,
+  "review_relative_path": "review.json",
+  "decision": "REJECT_CURRENT_WHOLE_SOURCE",
+  "CODE_count": 9,
+  "metadata_source_join_open": 1,
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "REQUIRED_NOT_RUN_NOT_WAIVED",
+  "GO": false,
+  "DAG": "payload leaves -> pathset -> manifest -> one external RESULT"
+}

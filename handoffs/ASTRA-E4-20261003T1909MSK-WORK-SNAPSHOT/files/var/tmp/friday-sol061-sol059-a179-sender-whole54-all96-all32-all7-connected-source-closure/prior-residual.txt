@@ -1,0 +1,101 @@
+SOL055 exact attempted-code mandatory residual — full repair NOT completed.
+
+R07 OUTSIDE CUSTODY / NATIVE GENERATION — OPEN, actual CODE still absent.
+ExistingRootTail.adopt still offers same-process numeric FDs with accepted=false.
+There is no called independently selected receiver, actual SCM_RIGHTS or real
+pre-birth ownership transfer, full accepted descriptor/object inventory, receiver
+partial-acquisition/raw-error ownership, consumed acceptance receipt or exact
+alias retirement. outside_wait4 still takes numeric pid/options, not the genuinely
+independently held helper/native creation generation and direct parent ownership.
+The CLI still closes local readers before outside acceptance/native-end receipt.
+The new wrapper raw owner and failed-prefix recipe require this boundary; they
+do not create it. F04/F05 local sticky-close/one-attach repairs remain genuine.
+This package did not implement the complete outside ABI or its ordinary caller.
+That is author incompleteness, not missing permission to author inert legal code,
+not impossibility, and not a demand for a current live Root grant.
+
+R02/R11 PHYSICAL READ / STARTUP / INTERNAL BOUNDS — OPEN AFTER REAL ATTEMPT.
+Called new SourceReadMeter.perform/adapter retain requested operands, actual
+returns/errors/vector buffer owners before representation. readv/preadv success
+uses the actual integer count; capture failure and vector-error count are unknown.
+OwnedStream read/read1/readinto/readinto1/readline/readlines no longer bypass that
+adapter. However, buffering/decoding can prefetch and serve retained data; returned
+bytes/characters are not the physical read count. Such rows set accounting_complete
+false and physical_bytes=null; semantic units are not charged as physical bytes.
+The actual raw-layer BufferedIO/TextIO/FileIO chain was NOT completely instrumented.
+Unknown physical IO cannot consume a fictional residual allowance. The ordinary
+controller report still exports its known used count, not a whole proof.
+SourceGraph recorder recursion, raw Producer transport, startup/pre-attachment
+imports/loaders, implicit IO and Sender stock subprocess internals remain open.
+Adapter fstat used to bound a default regular-file request is a raw metadata edge
+and not itself full startup/internal observation. Unbounded pipe/readall requests
+have no supplied physical bound and are refused; this is not whole behavior credit.
+readlines(hint) may return beyond its hint, argument-validation/keyword/buffer
+errors still need exact stock first-error correspondence, and the concurrent
+reservation release-to-charge boundary has not been proven. All are exact
+implementation residuals; no raw-layer closure or all-path read-cap PASS claimed.
+Original Source54 currently 5,231,694 bytes; three full physical scans 15,695,082
+leave 1,082,134 of the ORIGINAL shared controller+receiver16MiB for ALL other
+reads. Same-owned fullbytes/current named+held9 cache remains legal under the
+reviewed immutable generation fence. No extra Source allowance is taken from Root.
+
+R03/R06 DAMAGE SAFE RAW CAPACITY / DURABILITY — OPEN.
+RootNativeLauncher.run_failure exists before run. Raw actual exception/traceback
+is retained before error_value; projection_error, prefix_recording_error and
+result_recording_error are separate and original lifetime.first_error is sticky.
+This locally repairs the exact encoded-first wrapper ordering. Raw objects are
+still in-process, not independently accepted/durable complete exception graphs.
+Pending list growth, all raw generations, buffers, vector snapshots, encoding,
+recorder failures and final transport need a complete bound/reserved damage route
+under unchanged AS/CPU/wall/storage ends. A raw slot is not a resource theorem.
+No arbitrary event cap, projection, bytes cut, reserved allowance or zero IO/RAM
+was invented. Secondary failures before/beside completed encoding remain required.
+
+R08 FAILED PREFIX — LOCAL RECIPE ADDED; OUTSIDE QUALIFICATION OPEN.
+incomplete_prefix_recipe admits prefix_sealed=true AND sealed=false and verifies
+same readonly fully sealed held generation, size and full SHA. It returns every
+literal chunk and raw row/read/error owner, including torn last row; it does not
+JSON-parse a torn row as complete. sideband_read_bytes selects this path explicitly,
+binds persisted fragments to actual raw reads and always reports complete=false.
+Complete rows_from_held and All32RootConsumer still require complete sealed state.
+All raw retained owners still need real independent adoption and capacity, including
+bytes returned but not persisted when the recorder failed. Those are NOT silently
+credited as independently held bytes or completed read/error persistence.
+
+R09/R10 ORDERED METHODS / ALL32 / PHYSICAL WRITER CHRONOLOGY — OPEN.
+N01 actual bootstrap global lookup, N02 exact stderr tag and N03 artifact-refusal
+domain have real code changes; different-author acceptance remains required.
+The original all132 expressions and16 pure bodies are byte-preserved. Full
+effectful-method self-state/phase/prior-operation replay was NOT implemented.
+Generic listdir fd_names, arbitrary-error errno purposes and event-absence-only
+NOT_REACHED remain as A155 identified; they are not first-fault/branch proofs.
+The new consumer refuses text/buffered write acceptance as physical bytes instead
+of pretending re-encoding equals physical chronology. It supplies no missing raw
+writer/encoder/flush/channel-generation ownership or cross-actor physical order.
+Only selected true unbuffered FileIO/os.write events have local byte recipes.
+That can refuse ordinary buffered controller/dispatcher paths; no all32 PASS.
+All original initiating causes, domains, reached/unreached phases, typed controls
+and purpose bindings remain mandatory. No zero substitution, invented observation,
+fixture oracle, receipt-arrival-as-write-order or negative-gate waiver is supplied.
+
+FINITE NEXT REQUIRED CODE PACKAGE (proposal, NOT implemented/authorized RUN):
+1. Implement and CALL the actual outside/ordinary receiver and acceptance ABI:
+   genuine held-FD/full-object/raw-owner transfer or real pre-birth parent custody,
+   exact native creation/direct-parent generation, performed wait/retirement and
+   independently retained actual last-close/native-end receipt, under original ends.
+2. Implement the actual low-level raw reader/writer chain for buffered/text and
+   stock subprocess/loader/internal startup paths with exact original semantics,
+   request/return/error ownership and physical encoder/flush/write chronology.
+3. Complete full ordered method state and all32 purpose/first-fault/reachability
+   joins, plus complete damage/event/alias/storage/CPU/AS/whole RAM bounds.
+Then different-author WHOLE review of changed final bytes, followed only by the
+separately authorized original independent/live/final gate process. No topology,
+FD count, outside authority, process, budget or deadline is granted here.
+
+Original scope retained: held32, unprojected4,139,478B inventory,464IDs/657required
+observations/374matrices/10,514semantics; fixed63/accepted49/full56/selfcheck96,
+all30/F0-F11 and all gates. Source65536 each, native262144, Sender32MiB,
+shared controller+receiver16MiB, Source softAS64MiB/CPU300, canonical four workers,
+worker+dispatcher1.5GiB ceilings and whole8GiB/original dual ends/no retries.
+Whole resource verdict remains NOT_PROVEN; actual implicit IO and aggregate RAM
+UNKNOWN_NOT_ZERO. No successful runtime, Root admission or release claim.

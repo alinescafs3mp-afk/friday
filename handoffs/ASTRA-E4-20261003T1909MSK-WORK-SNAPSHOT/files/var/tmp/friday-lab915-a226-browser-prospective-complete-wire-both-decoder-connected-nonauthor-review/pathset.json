@@ -1,0 +1,35 @@
+{
+  "files": [
+    {
+      "bytes": 785,
+      "name": "bound.json",
+      "sha256": "6e141a57b0ef7572549a6c4578b0f20f17664776ab57fe358d6627dd95f5b3b3"
+    },
+    {
+      "bytes": 431,
+      "name": "bound.txt",
+      "sha256": "b151a42a3a695933622bc3e91636d119be467308985794d65fcda3c2b6c985eb"
+    },
+    {
+      "bytes": 1005950,
+      "name": "pin-checks.json",
+      "sha256": "67971832d4eb9b6bdfd0c06b27baf7db3bebd26f1996912622ab7f093ba1a1d6"
+    },
+    {
+      "bytes": 641,
+      "name": "relation.json",
+      "sha256": "b01d87562d700a18cd9af40975e9f608538acb44899ac748a887d8d22b36ce7c"
+    },
+    {
+      "bytes": 11008,
+      "name": "result.json",
+      "sha256": "20ac6f08635f86335d0fb51eb5af54aba82f7461d2d5ad9b46d6d25a73efb6f8"
+    },
+    {
+      "bytes": 777,
+      "name": "validation-plan.txt",
+      "sha256": "9a818e45b450f924368857445348d5d400bff1d894571a0c3fe1c1527045ba3a"
+    }
+  ],
+  "schema": "friday.astra.lab915.browser.prospective-complete-wire.nonauthor.run.v1"
+}

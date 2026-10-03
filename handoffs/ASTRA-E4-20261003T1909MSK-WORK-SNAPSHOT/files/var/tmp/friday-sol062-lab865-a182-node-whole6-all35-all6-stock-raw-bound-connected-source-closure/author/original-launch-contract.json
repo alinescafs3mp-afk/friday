@@ -1,0 +1,731 @@
+{
+  "schema": "friday.e4.node.supervised-launch-contract.a172.v1",
+  "assignment": "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048",
+  "generation": 1,
+  "disposition": "INERT_CONNECTED_SOURCE_PENDING_WHOLE_REVIEW_AND_NEW_ROOT_ADMISSION",
+  "error_raw_onceclose": "Owned numeric slots are cleared before os.close on supervisor, verifier and caller paths. A failed close is sticky and is not retried, so a recycled number is not closed as the old owner. Verifier call retains stdout, stderr, status and writable count, sha256 and either complete utf-8 text or raw base64 before those memfds close, including timeout, live-resource, read, decode and cleanup prefixes. Partial output stays partial. Supervisor transport bytes already produced are retained with count and sha256 before the terminal close. No new role, budget, GPG route, or extended end.",
+  "execution_authority": "NONE in A048. SOURCE ONLY. Independent source review, independent trust admission of host bootstrap/dependencies and a separate finite execution assignment are mandatory.",
+  "source": {
+    "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
+    "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
+    "bytes": 62097,
+    "mode": "0600",
+    "nlink": 1,
+    "generated_source_executed_compiled_imported_or_tested": false
+  },
+  "own_runtime_fd": {
+    "role": "own_stock_runtime",
+    "ambient_input": false,
+    "path": "/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0",
+    "sha256": "1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa",
+    "size": 64184,
+    "mode": "0644",
+    "uid": 0,
+    "gid": 0,
+    "nlink": 1,
+    "flags": "O_RDONLY|FD_CLOEXEC",
+    "authority": "Explicit ordinary owned-source stock dependency assumption only, NOT immutable whole-root image proof",
+    "provenance": "ABSENT_AT_STRICT_INHERITED_ENTRY_NEW_DURING_STOCK_CALLBACK_PREPARATION",
+    "inherited_bootstrap_before_ctypes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "child_canonical_roles": {
+      "3": "prlimit",
+      "4": "python",
+      "5": "source",
+      "6": "capsule_contract"
+    },
+    "collision": "fd6 dup2 replaces own runtime with capsule contract before exec; fd>=7 closerange(7,128); runtime role is not source, capsule, or an ambient input; unknown inherited fds are refused and not closed or reclassified",
+    "supervisor_hash_check": "FULL_OBSERVED",
+    "verifier_hash_check": "FULL_OBSERVED_ONLY_IF_NEW_ELSE_ABSENT",
+    "image_proof": false,
+    "acquisition": {
+      "operation": "ctypes.CFUNCTYPE(ctypes.c_int)(lambda: 0)",
+      "retained_role": "RUNTIME_CALLBACK",
+      "callback_invoked": false,
+      "window": "exact inherited0..5 before ctypes import; retain the benign callback; exact one new pinned stock descriptor immediately afterward before kernel policy"
+    },
+    "read_accounting": {
+      "schema": "friday.e4.node.explicit-read-ledger.a073.v1",
+      "runtime_content_ceiling_bytes": 262144,
+      "child_bootstrap_upper_debit_bytes": 32768,
+      "verifier_whole_content_ceiling_bytes": 4294967296,
+      "child_debit_kind": "FIXED_CONSERVATIVE_UPPER_BOUND_NOT_MEASURED",
+      "child_debit_scope": "gate token, post-remap directory scan and four bounded role readlinks; no copied supervisor prefix",
+      "local_scope": "all explicit content reads in this verifier including both import-window scans, files, proc memory, readlinks and own directory scans",
+      "implicit_io": "UNKNOWN_NOT_ZERO",
+      "parent_prefix_carried": false,
+      "reset_or_subtraction": false,
+      "execution_credit": false
+    }
+  },
+  "upstream": {
+    "A038_contract_sha256": "2e54de5ed56edc722ef1b3f9cb158f36aa9c865f12f19ca1a8067cc133b7c33f",
+    "A036_result_sha256": "ad006db095091629c1e33fc2534f46cc5f7fc2180264264384a915016123f7f5",
+    "A036_disposition": "Terminal NOT_PROVEN; zero GPG calls; never rerun its embedded source or relabel refusal.",
+    "A032_bill_sha256": "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2",
+    "A041_review_sha256": "afe8303134ab1f66a4cd099d9388068ec13c9bdca4ea02495a73bb961605fe5c",
+    "A038_disposition": "Terminal INCOMPLETE_PREPARATION_DEADLINE_EXCEEDED; 934s>900s, no execution, immutable.",
+    "A043_source_sha256": "9edda15264b200c3a10f8d9ec6f400ea07029ea88e16ab591a4956ac8db56c97",
+    "A043_supervisor_sha256": "73e4c291ed80238f37ce15335290f076f6a6bcff1d4521a69d8b729898313fdc",
+    "A043_launch_contract_sha256": "5d76656c2761803c44521b22c9cde96ddfc2ce58c4908336ce025bf1e0352d34",
+    "A045_result_sha256": "ee4cc183367859ae25161496601a1b6805b0f13ccc3d7305b0d12521717069b1",
+    "A045_observations_sha256": "69c4eebc044ceabbd12b640a59102f4e43abe167979f6b510d24e0fc7b946e41",
+    "A048_authoritative_assignment_sha256": "73fa52af3ef9bcde4538be257c384cfe074c0592e331c66b08fb2edafccce5e7"
+  },
+  "independent_prelaunch_custody": {
+    "owner": "Independently reviewed A048 supervisor, running in separately admitted trusted host bootstrap. It opens/pins all verifier inputs/tools before starting the verifier Python and holds them through post-exit. The supervisor's own Python/bootstrap trust is not established by this generated source or its receipt.",
+    "required_algorithm": [
+      "Bootstrap is a separately trusted host caller: hold/pin the installed prlimit/Python and externally reviewed supervisor source by NOFOLLOW components/leaves; map fds3/4/5; fd-exec prlimit with supervisor AS soft32MiB hard112MiB CPU120 FSIZE32768 NOFILEsoft64/hard128 CORE0 before bootstrap Python -I -S -B; exact three-variable ENV; actual host monotonic deadline fixed before bootstrap. Generated code does not establish its own bootstrap trust.",
+      "Supervisor requires inherited supervisor limits, uid/euid/suid1000 gid/egid/sgid1000, one thread, zero inheritable/permitted/effective/ambient capabilities plus actual bounding-mask observation, exact ENV, pinned actual Python; it sets Linux NO_NEW_PRIVS and CHILD_SUBREAPER before any verifier fork. No root privilege, model, network, caller pin/source/env/target inputs or shell execution.",
+      "Supervisor independently holds every NOFOLLOW path component and regular leaf and whole-byte verifies all executable/source/contract/bill/receipt/raw/key/two archive pins before admitted verifier Python. It holds /var/tmp and registers one random exact home name as absent before launch. Only the supervisor creates this bounded name; callers cannot choose it.",
+      "After strict inherited0..5 refusal and recorded metadata/flags, only the admitted ctypes import and retained benign CFUNCTYPE(c_int)(lambda:0) preparation occur in the acquisition window; the callback is never invoked. Immediately prove exactly one new Root-selected readonly CLOEXEC stock libffi descriptor with full SHA and stable before/opened/after path/metadata/flags, before kernel policy. Immediately before fork and immediately after launch the same held component/path/whole-byte pins are checked. Child remaps only reviewed read-only fds3=prlimit4=Python5=source6=contract;0=/dev/null device checked;1/2=own empty memfds. It closes all other inherited fds, including the supervisor own post-ctypes readonly CLOEXEC libffi descriptor: fd 6 is replaced by dup2 of the capsule contract before exec, and any own runtime fd >= 7 is closed by closerange(7, 128). That runtime role is not an ambient input and is not source fd 5 or capsule fd 6. Unknown inherited descriptors are refused before the ctypes import and are not closed or reclassified. The child independently bounds its own new gate/listing/readlink content to32768 bytes; no parent copied prefix is charged as child work. Exact ENV3 is retained; fixed argv and pinned fd6 contract carry the full conservative32768 upper debit into the verifier before its first import-window observation, even though actual child bytes remain UNKNOWN_NOT_ZERO. Before fd-exec of prlimit it enforces AS112MiB or control64MiB CPU120 FSIZE32768 NOFILE128 CORE0, then pinned prlimit repeats these exact limits and fd-execs pinned Python -I -S -B.",
+      "Only fixed verify-node/startup-env-negative/startup-as-negative modes exist. Only reviewed fixed source/contract hashes, literal child read debit32768, supervisor-created canonical private name and finite host deadline are passed. ENV-negative omits LC_ALL only; AS-negative uses hard/soft64MiB only. No caller-controlled executable/pin/env/source/target.",
+      "Two produced stdout/stderr memfds each kernel-limited32768B by pre-interpreter FSIZE; aggregate<=65536B. Supervisor incrementally drains bounded offsets and retains aggregate<=65536B, never a truncation pass. Normal inner stdout must be complete strict JSON plus one newline<=32768B; stderr must be empty.",
+      "Prepare complete ownership/descriptor reserves before the sole fork; mask installed asynchronous handlers and record the exact returned PID immediately. Child waits behind a <=5s own gate until held pidfd/proc generation registered. On failure freeze exact held parent, reconcile every actual direct generation, kill only confirmed owned handles, exact wait4 parent then every confirmed subreaper adoptee. Same-number reused PID gets a fresh generation/handle; old exited fd never represents it. Genuine unknown is sticky STOP; the narrow unreleased direct-child fallback requires actual waitid ownership, no guessed/broad signal.",
+      "Complete mandatory live memory/credential/thread observations must be numeric. Missing exited samples are null with reason; missing mandatory live samples explicitly refuse. Retain raw Linux-KiB high-water independently of current proc metrics. Kernel caps supply bounds but are not replaced by missing telemetry or synthetic zeros.",
+      "Post-exit retain all custody and independently check exact whole-byte input/tool/source/contract pins, absent exact home name, zero supervisor child set and reaped tracked handles. Supervisor never deletes an EEXIST or unowned directory. Presence/unknown remains STOP_UNCONFIRMED even if inner JSON said cleanup succeeded.",
+      "Validate/preserve the complete inner receipt before success or control return, plus independent actual postexit custody/home/empty-child/held-generation/telemetry checks. Require exact current argv/hash/ENV/limits, complete numeric resources, no terminal failure and exact startup cause or canonical six-call Node proof/negatives. Inner<=32KiB/outer<=64KiB overflow refuses, no field dropping/digest-only evidence or generic GO. Root separately binds complete final supervisor bytes and successful external transport/exit."
+    ],
+    "inherited_fds": {
+      "3": {
+        "path": "/usr/bin/prlimit",
+        "size": 27616,
+        "sha256": "cb28811cb3902773c1a0f3ac0ea554c7a1e232724e9d4cae055ede54b65a7bc4"
+      },
+      "4": {
+        "path": "/usr/bin/python3.14",
+        "size": 7477160,
+        "sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+      },
+      "5": {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
+        "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
+        "bytes": 62097
+      },
+      "6": {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/launch-contract.json",
+        "sha256_binding": {
+          "fixed_binding": "sealed_contract_full_sha256",
+          "provider": "supervisor.CONTRACT_SHA",
+          "caller_override": false
+        }
+      }
+    }
+  },
+  "parent_exec": {
+    "executable": "/proc/self/fd/3",
+    "env": {
+      "PATH": "/usr/bin:/bin",
+      "LANG": "C",
+      "LC_ALL": "C"
+    },
+    "shell": false,
+    "argv_template": [
+      "prlimit",
+      "--as=117440512:117440512",
+      "--cpu=120:120",
+      "--fsize=32768:32768",
+      "--nofile=128:128",
+      "--core=0:0",
+      "--",
+      "/proc/self/fd/4",
+      "-I",
+      "-S",
+      "-B",
+      "/proc/self/fd/5",
+      "--reviewed-source-sha256",
+      "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
+      "--reviewed-contract-sha256",
+      {
+        "fixed_binding": "sealed_contract_full_sha256",
+        "provider": "supervisor.CONTRACT_SHA",
+        "caller_override": false
+      },
+      "--deadline-monotonic-ns",
+      {
+        "parameter": "supervisor_inner_deadline_monotonic_ns"
+      },
+      "--private-home-name",
+      {
+        "parameter": "supervisor_created_private_home_name"
+      },
+      "--child-bootstrap-read-debit",
+      "32768"
+    ],
+    "dynamic_values": "The appended child-bootstrap read debit is the fixed literal 32768, not a caller override or observed child measurement. Only the exact host deadline, supervisor-created name and three literal mode presets are dynamic. Source SHA is literal above. The contract SHA argument is a fixed full-byte self-binding: independently seal this complete contract, then place that exact hash literally in supervisor.CONTRACT_SHA. This object is a binding rule, not a caller parameter or placeholder. Both real source consumers verify the full positional template, and the supervisor resolves it solely from its literal pins. RESULT/review bind final supervisor bytes without a hash cycle.",
+    "argv_positions": {
+      "source_flag": 12,
+      "source_value": 13,
+      "contract_flag": 14,
+      "contract_value": 15,
+      "deadline_flag": 16,
+      "deadline_value": 17,
+      "home_flag": 18,
+      "home_value": 19,
+      "child_read_debit_flag": 20,
+      "child_read_debit_value": 21
+    },
+    "verifier_sys_argv_positions": {
+      "source_flag": 1,
+      "source_value": 2,
+      "contract_flag": 3,
+      "contract_value": 4,
+      "deadline_flag": 5,
+      "deadline_value": 6,
+      "home_flag": 7,
+      "home_value": 8,
+      "child_read_debit_flag": 9,
+      "child_read_debit_value": 10
+    },
+    "fixed_mode_overrides": {
+      "verify-node": {
+        "as_soft_hard": [
+          117440512,
+          117440512
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LANG": "C",
+          "LC_ALL": "C"
+        }
+      },
+      "startup-env-negative": {
+        "as_soft_hard": [
+          117440512,
+          117440512
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LANG": "C"
+        }
+      },
+      "startup-as-negative": {
+        "as_soft_hard": [
+          67108864,
+          67108864
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LANG": "C",
+          "LC_ALL": "C"
+        }
+      }
+    }
+  },
+  "child_exec": {
+    "maximum_active_owned_gpg_children": 1,
+    "executable": "/proc/self/fd/HELD_PRLIMIT_FD",
+    "env_template": {
+      "PATH": "/usr/bin:/bin",
+      "LANG": "C",
+      "LC_ALL": "C",
+      "HOME": "NEW_OWN_EMPTY_HOMEDIR",
+      "GNUPGHOME": "NEW_OWN_EMPTY_HOMEDIR"
+    },
+    "preexec_limits": {
+      "RLIMIT_AS": [
+        67108864,
+        67108864
+      ],
+      "RLIMIT_CPU": [
+        20,
+        20
+      ],
+      "RLIMIT_FSIZE": [
+        "QUOTA",
+        "QUOTA"
+      ],
+      "RLIMIT_NOFILE": [
+        128,
+        128
+      ],
+      "RLIMIT_CORE": [
+        0,
+        0
+      ],
+      "RLIMIT_NPROC": [
+        0,
+        0
+      ]
+    },
+    "argv_prefix_template": [
+      "prlimit",
+      "--as=67108864:67108864",
+      "--cpu=20:20",
+      "--fsize=QUOTA:QUOTA",
+      "--nofile=128:128",
+      "--core=0:0",
+      "--nproc=0:0",
+      "--",
+      "/proc/self/fd/HELD_TOOL_FD"
+    ],
+    "quota_rule": "floor((65536 - all previously observed GPG output bytes)/(3 + writable result fd count)); kernel RLIMIT_FSIZE applies to each of stdout/stderr/status and each writable result memfd. Every result begins empty. Thus total produced file outputs across calls are bounded, not merely truncated after production.",
+    "gpg_pin": {
+      "path": "/usr/bin/gpg",
+      "size": 1186456,
+      "sha256": "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754"
+    },
+    "gpgv_pin": {
+      "path": "/usr/bin/gpgv",
+      "size": 302296,
+      "sha256": "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d"
+    },
+    "gpg_common_arguments_template": [
+      "--no-options",
+      "--homedir",
+      "NEW_OWN_EMPTY_HOMEDIR",
+      "--batch",
+      "--no-tty",
+      "--no-autostart",
+      "--no-auto-key-retrieve",
+      "--no-auto-key-import",
+      "--auto-key-locate",
+      "clear",
+      "--no-default-keyring",
+      "--trust-model",
+      "always",
+      "--lock-never",
+      "--no-auto-check-trustdb",
+      "--no-sig-cache",
+      "--require-cross-certification"
+    ],
+    "gpgv_configuration": "Installed gpgv man page says no configuration files and no key expiration/revocation checking. gpgv uses only --homedir and an explicit sealed binary keyring; do not send unsupported --no-options. Full trusted GPG independently supplies validity/revocation/current-time and cross-certification checks before gpgv body comparison.",
+    "exact_sequential_call_suffix_templates": [
+      {
+        "label": "show-raw-key",
+        "tool": "gpg",
+        "after_common": [
+          "--no-keyring",
+          "--status-fd",
+          "STATUS_FD",
+          "--with-colons",
+          "--fixed-list-mode",
+          "--with-fingerprint",
+          "--with-subkey-fingerprint",
+          "--show-keys",
+          "/proc/self/fd/KEY_FD"
+        ]
+      },
+      {
+        "label": "dearmor",
+        "tool": "gpg",
+        "after_common": [
+          "--no-keyring",
+          "--status-fd",
+          "STATUS_FD",
+          "--yes",
+          "--output",
+          "/proc/self/fd/BINARY_KEY_FD",
+          "--dearmor",
+          "/proc/self/fd/KEY_FD"
+        ]
+      },
+      {
+        "label": "check-self-signatures-and-bindings",
+        "tool": "gpg",
+        "after_common": [
+          "--keyring",
+          "/proc/self/fd/BINARY_KEY_FD",
+          "--status-fd",
+          "STATUS_FD",
+          "--with-colons",
+          "--fixed-list-mode",
+          "--with-fingerprint",
+          "--with-subkey-fingerprint",
+          "--check-sigs",
+          "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+        ]
+      },
+      {
+        "label": "positive-gpg",
+        "tool": "gpg",
+        "after_common": [
+          "--keyring",
+          "/proc/self/fd/BINARY_KEY_FD",
+          "--status-fd",
+          "STATUS_FD",
+          "--verify",
+          "/proc/self/fd/SAME_SIGNED_READER_FD"
+        ]
+      },
+      {
+        "label": "positive-gpgv-body",
+        "tool": "gpgv",
+        "whole_suffix": [
+          "--homedir",
+          "NEW_OWN_EMPTY_HOMEDIR",
+          "--keyring",
+          "/proc/self/fd/BINARY_KEY_FD",
+          "--status-fd",
+          "STATUS_FD",
+          "--output",
+          "/proc/self/fd/BODY_FD",
+          "/proc/self/fd/SAME_SIGNED_READER_FD"
+        ]
+      },
+      {
+        "label": "negative-same-path-changed-row",
+        "tool": "gpg",
+        "after_common": [
+          "--keyring",
+          "/proc/self/fd/BINARY_KEY_FD",
+          "--status-fd",
+          "STATUS_FD",
+          "--verify",
+          "/proc/self/fd/SAME_SIGNED_READER_FD"
+        ]
+      }
+    ]
+  },
+  "finite_resources": {
+    "wall_seconds_including_startup_cleanup_serialization_and_emission": 900,
+    "main_reserves_cleanup_seconds": 20,
+    "exact_child_reap_seconds_within_remaining_wall": 5,
+    "parent_as_bytes": 117440512,
+    "gpg_and_prlimit_child_as_bytes_before_exec": 67108864,
+    "trusted_gpg_calls_max": 8,
+    "planned_trusted_gpg_calls": 6,
+    "per_call_wall_seconds": 30,
+    "aggregate_all_gpg_output_bytes_including_dearmored_key_and_verified_body": 65536,
+    "public_whole_json_serialization_and_output_bytes": 65536,
+    "own_scratch_bytes": 16777216,
+    "raw_key_signature_body_bytes_each": 262144,
+    "archive_stream_bytes_each": 33554432,
+    "bill_read_bytes": 1048576,
+    "receipts_read_bytes": 4194304,
+    "memory_observation": "All four VmSize/VmRSS/VmHWM/VmPeak mandatory complete numeric observations. Unavailable exited child is null+reason; mandatory live missing explicitly refuses. Verifier raw self+largest child<=224MiB reserved32MiB supervisor; supervisor raw self<=32MiB, supervised wait4 maxrss<=112MiB, and independently checked actual supervisor+inner self+child high-water<=256MiB. No reset/subtraction or historical inference.",
+    "supervisor_as_soft_bytes": 33554432,
+    "supervisor_as_hard_bytes": 117440512,
+    "parent_ceiling_bytes": 134217728,
+    "steady_supervisor_parent_child_as_bytes": 218103808,
+    "fork_supervisor_parent_and_fork_as_bytes_max": 268435456,
+    "supervisor_fork_transient_bytes": 67108864,
+    "supervisor_nofile": 64,
+    "parent_nofile": 128,
+    "child_nofile": 128,
+    "aggregate_process_fd_ceiling": 320,
+    "supervisor_cpu_seconds": 120,
+    "parent_cpu_seconds": 120,
+    "per_gpg_cpu_seconds": 20,
+    "aggregate_cpu_ceiling_seconds": 400,
+    "inner_public_whole_json_bytes": 32768,
+    "supervised_stdout_stderr_combined_bytes": 65536,
+    "supervised_stdout_stderr_kernel_slot_bytes": 32768,
+    "verifier_memfd_scratch_bytes": 16515072,
+    "supervisor_transport_scratch_reserve_bytes": 262144,
+    "supervisor_final_cleanup_custody_emission_reserve_seconds": 20,
+    "supervisor_nofile_soft": 64,
+    "supervisor_nofile_hard": 128,
+    "startup_registration_barrier_seconds": 5,
+    "exact_child_cleanup_single_absolute_reserve_seconds": 5,
+    "maximum_retained_gpg_generations": 8,
+    "retained_generation_handles": "At most eight actual GPG generations, each with an exact pidfd and held /proc directory; all reserve/barrier handles are charged to unchanged supervisor effective soft64 FD ceiling. Allocation/cap/identity failure refuses; actual full descriptor and evidence fit remains NOT_PROVEN."
+  },
+  "own_scratch_and_cleanup": {
+    "homedir": "Before mkdir exact held parent/name registered PENDING. Success ->CONFIRMED_CREATED with held identity; asynchronous unknown stickySTOP. EEXIST definitely unowned never delete; all other OS errors conservatively UNKNOWN/stickySTOP. Only own confirmed empty held directory removed, removal confirmed by exact lookup. NOT_ATTEMPTED private_home_absent=null; no false absence from HOME=None. Supervisor independently registers exact name and observes actual absence after exit; it never deletes it.",
+    "memfds": "Owned only; size-capped; executable/authority inputs are never rewritten. Binary key and verified body sealed. Same-path signed input has a private unpassed writer and read-only passed reader; grow/shrink sealed; one checksum byte changed and restored between calls, then write-sealed.",
+    "reap": "Only exact unreaped Popen child PID, finite kill/wait, no killpg. Child RLIMIT_NPROC=0 plus no-autostart forbids process/thread creation under supplied nonroot host assumptions.",
+    "accepted_output": "Only after final descriptor/path/component/full-byte custody, honest compliant resources, owned-child reaping, empty exact private directory removal, descriptor closure and deadline checks. STOP_UNCONFIRMED is sticky through subsequent failures. Whole JSON is bounded before first output byte; nonblocking emission remains under deadline. Both successful controls and positive preserve full inner observations and independent supervisor observations; failed validation retains observations but cannot credit an inner success. Explicit incomplete overflow refusal is not proof."
+  },
+  "actual_cause_positive_negative_plan": [
+    {
+      "case": "startup-environment-positive",
+      "future_expected": "Exact PATH=/usr/bin:/bin LANG=C LC_ALL=C is established before Python and remains the exact mapping after startup; pass based on actual observation, not assumption."
+    },
+    {
+      "case": "startup-environment-negative",
+      "future_expected": "Use a separately authorized isolated launch with the same finite pre-startup limits but omit LC_ALL. Environment mapping mismatch refuses before any GPG call; no inference that A036's LC_CTYPE represented injection."
+    },
+    {
+      "case": "startup-memory-positive",
+      "future_expected": "Independently pinned prlimit installs 112MiB before interpreter startup. Observe actual inherited limits, raw ru_maxrss and current /proc mm. Any noncompliance stays refusal even if current mm is low."
+    },
+    {
+      "case": "startup-memory-negative",
+      "future_expected": "Use the same pinned prlimit with a stricter 64MiB parent hard/soft AS, preserving all finite bounds. The inherited-limit check refuses before GPG. No unsafe unlimited launch, no fabricated RSS or attribution of A036 historical366080KiB."
+    },
+    {
+      "case": "raw-publisher-positive",
+      "future_expected": "Strict LF armor/base64/CRC and signed rows; independently pinned primary; actual GPG key records and verified self certifications plus every present actual subkey binding. Positive trusted GPG rc0 exactly-one GOODSIG/VALIDSIG current-time decision, actual signer corresponds to primary or cryptographically bound signing subkey with required cross-certification; gpgv same signer and exact extracted body; exactly-one target row; held archive streaming actual SHA and size."
+    },
+    {
+      "case": "changed-signed-row-negative",
+      "future_expected": "Only first digest character of selected filename row changes in the owned same-size signed-input memfd. Exact same reader pathname and GPG argument template/keyring/decision function; all other text and signature armor unchanged. Require actual rc!=0, exactly-one BADSIG and zero VALIDSIG; generic parser/resource/no-key errors are not this negative's success."
+    },
+    {
+      "case": "archive-digest-negative",
+      "future_expected": "Same held archive is streamed through the exact positive compare function with inert altered digest, same expected size; require mismatch while actual digest/size remain pinned. Do not claim the altered digest is signed."
+    },
+    {
+      "case": "custody-resource-deadline-cleanup-and-output-review",
+      "future_expected": "Independent source review must cover NOFOLLOW components/path/fds, held executable fd use, bounded output slots and scratch, finite exact reap, empty-directory cleanup, deadline through serialization/emission, sticky STOP and refusal on all failure paths. Any later runtime fault controls use new own fixtures and retain bounded limits; no historical/quarantine mutation or source execution in A038."
+    }
+  ],
+  "prior_actual_failures_and_limits_of_diagnosis": {
+    "A036_environment": "Actual empty-env invocation observed only LC_CTYPE=C.UTF-8 and failed its empty-mapping assertion before GPG. Corrected explicit PATH/LANG/LC_ALL launch matches the root's separate read-only three-variable diagnostic; diagnostic is neither future admission nor historical coercion-cause proof.",
+    "A036_memory": "Historical self ru_maxrss366080KiB exceeded assignment256MiB; RLIMIT_AS was imposed after interpreter startup. Origin was not established. Corrected independently pinned prlimit imposes limits before startup and each GPG exec. Any future noncompliant high-water remains refusal; no historical value is zeroed or upgraded.",
+    "root_diagnostic": {
+      "exact_three_variable_environment": true,
+      "current_VmRSS_kib": 10980,
+      "ru_maxrss_self_kib": 10816,
+      "historical_memory_origin_proven": false,
+      "future_resource_admission_proven": false
+    }
+  },
+  "effects_now": {
+    "generated_import_compile_exec_tests": false,
+    "GPG_execution": false,
+    "network": false,
+    "archive_rehash": false,
+    "archive_copy_extract_install": false,
+    "root_native_Lab_active_peer_history_Git": false,
+    "historical_inputs_modes_labels_changed": false,
+    "only_new_exact_source_contract_result_files": true
+  },
+  "supervisor": {
+    "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/supervisor.py",
+    "whole_byte_pin_authority": "Acyclic exact chain: full verifier bytes -> this full contract -> literal SOURCE_SHA/CONTRACT_SHA plus sizes in full supervisor -> RESULT and independent review exact supervisor pin. No own SHA literal is embedded in its own file; all binding objects are non-overridable fixed rules resolved by the real launcher, never caller-provided placeholders.",
+    "bootstrap_pre_python_profile": {
+      "executable": "held /usr/bin/prlimit fd3",
+      "argv": [
+        "prlimit",
+        "--as=33554432:117440512",
+        "--cpu=120:120",
+        "--fsize=32768:32768",
+        "--nofile=64:128",
+        "--core=0:0",
+        "--",
+        "/proc/self/fd/4",
+        "-I",
+        "-S",
+        "-B",
+        "/proc/self/fd/5",
+        "--host-deadline-monotonic-ns",
+        "HOST_FIXED_BEFORE_BOOTSTRAP_START",
+        "--mode",
+        "verify-node|startup-env-negative|startup-as-negative"
+      ],
+      "env": {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C"
+      },
+      "caller_obligations": "Independently admitted trusted host pins bootstrap prlimit/Python/supervisor source BEFORE bootstrap Python, holds custody through its exit, closes unknown fds, bounds final stdout/stderr and independently refuses timeout/nonzero/partial transport. Not established by source-only artifacts."
+    },
+    "qualified_dependencies": [
+      "installed bootstrap and verifier Python, stdlib including ctypes/libc, prlimit, GPG/gpgv, executable loaders/shared libraries",
+      "trusted Linux kernel/procfs/pidfds/NO_NEW_PRIVS/subreaper/wait4/fork",
+      "single-threaded unprivileged host; exclusive protected inputs; no stronger hostile-root claim",
+      "trusted held proc-directory lifetime and pidfd fdinfo Pid association/-1 semantics; exact unreaped direct-child waitid WNOWAIT ownership and Python os.fork/pthread_sigmask/pipe2 semantics; installed asynchronous handlers are deferred at registration"
+    ],
+    "monotonic_deadline": "Host-fixed <=900s includes bootstrap/read-hash/barrier/forks/six GPG calls/postchecks/complete emission. Inner deadline host-20s. Child gate <=5s before any verifier exec. One absolute cleanup deadline <=5s shared by all stop/reap paths, bounded within host deadline-5s; no fresh cleanup window on a second final call.",
+    "process_ownership": {
+      "prepared_before_fork": "Complete CHILD dictionary and exact descriptor reserve slots exist before fork. Empty actual child boundary, single-thread exclusive launcher, observed subreaper, all catchable signals blocked including installed SIGALRM/SIGINT.",
+      "registration": "Existing CHILD.pid receives os.fork() result immediately; before release acquire held proc directory plus pidfd, compare stable PPid/start_ticks and pidfd fdinfo actual Pid. Narrow unknown-return recovery uses actual sole direct child under empty/exclusive launch and exact held gate when available; genuine unresolved creation is sticky STOP_UNCONFIRMED.",
+      "gate": "Pre-created own nonblocking CLOEXEC pipe; child closes its writer and polls <=5s for one byte. EOF/no release/deadline exits125. No exec or verifier tool/input effects precede stable exact ownership. After release enforce all original child limits, exact fd remap, close extraneous fds, restore deliberate SIGALRM/SIGINT/SIGPIPE default dispositions and original signal mask, then fd-exec.",
+      "generation_reconciliation": "Every enumerated actual verifier/adopted child is checked, including repeated numeric PID. Acquire held current proc directory, compare stable actual start and parent plus held pidfd association. A prior pidfd whose actual Pid=-1 cannot represent a new same-number generation even if coarse start tick collides. Fresh independent records and handles retain complete separate histories. Samples use held proc directories; before/after FD checks bind the same pidfd generation.",
+      "adoption": "Observed Linux subreaper, actual empty pre-fork boundary and sole exclusive fork site establish actual adopted lineage. Reconcile each actual adopted PPid/start/pidfd, including unseen or reused numbers; finite exact pidfd kill then wait4 only confirmed owned/adopted children.",
+      "failed_registration_cleanup": "Sticky STOP prevents proof. Exact unadmitted child behind unreleased gate is finitely reaped. If pidfd cannot be obtained, only the exact unreaped direct fork-return or held-proc confirmed empty/exclusive-fork recovery PID with actual waitid WNOWAIT ownership may receive a numeric SIGKILL. The original exact gate identity is additionally checked when held; an unavailable/mismatched gate retains sticky STOP. No guessed/unowned number, broad/group kill or released unregistered exec is allowed.",
+      "unknown": "Record actual null/reason and exact pending/unknown fork/ownership/home/history through terminal fallback. Genuine identity/lineage/stop/reap failure remains STOP_UNCONFIRMED; no absence or safe-cleanup success is invented."
+    },
+    "full_inner_evidence": {
+      "retention": "Complete strict parsed inner receipt is captured as soon as held parent exit makes the transport complete, before wait4 high-water and independent postchecks may refuse. The terminal failure path also attempts bounded capture after exact owned reap while descriptors remain held. Check_inner verifies unchanged complete transport and preserves the cached full receipt before any control/positive return or refusal. Raw/current resources, complete startup argv/env/credentials/limits, exact home intent/cleanup/custody and all six actual call records remain present with independent postchecks; capture/fit/delivery failure refuses qualification.",
+      "validation": "Shared current schema/assignment/argv/source/contract/deadline/home/startup limits, exact fixed child debit, cumulative read accounting (whole=32768+performing verifier content), charged import scans with no reset, explicit unknown implicit/child IO, optional runtime absent/full-pin flags/metadata and exact final own closure, all four actual numeric memory fields and raw high-water, terminal resources/custody/cleanup, actual bounded output/scratch are required for both controls and positive. Fixed controls additionally require exact Refusal cause/exit2/zero calls, actual null NOT_ATTEMPTED home evidence, independent exact home absence; positive still requires all canonical crypto/negative evidence.",
+      "bounds": "Inner whole JSON<=32768B, two produced slots each32768B, aggregate65536B, outer whole JSON<=65536B. Actual complete fit NOT_PROVEN. No success field truncation or digest substitution. On overflow only explicitly incomplete unqualified refusal preserving exact ownership/home histories is permitted; if even that whole refusal cannot fit, emit no partial/fitted receipt.",
+      "startup_environment_negative_observation_rule": "The pre-exec negative preset omits only LC_ALL. The actual inner startup mapping must preserve exact PATH/LANG and absent LC_ALL; only Python's actually observed additional LC_CTYPE may be present, with its full string retained. Do not substitute the intended mapping for that observation or infer injection/coercion origin. Positive and startup-AS mappings remain the exact three-variable ENV. Any other unexpected variable or generic failure refuses the intended-cause control."
+    }
+  },
+  "source_constraint_map": [
+    {
+      "id": 1,
+      "constraint": "Separate execution authority; independent approval/proof",
+      "A041_mapping": "1-7,45-51,643-647",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 2,
+      "constraint": "Trusted pre-interpreter custody and exact descriptors",
+      "A041_mapping": "5-6,162-184,638-647",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 3,
+      "constraint": "Exact parent executable/env/argv pinning",
+      "A041_mapping": "620-647",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 4,
+      "constraint": "128MiB parent AS before interpreter; other inherited hard/soft limits",
+      "A041_mapping": "30,633-637",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 5,
+      "constraint": "64MiB child before exec and transient aggregate <=256MiB",
+      "A041_mapping": "325-333,354,364-383,390-397",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 6,
+      "constraint": "Tool pins and actual fd executable consumer",
+      "A041_mapping": "638-642,648-651,364-383",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 7,
+      "constraint": "Nonroot/process/thread bounds",
+      "A041_mapping": "333,354,379-384,632",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 8,
+      "constraint": "Raw versus current memory, honest noncompliance refusal",
+      "A041_mapping": "206-236,356,390-399,637,763,783-786",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 9,
+      "constraint": "900s including startup, cleanup, serialization and emission",
+      "A041_mapping": "33-35,69-75,345,386-400,590-615,626-631,764,775-814",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 10,
+      "constraint": "Aggregate GPG output and whole public receipt <=64KiB",
+      "A041_mapping": "31,358-375,403-412,590-615,794-814",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 11,
+      "constraint": "File/temp/scratch/FD bounds",
+      "A041_mapping": "31,128-159,239-268,325-333,351-422,535-587,643-674",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 12,
+      "constraint": "Exact signed/raw/key/archive/receipt/bill inputs",
+      "A041_mapping": "652-674",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 13,
+      "constraint": "Strict armor/body/filename framing",
+      "A041_mapping": "271-322,670-679",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 14,
+      "constraint": "Independent primary, self certifications, all present subkey bindings",
+      "A041_mapping": "27,464-524,686-701",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 15,
+      "constraint": "Current GPG validity/revocation/time/algorithm and actual signer",
+      "A041_mapping": "425-461,475-521,681-713",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 16,
+      "constraint": "gpgv exact body and same signer",
+      "A041_mapping": "714-726",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 17,
+      "constraint": "Actual streamed digest+size versus unique signed filename",
+      "A041_mapping": "527-532,656-669,727-729,754-759",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 18,
+      "constraint": "Significant same-real-path changed-row BADSIG negative",
+      "A041_mapping": "702-710,730-753",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 19,
+      "constraint": "Inert archive digest mismatch negative",
+      "A041_mapping": "754-759",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 20,
+      "constraint": "No current-home/config/auto-key/network retrieval",
+      "A041_mapping": "32,372,535-549,681-684,715-720",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 21,
+      "constraint": "Whole-byte NOFOLLOW component/path/held-FD custody",
+      "A041_mapping": "78-203,355,414,760-761,777-781",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 22,
+      "constraint": "Exact PID finite reap and sticky unknown",
+      "A041_mapping": "63-66,336-348,377-422,552-587,787-792",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 23,
+      "constraint": "Final no-credit-after-failure and serialization/emission",
+      "A041_mapping": "768-814",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    },
+    {
+      "id": 24,
+      "constraint": "Actual-cause startup positives and negatives",
+      "A041_mapping": "632-637",
+      "retention": "Retained and statically reconciled in final A048 verifier/supervisor/contract. Actual function/caller/positive/intended-cause/negative map is in A048 RESULT; A045 five concrete defects corrected as one package, subject to independent source review and separate runtime admission."
+    }
+  ],
+  "resource_receipt_schemas": {
+    "supervisor": "friday.e4.node.supervisor-resources.a172.v1",
+    "verifier": "friday.e4.node.verifier-resources.a172.v1"
+  },
+  "readonly_keyring_policy": {
+    "schema": "friday.e4.node.readonly-keyring.a172.v1",
+    "keyless_calls": [
+      "show-raw-key",
+      "dearmor"
+    ],
+    "keyless_option": "--no-keyring",
+    "explicit_sealed_keyring_calls": [
+      "check-self-signatures-and-bindings",
+      "positive-gpg",
+      "positive-gpgv-body",
+      "negative-same-path-changed-row"
+    ],
+    "keyed_gpg_options": [
+      "--no-default-keyring",
+      "--keyring"
+    ],
+    "gpgv_options": [
+      "--homedir",
+      "--keyring"
+    ],
+    "home_mode": "0500",
+    "original_six_calls_unchanged": true,
+    "stock_option_support_documented": "/usr/share/man/man1/gpg.1.gz",
+    "current_provider_behavior_qualification": "NEW_ACTUAL_ROOT_REQUIRED"
+  },
+  "future_Root_requirements": {
+    "old_Source_acceptance_transfer": false,
+    "old_runtime_transfer": false,
+    "SourceReady": false,
+    "actual_materialization_and_admission": "NOT_ISSUED; independent WHOLE review then NEW actual Root qualification required before any effects",
+    "stock_message_factories": "ALL35 per message<=900 ASCII; class/native32, path160, clock32, JSON two-byte escapes, exact current providers/namespace/aliases",
+    "held_proc_lease": "NEW Root independently qualifies acquired dev/ino/mode retained across exact detached pidfd exit, terminal ALL9 owner pair acquired or root0:0; no token for immutable byte inputs",
+    "resources": "all original caps and all6 retained; new performing source sizes, schema, all output/error bounds and full19 custody must be independently qualified",
+    "GPG": "Exact pinned stock no-keyring semantics for show/dearmor and explicit sealed ring for checks/verification under unchanged0500 home, actualrc/fingerprint/six calls mandatory",
+    "complete_error_values": "No message slicing in caller/supervisor/verifier. Independently qualify full factory plus source-prefix bounds and all normal/error receipt shapes under original32/64KiB producer and2MiB whole caps."
+  }
+}

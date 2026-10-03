@@ -1,0 +1,123 @@
+{
+  "schema": "friday.sol093.same-original-pool-numerical-conflict.v1",
+  "classification": "EXACT_CURRENT_PROSPECTIVE_LAYOUT_CONFLICT_NOT_UNIVERSAL_WORKLOAD_IMPOSSIBILITY",
+  "original_caps": {
+    "body": 80000000,
+    "metadata": 2000000,
+    "whole_output": 33554432,
+    "whole_read": 40960000000,
+    "whole_RAM": 8589934592,
+    "FD": 128,
+    "workers": 4,
+    "original_clocks_and_gates": true,
+    "all_original_cases_required": true,
+    "unsafe_required_no_waiver": true
+  },
+  "necessary_rows": [
+    {
+      "category": "12 distinct metadata files: primary+late for six mandatory jobs",
+      "bytes": 24001536,
+      "basis": "PrefixBodyMailbox.prepare ftruncate(meta=128+2000000), count=meta, hold.commit(output=meta); two banks each RootNative._run plus two original actor banks. Actual selected dimensions, not DOCUMENT_MAX interpreted as minimum."
+    },
+    {
+      "category": "12 positive body-mapping slots",
+      "bytes": 12,
+      "basis": "prepare requires 1<=body<=DOCUMENT_MAX. One byte is mathematical minimum, not proposed clipping or adequate full-body width."
+    },
+    {
+      "category": "six original stream envelopes counted once for Root contour",
+      "bytes": 12000000,
+      "basis": "RootObserver.terminal_credit fixed original 6*INPUT_MAX_TERMINAL; actual capture/copy/terminal routes remain. This is prospective ceiling promise, not simultaneous output witness."
+    },
+    {
+      "category": "original refusal reserve counted once",
+      "bytes": 4096,
+      "basis": "RootObserver.terminal_credit includes REFUSAL_RESERVE."
+    }
+  ],
+  "necessary_output_floor": 36005644,
+  "whole_output_cap": 33554432,
+  "output_shortfall": 2451212,
+  "excluding_streams_and_refusal_metadata_floor": 24001536,
+  "remaining_output_room_after_metadata_alone": 9552896,
+  "pair_count_minimum": 6,
+  "bank_count_minimum": 12,
+  "jobs_minimum": [
+    {
+      "job": "admission signature",
+      "caller": "admission.qualify -> RootNative.verify_admission -> _run",
+      "count": 1
+    },
+    {
+      "job": "original actor",
+      "caller": "RootToolAdapter.launch -> PrefixBodyMailbox.prepare + attach_late",
+      "count": 1
+    },
+    {
+      "job": "node-version",
+      "caller": "PerformingOperations.node_archive -> ActorContext.native -> RootToolAdapter._dispatch native -> RootNative.perform -> _run",
+      "count": 1
+    },
+    {
+      "job": "python-version",
+      "caller": "PerformingOperations.venv -> same native RPC actual Root _run",
+      "count": 1
+    },
+    {
+      "job": "loader-list",
+      "caller": "PerformingOperations.loader -> same actual Root _run",
+      "count": 1
+    },
+    {
+      "job": "browser-version",
+      "caller": "PerformingOperations.browser -> same actual Root _run",
+      "count": 1
+    }
+  ],
+  "domain": "complete perform-and-retain all15 material/operation branch; retained-consumer branch not claimed impossible; current earlier CODE may prevent reaching entire positive branch",
+  "other_jobs": "ubuntu/node GPG/readelf/retained signatures/independent selections may require further jobs; excluded conservatively, not waived",
+  "remaining_components": [
+    "installed",
+    "member_copies",
+    "typed_records",
+    "typed_pack_copy",
+    "auth_and_legacy",
+    "native_captures_and_retention",
+    "actor_captures_and_retention",
+    "selectors",
+    "bundle",
+    "rpc_transport",
+    "generated_and_public",
+    "consumer_output"
+  ],
+  "remaining_costs": "UNKNOWN_NOT_ZERO; necessity already exceeds whole output; no complete upper/read/hash/RAM/CPU/FD/elapsed qualification",
+  "anti_double_accounting": [
+    "terminal_tail already represents this terminal contour; do not add it a second time to capacity_plan",
+    "six streams counted once, not per job",
+    "physical child/RPC/native meters not new grants; owner explicit output charges cumulative, releases do not refund",
+    "per-invocation metadata FD names unique; closing or resetting mapping not a cumulative output refund or full raw/native retirement",
+    "metadata body ceilings are separate from80M body cap; no80M-as-minimum argument",
+    "distinct raw identities are not content-deduplicated merely because initial images may be equal"
+  ],
+  "local_comparison": {
+    "LAB916_row_output": 12004096,
+    "one_pair_metadata_plus_six_streams": 16000256,
+    "old_local_shortfall": 3996160,
+    "A228_authority": "local reserve can change inside SAME whole33554432; valid for one pair; not full repeated-job fit",
+    "new_local_reserve_written": false,
+    "new_aggregate_written": false
+  },
+  "before_first_effect": {
+    "Root_constructor": "new proposal attached before OutputStore/helper effects; no new native execution or over-cap reserve",
+    "actual_signature_first_effect": "not closed: Root.admission=None until signature; constructor records numeric all15 conflict but does not invent known-mode grant",
+    "known_mode": "validate_complete_capacity calls actual require_publisher_whole_layout; perform-and-retain raises exact Refused detail; retained-consumer not falsely refused by this all15 floor",
+    "implementation_complete": false
+  },
+  "Source_execution": 0,
+  "independent_acceptance": false,
+  "C1": "CODE",
+  "C2": "UNKNOWN_NOT_ZERO",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

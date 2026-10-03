@@ -1,0 +1,524 @@
+{
+  "schema": "friday.sol094.a229.connected.nonauthor.source.review.v1",
+  "assignment": "ASTRA-E4-A229-NATIVE-CALLER-FULL-BANK-TRANSFER-RETIREMENT-INDEPENDENT-SOURCE-REVIEW-SOL094",
+  "generation": 1,
+  "reviewer": "Sol nonauthor A229; authored unchanged SOL093 attempts only, no self-acceptance imported",
+  "review_key": "NONAUTHOR exact A2293 owned Source + actual original caller->Invoke->full banks/roots/actual close rows->actual verify_native_caller_packet->Source context clear->Release->final strong caller packet. No scoped helper acceptance if actual caller/receiver/API disagrees.",
+  "decision": "SCOPED_STRONG_PACKET_CUSTODY_CREDIT_CLOSED_MAPPING_AND_ACTUAL_OUTER_END_NOT_CLOSED",
+  "finite_review_done": true,
+  "whole_accepted": false,
+  "implementation_complete": false,
+  "C1": "CODE",
+  "C2": "UNKNOWN_NOT_ZERO",
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "method": "All A229 C/H/Python text read manually to EOF. Connected exact functions inspected. JSON/stat/full SHA/LF partitions = integrity only, not Source parser/syntax/compiler/runtime evidence.",
+  "source_manifest": {
+    "path": "/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/manifest.json",
+    "bytes": 40262,
+    "sha256": "6ab1655494f66a919f21291cb3528f8b267a36e5476579f396a1e6ef18ddcd43",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371833",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "40262",
+      "1791040806306246741",
+      "1791040806359250133"
+    ],
+    "stable9": true
+  },
+  "scope": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A229-PUBLISHER-ACTUAL-NATIVE-TRANSFER-SCOPE-20261003.json",
+    "bytes": 3571,
+    "sha256": "ff2f261996de87f55d3cf3d937f0bd8156445a7587d1a8c7a7c97bfb8a6d7ffd",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534272",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3571",
+      "1791039954370034500",
+      "1791039954421037460"
+    ],
+    "stable9": true
+  },
+  "checkpoint": {
+    "path": "/home/jericho/.jericho/runtime/ASTRA-E4-CHECKPOINT-20261003T1800MSK.json",
+    "bytes": 138496,
+    "sha256": "c0f8e1417c1ea2f0afa19d144a28cb9fb43cc3f795e594c0fcfb5dc725e5eb9b",
+    "identity9_decimal_strings": [
+      "2050",
+      "9068708",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "138496",
+      "1791039629129169663",
+      "1791039629217174711"
+    ],
+    "stable9": true
+  },
+  "source3": [
+    {
+      "path": "/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/native/publisher_owned_custody.c",
+      "bytes": 45358,
+      "sha256": "933865f47ec4258026bad94096ac92a9a684cc59dbbd52949c247b5ed0b36779",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371827",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "45358",
+        "1791040608358991142",
+        "1791040608358991142"
+      ],
+      "stable9": true,
+      "name": "native/publisher_owned_custody.c",
+      "materialized": true,
+      "changed_from_SOL093": true,
+      "scope": "NEW_INERT_SELECTED_OWNED_SOURCE_NOT_ACCEPTED"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/native/publisher_owned_custody.h",
+      "bytes": 3675,
+      "sha256": "11c15f283a8b8d7aa42e1485a8b2a304b12f8379208b75f2e1b43016e8262361",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371828",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3675",
+        "1791040307887552180",
+        "1791040307965556707"
+      ],
+      "stable9": true,
+      "name": "native/publisher_owned_custody.h",
+      "materialized": true,
+      "changed_from_SOL093": true,
+      "scope": "NEW_INERT_SELECTED_OWNED_SOURCE_NOT_ACCEPTED"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/source/existing_root_caller.py",
+      "bytes": 20902,
+      "sha256": "c025e89546757ff376198f3610ece040e80629af2fff5f86c014265594f9a8bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371829",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20902",
+        "1791040307909553457",
+        "1791040307965556707"
+      ],
+      "stable9": true,
+      "name": "source/existing_root_caller.py",
+      "materialized": true,
+      "changed_from_SOL093": true,
+      "scope": "NEW_INERT_SELECTED_OWNED_SOURCE_NOT_ACCEPTED"
+    }
+  ],
+  "source49_count": 49,
+  "baseline134_count": 134,
+  "original_obligations": {
+    "name": "evidence/original-obligations.json",
+    "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/evidence/original-obligations.json",
+    "bytes": 38970,
+    "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371734",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "38970",
+      "1791022108009371618",
+      "1791022242519576230"
+    ],
+    "stable9": true
+  },
+  "credits": [
+    {
+      "id": "S1",
+      "status": "SCOPED_SOURCE_CREDIT",
+      "invariant": "Full immutable bank raw/alias/parts, tuple28 Run roots and actual close rows strong BEFORE reference retirement",
+      "actual": "C560-645 real exact sealed banks/full PyBytes, tuples aliases/parts, Py_NewRef all28, actual close row tuple5; no hash-only substitution",
+      "boundary": "No authenticated original native factory/table/full image/ABI or post-release outer reader acceptance"
+    },
+    {
+      "id": "S2",
+      "status": "SCOPED_SOURCE_CREDIT",
+      "invariant": "Early Source/native false is distinct from final native reference phase; original immutable v2 doc unchanged",
+      "actual": "C393 ownership_retired=False; Python280-304 exact Source return/early false, Source end true separate phase; C700 actual receiver uses (O) one tuple13 arg",
+      "boundary": "P3/G1 remain; no true pre-retirement native result"
+    },
+    {
+      "id": "S3",
+      "status": "SCOPED_SOURCE_CREDIT_CONDITIONAL",
+      "invariant": "Every explicit successful Run-field/close-row decref has packet strong custody before clearing",
+      "actual": "Invoke C711 caller_result, Release C725 packet, C735-749 all28 Py_CLEAR, close record row already strong C628-636 before free C742; caller_packet independently owned",
+      "boundary": "Only explicit Run references on complete current packet branch. NOT packet last aliases, outer caller end, original storage deallocation, interpreter/factory cost or whole N4"
+    },
+    {
+      "id": "S4",
+      "status": "SCOPED_CONSERVATIVE_CUSTODY_CREDIT",
+      "invariant": "Failure never certifies retirement/drops original owners",
+      "actual": "Run retained C665, source_return strong C696; C701-705 original error saved and Run retained; incomplete Release rejected before clearing; no retry",
+      "boundary": "E1 finite error end remains CODE"
+    }
+  ],
+  "findings": [
+    {
+      "id": "P1",
+      "severity": "HIGH",
+      "classification": "CONNECTED_CLOSED_MAPPING_LIFETIME_CONFLICT",
+      "invariant": "After full before-close transfer and actual mapping.close, terminal reader verifies retained full cut/bytes/row/credit/close transition, not a still-live mmap.",
+      "path": [
+        "existing_root_caller.py169-176 accept_mapping -> capture selected-mapping-transfer; NativeMemoryBody reader retains selected_mapping_cuts via full_value_arena ref(selected mmap).",
+        "selected_owned_values.py121-138 retire -> receiver.accept_mapping -> actual mapping.close -> mapping_closed.",
+        "NEW existing_root_caller.py309-315 verify_native_caller_packet loops ALL snapshots -> reader.match_roots Python63-68.",
+        "selected_owned_values.py202-204 require_selected_mapping_cuts -> require_cut Python103-105 rejects self.mapping.closed with selected_mapping_actual_cut_custody."
+      ],
+      "failure": "Any successfully closed selected mapping represented in a retained snapshot cannot pass the new terminal live-cut recheck. Conservative refusal is not accepted finite N4 end.",
+      "scope": "Necessary closed-mapping contour only. Earlier native/public-state/prepared-row/N3 failures can prevent reaching it today; no runtime observation/reachability claimed. No mapping-free or universal encoding impossibility inferred.",
+      "validation": "After proper admission: full selected mapping snapshot -> actual mapping.close and complete close record -> terminal verifier. Positive must accept retained exact immutable historical bytes/cut after close; meaningful full-byte/alias/row/credit/close mismatch negatives still fail. REQUIRED_NOT_RUN.",
+      "closure": "Same-original-role phase-aware after-close full-body/cut reader. Keep live alias checks before actual close and retain full raw bank/parts/aliases plus actual close transition. No skipped snapshot, hash/flag substitute, reopen, lowered cap or new owner."
+    },
+    {
+      "id": "G1",
+      "severity": "HIGH",
+      "classification": "ACTUAL_OUTER_CALLER_CONSUMER_AND_STORAGE_SUPPLIER_ABSENT",
+      "invariant": "Changed Invoke return ABI must be supplied and consumed by SAME actual original outer caller with owned pre-effect storage and both success/failure ends.",
+      "path": [
+        "A229 manifest exact6 excluding manifest: source49 metadata, C/H, Python receiver, result and plan. Current49/baseline134 lack actual outer Invoke call site, FridayPublisherBindings/zero already_owned_run supplier and post-return tuple13/error consumer.",
+        "existing_root_caller.py is INNER Source receiver called BEFORE Release; header tuple13 description is not outer consumer.",
+        "root_tool_adapter.py2054-2084 unchanged independently_invoked_root_tool returns Source dict; A229 Invoke returns tuple13 containing that unchanged dict. This is a changed native API, not a schema20 product receipt.",
+        "After Release active_run=NULL/bindings=NULL. NativeMemoryBody.require -> read_bank/context and NativeCompletionReceipt.outside_end_confirmed -> outside_end/context cannot serve as post-release reader; before Release references_retired=False."
+      ],
+      "failure": "Real same-frame strong packet is credited, but actual outer API/storage/reader/error lifetime and native ABI supply remain absent. Existing Source property supplies no final true native end.",
+      "scope": "Exact absence in supplied source49/134/A229 manifest, not claim no external implementation exists anywhere. Original raw-publisher-receipt and A138 schema domains are not implicit tuple13 consumers. No unsupported direct tuple->old product schema route inferred.",
+      "validation": "Exact actual outer call-site/storage/Bindings/return-schema/consumer pins; full byte readback after active context cleared, original NULL/retained Run failure ownership, actual final caller alias/error end. Independent Source review then admitted image/compiler/ABI/runtime. REQUIRED_NOT_RUN.",
+      "closure": "Implement and supply SAME original caller/consumer and finite error path under existing role/caps. No reconstructed Source replacement, fabricated pointer/table, new grant or documentation-as-authority."
+    },
+    {
+      "id": "E1",
+      "severity": "HIGH",
+      "classification": "NEW_ORDINARY_TRANSFER_FAILURE_END_OPEN_CODE",
+      "invariant": "Late packet/debit/verifier failures require actual full original error/body custody at finite original caller end, not retained pointer alone.",
+      "path": [
+        "prepare_caller_packet C570-645 pre-allocation debit and partial tuple/reference allocations can fail after original final document close.",
+        "Invoke C696 source_return strong; C701-705 saves prefix triple, clears active_run, returns NULL with *retained Run and bank/document/close owners.",
+        "Release C721-724 requires verified packet and caller_packet_current C534-539 rejects saved prefix/after_document errors; cannot retire this failed branch."
+      ],
+      "failure": "Conservative retention is correct and credited. No new approved finite failure handback/cleanup caller implementation supplied; no successful end or retry inferred.",
+      "scope": "NEW late A229 transfer failures separately open even though earlier N1/pre-module failures also remain known CODE.",
+      "validation": "Meaningful debit/allocation/receiver/qualification failures after actual final close preserve original triple/full bank/document/source_return/syscall outcomes; actual original caller handles them without true result, repeated syscall or lost Run. BOTH finite ends REQUIRED_NOT_RUN.",
+      "closure": "One finite same-original-caller failure custody/handback/cleanup protocol retaining originals and actual uncertain outcomes. STOP_UNCONFIRMED remains honest pending qualification; no hidden service/retry."
+    },
+    {
+      "id": "P3",
+      "severity": "MEDIUM",
+      "classification": "EXPOSED_TUPLE_NOT_CONSTRUCTION_ONLY_PUBLICATION",
+      "invariant": "Allocation-free final status publication uses valid mutable preowned representation or truly private preconstructed final return, not immutable tuple already exposed to Source.",
+      "path": [
+        "status=PyTuple_Pack(pid,False) C638-639 enters packet C643-644.",
+        "C700 publishes exact packet to Source receiver, which reads status Python288-290.",
+        "Release C726 obtains SAME status; C750 sets references_retired; C755 overwrites tuple slot with PyTuple_SET_ITEM."
+      ],
+      "failure": "Exact exposure-then-mutation fact; construction-only/private condition is not established by this API. Existing receiver does not deliberately retain status, but its prior exposure contradicts construction-only comment. No crash/UB/runtime outcome claimed.",
+      "scope": "Requires valid representation/API or actual admissible uniqueness/non-escape proof; not asserted universal failure of all status encodings.",
+      "validation": "After admission, receiver observes/retains pre-retirement status; original caller receives correctly phased final immutable or explicitly mutable representation, no post-retirement allocation/fallible Source callback, old document unchanged. REQUIRED_NOT_RUN.",
+      "closure": "Preconstruct genuinely private final packet not exposed until cleanup, validating transfer skeleton first, or SAME preowned native mutable completion cell with actual outer ABI. No optimistic end/new grant/late allocation."
+    },
+    {
+      "id": "R1",
+      "severity": "HIGH",
+      "classification": "ORIGINAL_SUPPLIERS_AND_WHOLE_COST_OPEN",
+      "invariant": "Full transfer/readers fit SAME whole original pools/caps without dropping raw/native/alias/control requirements.",
+      "path": [
+        "C570-594 charge=count*8192+close_count*2048+28*512+32768+128*references, references=sum(part count+alias count), BEFORE container allocation. Fixed floor47104; full payloads reused by strong references, not falsely claimed new copies.",
+        "Python verify_v2_document + per-snapshot validate/match reread full banks under original debit; whole factory/allocator/RSS/CPU/implicit IO/read/hash upper bound is NOT established.",
+        "C255-271 authenticates only original final FD row; missing other prepared-row supplier remains explicit CODE. Observer selected-public-stock remains explicit refusal."
+      ],
+      "failure": "Prospective reference floor != whole upper bound. SOL093 current-design floor36005644 exceeds output33554432 by2451212; metadata24001536 alone DOES fit. Same self-cohort B+2000128>B still current-design conflict. N2 LAB917 earliest pre-script/alias mismatch and both ends open retained.",
+      "scope": "No simultaneous runtime witness, universal lossless codec theorem, metadata-only whole impossibility or retained-consumer impossibility inferred. Other complete original output/cost components remain required UNKNOWN_NOT_ZERO.",
+      "validation": "All original69/exact6/all15/schema20/current134/caps/clocks and positive/negative controls required. Full original suppliers/first-effect/layout/BOTH readers/public-native state/whole-cost and actual outer end independently qualified before execution. REQUIRED_NOT_RUN.",
+      "closure": "Exact same-original-role N1/prebirth/native prepared table/N2/N3 whole layout/full public state, P1 reader, actual G1 caller, E1 error end, P3 valid publication; then current nonauthor Source and admitted execution layers."
+    }
+  ],
+  "root_reference_inventory": [
+    {
+      "field": "anchors",
+      "slot": 0,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "banks",
+      "slot": 1,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "errors",
+      "slot": 2,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "result",
+      "slot": 3,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "final_raw",
+      "slot": 4,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "source_end",
+      "slot": 5,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "capsule",
+      "slot": 6,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "source_qualification",
+      "slot": 7,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "registered_module",
+      "slot": 8,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "pending_close_row",
+      "slot": 9,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "source_entry",
+      "slot": 10,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "source_args",
+      "slot": 11,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "binding_storage.root_fact",
+      "slot": 12,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "binding_storage.qualification",
+      "slot": 13,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "binding_storage.held_root_tool_preimage",
+      "slot": 14,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "binding_storage.final_fd_row",
+      "slot": 15,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "binding_storage.final_fd_credit",
+      "slot": 16,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "prefix_error.error_type",
+      "slot": 17,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "prefix_error.error_value",
+      "slot": 18,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "prefix_error.error_tb",
+      "slot": 19,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "prefix_error.actual_document",
+      "slot": 20,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "prefix_error.accepted_cut",
+      "slot": 21,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "after_document_error.error_type",
+      "slot": 22,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "after_document_error.error_value",
+      "slot": 23,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "after_document_error.error_tb",
+      "slot": 24,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "after_document_error.actual_document",
+      "slot": 25,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "after_document_error.accepted_cut",
+      "slot": 26,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    },
+    {
+      "field": "source_return",
+      "slot": 27,
+      "retention": "Py_NewRef tuple28 BEFORE Release",
+      "clear": "Py_CLEAR",
+      "credit": "SCOPED_EXPLICIT_RUN_REFERENCE_CUSTODY_NOT_WHOLE_LAST_ALIAS_END"
+    }
+  ],
+  "close_inventory": "Each NativeCloseRecord row is independently in closes tuple before linked record free; actual scalars copied. Final caller_packet_current rechecks28 root pointer identities and bank count/raw identities, NOT all mutable close/parts/aliases subinventory after callback; coherent freeze/revalidation required for changed inventory. No such mutation claimed observed.",
+  "ordinary_path_matrix": [
+    {
+      "phase": "preSource debit/module/entry failure",
+      "custody": "original Run+prefix triple",
+      "end": "NOT_CLOSED_CODE"
+    },
+    {
+      "phase": "write/fsync/close/publication/result failure",
+      "custody": "after_document cell+raw doc+syscall scalars",
+      "end": "NOT_CLOSED_CODE"
+    },
+    {
+      "phase": "late packet/debit/allocation/verifier failure",
+      "custody": "original Run/root/bank/document/source_return/close owners, prefix triple",
+      "end": "E1_CODE"
+    },
+    {
+      "phase": "closed mapping historical snapshot check",
+      "custody": "full historical cut/raw, actual close",
+      "end": "P1_CODE"
+    },
+    {
+      "phase": "successful verified packet explicit reference clear",
+      "custody": "packet banks/parts/aliases/tuple28/close rows",
+      "end": "RUN_REFERENCES_SCOPED_NOT_OUTER_ALIAS_END"
+    },
+    {
+      "phase": "release precondition failure",
+      "custody": "Run stays retained, no clear/retry",
+      "end": "UNCONFIRMED"
+    }
+  ],
+  "resources": {
+    "body": 80000000,
+    "metadata": 2000000,
+    "whole_output": 33554432,
+    "whole_read": 40960000000,
+    "whole_RAM": 8589934592,
+    "FD": 128,
+    "workers": 4,
+    "original_clocks_and_gates": true,
+    "all_original_cases_required": true,
+    "unsafe_required_no_waiver": true
+  },
+  "qualification": {
+    "image": "REQUIRED_NOT_RUN",
+    "compiler": "REQUIRED_NOT_RUN",
+    "native_ABI": "REQUIRED_NOT_RUN",
+    "admission": "REQUIRED_NOT_RUN",
+    "runtime": "REQUIRED_NOT_RUN",
+    "gates": "REQUIRED_NOT_RUN",
+    "unsafe": {
+      "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    }
+  },
+  "all_original69_exact6_all15_schema20_current134_required": true,
+  "no_code_authored": true,
+  "children": 0,
+  "no_guard_or_denied_operation_retry": true,
+  "same_role_next": "Closed-map historical reader + actual original outer Invoke/storage/return/error consumer + finite late-transfer failure end + valid final status publication; current nonauthor Source decision, then allowed admission/execution. No runtime under SOL094."
+}

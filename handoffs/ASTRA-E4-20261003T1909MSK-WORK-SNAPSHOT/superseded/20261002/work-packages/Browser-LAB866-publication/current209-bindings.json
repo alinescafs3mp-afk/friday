@@ -1,0 +1,2104 @@
+{
+  "bindings": [
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-ABI-MAPPING.json",
+      "pin": {
+        "bytes": 5537,
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-ABI-MAPPING.json",
+        "sha256": "6aed98f71124f1d9f38a43cf42c6aec1678fbcfa8a24382f8543e2cbfa11e8b2"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-BILL.json",
+      "pin": {
+        "bytes": 149014,
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-BILL.json",
+        "sha256": "eb9cc38144f33e25a6a5dc5630fd8b38565d0c75a87a31d69a0a44d1587157cc"
+      },
+      "predecessor_sha256": "eb9cc38144f33e25a6a5dc5630fd8b38565d0c75a87a31d69a0a44d1587157cc"
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-BOOTSTRAP.c",
+      "pin": {
+        "bytes": 68593,
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-BOOTSTRAP.c",
+        "sha256": "4f6495fff30d4ac4c863622a526073f0523541af79ea81b2b5a5f1305ee854e4"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-BUILD-RECIPE.json",
+      "pin": {
+        "bytes": 10204,
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-BUILD-RECIPE.json",
+        "sha256": "9828a63746715ad4e753b269aeacbaab6b9b9c9aec2e98f35c819aa93abcee2e"
+      },
+      "predecessor_sha256": "9828a63746715ad4e753b269aeacbaab6b9b9c9aec2e98f35c819aa93abcee2e"
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-COMMON.c",
+      "pin": {
+        "bytes": 14047,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071-COMMON.c",
+        "sha256": "aaafe2777ea6d7d3d9828ec3d089f4de495d93c36a96c69033c83c220ab9e931"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-CONTRACT.py",
+      "pin": {
+        "bytes": 25065,
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-CONTRACT.py",
+        "sha256": "db5cae1cf7748ebb25a83bcd5f3896b380615a12ef1d3c4def60666d57ae2fc2"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-CONTROL-COVERAGE.json",
+      "pin": {
+        "bytes": 331035,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071-CONTROL-COVERAGE.json",
+        "sha256": "615c6db31e76e053bbb91972b29051595f997bfc4d653f44850b89a073418d4c"
+      }
+    },
+    {
+      "changed_from_A171": true,
+      "lab866_changed": true,
+      "name": "A071-CONTROLS.py",
+      "pin": {
+        "bytes": 235751,
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+        "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e"
+      },
+      "predecessor_sha256": "cf99fae2979256597c658fb889699798e2a46d578a734903f59d490c36c6970c"
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-EXECUTOR.py",
+      "pin": {
+        "bytes": 46722,
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-EXECUTOR.py",
+        "sha256": "869ed6b5118242e851f513424e3330b1f2c5306e5a6f163b4cc7a058134541b7"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-FULL-CONTROLS.py",
+      "pin": {
+        "bytes": 65233,
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-FULL-CONTROLS.py",
+        "sha256": "6efe9b3bb6a14678b2d82d1952a5fd42e80b23b2544abf396e5704cb4482a3cb"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-NATIVE.h",
+      "pin": {
+        "bytes": 8268,
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-NATIVE.h",
+        "sha256": "1ce9be67d0ab1b47b2653176798cd6c668baa67563f8a0b7ec4f443eea518bb3"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-OWNED.c",
+      "pin": {
+        "bytes": 40557,
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-OWNED.c",
+        "sha256": "1b75390eec0bd1062d35dfa6847fa65dfb2c8fc2bd0134937f3f7524d14e72d4"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-OWNER.py",
+      "pin": {
+        "bytes": 7991,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071-OWNER.py",
+        "sha256": "d507d197fdba8eb0c7f55ad2f008f682fa883153caa68351d7fe7d2329e606ea"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-PRODUCER.py",
+      "pin": {
+        "bytes": 19456,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071-PRODUCER.py",
+        "sha256": "bf4066d10f7f4c5cca5e64fa0ae88ecf923503e71197706961a110071220a0e0"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-RUNTIME.c",
+      "pin": {
+        "bytes": 7458,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071-RUNTIME.c",
+        "sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-SCHEMA.json",
+      "pin": {
+        "bytes": 18931,
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-SCHEMA.json",
+        "sha256": "a1ace93c26eca44eaf2f6b623d010bb2da70fc3a74fb086f746721840a636639"
+      },
+      "predecessor_sha256": "a1ace93c26eca44eaf2f6b623d010bb2da70fc3a74fb086f746721840a636639"
+    },
+    {
+      "changed_from_A171": true,
+      "lab866_changed": true,
+      "name": "A071-SUPERVISOR.py",
+      "pin": {
+        "bytes": 54576,
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-SUPERVISOR.py",
+        "sha256": "a419700a042c4718245a23e27e78ee7ae9b5f1e3838f886ff3e0ced226140ce3"
+      },
+      "predecessor_sha256": "e35ff3b99508109588b15d2b09495880703f075cebb3685492b98d8475c687d8"
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A071-WORKER.py",
+      "pin": {
+        "bytes": 7971,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071-WORKER.py",
+        "sha256": "f45b4848aea0711ecb7dceef3e15a421d266504971fc932de680a8923170a8eb"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A079-CALLER-STATUS-DATA.json",
+      "pin": {
+        "bytes": 280,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A079-CALLER-STATUS-DATA.json",
+        "sha256": "f24801464aea2fae3a81ea77d25627986f5a717c639631c348a9ea441720cde7"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A079-NATIVE-ORACLES.json",
+      "pin": {
+        "bytes": 3448,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A079-NATIVE-ORACLES.json",
+        "sha256": "10c844da321d5f4d8984e409d8f111edd3cab82bb11f9e1fe8519168fe7401a2"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A079-NATIVE-PUBLIC-DRIVER.py",
+      "pin": {
+        "bytes": 23943,
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "sha256": "73474e892116959f56f8a67caf3bb4f919269a503bc5c561d1b25e3c7620edbc"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A079-ORDINARY-POSITIVE-DATA.json",
+      "pin": {
+        "bytes": 270,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A079-ORDINARY-POSITIVE-DATA.json",
+        "sha256": "4536ca15335392725103545e1ef1027745dfbc6fb2834d0eeab0406cbe0ed2aa"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A079-REGISTRY-COVERAGE.json",
+      "pin": {
+        "bytes": 4539,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A079-REGISTRY-COVERAGE.json",
+        "sha256": "450e69a264549ac5d3badbe23ad1ee8623bca103cf29a382ba0e4bd9f846be20"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A079-WAIT-FLAGS-DATA.json",
+      "pin": {
+        "bytes": 277,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A079-WAIT-FLAGS-DATA.json",
+        "sha256": "1f94b36280021e99031901576157ab889cf471af6ba32082b394261e85eb5691"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-ABI-CONTRACT.json",
+      "pin": {
+        "bytes": 3249,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-ABI-CONTRACT.json",
+        "sha256": "8d8e2d27bf15f1e38c1242dc308168e97df7f5c134d7fc8f78ab0b22b77fd5cd"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-CALLER-MAP.json",
+      "pin": {
+        "bytes": 2715,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-CALLER-MAP.json",
+        "sha256": "a922823c93577a6433d7abd8a9d7ae78fae42920ccd0fcc79765da37b7a483e9"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-EXPECTED-CONTROLS.json",
+      "pin": {
+        "bytes": 35381,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-EXPECTED-CONTROLS.json",
+        "sha256": "0032135e44769f0993f0c4d2389db41485c9dec0de2cc4645fbb207804daebb4"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-abort_invalid_ACK.json",
+      "pin": {
+        "bytes": 231,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-abort_invalid_ACK.json",
+        "sha256": "dfcd096fde7e4fc61c78d7d2cb6d39a6c2806a6ce02079678234e75f06946396"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-abort_lost_ACK.json",
+      "pin": {
+        "bytes": 228,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-abort_lost_ACK.json",
+        "sha256": "903d0052b3179951bc2a4e0501949e9ce590bde62751ba0ebc6d560b349646ea"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-abort_positive.json",
+      "pin": {
+        "bytes": 228,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-abort_positive.json",
+        "sha256": "0ebc7de92dd8bd3c18cc27cd0b01d0f9ac5cf7284f4165f23fbf6cbf7ea3a1d4"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_deadline.json",
+      "pin": {
+        "bytes": 226,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_deadline.json",
+        "sha256": "26fe311dd2ebca5780d63223d87b85ab1a8aac95a1208ddf8771979ff2ff2636"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_many_rights.json",
+      "pin": {
+        "bytes": 229,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_many_rights.json",
+        "sha256": "dd657a4efd8ccb582c7d29355550bb34eda53fca206b8e4b58e5d088bf61f597"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_origin_gid.json",
+      "pin": {
+        "bytes": 228,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_origin_gid.json",
+        "sha256": "cedca23fe4811e4af9366ac16846fd477a49529f84053dabf1e7e4f6a62c3765"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_origin_pid.json",
+      "pin": {
+        "bytes": 228,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_origin_pid.json",
+        "sha256": "824d291985107233048dfd7e08204d067af0c40989714bfca0d0ab994e7e22d9"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_origin_uid.json",
+      "pin": {
+        "bytes": 228,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_origin_uid.json",
+        "sha256": "404bd558726cbb599186d1874f3c0aa48cb5ab68d8a398c9830d49152496ad69"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_owner.json",
+      "pin": {
+        "bytes": 223,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_owner.json",
+        "sha256": "28f84252bdb72a392d887e56203a70d91ba3e2623f252f60278665166e33ad8c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_owner_birth.json",
+      "pin": {
+        "bytes": 229,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_owner_birth.json",
+        "sha256": "3da975b7fedadf79efb783b5169928301efede0b91395426abf287bfecf4d113"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_rights.json",
+      "pin": {
+        "bytes": 224,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_rights.json",
+        "sha256": "163ccdc3fe5fc0ec32eb572d496af8be068fbcd2236f2946d6a483c0220a7acd"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_role.json",
+      "pin": {
+        "bytes": 222,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_role.json",
+        "sha256": "7e05656c8c895dcd1172864cf1f99c87ad546246a0bcd5be07e447f6312ab609"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_sequence_future.json",
+      "pin": {
+        "bytes": 233,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_sequence_future.json",
+        "sha256": "d937b0eaf77132da0b9cb6c9855ac91b657fac3eaa07143e08dccf6529212dbc"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_sequence_replay.json",
+      "pin": {
+        "bytes": 233,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_sequence_replay.json",
+        "sha256": "70d2b79e35288d6a3da72405333408dbc8f757028e6f9a90ec88198bd28dfd2e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-ack_session.json",
+      "pin": {
+        "bytes": 225,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-ack_session.json",
+        "sha256": "051478a6a02c830c65875f29f5449ce52503cff3028f4d41645c9eac867e4cd2"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-caller_status_DATA.json",
+      "pin": {
+        "bytes": 232,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-caller_status_DATA.json",
+        "sha256": "20d1b08485c83a15653bff99ccc3b734d4afb46b69380dd9778d8f6556e2c51e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-close_denied.json",
+      "pin": {
+        "bytes": 226,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-close_denied.json",
+        "sha256": "81ebcb569e376fe3eb1f03eb9ff1c757968f5c5d20cd71e26974bd31c63cbf8e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-copy_birth.json",
+      "pin": {
+        "bytes": 224,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-copy_birth.json",
+        "sha256": "f73abe4c9c6a7f16b41853eab8b8e0ce5fce6447844c823a5482c3ca2019b4d1"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-copy_pid.json",
+      "pin": {
+        "bytes": 222,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-copy_pid.json",
+        "sha256": "2c586b0f0d3861697d257eee77a9c69c2fae99fec6aea0b5c9f9d16dff0ac02e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-copy_pidfd.json",
+      "pin": {
+        "bytes": 224,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-copy_pidfd.json",
+        "sha256": "cc5ad8e47bc9ee5440a141b14cb6cb4938e001c0a266a9d0891f5872e944530b"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-copy_role.json",
+      "pin": {
+        "bytes": 223,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-copy_role.json",
+        "sha256": "242f13c7f4cf666b31b01aa42bd921ee8852f81250bae9ec9a3a6fb43161e9fa"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-deadline_expired.json",
+      "pin": {
+        "bytes": 230,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-deadline_expired.json",
+        "sha256": "8ac5e45dcb39712a6b1de9823444a452f1f03a07958ad5acb05807c295b36c8f"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-pidfd_closed.json",
+      "pin": {
+        "bytes": 226,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-pidfd_closed.json",
+        "sha256": "bdd0b4d4b5ab3a6585458214c2c4bb5e89e1a9dc56900ed5b0a41eef7c92d144"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-pidfd_plaintext.json",
+      "pin": {
+        "bytes": 229,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-pidfd_plaintext.json",
+        "sha256": "1ba7ce5e0fbf2e1b5832eef398cbfd379c40606775f5a2b50b308b9b439e3472"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-positive.json",
+      "pin": {
+        "bytes": 222,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-positive.json",
+        "sha256": "8fe48f7495a8f8f77d65efe3e0781fc32c7e8befe65cc72b825b7390fe02d4e0"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-reap_invalid_ACK.json",
+      "pin": {
+        "bytes": 230,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-reap_invalid_ACK.json",
+        "sha256": "d636e8cbc6a4235dc606802952627654c0a8ccdf4f325a7ade028d9820bc47b5"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-reap_lost_ACK.json",
+      "pin": {
+        "bytes": 227,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-reap_lost_ACK.json",
+        "sha256": "913914051ced6f9a7ccea1681402823a910e516823976ce867fd38a37db8558d"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-register_delayed_ACK.json",
+      "pin": {
+        "bytes": 234,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-register_delayed_ACK.json",
+        "sha256": "511c2f01a0cd4505517326cde1b909632cb42e0c5d2fefb6c43d1311230e9a32"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-register_invalid_ACK.json",
+      "pin": {
+        "bytes": 234,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-register_invalid_ACK.json",
+        "sha256": "da4ed7f2cd9a8e3a7d20660c04f4269a78b13c37d64b1a2caad187fefdbb4c3e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-register_lost_ACK.json",
+      "pin": {
+        "bytes": 231,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-register_lost_ACK.json",
+        "sha256": "ce96cd82aca5e97852f42fbfe39e4f95df368057f939b6175030484cbe7fb499"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-role_invalid.json",
+      "pin": {
+        "bytes": 226,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-role_invalid.json",
+        "sha256": "327f57d3e63fc9758ae36e13917de110aac3803d23c09c3fd9685e4a19847cbe"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-session_restart.json",
+      "pin": {
+        "bytes": 229,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-session_restart.json",
+        "sha256": "e3f58ff31e2fcf10c1fccdbe7a8b8c7caab857cdb1b7dcb2a37a9667a81050fe"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-signal_denied.json",
+      "pin": {
+        "bytes": 227,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-signal_denied.json",
+        "sha256": "2842e698b1ea34438a87aa298c18168650242dfb62dc63206db33650281e0312"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-start_deadline.json",
+      "pin": {
+        "bytes": 228,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-start_deadline.json",
+        "sha256": "8d2a1aca159d3cea98d0ac1614e1b17847c55ff40d45accda805ad3b75da12ed"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-start_origin_gid.json",
+      "pin": {
+        "bytes": 230,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-start_origin_gid.json",
+        "sha256": "4228475b0b06646a394f849e0222e6c630ddd4db1e14f8e093d1cc2ab2019468"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-start_origin_pid.json",
+      "pin": {
+        "bytes": 230,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-start_origin_pid.json",
+        "sha256": "10f1ab3af95cddf5f59c5d5923148f1305c7b04b0c4e21622bb023c350c4b5f4"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-start_origin_uid.json",
+      "pin": {
+        "bytes": 230,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-start_origin_uid.json",
+        "sha256": "8b3495afb5547e66ec2c855d716d356b496ff39a00bd6cc20bac0e982d9f658f"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-start_owner.json",
+      "pin": {
+        "bytes": 225,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-start_owner.json",
+        "sha256": "6d0be6d6e71b3db57b7323d125e57b26e2ae2eeef45fcb4135b45a1d4e160d6e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-start_owner_birth.json",
+      "pin": {
+        "bytes": 231,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-start_owner_birth.json",
+        "sha256": "967dace9bc566855b5a77b3635ee2565d0bef4d736dc46bf3e41e5b327014343"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-start_rights.json",
+      "pin": {
+        "bytes": 226,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-start_rights.json",
+        "sha256": "72fba0e277218d8f13d585d3abbae20a4fa3b4927db6437e17a15aa0de392f9a"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-start_role.json",
+      "pin": {
+        "bytes": 224,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-start_role.json",
+        "sha256": "c49e92cae56c27e0f4f73c7f691f80f5c44e45a1f957877e4ed3aba388949d7a"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-start_sequence.json",
+      "pin": {
+        "bytes": 228,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-start_sequence.json",
+        "sha256": "6b351c03e24613e2be3ca79ee45fe0489ec4f44720828c5c81b638ee618d7aac"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-transport_closed.json",
+      "pin": {
+        "bytes": 230,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-transport_closed.json",
+        "sha256": "c360df2ef38d395e1c7d2630748bbdc6a154011b9760a8e408922c06c5fd3fb6"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-INPUT-wait_flags_DATA.json",
+      "pin": {
+        "bytes": 229,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-INPUT-wait_flags_DATA.json",
+        "sha256": "a7d4932df9035a838d5278e1a68af07f91d556cd8602a28a3f397e78165b840e"
+      }
+    },
+    {
+      "changed_from_A171": true,
+      "lab866_changed": false,
+      "name": "A087-PUBLIC-DRIVER.py",
+      "pin": {
+        "bytes": 101546,
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+        "sha256": "ca7fbfb013653ebae18b4b7a23c38c871579dce51c84a62d87d2bdf5bf1c17e0"
+      },
+      "predecessor_sha256": "ca7fbfb013653ebae18b4b7a23c38c871579dce51c84a62d87d2bdf5bf1c17e0"
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-RESOURCES.json",
+      "pin": {
+        "bytes": 1820,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-RESOURCES.json",
+        "sha256": "d8a74df0ede67c2ff1edc8a56cd5ce13dd7f0e3e8695e848e955d37a7581e425"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A087-SCOPE-PRESERVATION.json",
+      "pin": {
+        "bytes": 2065,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A087-SCOPE-PRESERVATION.json",
+        "sha256": "21a7540ec4afef2c5ba15bfd4fe6e945d1fecd45c21a243043b91dc0a387ef16"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A091-ABI-MAPPING.json",
+      "pin": {
+        "bytes": 9853,
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A091-ABI-MAPPING.json",
+        "sha256": "a647b86779ad7dc84fa1ff50a5b0d8b9e831f77b2974e8668b1e0bf6c8e812de"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A091-EXPECTED-CONTROLS.json",
+      "pin": {
+        "bytes": 9798,
+        "path": "/var/tmp/friday-astra-browser-a116-connected-normal-source-closure-a118-g1/source/A091-EXPECTED-CONTROLS.json",
+        "sha256": "6565cda0ff2a58ada0d543520c58da77aa569b7566baae5ff76236c4c8a6402c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A091-STOCK-CALLER.h",
+      "pin": {
+        "bytes": 32570,
+        "path": "/var/tmp/friday-astra-browser-a118-a152-whole216-all3-connected-source-repair-a153-g1/source/A091-STOCK-CALLER.h",
+        "sha256": "d5c3cbc6ed8ab0623d1787401af710cedeeba7b6bd916b838f28d00a0c04d07a"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-Root_signal_denied.json",
+      "pin": {
+        "bytes": 134,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-Root_signal_denied.json",
+        "sha256": "af7fe96ffa798b9f08dfb9443d856e69a61b2b96c307375c6fd29f1f2ee9499d"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-Root_signal_positive.json",
+      "pin": {
+        "bytes": 136,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-Root_signal_positive.json",
+        "sha256": "bf988b578eea566c544a41dbe92f31dbf11edf12fb93dac7ffc365404211bb6b"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-Root_transport_close_denied.json",
+      "pin": {
+        "bytes": 143,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-Root_transport_close_denied.json",
+        "sha256": "0493732e850c41b12a2391720a409b3cd8d26c5a609e2e89ab25bcfa0022c753"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-abort_detail.json",
+      "pin": {
+        "bytes": 128,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-abort_detail.json",
+        "sha256": "14fc6e9448b4eb02463e55d4d6528fb8ecc2bab9774d69ea7bd4f5df7f7dce02"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-abort_positive.json",
+      "pin": {
+        "bytes": 130,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-abort_positive.json",
+        "sha256": "cdc6ebc45c8cb64b4ae3b92b7d394f288e61d0e455c097e797576be87d52aad6"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-abort_right.json",
+      "pin": {
+        "bytes": 127,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-abort_right.json",
+        "sha256": "dee8fc515eff42f7bb851c83441c4185bf586f826c31bdb7ad221fa5876e1819"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-abort_without_intent.json",
+      "pin": {
+        "bytes": 136,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-abort_without_intent.json",
+        "sha256": "569f8d984b54c3ce93bbb207396f27d422ac13b04f7f39feaef05344c656f654"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-deadline.json",
+      "pin": {
+        "bytes": 124,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-deadline.json",
+        "sha256": "19419be7a70c8e164d58664e90a9a498bfdad6d170d07cfa1b7fc988f38044ff"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-drain_live.json",
+      "pin": {
+        "bytes": 126,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-drain_live.json",
+        "sha256": "7b06c9a725ff65948286bf40d72a1ccc19853bc7653ee25cacff12f34dc203a1"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-drain_pending.json",
+      "pin": {
+        "bytes": 129,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-drain_pending.json",
+        "sha256": "1763e6c261af84f38f6461830ef0d3ea03c434a4ad252a6a5c8106795e884595"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-finish_without_drain.json",
+      "pin": {
+        "bytes": 136,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-finish_without_drain.json",
+        "sha256": "646292cba47784a5e65178ae68e84da4dd58ea9810fa8e4be286ab262e57a329"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-frame_session.json",
+      "pin": {
+        "bytes": 129,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-frame_session.json",
+        "sha256": "79d97be72a875011e83edd29c07d5e12aed82cf180e26594a5ae016dfa09d1fc"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-inherited_start_owner.json",
+      "pin": {
+        "bytes": 137,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-inherited_start_owner.json",
+        "sha256": "e7fbe90bcce384a1e84711f35d5d6d2910a7b466fd097be70842ee9c0ddd07a0"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-intent_right.json",
+      "pin": {
+        "bytes": 128,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-intent_right.json",
+        "sha256": "9ac8f47bcab9ab6ba112f5fc23f6996e8c7553f5faebe7b947c302ad374af5af"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-origin_birth_argument.json",
+      "pin": {
+        "bytes": 137,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-origin_birth_argument.json",
+        "sha256": "ef9145c2b4c0f17aef38631a78e4619db29808f9efa05c2a6ecb4a4c1a2104cc"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-origin_parent_argument.json",
+      "pin": {
+        "bytes": 138,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-origin_parent_argument.json",
+        "sha256": "4eb341c563f704e82af4d5c6ba3247120c32e229e55043cbfc740f7023eafa7d"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-owner.json",
+      "pin": {
+        "bytes": 121,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-owner.json",
+        "sha256": "f7e0f339f399bf2410cc4f6646e139c4acf798ce2b0ad4bf1894f30ca2a3a1c0"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-owner_birth.json",
+      "pin": {
+        "bytes": 127,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-owner_birth.json",
+        "sha256": "f07b3743b2e814f7dcfcbfafcf87711dadef50137320a269e7d3995a44171c8c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-peer_gid.json",
+      "pin": {
+        "bytes": 124,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-peer_gid.json",
+        "sha256": "08f33b1d91414cb83b7d65386504de83e46240483555cca4bc4d7d5861fae5fc"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-peer_pid.json",
+      "pin": {
+        "bytes": 124,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-peer_pid.json",
+        "sha256": "b6b4011c5008536b886cf2fd7679ab9ed5793137ffb96748bb51d8d7855da1bf"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-peer_uid.json",
+      "pin": {
+        "bytes": 124,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-peer_uid.json",
+        "sha256": "bd848e5c3088a64b17c2db1d24cd2fd774f0565a20bb91262e657269d2a47160"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-pending_timeout.json",
+      "pin": {
+        "bytes": 131,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-pending_timeout.json",
+        "sha256": "51be837cf55a8ccbcf1ca56f9f47f649d493bcf918215c834baa6aa6783107ac"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-positive.json",
+      "pin": {
+        "bytes": 124,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-positive.json",
+        "sha256": "b8a4cfeacd76d23aa6af44722bd5f10bb5a5826afd3076997786c0598c2d5710"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-reap_birth.json",
+      "pin": {
+        "bytes": 126,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-reap_birth.json",
+        "sha256": "3caf6b00dc8f4d21135773cf8fe227a814fe5f3169d6750689ea5e10dcb80cda"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-reap_invalid_ACK.json",
+      "pin": {
+        "bytes": 132,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-reap_invalid_ACK.json",
+        "sha256": "4a9592c190fb7fa4ef8ec8fa2050bf37812dba1e17f465b49ce7cc44aa64e2dd"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-reap_live.json",
+      "pin": {
+        "bytes": 125,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-reap_live.json",
+        "sha256": "8a9c273430a3520e9597599763c82adbcf9da90d2f204487635dcca63b5affb9"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-reap_lost_ACK.json",
+      "pin": {
+        "bytes": 129,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-reap_lost_ACK.json",
+        "sha256": "e0d40b4ea72f94b4c7cf14787fad1e0cd0174af96272f11acdc8771a43d8aff5"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-reap_pid.json",
+      "pin": {
+        "bytes": 124,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-reap_pid.json",
+        "sha256": "106e59eae19c4a90463cb236eedb3046d5f8269b367e4174d4f228118d233064"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-reap_right.json",
+      "pin": {
+        "bytes": 126,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-reap_right.json",
+        "sha256": "20268d57bf7d04120b00f06856f8fb0bf7f47b84ef328575e3f9b66fa136d73a"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-reap_status.json",
+      "pin": {
+        "bytes": 127,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-reap_status.json",
+        "sha256": "474cdca6dd64fe5a1240d5164c99df62787676f53556d18fe2ebddf5f6d001f6"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-register_birth.json",
+      "pin": {
+        "bytes": 130,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-register_birth.json",
+        "sha256": "e72f50ec21f41d3623add628094f5323f962014a6d23d8a1b01d384effe6e071"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-register_late.json",
+      "pin": {
+        "bytes": 129,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-register_late.json",
+        "sha256": "864a0ba20038195e9af2c1be301fde73a9ff1b3ee18338f858a0b733eca924e9"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-register_many_rights.json",
+      "pin": {
+        "bytes": 136,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-register_many_rights.json",
+        "sha256": "5834c0387334126bcfe1f37c91f011a2c50c371ec2a0c4aaf026403f62f574e6"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-register_other_owned_pidfd.json",
+      "pin": {
+        "bytes": 142,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-register_other_owned_pidfd.json",
+        "sha256": "90b440ec5019724caeecde8702d6621b66e7c7469b7a63d6c7dc8be53668af05"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-register_parent.json",
+      "pin": {
+        "bytes": 131,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-register_parent.json",
+        "sha256": "cb12a184b81037209857a5a4e787140cb9f7f70bac024931b5177184acb4ca9f"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-register_plaintext.json",
+      "pin": {
+        "bytes": 134,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-register_plaintext.json",
+        "sha256": "1dfbe162c47a13184508643dd08de4cab99cc17bdf157c8f8f3d05201c525be7"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-register_stale_pidfd.json",
+      "pin": {
+        "bytes": 136,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-register_stale_pidfd.json",
+        "sha256": "59f48c56b214f9f88050a95265ab15cf8fc08a84953343a192593d0d8f9d27b8"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-register_without_intent.json",
+      "pin": {
+        "bytes": 139,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-register_without_intent.json",
+        "sha256": "7565e5d9a3030e826c7fef0db6dd8ead55f4f071743015d65ea67c466549082c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-register_zero_rights.json",
+      "pin": {
+        "bytes": 136,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-register_zero_rights.json",
+        "sha256": "a3e8d5db7efbc376469f1c527d7744b75a463a27e15ed136816acd8f6de25a2a"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-role.json",
+      "pin": {
+        "bytes": 120,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-role.json",
+        "sha256": "0f6d050155414bc9f74299a73122f075f6cbef979d11838b335584755291a9a2"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-sequence_future.json",
+      "pin": {
+        "bytes": 131,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-sequence_future.json",
+        "sha256": "6ed7900bc1de9d458ab9f9b3932e6bdf04f0c809b87cd2d2795c72e3a48c7adc"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-sequence_replay.json",
+      "pin": {
+        "bytes": 131,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-sequence_replay.json",
+        "sha256": "21e909505d1620a3ef4f5612ba74a390063eb1021b94a56ef1fe6507146d6464"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-transport_closed.json",
+      "pin": {
+        "bytes": 132,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-transport_closed.json",
+        "sha256": "294b6bbddffe562b9bd20d970c513e99f9073bc575c715c45980bbf8f8032b37"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-type.json",
+      "pin": {
+        "bytes": 120,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-type.json",
+        "sha256": "1aadc7bfd68b2ec33e87da575a8dde674fae9595eccaaad72c840ba95d010176"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-INPUT-version.json",
+      "pin": {
+        "bytes": 123,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-INPUT-version.json",
+        "sha256": "313e742e16bd6c0260d78399de085621ff5c7d66dab2a096e301009cd8bc60e1"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A104-NESTED216-RESIDUALS.json",
+      "pin": {
+        "bytes": 280122,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A104-NESTED216-RESIDUALS.json",
+        "sha256": "39a5a7145a14602f258c119fc937f9fb0d35585ae83c8665c0f18d2d704168c8"
+      }
+    },
+    {
+      "changed_from_A171": true,
+      "lab866_changed": false,
+      "name": "A104-ORDINARY-CONTRACTS.json",
+      "pin": {
+        "bytes": 89618,
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A104-ORDINARY-CONTRACTS.json",
+        "sha256": "d891b6302ca3f4c662b8188fed60ce443600966aee1f9927b51b14ce0d825cc1"
+      },
+      "predecessor_sha256": "d891b6302ca3f4c662b8188fed60ce443600966aee1f9927b51b14ce0d825cc1"
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "CONTRACT-A071.md",
+      "pin": {
+        "bytes": 3929,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/CONTRACT-A071.md",
+        "sha256": "eb46835cea1d30a2f8465b67bf0629529456054b36b80712e8dc255f42356b76"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "CONTRACT-A079.md",
+      "pin": {
+        "bytes": 3798,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/CONTRACT-A079.md",
+        "sha256": "ac98979759c33f8ddd5207627ff829138e2681efd5be0f1c4ea846420aea3bbb"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "CONTRACT-A087.md",
+      "pin": {
+        "bytes": 4685,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/CONTRACT-A087.md",
+        "sha256": "70575fdf6233697215e5add3e673cd0d6e08a759f44cbbc912a8550899c0c955"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "DELTA-COMPLEMENT.json",
+      "pin": {
+        "bytes": 41604,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/DELTA-COMPLEMENT.json",
+        "sha256": "f7cbe7844d92faeb5a90a168560a837009c1543757b23df42ca7e64f63a981d9"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INDEX.md",
+      "pin": {
+        "bytes": 2151,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INDEX.md",
+        "sha256": "fd6529b551b069d7678717fc1760586fa8715f1147cc7fa01a760e252216b7d5"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A071-MANIFEST.json",
+      "pin": {
+        "bytes": 19586,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A071-MANIFEST.json",
+        "sha256": "5e4e8f95c1b6ccd4b13ca8fc1dd1e12dbb807caa5da682b26dfd42098e9c6aaa"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-ABI-MAPPING.json",
+      "pin": {
+        "bytes": 2173,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-ABI-MAPPING.json",
+        "sha256": "1cbd33a0f2999dde9886e7509d26fa2c056c92ce664925dd2fb59275599fc8e4"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-BOOTSTRAP.c",
+      "pin": {
+        "bytes": 27697,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-BOOTSTRAP.c",
+        "sha256": "fb4dc6a35d460d5fa9c41b4d5083a2b7ad0a4a0f997c66ba789367065180a01a"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-BUILD-RECIPE.json",
+      "pin": {
+        "bytes": 3340,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-BUILD-RECIPE.json",
+        "sha256": "5c62653f9bb767067ca3bcba87d396fb0812b1d7f0fef030855b4e8d7723fee0"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-COMMON.c",
+      "pin": {
+        "bytes": 13216,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-COMMON.c",
+        "sha256": "932393df67e0b77bd1b615e1f044540de5620d9838010d98ca417d925573ed63"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-CONTRACT.py",
+      "pin": {
+        "bytes": 21170,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+        "sha256": "8ecd1009c613b21b119f5b393256eb239b17ad8515b06b057552d566cab01aa2"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-CONTROLS.py",
+      "pin": {
+        "bytes": 8976,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-CONTROLS.py",
+        "sha256": "69aab635f72a3bd8521f2812b034ca6fd4a4da09c0108cc1fbe4adc0fd28fc49"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-EXECUTOR.py",
+      "pin": {
+        "bytes": 46228,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+        "sha256": "a06660c9c8abbb3562083ab020e02c7097cdab52ee661f86dd018174508133f5"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-NATIVE.h",
+      "pin": {
+        "bytes": 5310,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-NATIVE.h",
+        "sha256": "71ec4f8edf1d460f140c2da7737a9fac1e5c4fdce2b1347b62c2388793d53be0"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-OWNED.c",
+      "pin": {
+        "bytes": 24872,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-OWNED.c",
+        "sha256": "a508fdb07cd41fd4995aee597269838b5002acafb1986ecf54f1fcfcf7bb0ecc"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-OWNER.py",
+      "pin": {
+        "bytes": 7757,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-OWNER.py",
+        "sha256": "5b7711388865e464f9b3f30a2c1d250fdc33645d742a7776d457805e4557a6cf"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-PRODUCER.py",
+      "pin": {
+        "bytes": 19436,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-PRODUCER.py",
+        "sha256": "0d09bbe45fd6eb839672532412c7234eaa46ff2d84ea131efa006ef925cc4b3c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+      "pin": {
+        "bytes": 50384,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "sha256": "b13434128b413ebe730110d9cba0fb559a45c4cc5e9de0f38439b3681498cb53"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-CURRENT-A071-WORKER.py",
+      "pin": {
+        "bytes": 7966,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-CURRENT-A071-WORKER.py",
+        "sha256": "64fe2967b220aa5fe17872913fcf5d03c5f0818e7d2f81491cec607eaa7dc534"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-DELTA-COMPLEMENT.json",
+      "pin": {
+        "bytes": 31995,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-DELTA-COMPLEMENT.json",
+        "sha256": "23d573b421f88938a33682e35fef9ebf897fbd1fa589094f2b1222a3d2460d4d"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-INDEX.md",
+      "pin": {
+        "bytes": 2674,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-INDEX.md",
+        "sha256": "c27d60165426fc52ea9991a8842d1728c149a5fbd54404ec1697015e261f662d"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-MANIFEST.json",
+      "pin": {
+        "bytes": 25268,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-MANIFEST.json",
+        "sha256": "395c6e3e0ba12324e158730d5918a1bf77e61fea95a23ba3d2b62f6bdd1dd674"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-RAW-DELTA.patch",
+      "pin": {
+        "bytes": 98050,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-RAW-DELTA.patch",
+        "sha256": "ec50e5c5102bdc75acb92772da036ceb2f8a04b7693b9dae5b76745067d46e4c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-READ-LEDGER.tsv",
+      "pin": {
+        "bytes": 1340,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-READ-LEDGER.tsv",
+        "sha256": "8b0b7b06c551c958525ef2961f3c4f20223de9b029414dd789f32bc56c1d5aa0"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-RESULT.json",
+      "pin": {
+        "bytes": 8429,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-RESULT.json",
+        "sha256": "93d53a0ef85de6f095ab92b20cab01fe2a577f707c99e3b48a0c153772d2612f"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "INPUT-A079-REVIEW-REQUEST.md",
+      "pin": {
+        "bytes": 2316,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/INPUT-A079-REVIEW-REQUEST.md",
+        "sha256": "1fd82a04c37061613fc39d3245584f3eb8d4567edcc9dc663cec9c7dae853f34"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "RAW-DELTA.patch",
+      "pin": {
+        "bytes": 171773,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/RAW-DELTA.patch",
+        "sha256": "2666aa7313acbe5f5a9dff0263796529afaaf1863d171b0cf5e496c4c8e81e06"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "READ-LEDGER.tsv",
+      "pin": {
+        "bytes": 1871,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/READ-LEDGER.tsv",
+        "sha256": "1b3c29b046d98169610b95ea0ff9e0978663f5678d5aa8f9ef4a1e69b1be3256"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "RESULT.json",
+      "pin": {
+        "bytes": 7212,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/RESULT.json",
+        "sha256": "80cddfa04065d1a10dead34cd3911fa11b141d1d52a228b11232f87abef5d46b"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "REVIEW-A087.md",
+      "pin": {
+        "bytes": 2809,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/REVIEW-A087.md",
+        "sha256": "c84e9fbbba05c5462ed01d440e802207026f092087d3c7d3d70a51109d8aa90b"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "REVIEW-REQUEST.md",
+      "pin": {
+        "bytes": 402,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/REVIEW-REQUEST.md",
+        "sha256": "fcec6bb7124c15c50235850ac60ca78bd2fd98073222a1cd044671036739ab88"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-ABI-MAPPING.json",
+      "pin": {
+        "bytes": 1222,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-ABI-MAPPING.json",
+        "sha256": "e395295b700f1b76d0f8555bafc2ce6fed78e0d5267c93a426e4a2b0c7af1a87"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-BILL.json",
+      "pin": {
+        "bytes": 105071,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-BILL.json",
+        "sha256": "a5ad77e70d1a2d540ce2bf18f75da0af760383900a716563ffe1232c5bf36fa1"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+      "pin": {
+        "bytes": 23716,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+        "sha256": "198c895663016ac2a1a6c7a5445c30e640167cd97b0595f474b5a7cd5b945bd9"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-BUILD-RECIPE.json",
+      "pin": {
+        "bytes": 3285,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-BUILD-RECIPE.json",
+        "sha256": "d4780f915524badaedcbb3d17a1b20820e7de80b1b660fd95e7ef0209b97cd9e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-COMMON.c",
+      "pin": {
+        "bytes": 13215,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-COMMON.c",
+        "sha256": "31cda48199bee974c0204a4662fc9852ddf43f24c9629016fed369823d068fc2"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+      "pin": {
+        "bytes": 19885,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+        "sha256": "93bda86a667817e5cbc06a94c7e0c0b513bfafbb3f891a8696f6b4fbaa973cde"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-CONTROL-COVERAGE.json",
+      "pin": {
+        "bytes": 277271,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROL-COVERAGE.json",
+        "sha256": "2f47b09ecd8af02f8e910b66b179bbda08412e6046dec72034f9c1c6dd9fe2ca"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+      "pin": {
+        "bytes": 704,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+        "sha256": "4904b585110926cbb5971fff88e04421a366a1c3c856e907b2af9a4f87956460"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+      "pin": {
+        "bytes": 46216,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+        "sha256": "af177f3efaa6b46e2d8905486e9da6afdea32e18c4b3149f24aff4ae2121e733"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+      "pin": {
+        "bytes": 29558,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+        "sha256": "76c717e38b909d5b41e2ff48582dc27e3c4dc82fd0643ac8206748e97b8c70d1"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-NATIVE.h",
+      "pin": {
+        "bytes": 4317,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-NATIVE.h",
+        "sha256": "5fc40d1e1417a31bdb71b46f30196d267e64898660746dd1093481af7f800e20"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-OWNED.c",
+      "pin": {
+        "bytes": 11576,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-OWNED.c",
+        "sha256": "2a0574d33c4372a3edb2b87b2594bc13f8146d61d62524aa50566230ac83894f"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-OWNER.py",
+      "pin": {
+        "bytes": 7369,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-OWNER.py",
+        "sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+      "pin": {
+        "bytes": 12180,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+        "sha256": "dd4249a75e6cfc5124513a91ce5da9506f82ceae61dd6a3011e91a41c859db97"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-RUNTIME.c",
+      "pin": {
+        "bytes": 7457,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-RUNTIME.c",
+        "sha256": "48a581112f4b3ec16658c2415c9e667144ed7a21a9d839831bf6c8bb6d490e76"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-SCHEMA.json",
+      "pin": {
+        "bytes": 6504,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-SCHEMA.json",
+        "sha256": "d44887d602d654b89c909a47bbbf5debd45e755793b1830e909757e70c3dfd5c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+      "pin": {
+        "bytes": 49327,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "sha256": "34f4b2585fdc1a721e5c31bd702c02e2e55ee5e4526621ef39f167418ab6552e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-WORKER.py",
+      "pin": {
+        "bytes": 7957,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-A066-WORKER.py",
+        "sha256": "95da47af5986cd1549edab0c9f3b2832d453ac06032b985e9425a04375457825"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A037.md",
+      "pin": {
+        "bytes": 4529,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A037.md",
+        "sha256": "69a322cf08b8038d9af867f919d8639df4a932fa593ffb3d155a35d325a7b8bc"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A039.md",
+      "pin": {
+        "bytes": 4566,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A039.md",
+        "sha256": "8e04c3d3516e7eb361fb31d7d33e3a45eaa0d523188aa0aba3c75eed3e314da5"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A042.md",
+      "pin": {
+        "bytes": 4369,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A042.md",
+        "sha256": "3339163945188c482239c6c757293fdc02876452630a9739a5608f45bebca8ea"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A046.md",
+      "pin": {
+        "bytes": 5141,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A046.md",
+        "sha256": "7b25a398d47b6ae50eccd1888f841bee0d06c795c38f05c5d418f0d03dc3341c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A051.md",
+      "pin": {
+        "bytes": 6304,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A051.md",
+        "sha256": "f467bb553668e48132ca0b9bac98b791f97b48c34e1cd2e9595ee4dc08f3ce26"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A066.md",
+      "pin": {
+        "bytes": 2868,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A066.md",
+        "sha256": "b7909d2b2f5a3b924765b4a9f13112936389729fda88d990fc0a17559d0a2f5e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-INDEX.md",
+      "pin": {
+        "bytes": 1696,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-INDEX.md",
+        "sha256": "1e91a4bbed4f32dfb625de12e199cc3562dd3d6d32d7f5c8a574250eae298fa1"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-MANIFEST.json",
+      "pin": {
+        "bytes": 13182,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-MANIFEST.json",
+        "sha256": "0a519f021c0430a4d8fb08b30fe6912ca8f4f73e0fdef8ef3fb94c06e99082c7"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-READ-LEDGER.tsv",
+      "pin": {
+        "bytes": 1759,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-READ-LEDGER.tsv",
+        "sha256": "f2de95cd4dcbaa478c218068c268a7c36a6460454d2a86b120e69a704cb5679e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-RESULT.json",
+      "pin": {
+        "bytes": 9836,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-RESULT.json",
+        "sha256": "9d00af0bc3b1b4273c8f23cd55b0c40f4ef9a3e888fb0ef494e2c15a7d807227"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-REVIEW-REQUEST.md",
+      "pin": {
+        "bytes": 2366,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-REVIEW-REQUEST.md",
+        "sha256": "2c3bb531db846d328f7e963fd78fbf96623fa3d7f0df102a4573cec5e07d02f7"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-ABI-MAPPING.json",
+      "pin": {
+        "bytes": 2238,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-ABI-MAPPING.json",
+        "sha256": "aec6724c05c20882450acf0c0e14592b0225a324a8d906fb6603c51053269ff3"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BILL.json",
+      "pin": {
+        "bytes": 104731,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BILL.json",
+        "sha256": "488e8dc7e16d6aded4d082301f4a7e8ebf8575452a584eb7a9f70d897f7ce650"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+      "pin": {
+        "bytes": 23717,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+        "sha256": "7641f18ca0e9fbe67ed0bab6d70454aace4014c2b7ce6a63dcabf411767fd03e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BUILD-RECIPE.json",
+      "pin": {
+        "bytes": 3373,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BUILD-RECIPE.json",
+        "sha256": "2c8d0f32fc7eeefea73f5fce4d24d6b2c91b06ad53716b0439fcc8411395c19d"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-COMMON.c",
+      "pin": {
+        "bytes": 13215,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-COMMON.c",
+        "sha256": "9524b0ac2461b824b9c206501911fb0aec3fb55a572acfc5fbc4cf8b2012086f"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+      "pin": {
+        "bytes": 19703,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+        "sha256": "09e0f328547a3bc937c297fa9bc0dfbf4871633fe7ecd6dd3b90fb8d4526fc88"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROL-MATRIX.json",
+      "pin": {
+        "bytes": 3052,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROL-MATRIX.json",
+        "sha256": "ac63be0ab49795fe9d0d20b3ab212c567ba34b7ef2cc7a3986673a1d46418805"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "pin": {
+        "bytes": 78027,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+        "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+      "pin": {
+        "bytes": 46214,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+        "sha256": "92a641025cb078b01418f7ec9e1701181c0d6d680ef5dbf1089279df688753c3"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+      "pin": {
+        "bytes": 23060,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+        "sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-NATIVE.h",
+      "pin": {
+        "bytes": 4278,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-NATIVE.h",
+        "sha256": "5f269a4494ef7e7c1c2377242b9c407068b6af29abca85c36ff199a3899def17"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c",
+      "pin": {
+        "bytes": 10649,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c",
+        "sha256": "638d84391b4351f06499c1ad5aaa2966e9cc42cdfaf658a2148d25bf264d9290"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNER.py",
+      "pin": {
+        "bytes": 7369,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNER.py",
+        "sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+      "pin": {
+        "bytes": 12182,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+        "sha256": "2e7fd79e1754588364a76975ffbf9ff1ca7dacf38dbef30659151c241b8e364e"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-RUNTIME.c",
+      "pin": {
+        "bytes": 7457,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-RUNTIME.c",
+        "sha256": "50ad41fa45923515433ca153c33199e21c8e704db4163861dd35a0e065e1f26f"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SCHEMA.json",
+      "pin": {
+        "bytes": 6074,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SCHEMA.json",
+        "sha256": "c8e2d4a30f559c58f121ae0928564809b52c33237924f7f0a834a605c137a96c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+      "pin": {
+        "bytes": 49225,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+        "sha256": "4b6ad763b0883310445d625414fc178e76b28e36c66ca617a8f92b4a71d3d85f"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py",
+      "pin": {
+        "bytes": 7958,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py",
+        "sha256": "2da91ef0254d5b92aa82e12f2c049ce1ad3940da1a2ae54f0750658cec1b6d66"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-BENIGN-FIXTURES.json",
+      "pin": {
+        "bytes": 1573,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-BENIGN-FIXTURES.json",
+        "sha256": "64e93fb9fc3f93e3420ad1fb03007416aaffeaea0195532811c4ac380074da4c"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-INDEX.md",
+      "pin": {
+        "bytes": 1647,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-INDEX.md",
+        "sha256": "855d5daade942ae4b1cae99ddf1479fc8e47f7f3fa6f998fb0b7a9c8db8b4239"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-MANIFEST.json",
+      "pin": {
+        "bytes": 6074,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-MANIFEST.json",
+        "sha256": "3a91f7d1e73f140a68805cf52a6159b29e74a186856289ee67b9d96ca5defcd2"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-READ-LEDGER.tsv",
+      "pin": {
+        "bytes": 2517,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-READ-LEDGER.tsv",
+        "sha256": "41fee460f7d563c6d882040e716153ebc4443da6d8e6f6bb1e0ac9d68edc04eb"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-RESULT.json",
+      "pin": {
+        "bytes": 5703,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-RESULT.json",
+        "sha256": "439f93fe5dbb590928acbc91794ba5a84101a849e01d6066d0382c8892ae0ea9"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-REVIEW-REQUEST.md",
+      "pin": {
+        "bytes": 1856,
+        "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-REVIEW-REQUEST.md",
+        "sha256": "e3c87c5e4481dd543d111565998e140b348a2437270bb0bbc749d29fe322c31a"
+      }
+    },
+    {
+      "changed_from_A171": false,
+      "lab866_changed": false,
+      "name": "A118-CONNECTED-CONTRACT.json",
+      "pin": {
+        "bytes": 19606,
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A118-CONNECTED-CONTRACT.json",
+        "sha256": "e655ed2c859cad06a3dd629d3b0a28bc130d83e988fde74289c03f1c92619b52"
+      },
+      "predecessor_sha256": "e655ed2c859cad06a3dd629d3b0a28bc130d83e988fde74289c03f1c92619b52"
+    }
+  ],
+  "count": 209,
+  "schema": "friday.grok.lab866.current209-bindings.v1"
+}

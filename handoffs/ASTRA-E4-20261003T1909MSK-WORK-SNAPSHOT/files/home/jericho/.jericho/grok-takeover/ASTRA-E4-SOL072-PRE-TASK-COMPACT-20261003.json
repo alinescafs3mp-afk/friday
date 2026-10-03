@@ -1,0 +1,70 @@
+{
+  "GO": false,
+  "after": {
+    "latest_turn": {
+      "completedAt": 1790980471,
+      "durationMs": 111716,
+      "error": null,
+      "id": "01a0febf-8734-78a3-bdc9-95ace4607ca8",
+      "items": [],
+      "itemsView": "notLoaded",
+      "startedAt": 1790980359,
+      "status": "completed"
+    },
+    "queue_count": 0,
+    "queue_has_more": false,
+    "quiescence": {
+      "active_completed_grace_seconds": 0.0,
+      "basis": "strict_idle",
+      "observations": 1,
+      "stability_seconds": 0.0
+    },
+    "thread_status": {
+      "type": "idle"
+    }
+  },
+  "assignment": "ASTRA-E4-LAB883-NODE-PREOWNED-BODY-ACTUAL-OUTSIDE-CALLER-BOTH-DECODERS-FINITE-END-CONNECTED-CLOSURE-SOL072",
+  "at": "2026-10-02T22:34:31.773364+00:00",
+  "before": {
+    "latest_turn": {
+      "completedAt": 1790979728,
+      "durationMs": 2372036,
+      "error": null,
+      "id": "01a0fe91-b16a-71d3-bd4a-a896cd3e5de6",
+      "items": [],
+      "itemsView": "notLoaded",
+      "startedAt": 1790977356,
+      "status": "completed"
+    },
+    "queue_count": 0,
+    "queue_has_more": false,
+    "quiescence": {
+      "active_completed_grace_seconds": 5.0,
+      "basis": "strict_idle",
+      "observations": 1,
+      "stability_seconds": 0.0
+    },
+    "thread_status": {
+      "type": "idle"
+    }
+  },
+  "compact_response": {},
+  "compact_turn": "01a0febf-8734-78a3-bdc9-95ace4607ca8",
+  "completion": {
+    "completed_at": 1790980471,
+    "duration_ms": 111716,
+    "error": null,
+    "id": "01a0febf-8734-78a3-bdc9-95ace4607ca8",
+    "item_id": "01a0febf-8755-78c1-90b2-d03c7129af59",
+    "item_type": "contextCompaction",
+    "started_at": 1790980359,
+    "status": "completed"
+  },
+  "completion_verified_by": "thread/turns/list itemsView=full contextCompaction",
+  "generation": 1,
+  "next_task_enqueued": false,
+  "profile": "sol",
+  "same_tui": true,
+  "schema": "friday.team.pre-task-compact.v1",
+  "thread_id": "01a0d516-a446-7131-a123-faeea4bb8e8c"
+}

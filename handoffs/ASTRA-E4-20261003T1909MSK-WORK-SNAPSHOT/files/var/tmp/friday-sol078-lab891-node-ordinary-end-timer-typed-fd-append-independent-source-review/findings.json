@@ -1,0 +1,163 @@
+{
+  "schema": "friday.sol078.lab891.independent-scoped-source-findings.v1",
+  "assignment": "ASTRA-E4-LAB891-NODE-ORDINARY-END-TIMER-TYPED-FD-APPEND-INDEPENDENT-REVIEW-SOL078",
+  "generation": 1,
+  "decision": "REJECT_CONNECTED_ORDINARY_CLOSURE_WITH_SCOPED_CREDITS",
+  "review_complete": true,
+  "non_author_of_LAB891": true,
+  "prior_Sol072_authorship_not_own_whole_acceptance": true,
+  "scope": "Only changed LAB891 ordinary Python Source4/current6, relevant original methods/bindings/control obligations; not a repeat whole product/native-body audit and not denied SOL075 operation.",
+  "review_key": "Actual three main endpoints -> locked append and both existing transport consumers -> typed FD acquisition and sticky close -> terminal variables before frame -> original absolute timer and cleanup",
+  "snapshot": {
+    "current6_changed": 4,
+    "current6_equal": 2,
+    "gapless_partitions": 158,
+    "owned13_exact": true,
+    "unchanged_actual_method_rejoins": 45,
+    "original35": 35,
+    "original_cases": 6,
+    "original_controls": 3,
+    "original_GPG_calls": 6,
+    "current_selection": 19
+  },
+  "scoped_credits": [
+    {
+      "id": "S078-D1",
+      "credit": "SCOPED_CREDIT_TERMINAL_ORDER_AND_ACTUAL_VARIABLES",
+      "sites": {
+        "caller": "caller.py:3886-3934; finish_outside_end:813-885",
+        "supervisor": "supervisor.py:3140-3188; finish_outside_end:470-542",
+        "verifier": "verifier.py:2615-2668; finish_outside_end:525-597"
+      },
+      "fact": "All three reached main endpoints set their final fields first, call finish_outside_end before publish_preowned_then_frame and encode, then commit once. Helper invalidates R.qualified_node_only/R.qualified, recognized success status and the ACTUAL global qualified/verified variables, not merely a detached dictionary. The original late helper after already committed frame is gone.",
+      "limits": "Only the actual end-observation failure flags/order. Original native error custody, subsequent fallible publication/costs/whole native ends remain OPEN. Not an assertion that an already physically emitted frame can be changed."
+    },
+    {
+      "id": "S078-D2",
+      "credit": "SCOPED_CREDIT_REMOVED_EXPLICIT_END_TIMER_DISABLE",
+      "sites": {
+        "caller": "caller.py:813-885,3596-3598; child-only disarm2939",
+        "supervisor": "supervisor.py:470-542,2974-2975; child-only disarm2238",
+        "verifier": "verifier.py:525-597,2410-2411"
+      },
+      "fact": "Changed finish_outside_end has no setitimer(ITIMER_REAL,0), no new end or deadline refresh and no raw close claiming a completed native end. Original main arming/due and the pre-exec child-only disarm are unchanged. disposition honestly remains NOT_RETIRED.",
+      "limits": "timer_still_enforcing=True is a literal report, not observed timer state or a full finite-end proof. One-shot expiration, error/cleanup paths and actual both outside native ends remain REQUIRED_NOT_RUN/CODE_OPEN; no claim that a caught expired alarm is still armed."
+    },
+    {
+      "id": "S078-D3",
+      "credit": "SCOPED_CREDIT_NORMAL_APPEND_RESERVATION",
+      "sites": {
+        "caller": "caller.py:705-762",
+        "supervisor": "supervisor.py:362-419",
+        "verifier": "verifier.py:417-474"
+      },
+      "fact": "Exactly equal literal implementation all three uses lockf LOCK_EX|LOCK_NB with whole-file start0 and length0; contested wait uses ORIGINAL due() then0.01s, no deadline update. fstat/current extent, marker, per-process relation/prefix delta, unchanged32768 aggregate cap and pwrite cursor are inside lock; finally unlocks. No flock or LOCK_OFD substitute. Successful source path is serialized by the explicitly intended per-process POSIX record-lock protocol.",
+      "limits": "Installed lock behavior/interprocess overlap not executed. Error-prefix original object retention fails E02 below. Locks, marker and rendered relation are transport accounting, not original native-body/read-only receiver custody. Read/RAM/IO/encode/decode/alias/lock costs not free."
+    },
+    {
+      "id": "S078-D4",
+      "credit": "SCOPED_CREDIT_NORMAL_TYPED_ALIAS_AND_EXISTING_LIVE_SLOT_RECLAMATION",
+      "sites": {
+        "caller": "caller.py:664-701,1682-1703,3707-3806",
+        "supervisor": "supervisor.py:345-358,1331-1398",
+        "verifier": "verifier.py:400-413,1365-1432"
+      },
+      "fact": "Successful actual caller retains OwnedFD lease instead of int, reserves an alias record before dup2 then publish_fd(8) and stores typed alias. Actual supervisor/verifier adopt8 into their existing AllocationFD ledgers. Changed outside_body_number recognizes int subclasses. Successful outside aliases remain counted and deliberately unretired; cleanup skips these body aliases while body OPEN. Existing45 relevant method literals including confirmed-close exact-slot reclamation/sticky no-retry/transport state and decoders are independently byte equal.",
+      "limits": "Not complete prospective acquisition on ordinary signal/failure prefix: E01 below. Lifetime acquisitions do NOT imply simultaneous occupancy over256. No invented lifetime512 cap or revival of old normal255+7 argument; no unconfirmed-close reclaim and no outside alias retirement/transfer credited."
+    },
+    {
+      "id": "S078-D5",
+      "credit": "SCOPED_CREDIT_INERT_INTEGRITY_AND_BINDINGS",
+      "fact": "Exact SHA9 pinned owned13/current6; all158 gapless before/after partitions checked on actual slices through both EOF; original full134 Source bytes hashed only as context, no re-audit or execution. Current contract has exactly9 path/hash/size leaf updates and no schema/control/resource changes. Exact verifier->contract->supervisor literals->caller hash/size DAG matched. expectations and ordinary-surplus are equal before/after. All35 slots/all6/all3/GPG6/F1/F2/D1/D2/19 required, no waiver.",
+      "limits": "Sealed bytes and correct chain are not Source acceptance, Root admission, runtime qualification or full cost-fit."
+    }
+  ],
+  "findings": [
+    {
+      "id": "S078-E01",
+      "classification": "CODE_OPEN_ORDINARY_ALIAS_ACQUISITION_PREFIX",
+      "severity": "HIGH",
+      "runtime_observed": false,
+      "sites": [
+        "caller.py:675-683",
+        "caller.py:1682-1720",
+        "caller.py:3707-3744,3795-3806",
+        "caller.py:3596-3607,3886-3920"
+      ],
+      "invariant": "Before every original actual descriptor acquisition/duplication, exact attempted/unknown/returned state and original error owners survive any ordinary failing boundary; no PLANNED fiction after possible native effect.",
+      "actual_path": "main open_caller_outside_body -> preown_fd('outside-body-alias') -> raw os.dup2 -> publish_fd -> stored OUTSIDE_BODY aliases -> actual close_final/history/terminal.",
+      "fact": "preown_fd returns PLANNED with number=None. Newly added raw dup2 is NOT in the existing masked allocate_owned protocol, never writes ACQUIRE_UNKNOWN, and does not store its original exception in alias_record. A same original armed SIGALRM/ordinary exception between successful dup2 return and publish_fd leaves an actual alias8 with a PLANNED/no-number record. A synchronous dup2 exception also leaves the attempt classified PLANNED rather than recorded. close_final accepts PLANNED in its allocation-state predicate; outside_body_number unconditionally exempts numeric8, irrespective of typed record. This is not complete prospective ownership and cannot be credited as attempted outcome/returned identity.",
+      "symbolic_path": [
+        "actual original main timer already armed",
+        "alias record PLANNED created",
+        "dup2 physically returns8",
+        "original finite alarm before publish_fd or publication fails",
+        "alias record remains PLANNED/no number; OUTSIDE_BODY alias_lease not established",
+        "exact normal cleanup cannot infer absence or accepted transfer of8; original body/end remains open"
+      ],
+      "qualification": "Conditional original ordinary stock signal/failure branch, not an observed failing run, offensive fixture, arbitrary custom factory or a demand for universal private heap.",
+      "closure": "Repair safe original Python acquisition/error accounting within existing exact lease protocol; independently review changed path. No numeric recovery/guessed close/new native body, role or authority. No implementation performed here."
+    },
+    {
+      "id": "S078-E02",
+      "classification": "CODE_OPEN_ORIGINAL_APPEND_AND_END_EXCEPTION_CUSTODY",
+      "severity": "HIGH",
+      "runtime_observed": false,
+      "sites": [
+        "caller.py:705-762,837-874",
+        "supervisor.py:362-419,494-531,3162-3175",
+        "verifier.py:417-474,549-586,2642-2655",
+        "all3 outside_body_fault and outside_relation_bytes"
+      ],
+      "invariant": "Original stock primary and reached secondary exception/TB/cause/context/aliases retained before diagnostic formatting or replacement; full body and both decoder failure obligations unchanged.",
+      "fact": "commit_outside_body catches BaseException WITHOUT binding/storing original at the whole lock/fstat/pread/render/pwrite boundary and at the newly added unlock boundary; only string fault reasons survive. finish_outside_end similarly catches its actual new fstat/end observation exception without retaining it. Called require(commit_outside_body(),...) subsequently raises a NEW Refusal which is the only recorded publication error. Thus newly reached lock/unlock/fstat exceptions and any secondary unlock fault are not original retained objects/TBs in ERROR_OBJECTS/EMERGENCY/PUBLICATION_FAILURES/allocation records or the outside relation. Failure flags are honest refusal, not complete original error custody.",
+      "limits": "The generic prefix/encoding/commit_public transport helpers DO retain their caught exc/TB first; their45 unchanged methods were rejoined and are not accused of this discard. This defect is the actual outside append/end helpers, not a future ABI/image qualification label.",
+      "closure": "A bounded, original-owner first-store path for primary and reached secondary errors is still needed through actual allthree caller/consumer endpoints and original caps; retaining a reason string or surrogate Refusal is insufficient. No Source fix or tests authored."
+    }
+  ],
+  "retained_code": [
+    {
+      "id": "C1",
+      "classification": "CODE_OPEN_ORIGINAL_NATIVE_BODY_OUTSIDE_READONLY_RECEIVER_AND_BOTH_NATIVE_ENDS",
+      "fact": "memfd marker+F0..F5/derived numbers/rendered exception bytes, typed fd8, sealed/writable transport, fstat regular, consumed label, exit/wait4/ACK/hash cannot supply original prebirth native/stock/raw/error/private-state/body aliases, actual original performing outside readonly consumer or finite both-owner end. Actual caller.consume/admit_supervisor and supervisor.verifier decoding remain derived transport; no native body/grant/source was added. Exact original Source requirement unchanged; not another audit root."
+    },
+    {
+      "id": "C2",
+      "classification": "CODE_OPEN_ORIGINAL_FACTORY_CAUSE_RAW_COST_BOUNDS",
+      "fact": "Existing full6/original35/default/alias/error/projection/decoder paths and conditional stock/graph/raw partition arithmetic are not complete finite actual factory/catch/multiplicity or native/error/body cost proof. Original cap checks after materialization are refusal, not normal allcase fit proof; no claim arbitrary maximal encoded strings were actually produced."
+    }
+  ],
+  "costs": {
+    "classification": "UNKNOWN_NOT_ZERO",
+    "scope": "Whole actual native/stock/error/lock/sleep/FD/encoder/decoder/parser/copy/hash/header/body/RAM/physical IO/overlap/cleanup/end prospective costs remain unproved under original caps. Added operations need accounting; author sealer byte/RSS observations do not qualify product.",
+    "original_caps_preserved": true,
+    "author_owned13_bytes": 615088,
+    "author_sealed_tree_bytes": 615088,
+    "author_owned_byte_count_reconciled": true,
+    "author_remaining_full_io": "UNKNOWN_NOT_ZERO; no claim a budget exceeded from partial counters"
+  },
+  "qualification": {
+    "classification": "EVIDENCE_OR_ENVIRONMENT_QUALIFICATION_REQUIRED_NOT_RUN",
+    "scope": "Exact current image/module/stock/provider/namespace/selected19 numeric-int9, independent whole Source acceptance, compiler/native ABI/grants/prebirth/outside source authority, actual clocks/resource peaks/positives/negative/gates. Missing future facts alone not declared a new CODE defect.",
+    "runtime": "NOT_RUN",
+    "compiler_ABI": "NOT_RUN",
+    "gates": "NOT_RUN"
+  },
+  "unsafe": {
+    "handling": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false,
+    "source_copied": false,
+    "decoded": false,
+    "reconstructed": false,
+    "executed": false
+  },
+  "ordinary_connected_closure": false,
+  "whole_accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "source_execution": 0,
+  "children": 0,
+  "next": "One connected SAFE original Python repair of E01+E02 and corresponding resource/error/terminal joins, then non-author changed-context review; separately retain C1/C2/new admission/full mandatory controls. No SOL075 native continuation, guard bypass or new outside body authority."
+}

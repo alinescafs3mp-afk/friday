@@ -1,0 +1,3243 @@
+{
+  "schema": "friday.a192.final-source52-method-inventory-consistency.v1",
+  "source52": [
+    {
+      "file": "controls/catalog.json",
+      "bytes": 12103,
+      "sha256": "a3a2c499df062b6d9c048416dc8c2dbf3aa4638b23bc47cfe5c5c219bfaa63e2",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980404",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12103",
+        "1790941728814267372",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "controls/independent-contract.json",
+      "bytes": 1484,
+      "sha256": "0c45acead7156172974dbf89d8a7044fe90bc420724638501d86f7f927942ca0",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980405",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1484",
+        "1790941728815267430",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "controls/whole-closure.json",
+      "bytes": 21559,
+      "sha256": "8208d4bc540dce0c0b7eabbd149d14ddc8686a68af851d8b6af22bad048aeced",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980406",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21559",
+        "1790941728815639555",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 459,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "data/all202-identity-map.json",
+      "bytes": 298123,
+      "sha256": "ffddb01d39713c2464856b717b7512733e7d2e68da58250cfc3ff599ea552529",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980408",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "298123",
+        "1790941728815639555",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "data/c55-admission.json",
+      "bytes": 159,
+      "sha256": "c276309c7b4ce03626eca641e2bba42bc79036b5f63247ae0c2787eb6e61d5da",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980409",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "159",
+        "1790941728816267487",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "data/c55-expected-output.json",
+      "bytes": 356,
+      "sha256": "7ba0a58769f20b0c69d20d66f578ceb3d25b047d96e5103cd8c51101427db126",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980410",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "356",
+        "1790941728816624712",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "data/c55-held.json",
+      "bytes": 63,
+      "sha256": "ff7f06af5898b00d8fb17b129906516807ef744f2595a0c0fa0317a18a78b012",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980411",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "63",
+        "1790941728816743119",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "data/c55-index.json",
+      "bytes": 772,
+      "sha256": "fedcc9aab0857e605f54ea869919a855eebdcab077c035df536fa8882ad9fff0",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980412",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "772",
+        "1790941728816855025",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "future-scan-plan/plan.json",
+      "bytes": 16241,
+      "sha256": "083fd2a22e468ab2adcced2a55e33225a6785b1c5dcb0362f139731c28b8f59c",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980414",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16241",
+        "1790941728816855025",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "input-index/index.json",
+      "bytes": 238293,
+      "sha256": "41781d9297176e57c5b222a3692c737e8953cae175eec17e2477af9a48a31197",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980416",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "238293",
+        "1790941728816855025",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "native/source_owner.c",
+      "bytes": 111016,
+      "sha256": "3e1f2722141aa31a21187c9f03e4787300ed24682166978b24cf7bd38b325e06",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980418",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "111016",
+        "1790943491567637345",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 1879,
+      "lexical_definition_regions": 100,
+      "imports_text": [
+        {
+          "line": 10,
+          "text": "#include <Python.h>"
+        },
+        {
+          "line": 11,
+          "text": "#include <errno.h>"
+        },
+        {
+          "line": 12,
+          "text": "#include <fcntl.h>"
+        },
+        {
+          "line": 13,
+          "text": "#include <grp.h>"
+        },
+        {
+          "line": 14,
+          "text": "#include <linux/sched.h>"
+        },
+        {
+          "line": 15,
+          "text": "#include <linux/futex.h>"
+        },
+        {
+          "line": 16,
+          "text": "#include <stdatomic.h>"
+        },
+        {
+          "line": 17,
+          "text": "#include <limits.h>"
+        },
+        {
+          "line": 18,
+          "text": "#include <stdarg.h>"
+        },
+        {
+          "line": 19,
+          "text": "#include <sys/epoll.h>"
+        },
+        {
+          "line": 20,
+          "text": "#include <sys/file.h>"
+        },
+        {
+          "line": 21,
+          "text": "#include <poll.h>"
+        },
+        {
+          "line": 22,
+          "text": "#include <stdint.h>"
+        },
+        {
+          "line": 23,
+          "text": "#include <stddef.h>"
+        },
+        {
+          "line": 24,
+          "text": "#include <string.h>"
+        },
+        {
+          "line": 25,
+          "text": "#include <sys/mman.h>"
+        },
+        {
+          "line": 26,
+          "text": "#include <sys/resource.h>"
+        },
+        {
+          "line": 27,
+          "text": "#include <sys/socket.h>"
+        },
+        {
+          "line": 28,
+          "text": "#include <sys/stat.h>"
+        },
+        {
+          "line": 29,
+          "text": "#include <sys/syscall.h>"
+        },
+        {
+          "line": 30,
+          "text": "#include <sys/time.h>"
+        },
+        {
+          "line": 31,
+          "text": "#include <sys/wait.h>"
+        },
+        {
+          "line": 32,
+          "text": "#include <signal.h>"
+        },
+        {
+          "line": 33,
+          "text": "#include <pthread.h>"
+        },
+        {
+          "line": 34,
+          "text": "#include <time.h>"
+        },
+        {
+          "line": 35,
+          "text": "#include <unistd.h>"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/archive-expectation.v1.json",
+      "bytes": 989,
+      "sha256": "75ad747bd30f63ce624d10c789c1a27003e7f8ea38dba0b83a958709d2a67427",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980420",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "989",
+        "1790941728819267658",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/broker-material-provenance.v1.keys.json",
+      "bytes": 1919,
+      "sha256": "16239396207f90a3ab78158ebdd9abd58db304c3bc3061a081fba18d33489503",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980421",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1919",
+        "1790941728819656086",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 85,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/broker-snapshot-manifest.v1.keys.json",
+      "bytes": 8823,
+      "sha256": "0038a130fc6cfc212180ec82f932f8ddd4d4d25ceeda27dda64713e4cf0755fc",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980422",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8823",
+        "1790941728819804694",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 354,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/custody-record.v1.json",
+      "bytes": 705,
+      "sha256": "4a8d71b72af9ff8fcef74f1de7a29fb20b94087975b347037080a70eedccee16",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980423",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "705",
+        "1790941728820100912",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/deb-member-observation.v1.json",
+      "bytes": 7833,
+      "sha256": "45924c3191e3197fc94373566bd3d244b2b61d070c580515cbd73989ebf3d0f3",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980424",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7833",
+        "1790941728820215918",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/future-scan-manifest.v1.json",
+      "bytes": 8050,
+      "sha256": "671cbc38574acfd4bc05ac74f7c8f0eec7b95fda6ebea39faecb5477655b9f32",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980425",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8050",
+        "1790941728820335425",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/held-custody.v1.json",
+      "bytes": 2990,
+      "sha256": "ac77bd4881f968bc58c24198afe0a4eb5befa1d7c0fe2665c2ef5ee7c55ec9b1",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980426",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2990",
+        "1790941728820496234",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/input-index.v1.json",
+      "bytes": 6332,
+      "sha256": "8eff7af829f21acc44705e580339bc76ce678fca0dc5475e86a1ed35acefa839",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980427",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6332",
+        "1790941728820609741",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/member-record.v1.json",
+      "bytes": 17438,
+      "sha256": "a40f2d7feecdd4298065b879c2c73ce49a3f2d081c1be683a1fdd7fe7e976708",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980428",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17438",
+        "1790941728820732248",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 763,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/scan-admission.v1.json",
+      "bytes": 7772,
+      "sha256": "88c1e2caa20b29c4fe242510b1d59e956c34e8dfd16b11d5a2756f6dd86b1ac7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980429",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7772",
+        "1790941728821228876",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 309,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/scan-index.v1.json",
+      "bytes": 966,
+      "sha256": "fee19bd2e81076c01d25479a0144fdfd3f4192c14e66892bd20e9084478a9c85",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980430",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "966",
+        "1790941728821267773",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/scan-resource.v1.json",
+      "bytes": 39747,
+      "sha256": "d70d4914ce82272338b3f3972ed258f651743cb56087567e2d2673e6a6b889e4",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980431",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "39747",
+        "1790941728821666201",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/scan-result.v1.json",
+      "bytes": 11609,
+      "sha256": "d1f40916d2b2e36c077b28888f9c4dd9712bc7a70b2e5c17c2699bbfd84c31cb",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980432",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11609",
+        "1790941728821809110",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 1,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "schemas/wheel-metadata-observation.v1.json",
+      "bytes": 17439,
+      "sha256": "5ac922c318c18ab9d3a562bd25c6cac28488a749fbd82b84feaeeaaa421bd875",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980433",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17439",
+        "1790941728821936517",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": false,
+      "line_count": 751,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/__init__.py",
+      "bytes": 211,
+      "sha256": "d27706191c919459d23e8b27f17066132d4ee7311cd0d9630f75a3c1cb179bda",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980435",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "211",
+        "1790941728822267830",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 6,
+      "lexical_definition_regions": 0,
+      "imports_text": [
+        {
+          "line": 3,
+          "text": "from .controls import dispatch_control"
+        },
+        {
+          "line": 4,
+          "text": "from .public import scan_retained"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/bounds.py",
+      "bytes": 19120,
+      "sha256": "d304b445915461a8f6ea7399cec8ce8861b660e349f45a4017d0fd9b2d9561e1",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980436",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19120",
+        "1790942649050695272",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 433,
+      "lexical_definition_regions": 13,
+      "imports_text": [
+        {
+          "line": 159,
+          "text": "from .canonical import canonical_bytes_bounded"
+        },
+        {
+          "line": 183,
+          "text": "import time"
+        },
+        {
+          "line": 184,
+          "text": "from tools.native_support import selected_owner,source_raw_owner,_source_raw_scope"
+        },
+        {
+          "line": 272,
+          "text": "from .canonical import canonical_resource_bound"
+        },
+        {
+          "line": 314,
+          "text": "import resource"
+        },
+        {
+          "line": 315,
+          "text": "import time"
+        },
+        {
+          "line": 348,
+          "text": "import resource"
+        },
+        {
+          "line": 349,
+          "text": "import time"
+        },
+        {
+          "line": 366,
+          "text": "from tools.native_support import native_entry_cause"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/broker_map.py",
+      "bytes": 18753,
+      "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980437",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18753",
+        "1790941728822872371",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 402,
+      "lexical_definition_regions": 6,
+      "imports_text": [
+        {
+          "line": 6,
+          "text": "from .canonical import canonical_sha256"
+        },
+        {
+          "line": 7,
+          "text": "from .causes import pack"
+        },
+        {
+          "line": 8,
+          "text": "from .pins import PROVENANCE_KEYS, PROVENANCE_SCHEMA, SNAPSHOT_KEYS, SNAPSHOT_SCHEMA"
+        },
+        {
+          "line": 84,
+          "text": "from .schema_validate import validate_role"
+        },
+        {
+          "line": 88,
+          "text": "from .bounds import performing_requested"
+        },
+        {
+          "line": 170,
+          "text": "from .schema_validate import load_schemas"
+        },
+        {
+          "line": 247,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 271,
+          "text": "from .schema_validate import validate_role"
+        },
+        {
+          "line": 272,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 288,
+          "text": "from .schema_validate import validate_role"
+        },
+        {
+          "line": 306,
+          "text": "from .canonical import canonical_sha256_metered"
+        },
+        {
+          "line": 330,
+          "text": "from .schema_validate import validate_value"
+        },
+        {
+          "line": 398,
+          "text": "from .schema_validate import validate_value"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/canonical.py",
+      "bytes": 9474,
+      "sha256": "492af27f62df7609010bcf40ace91153992f747a514437128dbf030baef39050",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980438",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9474",
+        "1790942162191991355",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 268,
+      "lexical_definition_regions": 17,
+      "imports_text": [
+        {
+          "line": 3,
+          "text": "import json"
+        },
+        {
+          "line": 28,
+          "text": "from .bounds import HARD_MAX_OUTPUT_BYTES, HARD_MAX_DEPTH"
+        },
+        {
+          "line": 72,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 91,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 99,
+          "text": "from .bounds import release_live"
+        },
+        {
+          "line": 182,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 196,
+          "text": "import hashlib"
+        },
+        {
+          "line": 208,
+          "text": "from .digests import content_sha256, DigestStop"
+        },
+        {
+          "line": 213,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 217,
+          "text": "from .bounds import release_live"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/causes.py",
+      "bytes": 10859,
+      "sha256": "c56f0a84275cad7b9c923ee8c4f84a92724dd0d9926456a6a8fbf664cae7a703",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980439",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10859",
+        "1790941911218707995",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 251,
+      "lexical_definition_regions": 7,
+      "imports_text": [
+        {
+          "line": 18,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 20,
+          "text": "from .bounds import performing_requested"
+        },
+        {
+          "line": 246,
+          "text": "from tools.native_support import retain_source_origin"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/compression.py",
+      "bytes": 19552,
+      "sha256": "81f845b58a41fd5e733a8e062f94f442718253563ceded26e9491fde72434274",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980440",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19552",
+        "1790942162193991468",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 404,
+      "lexical_definition_regions": 20,
+      "imports_text": [
+        {
+          "line": 3,
+          "text": "from .bounds import charge, reserve, release_live, performing_requested"
+        },
+        {
+          "line": 4,
+          "text": "from .pins import CODEC_PINS"
+        },
+        {
+          "line": 5,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 30,
+          "text": "from .custody import HeldRange"
+        },
+        {
+          "line": 141,
+          "text": "import hashlib,base64"
+        },
+        {
+          "line": 198,
+          "text": "from .digests import _chunks"
+        },
+        {
+          "line": 240,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 242,
+          "text": "from .causes import source_exception_detail"
+        },
+        {
+          "line": 258,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 278,
+          "text": "from .contracts import loaded_globals_cause"
+        },
+        {
+          "line": 319,
+          "text": "import zlib as module"
+        },
+        {
+          "line": 321,
+          "text": "import lzma as module"
+        },
+        {
+          "line": 323,
+          "text": "import compression.zstd as module"
+        },
+        {
+          "line": 345,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 351,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 355,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 359,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 363,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 367,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 371,
+          "text": "from tools.native_support import retain_source_origin"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/context.py",
+      "bytes": 20445,
+      "sha256": "43bbf91da3411a70986fc5e9d8518bc8197901dc74ca771d61fd4103fba12a4b",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980441",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20445",
+        "1790942162194991526",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 374,
+      "lexical_definition_regions": 9,
+      "imports_text": [
+        {
+          "line": 8,
+          "text": "from .canonical import canonical_loads, canonical_sha256"
+        },
+        {
+          "line": 9,
+          "text": "from .pins import BILL_SHA256, CODEC_PINS, FUTURE_PLAN_SHA256, HELD_ROOT"
+        },
+        {
+          "line": 19,
+          "text": "import json"
+        },
+        {
+          "line": 20,
+          "text": "from .canonical import _walk"
+        },
+        {
+          "line": 76,
+          "text": "from .bounds import reserve, performing_requested"
+        },
+        {
+          "line": 77,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 78,
+          "text": "from .schema_validate import bind_schema_roster"
+        },
+        {
+          "line": 119,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 127,
+          "text": "from .schema_validate import validate_value"
+        },
+        {
+          "line": 135,
+          "text": "from .contracts import metered_identity, validate_stock_roles, bind_plan_roster, bind_loaded_implementation"
+        },
+        {
+          "line": 150,
+          "text": "from .contracts import bind_held_scope"
+        },
+        {
+          "line": 195,
+          "text": "from .custody import ROOT_LIFETIME,RootHolderEndpoint,RootHolderClient"
+        },
+        {
+          "line": 249,
+          "text": "from .schema_validate import RESULT_SCHEMA"
+        },
+        {
+          "line": 254,
+          "text": "from .contracts import recipe_identity as identity_projection"
+        },
+        {
+          "line": 305,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 306,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 307,
+          "text": "from .filename import pep503_name"
+        },
+        {
+          "line": 326,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 339,
+          "text": "import os"
+        },
+        {
+          "line": 343,
+          "text": "from .custody import owned_metadata_directory"
+        },
+        {
+          "line": 354,
+          "text": "from .custody import owned_metadata_bytes"
+        },
+        {
+          "line": 369,
+          "text": "from .bounds import performing_requested"
+        },
+        {
+          "line": 372,
+          "text": "from .contracts import loaded_globals_cause"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/contracts.py",
+      "bytes": 30961,
+      "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980442",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30961",
+        "1790941728824240750",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 573,
+      "lexical_definition_regions": 13,
+      "imports_text": [
+        {
+          "line": 7,
+          "text": "from .bounds import reserve,release_live"
+        },
+        {
+          "line": 8,
+          "text": "from .canonical import canonical_bytes_bounded, canonical_sha256_metered"
+        },
+        {
+          "line": 9,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 10,
+          "text": "from .schema_validate import validate_role"
+        },
+        {
+          "line": 26,
+          "text": "from .context import ROLES,_administrative"
+        },
+        {
+          "line": 27,
+          "text": "from .pins import BILL_SHA256"
+        },
+        {
+          "line": 100,
+          "text": "import marshal"
+        },
+        {
+          "line": 101,
+          "text": "from .public import scan_retained,scan_retained_bytes"
+        },
+        {
+          "line": 102,
+          "text": "from .compression import decode_admitted"
+        },
+        {
+          "line": 103,
+          "text": "from .schema_validate import validate_document"
+        },
+        {
+          "line": 104,
+          "text": "from .zip_wheel import scan_wheel"
+        },
+        {
+          "line": 105,
+          "text": "from .deb_archive import scan_deb"
+        },
+        {
+          "line": 117,
+          "text": "from tools.state_binding import bind_native"
+        },
+        {
+          "line": 144,
+          "text": "from .pins import CODEC_PINS"
+        },
+        {
+          "line": 162,
+          "text": "from .context import _administrative"
+        },
+        {
+          "line": 182,
+          "text": "import sys, types, marshal"
+        },
+        {
+          "line": 244,
+          "text": "from tools.state_binding import source_state_cause"
+        },
+        {
+          "line": 270,
+          "text": "from tools.state_binding import source_state_cause,bind_native"
+        },
+        {
+          "line": 313,
+          "text": "from .pins import CODEC_PINS"
+        },
+        {
+          "line": 316,
+          "text": "from .schema_validate import RESULT_SCHEMA,validate_document"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/controls.py",
+      "bytes": 9780,
+      "sha256": "1603b21d0f65c116c3e46e7611e652a8ca2bdd2aa80e273ef212838d72003aef",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980443",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9780",
+        "1790942162196991639",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 159,
+      "lexical_definition_regions": 7,
+      "imports_text": [
+        {
+          "line": 7,
+          "text": "import json"
+        },
+        {
+          "line": 8,
+          "text": "import os"
+        },
+        {
+          "line": 9,
+          "text": "from .canonical import canonical_loads"
+        },
+        {
+          "line": 10,
+          "text": "from .public import scan_retained_bytes"
+        },
+        {
+          "line": 15,
+          "text": "from .bounds import new_meter"
+        },
+        {
+          "line": 16,
+          "text": "from .custody import owned_metadata_bytes"
+        },
+        {
+          "line": 17,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 49,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 72,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 73,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 74,
+          "text": "from .schema_validate import validate_role"
+        },
+        {
+          "line": 100,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 103,
+          "text": "from .bounds import new_meter"
+        },
+        {
+          "line": 104,
+          "text": "from .schema_validate import validate_role"
+        },
+        {
+          "line": 105,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 112,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 116,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 129,
+          "text": "from .custody import ROOT_LIFETIME"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/custody.py",
+      "bytes": 56605,
+      "sha256": "cba6ab3149298afe0b50dcdc53187bb0c363cc518f90d95b3c816b37bbd132bc",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980444",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "56605",
+        "1790943347115417528",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 1243,
+      "lexical_definition_regions": 49,
+      "imports_text": [
+        {
+          "line": 7,
+          "text": "import errno"
+        },
+        {
+          "line": 8,
+          "text": "import os"
+        },
+        {
+          "line": 10,
+          "text": "from .causes import pack"
+        },
+        {
+          "line": 11,
+          "text": "from .pins import HELD_ROOT"
+        },
+        {
+          "line": 44,
+          "text": "from .causes import exception_detail"
+        },
+        {
+          "line": 104,
+          "text": "import socket,struct"
+        },
+        {
+          "line": 105,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 106,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 136,
+          "text": "from .bounds import release_live"
+        },
+        {
+          "line": 139,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 148,
+          "text": "from .canonical import canonical_bytes_bounded"
+        },
+        {
+          "line": 149,
+          "text": "from .bounds import reserve,release_live"
+        },
+        {
+          "line": 150,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 163,
+          "text": "from .bounds import reserve,release_live"
+        },
+        {
+          "line": 164,
+          "text": "from .canonical import canonical_loads"
+        },
+        {
+          "line": 165,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 215,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 216,
+          "text": "from .bounds import reserve,release_live"
+        },
+        {
+          "line": 235,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 248,
+          "text": "from .digests import content_sha256,DigestStop"
+        },
+        {
+          "line": 249,
+          "text": "from .bounds import reserve,release_live"
+        },
+        {
+          "line": 277,
+          "text": "from .bounds import release_live"
+        },
+        {
+          "line": 307,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 308,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 315,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 320,
+          "text": "from .bounds import reserve,release_live"
+        },
+        {
+          "line": 321,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 335,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 343,
+          "text": "from .bounds import release_live"
+        },
+        {
+          "line": 371,
+          "text": "import stat"
+        },
+        {
+          "line": 372,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 436,
+          "text": "import stat"
+        },
+        {
+          "line": 437,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 438,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 488,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 649,
+          "text": "from .bounds import charge, reserve"
+        },
+        {
+          "line": 650,
+          "text": "from .context import effects_cause"
+        },
+        {
+          "line": 651,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 685,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 761,
+          "text": "import stat as statmod"
+        },
+        {
+          "line": 777,
+          "text": "import hashlib"
+        },
+        {
+          "line": 865,
+          "text": "from .schema_validate import CUSTODY_SCHEMA, validate_value"
+        },
+        {
+          "line": 884,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 913,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 932,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 945,
+          "text": "from .bounds import release_live"
+        },
+        {
+          "line": 958,
+          "text": "import sys"
+        },
+        {
+          "line": 959,
+          "text": "from .bounds import reserve,release_live"
+        },
+        {
+          "line": 999,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 1000,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 1008,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1043,
+          "text": "import hashlib"
+        },
+        {
+          "line": 1044,
+          "text": "from .bounds import reserve, release_live"
+        },
+        {
+          "line": 1100,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 1128,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 1146,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 1171,
+          "text": "from .bounds import reserve, release_live"
+        },
+        {
+          "line": 1172,
+          "text": "from .canonical import canonical_bytes_bounded"
+        },
+        {
+          "line": 1173,
+          "text": "from .digests import content_sha256, DigestStop"
+        },
+        {
+          "line": 1174,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 1194,
+          "text": "from .schema_validate import WHEEL_SCHEMA, DEB_SCHEMA, validate_document"
+        },
+        {
+          "line": 1218,
+          "text": "from .causes import source_exception_detail"
+        },
+        {
+          "line": 1228,
+          "text": "from .causes import source_exception_detail"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/deb_archive.py",
+      "bytes": 56876,
+      "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980445",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "56876",
+        "1790942162199991810",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 1302,
+      "lexical_definition_regions": 26,
+      "imports_text": [
+        {
+          "line": 3,
+          "text": "import struct"
+        },
+        {
+          "line": 5,
+          "text": "from .bounds import admission_cause, charge, clock_cause, performing_requested, reserve"
+        },
+        {
+          "line": 6,
+          "text": "from .causes import pack"
+        },
+        {
+          "line": 7,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 8,
+          "text": "from .guards import casefold_collision, duplicate_path, normalize_member_path, symlink_escapes"
+        },
+        {
+          "line": 9,
+          "text": "from .zip_wheel import _hex64, _open_held, _publisher_cause"
+        },
+        {
+          "line": 75,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 81,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 107,
+          "text": "from .custody import HeldRange"
+        },
+        {
+          "line": 129,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 140,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 170,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 252,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 290,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 342,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 358,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 379,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 383,
+          "text": "from .compression import DecodedReader,BudgetStop"
+        },
+        {
+          "line": 424,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 446,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 463,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 467,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 512,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 794,
+          "text": "from .compression import decode_admitted"
+        },
+        {
+          "line": 803,
+          "text": "from .compression import stream_reader"
+        },
+        {
+          "line": 871,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 874,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 882,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 899,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1014,
+          "text": "from .context import effects_cause"
+        },
+        {
+          "line": 1021,
+          "text": "from .schema_validate import EXPECTATION_SCHEMA, validate_value"
+        },
+        {
+          "line": 1026,
+          "text": "from .zip_wheel import _held_present"
+        },
+        {
+          "line": 1034,
+          "text": "from .schema_validate import DEB_SCHEMA, MEMBER_SCHEMA, RESOURCE_SCHEMA, validate_value"
+        },
+        {
+          "line": 1049,
+          "text": "from .bounds import new_meter"
+        },
+        {
+          "line": 1053,
+          "text": "from .custody import begin_archive"
+        },
+        {
+          "line": 1060,
+          "text": "from .custody import release_retained_fd"
+        },
+        {
+          "line": 1098,
+          "text": "from .custody import HeldRange"
+        },
+        {
+          "line": 1115,
+          "text": "from .compression import DecodedReader,BudgetStop"
+        },
+        {
+          "line": 1124,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1126,
+          "text": "from .public import exception_owned_result"
+        },
+        {
+          "line": 1159,
+          "text": "from .custody import reserve_public_members"
+        },
+        {
+          "line": 1225,
+          "text": "from .custody import seal_archive_custody"
+        },
+        {
+          "line": 1231,
+          "text": "from .semantics import deb_cause, member_cause"
+        },
+        {
+          "line": 1242,
+          "text": "from .bounds import charge_output"
+        },
+        {
+          "line": 1247,
+          "text": "from .custody import release_retained_fd"
+        },
+        {
+          "line": 1262,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 1265,
+          "text": "from .bounds import new_meter"
+        },
+        {
+          "line": 1272,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1274,
+          "text": "from .public import exception_owned_result"
+        },
+        {
+          "line": 1277,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1279,
+          "text": "from .public import exception_owned_result"
+        },
+        {
+          "line": 1284,
+          "text": "from .custody import release_archive_live,retain_public_observation"
+        },
+        {
+          "line": 1290,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1297,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1300,
+          "text": "from .public import finish_owned"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/digests.py",
+      "bytes": 3970,
+      "sha256": "fd588bda6e4edbe2fe751ea69ac147a9b2bbd3271096c00b69af31bb70757b1d",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980446",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3970",
+        "1790942162200991867",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 122,
+      "lexical_definition_regions": 6,
+      "imports_text": [
+        {
+          "line": 12,
+          "text": "from .bounds import charge,reserve,release_live"
+        },
+        {
+          "line": 13,
+          "text": "from .custody import HeldRange"
+        },
+        {
+          "line": 43,
+          "text": "from .bounds import reserve,release_live"
+        },
+        {
+          "line": 48,
+          "text": "import hashlib"
+        },
+        {
+          "line": 69,
+          "text": "from .bounds import reserve,release_live"
+        },
+        {
+          "line": 74,
+          "text": "import base64"
+        },
+        {
+          "line": 75,
+          "text": "import hashlib"
+        },
+        {
+          "line": 101,
+          "text": "import zlib"
+        },
+        {
+          "line": 103,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 107,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 116,
+          "text": "from tools.native_support import retain_source_origin"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/filename.py",
+      "bytes": 1917,
+      "sha256": "12d9730bbacfbcf32896c448d9fbaa84c304b62a7b6d24210f3d3339bd2851f7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980447",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1917",
+        "1790941728826613786",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 56,
+      "lexical_definition_regions": 3,
+      "imports_text": [
+        {
+          "line": 3,
+          "text": "import re"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/fixtures.py",
+      "bytes": 1798,
+      "sha256": "baa60bba8f6bbb912663569e478d171f16c808ed6ccf9beb811cdd41c2a90762",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980448",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1798",
+        "1790941728826750494",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 37,
+      "lexical_definition_regions": 1,
+      "imports_text": [
+        {
+          "line": 3,
+          "text": "import struct"
+        },
+        {
+          "line": 4,
+          "text": "from .digests import crc32"
+        },
+        {
+          "line": 20,
+          "text": "import zlib"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/guards.py",
+      "bytes": 2031,
+      "sha256": "de34c880bd18b78d2e9b691008950809a31c466d581e3f232939b30d10969806",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980449",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2031",
+        "1790941728826884401",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 68,
+      "lexical_definition_regions": 4,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/normalize.py",
+      "bytes": 1458,
+      "sha256": "91053cc6010512819788b5adf11af85286c74ec32f90cbc76721e280cc28a43c",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980450",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1458",
+        "1790941728827037310",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 36,
+      "lexical_definition_regions": 2,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/pins.py",
+      "bytes": 4553,
+      "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980451",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4553",
+        "1790941728827180318",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 115,
+      "lexical_definition_regions": 0,
+      "imports_text": [],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/public.py",
+      "bytes": 60149,
+      "sha256": "ac5343b8d0fbb5630432277f07d8a1f1ef8c1529e2d6e20f23de7afea3ad1014",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980452",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "60149",
+        "1790942527410773533",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 1175,
+      "lexical_definition_regions": 25,
+      "imports_text": [
+        {
+          "line": 9,
+          "text": "from .bounds import HARD_MAX_ARCHIVE_BYTES, charge, new_meter, performing_requested, reserve"
+        },
+        {
+          "line": 10,
+          "text": "from .broker_map import project_provenance, project_snapshot"
+        },
+        {
+          "line": 11,
+          "text": "from .canonical import canonical_bytes, canonical_loads, canonical_sha256"
+        },
+        {
+          "line": 12,
+          "text": "from .causes import pack"
+        },
+        {
+          "line": 13,
+          "text": "from .deb_archive import scan_deb"
+        },
+        {
+          "line": 14,
+          "text": "from .pins import ("
+        },
+        {
+          "line": 18,
+          "text": "from .schema_validate import ("
+        },
+        {
+          "line": 26,
+          "text": "from .zip_wheel import scan_wheel"
+        },
+        {
+          "line": 114,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 138,
+          "text": "from .schema_validate import validate_role"
+        },
+        {
+          "line": 149,
+          "text": "from .contracts import recipe_identity"
+        },
+        {
+          "line": 157,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 199,
+          "text": "from .contracts import installed_inventory"
+        },
+        {
+          "line": 281,
+          "text": "from .contracts import provenance_relations"
+        },
+        {
+          "line": 440,
+          "text": "from .context import effects_cause"
+        },
+        {
+          "line": 509,
+          "text": "from .custody import complete_material_output"
+        },
+        {
+          "line": 625,
+          "text": "from .canonical import canonical_sha256_metered"
+        },
+        {
+          "line": 667,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 668,
+          "text": "from .compression import BudgetStop"
+        },
+        {
+          "line": 672,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 683,
+          "text": "from .canonical import canonical_bytes_bounded"
+        },
+        {
+          "line": 684,
+          "text": "from .bounds import reserve, terminal_meter, TERMINAL_OUTPUT_CAP, release_live"
+        },
+        {
+          "line": 688,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 691,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 699,
+          "text": "from .bounds import reserve_terminal_causal"
+        },
+        {
+          "line": 706,
+          "text": "from .contracts import material_receipt_relations"
+        },
+        {
+          "line": 712,
+          "text": "from .canonical import canonical_sha256_metered"
+        },
+        {
+          "line": 717,
+          "text": "from .custody import RootHolderClient"
+        },
+        {
+          "line": 730,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 747,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 774,
+          "text": "from .digests import content_sha256, DigestStop"
+        },
+        {
+          "line": 778,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 837,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 841,
+          "text": "from .bounds import bootstrap_reserve"
+        },
+        {
+          "line": 858,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 882,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 885,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 892,
+          "text": "from .canonical import canonical_sha256_metered"
+        },
+        {
+          "line": 916,
+          "text": "from .context import bind_stock"
+        },
+        {
+          "line": 921,
+          "text": "from .contracts import bind_independent_output"
+        },
+        {
+          "line": 942,
+          "text": "from tools.native_support import source_raw_owner,leave_source_scope"
+        },
+        {
+          "line": 946,
+          "text": "from .custody import complete_custody"
+        },
+        {
+          "line": 949,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 950,
+          "text": "from .compression import BudgetStop"
+        },
+        {
+          "line": 954,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 959,
+          "text": "from tools.native_support import transfer_result"
+        },
+        {
+          "line": 970,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 971,
+          "text": "from .compression import BudgetStop"
+        },
+        {
+          "line": 972,
+          "text": "from .causes import causal_refusal,source_exception_detail"
+        },
+        {
+          "line": 973,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 991,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1000,
+          "text": "from .custody import complete_custody"
+        },
+        {
+          "line": 1001,
+          "text": "from tools.native_support import begin_terminal"
+        },
+        {
+          "line": 1008,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1015,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 1016,
+          "text": "from .compression import BudgetStop"
+        },
+        {
+          "line": 1018,
+          "text": "from .bounds import reserve_terminal_causal"
+        },
+        {
+          "line": 1021,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1027,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1034,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1037,
+          "text": "from tools.native_support import own_map"
+        },
+        {
+          "line": 1040,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1042,
+          "text": "from tools.native_support import own_map"
+        },
+        {
+          "line": 1052,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1054,
+          "text": "from .custody import close_whole_custody,release_retained_fd,release_archive_live"
+        },
+        {
+          "line": 1055,
+          "text": "from .bounds import terminal_meter,release_live,reserve"
+        },
+        {
+          "line": 1056,
+          "text": "from .canonical import canonical_bytes_bounded"
+        },
+        {
+          "line": 1057,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 1058,
+          "text": "from .compression import BudgetStop"
+        },
+        {
+          "line": 1061,
+          "text": "from .causes import source_exception_detail"
+        },
+        {
+          "line": 1068,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1079,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1085,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1095,
+          "text": "from .bounds import reserve_terminal_causal"
+        },
+        {
+          "line": 1116,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1139,
+          "text": "from .filename import parse_wheel_filename"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/raw_relations.py",
+      "bytes": 28991,
+      "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980453",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "28991",
+        "1790942162204992094",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 433,
+      "lexical_definition_regions": 4,
+      "imports_text": [
+        {
+          "line": 2,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 3,
+          "text": "from .digests import content_sha256"
+        },
+        {
+          "line": 7,
+          "text": "from .deb_archive import _NumericUnsupported"
+        },
+        {
+          "line": 8,
+          "text": "import struct"
+        },
+        {
+          "line": 20,
+          "text": "from .deb_archive import _numeric,_header_text,_octal,_tar_checksum,_apply_pax,_effective_pax,_parse_pax,_gnu_text"
+        },
+        {
+          "line": 108,
+          "text": "from .guards import normalize_member_path"
+        },
+        {
+          "line": 113,
+          "text": "import struct"
+        },
+        {
+          "line": 123,
+          "text": "from .zip_wheel import _read_sizes,_decode_name"
+        },
+        {
+          "line": 168,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 176,
+          "text": "import struct"
+        },
+        {
+          "line": 207,
+          "text": "from .zip_wheel import _parse_record"
+        },
+        {
+          "line": 221,
+          "text": "from .guards import normalize_member_path"
+        },
+        {
+          "line": 250,
+          "text": "from .digests import SUPPORTED_RECORD_ALGORITHMS"
+        },
+        {
+          "line": 266,
+          "text": "import base64"
+        },
+        {
+          "line": 280,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 294,
+          "text": "from .deb_archive import _numeric,_octal,_tar_checksum,_header_text,_parse_pax,_gnu_text,_merge_pax,_effective_pax,_NumericUnsupported"
+        },
+        {
+          "line": 366,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 386,
+          "text": "from .deb_archive import _ar_uint"
+        },
+        {
+          "line": 419,
+          "text": "from .deb_archive import _deb822,_case_field"
+        },
+        {
+          "line": 430,
+          "text": "from tools.native_support import retain_source_origin"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/schema_validate.py",
+      "bytes": 12176,
+      "sha256": "57ec66bc4faf68c12576cd34418c7af1a45add88bd0f881f43f7e043401bca15",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980454",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12176",
+        "1790942162205992152",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 292,
+      "lexical_definition_regions": 10,
+      "imports_text": [
+        {
+          "line": 7,
+          "text": "import json"
+        },
+        {
+          "line": 8,
+          "text": "import os"
+        },
+        {
+          "line": 9,
+          "text": "import re"
+        },
+        {
+          "line": 44,
+          "text": "from .bounds import new_meter"
+        },
+        {
+          "line": 52,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 56,
+          "text": "from .custody import owned_metadata_directory"
+        },
+        {
+          "line": 63,
+          "text": "from .custody import owned_metadata_bytes"
+        },
+        {
+          "line": 68,
+          "text": "from .context import _administrative"
+        },
+        {
+          "line": 91,
+          "text": "from .bounds import reserve"
+        },
+        {
+          "line": 105,
+          "text": "from .custody import stat_identity9"
+        },
+        {
+          "line": 154,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 174,
+          "text": "from .bounds import charge"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/semantics.py",
+      "bytes": 3622,
+      "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980455",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3622",
+        "1790941728828767110",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 68,
+      "lexical_definition_regions": 2,
+      "imports_text": [
+        {
+          "line": 7,
+          "text": "from .raw_relations import member_raw_cause"
+        },
+        {
+          "line": 40,
+          "text": "from .raw_relations import deb_raw_cause"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "source/zip_wheel.py",
+      "bytes": 63188,
+      "sha256": "12c732f0674edf432461c598f5149d65fbde67211e2366fdce4c12b0987133a8",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980456",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "63188",
+        "1790942162208992322",
+        "1790943768723408446"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 1343,
+      "lexical_definition_regions": 31,
+      "imports_text": [
+        {
+          "line": 3,
+          "text": "import base64"
+        },
+        {
+          "line": 4,
+          "text": "import binascii"
+        },
+        {
+          "line": 5,
+          "text": "import struct"
+        },
+        {
+          "line": 7,
+          "text": "from .bounds import HARD_MAX_METADATA_BYTES, admission_cause, charge, clock_cause, performing_requested, reserve"
+        },
+        {
+          "line": 8,
+          "text": "from .causes import pack"
+        },
+        {
+          "line": 9,
+          "text": "from .digests import content_sha256, crc32, record_digest"
+        },
+        {
+          "line": 10,
+          "text": "from .filename import parse_wheel_filename, pep503_name"
+        },
+        {
+          "line": 11,
+          "text": "from .guards import casefold_collision, duplicate_path, normalize_member_path, symlink_escapes"
+        },
+        {
+          "line": 12,
+          "text": "from .normalize import requires_python_correspondence"
+        },
+        {
+          "line": 148,
+          "text": "from .compression import decode_admitted"
+        },
+        {
+          "line": 149,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 171,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 241,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 315,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 376,
+          "text": "from .custody import HeldRange"
+        },
+        {
+          "line": 412,
+          "text": "from .compression import stream_reader,BudgetStop"
+        },
+        {
+          "line": 422,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 424,
+          "text": "from .public import exception_owned_result"
+        },
+        {
+          "line": 497,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 655,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 659,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 731,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 762,
+          "text": "from .causes import enter_phase"
+        },
+        {
+          "line": 787,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 794,
+          "text": "from .pins import SUPPORTED_METADATA_VERSIONS"
+        },
+        {
+          "line": 1049,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1067,
+          "text": "from .custody import read_nofollow_file"
+        },
+        {
+          "line": 1104,
+          "text": "from .custody import compare_custody, plan_nofollow_read"
+        },
+        {
+          "line": 1179,
+          "text": "from .context import effects_cause"
+        },
+        {
+          "line": 1186,
+          "text": "from .schema_validate import EXPECTATION_SCHEMA, validate_value"
+        },
+        {
+          "line": 1197,
+          "text": "from .schema_validate import MEMBER_SCHEMA, RESOURCE_SCHEMA, WHEEL_SCHEMA, validate_value"
+        },
+        {
+          "line": 1213,
+          "text": "from .bounds import new_meter"
+        },
+        {
+          "line": 1217,
+          "text": "from .custody import begin_archive"
+        },
+        {
+          "line": 1224,
+          "text": "from .custody import release_retained_fd"
+        },
+        {
+          "line": 1254,
+          "text": "from .custody import reserve_public_members"
+        },
+        {
+          "line": 1267,
+          "text": "from .custody import seal_archive_custody"
+        },
+        {
+          "line": 1273,
+          "text": "from .raw_relations import wheel_raw_cause"
+        },
+        {
+          "line": 1278,
+          "text": "from .semantics import member_cause"
+        },
+        {
+          "line": 1288,
+          "text": "from .custody import release_retained_fd"
+        },
+        {
+          "line": 1303,
+          "text": "from .digests import DigestStop"
+        },
+        {
+          "line": 1306,
+          "text": "from .bounds import new_meter"
+        },
+        {
+          "line": 1313,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1315,
+          "text": "from .public import exception_owned_result"
+        },
+        {
+          "line": 1318,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1320,
+          "text": "from .public import exception_owned_result"
+        },
+        {
+          "line": 1325,
+          "text": "from .custody import release_archive_live,retain_public_observation"
+        },
+        {
+          "line": 1331,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1338,
+          "text": "from .causes import causal_refusal"
+        },
+        {
+          "line": 1341,
+          "text": "from .public import finish_owned"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "tools/native_owner.py",
+      "bytes": 90243,
+      "sha256": "c24609bb6ccef3976d1922659596a595e13f3dcfeeb8a55960fded47498239ac",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980458",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "90243",
+        "1790941728829563456",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 1383,
+      "lexical_definition_regions": 42,
+      "imports_text": [
+        {
+          "line": 8,
+          "text": "import errno"
+        },
+        {
+          "line": 9,
+          "text": "import fcntl"
+        },
+        {
+          "line": 10,
+          "text": "import hashlib"
+        },
+        {
+          "line": 11,
+          "text": "import json"
+        },
+        {
+          "line": 12,
+          "text": "import os"
+        },
+        {
+          "line": 13,
+          "text": "import selectors"
+        },
+        {
+          "line": 14,
+          "text": "import signal"
+        },
+        {
+          "line": 15,
+          "text": "import socket"
+        },
+        {
+          "line": 16,
+          "text": "import stat"
+        },
+        {
+          "line": 17,
+          "text": "import struct"
+        },
+        {
+          "line": 18,
+          "text": "import time"
+        },
+        {
+          "line": 20,
+          "text": "from tools.root_holder import RootBudget,RootHolder,HolderStop,full9"
+        },
+        {
+          "line": 21,
+          "text": "from tools.native_support import selected_owner,RootRetainedCapsule"
+        },
+        {
+          "line": 178,
+          "text": "from source.canonical import canonical_loads"
+        },
+        {
+          "line": 342,
+          "text": "from source.causes import exception_detail"
+        },
+        {
+          "line": 425,
+          "text": "from source.canonical import canonical_loads"
+        },
+        {
+          "line": 426,
+          "text": "from source.schema_validate import validate_document,RESULT_SCHEMA"
+        },
+        {
+          "line": 427,
+          "text": "from source.bounds import new_meter"
+        },
+        {
+          "line": 454,
+          "text": "from source.causes import exception_detail"
+        },
+        {
+          "line": 613,
+          "text": "from source.canonical import canonical_loads"
+        },
+        {
+          "line": 670,
+          "text": "from source.causes import exception_detail"
+        },
+        {
+          "line": 932,
+          "text": "from source.canonical import canonical_loads"
+        },
+        {
+          "line": 1131,
+          "text": "from source.canonical import canonical_loads"
+        },
+        {
+          "line": 1259,
+          "text": "from source.causes import exception_detail"
+        },
+        {
+          "line": 1330,
+          "text": "from source.canonical import canonical_loads"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "tools/native_support.py",
+      "bytes": 23613,
+      "sha256": "8025cd70dfd25481ca76c10957d90d9ce5c14dfa3388a8fb74dc2d37698b4b12",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980459",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23613",
+        "1790943251886998707",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 511,
+      "lexical_definition_regions": 39,
+      "imports_text": [
+        {
+          "line": 6,
+          "text": "import sys"
+        },
+        {
+          "line": 7,
+          "text": "import types"
+        },
+        {
+          "line": 8,
+          "text": "from contextvars import ContextVar"
+        },
+        {
+          "line": 79,
+          "text": "from contextvars import copy_context"
+        },
+        {
+          "line": 151,
+          "text": "from source.bounds import performing_requested"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "tools/root_holder.py",
+      "bytes": 32079,
+      "sha256": "640e8e48dd70089e373b6f49965d713820b9b2d0a7e6540c071105d9b0c2d266",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980460",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32079",
+        "1790941728831183249",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 565,
+      "lexical_definition_regions": 27,
+      "imports_text": [
+        {
+          "line": 11,
+          "text": "import array"
+        },
+        {
+          "line": 12,
+          "text": "import hashlib"
+        },
+        {
+          "line": 13,
+          "text": "import json"
+        },
+        {
+          "line": 14,
+          "text": "import os"
+        },
+        {
+          "line": 15,
+          "text": "import socket"
+        },
+        {
+          "line": 16,
+          "text": "import stat"
+        },
+        {
+          "line": 17,
+          "text": "import struct"
+        },
+        {
+          "line": 18,
+          "text": "import time"
+        },
+        {
+          "line": 106,
+          "text": "from source.causes import exception_detail"
+        },
+        {
+          "line": 129,
+          "text": "from tools.native_support import selected_owner"
+        },
+        {
+          "line": 349,
+          "text": "from tools.native_support import selected_owner"
+        },
+        {
+          "line": 358,
+          "text": "from source.canonical import canonical_loads"
+        },
+        {
+          "line": 405,
+          "text": "from tools.native_support import selected_owner"
+        },
+        {
+          "line": 469,
+          "text": "from tools.native_owner import run_selected_source,consume_selected_source_capsule"
+        },
+        {
+          "line": 470,
+          "text": "from tools.native_support import selected_owner,ExistingParentCaller"
+        },
+        {
+          "line": 521,
+          "text": "from tools.native_owner import observe_selected_root_completion,consume_selected_observer_capsule,retain_selected_final_caller_capsule"
+        },
+        {
+          "line": 522,
+          "text": "from tools.native_support import selected_owner,ExistingParentCaller"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "tools/state_binding.py",
+      "bytes": 15906,
+      "sha256": "99e43760236702ad53c3fed9f7ed6462d937e8a7f9da38848d58e37b71dfd983",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980461",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15906",
+        "1790942216972108529",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 219,
+      "lexical_definition_regions": 5,
+      "imports_text": [
+        {
+          "line": 6,
+          "text": "import hashlib"
+        },
+        {
+          "line": 7,
+          "text": "import json"
+        },
+        {
+          "line": 8,
+          "text": "import marshal"
+        },
+        {
+          "line": 9,
+          "text": "import re"
+        },
+        {
+          "line": 10,
+          "text": "import types"
+        },
+        {
+          "line": 11,
+          "text": "import weakref"
+        },
+        {
+          "line": 12,
+          "text": "import _thread"
+        },
+        {
+          "line": 13,
+          "text": "import functools"
+        },
+        {
+          "line": 70,
+          "text": "import _abc"
+        },
+        {
+          "line": 115,
+          "text": "import sys"
+        },
+        {
+          "line": 116,
+          "text": "from tools.native_support import selected_owner"
+        },
+        {
+          "line": 117,
+          "text": "from source.custody import owned_metadata_bytes"
+        },
+        {
+          "line": 187,
+          "text": "import threading"
+        },
+        {
+          "line": 213,
+          "text": "from tools.native_support import source_raw_state_matches"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    },
+    {
+      "file": "tools/worker_entry.py",
+      "bytes": 5919,
+      "sha256": "112b2fa914daa0e7268945da5818c84b04d8e6240b4f008911331f3574bd8de5",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980462",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5919",
+        "1790941728831863188",
+        "1790943768722408389"
+      ],
+      "stable9_and_declared_SHA9": true,
+      "code": true,
+      "line_count": 116,
+      "lexical_definition_regions": 3,
+      "imports_text": [
+        {
+          "line": 7,
+          "text": "import fcntl"
+        },
+        {
+          "line": 8,
+          "text": "import hashlib"
+        },
+        {
+          "line": 9,
+          "text": "import json"
+        },
+        {
+          "line": 10,
+          "text": "import os"
+        },
+        {
+          "line": 11,
+          "text": "import socket"
+        },
+        {
+          "line": 12,
+          "text": "import sys"
+        },
+        {
+          "line": 14,
+          "text": "import _friday_source_owner as native"
+        },
+        {
+          "line": 35,
+          "text": "from source.canonical import canonical_loads"
+        },
+        {
+          "line": 45,
+          "text": "import importlib"
+        },
+        {
+          "line": 46,
+          "text": "from source.context import ROLES"
+        },
+        {
+          "line": 47,
+          "text": "from source.pins import CODEC_PINS"
+        },
+        {
+          "line": 55,
+          "text": "from source.public import scan_retained,scan_retained_bytes"
+        },
+        {
+          "line": 56,
+          "text": "from source.compression import decode_admitted"
+        },
+        {
+          "line": 57,
+          "text": "from source.schema_validate import validate_document"
+        },
+        {
+          "line": 58,
+          "text": "from source.zip_wheel import scan_wheel"
+        },
+        {
+          "line": 59,
+          "text": "from source.deb_archive import scan_deb"
+        },
+        {
+          "line": 85,
+          "text": "from source.custody import RootHolderEndpoint"
+        },
+        {
+          "line": 101,
+          "text": "from source.public import scan_retained_bytes"
+        }
+      ],
+      "not_AST_not_dynamic_execution": true
+    }
+  ],
+  "source_count": 52,
+  "code_count": 28,
+  "lexical_regions": 471,
+  "all471_existing_regions_match_actual_current52": true,
+  "complete_file_SHA9": true,
+  "scope_note": "Lexical definition inventory does not prove complete C grammar, class bodies or dynamic reachability. Multiline C-entry and targeted actual whole methods are reviewed explicitly in phase/default matrices; supplied AST/compiler/interpreter never used.",
+  "explicit_current52_read_bytes": 1437030,
+  "SourceReady": false,
+  "runtime": "NOT_RUN"
+}

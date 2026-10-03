@@ -1,0 +1,14 @@
+{
+  "schema": "friday.sol063.received.v1",
+  "event_id": "ASTRA-SOL-E4-SOL063-T1",
+  "assignment": "ASTRA-E4-LAB866-BROWSER-WHOLE209-ALL216-ALL29-INDEPENDENT-SOURCE-REVIEW-SOL063",
+  "generation": 1,
+  "accepted_msk": "2026-10-02T15:19:09+03:00",
+  "task_ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL063-TASK.txt",
+  "task_sha256": "af88460e12461a27632ef9e29c6121c82935c24efe09b20f0c0af294ece53ebb",
+  "input_ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL063-INPUT-20261002.json",
+  "input_sha256": "541ef5fa6d0a386ca29c3f69c1020fb9bcc39a388a23be96a7300cb613f58109",
+  "pre_task_compact": "same existing TUI, generation1, completed contextCompaction 01a0fc8b-66b1-78a1-96d9-87bda5aadb3e; not repeated",
+  "source_execution": false,
+  "model_children": 0
+}

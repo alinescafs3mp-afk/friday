@@ -1,0 +1,61 @@
+{
+  "C1": "CODE",
+  "C2": "UNKNOWN_NOT_ZERO",
+  "actual_failing_path": [
+    "Parent creates the response pipe, then refuses before fork when fd 0 is already one of bundle, request write, bootstrap, executable, gate read, pre-exec child write, or the stdout and stderr write ends. The check is that fixed tuple. It does not walk the live descriptor census.",
+    "In the child, before exec, the response read end is duplicated onto fd 0 and the original read-end number is closed. Stdout and stderr stay on 1 and 2. The four script values are the bundle, the request write end, 0, and the existing export token.",
+    "After the pre-exec table is received, the parent records nine-field pins from its own write end and from the request read end, stores response 0 in the seed, then uses the non-prepaid frame sender. The child script reads that frame on fd 0 before it parses argv and before it constructs the channel.",
+    "The child compares the response and request rows, including a live nine-field stat, before it binds the request descriptor and the token. Those three observations are the dup2-time history row, the parent pin taken before the send, and the child stat taken after the frame is drained. Inequality raises while the request and token are still unset, so the prefix writer does not run.",
+    "Only a positive token and a response equal to the incoming 0, after those two row checks, bind the route. Field-set, three-descriptor collision, bundle row, and the original launch flags are checked after that bind. Those later failures can attempt a prefix. The prefix object carries retirement false.",
+    "The parent prefix reader repeats the seed join, then the strict full reader for the current prefix schema returns retained with retirement false. The child requires the reply retirement flag to be true and otherwise raises the unconfirmed-end error.",
+    "An ordinary actor failure is stored first by the shallow failure reader, which returns an empty object. The same exception then reaches the prefix writer. Neither reader retires an end. After the poll loop, wait and parent-table cancellation run. The prefix retirement helper raises once the launch fact exists or the actor pid is positive, and this route sets both before the seed is sent.",
+    "Interpreter or import failure before the script main, and any pre-exec child failure, never reach this fd 0 reader. The pre-exec child write end is close-on-exec. That earlier bank is a different reader and is not full original body custody."
+  ],
+  "changed_files": [
+    "source/actor_bootstrap.py",
+    "source/root_tool_adapter.py"
+  ],
+  "closure": "Scoped route attempt only. Earliest alias mismatch and pre-script failure have no prefix. Later errors reach two readers and both leave the ends open. SourceReady, Root admission, and GO stay false.",
+  "decision": "FD0_SAME_RESPONSE_READ_END_BEFORE_ARGV_EARLIEST_MISMATCH_HAS_NO_PREFIX_BOTH_READERS_LEAVE_ENDS_OPEN",
+  "invariant": "A missing or corrupt earliest seed, and every ordinary error, still need the full original body and alias custody and both finite ends. A typed failure or a process exit is not that custody.",
+  "joined": "PRE_ARGV_SEED_AND_OPEN_FINITE_ENDS_NOT_SOURCE_READY",
+  "kind": "independent-nonauthor-source-review",
+  "line_anchors": {
+    "child_argv_after_constructors": 947,
+    "child_bind_after_two_rows": 723,
+    "child_prefix_only_if_route_bound": 972,
+    "child_prefix_schema_flag_false": 635,
+    "child_seed_read": 676,
+    "parent_collision_before_fork": 1277,
+    "parent_dup2_read_end": 1312,
+    "parent_full_reader_flag_false": 874,
+    "parent_nonprepaid_send": 1394,
+    "parent_retire_prefix_refuses_after_launch": 1939,
+    "parent_seed_recheck_on_prefix": 919,
+    "parent_shallow_failure": 1169
+  },
+  "local_credits": [
+    "The changed parent and child agree that fd 0 is the read end of the same response pipe, and that the seed frame is the non-prepaid sender. The pre-token reader rejects a prepaid frame, and the current sender does not set that bit.",
+    "Argv is an equality check of four already chosen values. It is not the source of the request descriptor or the token. A mismatch after a successful bind attempts a prefix and still does not retire an end.",
+    "The child prefix builder and the parent full reader still name the same current prefix schema. Both keep the retirement flag false. The two history-row decoders in the child file and in the unchanged common module are the same text.",
+    "The extra duplication uses the same pre-fork stdio reservation, with its slot count raised from 2 to 3. The changed files do not reassign the imported body, metadata, output, read, RAM, descriptor, or worker caps."
+  ],
+  "not_credited": [
+    "Author result prose and the author manifest decision are pins, not credit.",
+    "The collision tuple is not a proof that every protected descriptor was examined.",
+    "The three nine-field observations are not one simultaneous snapshot.",
+    "No image, compiler ABI, admission, runtime, or gate was run.",
+    "N1, N3, and N4 files are outside the two changed sources. The earlier bank and lifetime work is not accepted here.",
+    "Whole cost, factory, CPU, RSS, and implicit IO stay unknown and are not zero."
+  ],
+  "public_native_state": "CODE",
+  "required_validation": [
+    "Original clocks, gates, and all original cases remain required and were not run.",
+    "Both finite ends still need a confirmed original native supplier and receiver on bytes this review did not execute.",
+    "Earliest seed mismatch and pre-script failure still need a body path that exists before the script main and does not depend on the token learned from the seed.",
+    "A fitting physical row would still have to pass the strict full reader and a real retirement, which this source does not return on the launched path."
+  ],
+  "reviewed_root": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source",
+  "schema": "friday.lab917.sol092.n2.independent.review.v1",
+  "verdict": "SCOPED_N2_ROUTE_ATTEMPT_NOT_WHOLE_ACCEPTED"
+}

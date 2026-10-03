@@ -1,0 +1,95 @@
+{
+  "GO": false,
+  "Root_Image": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "assignment": "ASTRA-E4-SOL061-A188-SENDER-WHOLE54-ALL96-ALL32-ALL7-CONNECTED-SOURCE-CLOSURE-LAB-867",
+  "changed_count": 1,
+  "code_open": [
+    "NATIVE_INTERPRETER_STARTUP_AND_C_STDIO_NOT_QUALIFIED: first source metering still starts after the interpreter, and inherited stdio buffers stay unqualified.",
+    "HELPER_TOOL_NATIVE_BOTH_ENDS_AND_LAST_FD_NOT_QUALIFIED: direct caller wait stays helper_native_end_verified false, and native C memory retirement stays unqualified.",
+    "NATIVE_TRACEBACK_LOCALS_AND_CYCLIC_CONSTRUCTOR_NOT_RECONSTRUCTED: method error text and args are bound; native traceback, frame locals, and cyclic constructors stay unreconstructed.",
+    "ALLPATH_ARENA_AND_WHOLE_COST_UNKNOWN_NOT_ZERO: original caps stay in force, and unknown whole RAM or IO is not zero.",
+    "OPAQUE_NATIVE_PROCESS_SELECTOR_STATE_NOT_REPLAYED: wrapper and API checks are consumed in producer order; opaque native, process, selector, ctypes, and libffi state stays unreplayed.",
+    "WHOLE_PHYSICAL_STREAM_CHRONOLOGY_NOT_PROVEN: per-pipe order and equal-prefix refusal stay; cross-actor C stdio chronology stays open.",
+    "ALL32_WHOLE_CONSUMERS_STILL_FALSE: not-reached still requires a complete failed-method replay, and whole32 acceptance stays false.",
+    "HISTORICAL_TWO_OPERATIONAL_BODIES_ABSTRACT_REQUIRED_NOT_RUN: no payload, fixture, generator, repro, or exploit.",
+    "NOT_RUN: no Source execution, Root image, compiler, runtime, or gates."
+  ],
+  "compiler_ELF_ABI": "NOT_RUN",
+  "completed_msk": "2026-10-02T15:25:58.916372+03:00",
+  "costs": {
+    "cgroup_memory_current": "3077824512",
+    "cumulative_bytes": 17089976,
+    "implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "meminfo_present": true,
+    "memory_hash_bytes": 576491,
+    "physical_read_bytes": 15932739,
+    "proc_read_bytes": 3315,
+    "proc_write_bytes": 0,
+    "sealed_tree_bytes": 580746,
+    "transport_write_bytes": 580746,
+    "vm_rss_kib": "36376",
+    "whole_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+  },
+  "current96_changed": 1,
+  "current96_equal": 95,
+  "delivery_id": "del_c6b9af344913482892635fe8606096d3",
+  "elapsed_seconds": 524.197555,
+  "equal_count": 6,
+  "equal_source": [
+    "caller.py",
+    "controller.py",
+    "native_grammar.py",
+    "root_native_launcher.py",
+    "source_grammar.py",
+    "staged_sender.py"
+  ],
+  "gates": "NOT_RUN",
+  "input_bytes": 210968,
+  "input_sha256": "fafb4b44db4235f2ee52f84a616df1cea9eea44b3be80420cbdb4c644919a61d",
+  "job_id": "job_6706acbd08f44b2b92788922cb2e9ce4",
+  "pins_verified": 165,
+  "predecessor_consumers_sha256": "b9dff9df68597a1250267d2dd5421b6c11ac035ffaa96c12556bc0cebcbe1522",
+  "predecessor_manifest_sha256": "c82c4662c1c7702eea92739b907b9b6bbe9dde78624bc0aedb90db4c21361ab7",
+  "run_message_id": "msg_4016a927503943f7b1bb9b883b416ab4",
+  "runtime": "NOT_RUN",
+  "schema": "friday.grok.lab867.sender-whole54-all96-all32-all7-connected-source-closure.v1",
+  "sizes": {
+    "caller.py": {
+      "bytes": 65450,
+      "sha256": "dc39a59751473701c649ba22231472d4cd8f728917854f73c9b8c6189fc636a9"
+    },
+    "controller.py": {
+      "bytes": 28654,
+      "sha256": "05dda8b7615aa5fc7e8ff274397415bebd4e651a0bfd37222ab8106e8af72ffe"
+    },
+    "native_grammar.py": {
+      "bytes": 38131,
+      "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853"
+    },
+    "ordinary_root_consumers.py": {
+      "bytes": 87292,
+      "sha256": "c0939ae7d2b3396650ffea494d5366986f8d8dc78a36ec91e919be1033f5f36b"
+    },
+    "root_native_launcher.py": {
+      "bytes": 111473,
+      "sha256": "f80567e7b8d8b79e968fe8027f5d4b26904bba397a95b998077b0def06467f0a"
+    },
+    "source_grammar.py": {
+      "bytes": 126384,
+      "sha256": "a804ff098973d49538b94461510a6a58ac84aa930ea99b34356eb25e17ded122"
+    },
+    "staged_sender.py": {
+      "bytes": 65443,
+      "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f"
+    }
+  },
+  "source_changed": [
+    "ordinary_root_consumers.py"
+  ],
+  "source_execution": 0,
+  "verdict": "A188_SEVEN_ROUTES_CONNECTED_SOURCE_CLOSURE_AUTHORED_NOT_RUN",
+  "whole_assignment_RAM_and_implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+}

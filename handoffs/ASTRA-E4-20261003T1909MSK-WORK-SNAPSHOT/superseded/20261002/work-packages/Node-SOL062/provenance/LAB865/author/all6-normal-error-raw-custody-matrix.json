@@ -1,0 +1,251 @@
+{
+  "schema": "friday.sol060.original6-connected.v1",
+  "rows": [
+    {
+      "case": "startup-env-negative",
+      "index": 0,
+      "original_expectation": {
+        "case": "startup-env-negative",
+        "consumer": "fixed supervisor -> fixed verifier",
+        "outer_exit": 0,
+        "outer_status": "STARTUP_CONTROL_CAUSE_CONFIRMED",
+        "inner_exit": 2,
+        "inner_status": "NOT_PROVEN",
+        "cause_type": "Refusal",
+        "cause": "nonroot exact three-variable startup environment required",
+        "preexec_ENV": {
+          "PATH": "/usr/bin:/bin",
+          "LANG": "C"
+        },
+        "actual_ENV": "PATH/LANG exact, LC_ALL absent, optional actually observed nonempty LC_CTYPE retained",
+        "GPG_calls": 0,
+        "private_home_intent": "NOT_ATTEMPTED",
+        "private_home_absence": null,
+        "complete_inner_and_outer_receipts": true
+      },
+      "actors": [
+        "caller.py",
+        "supervisor.py",
+        "verifier.py"
+      ],
+      "raw_custody": "stdout/stderr inclusive overflow and pending raw kept; canonical full supervisor/inner exact reversible preimages; writable/base64/count/SHA/prodcharge verified bothside",
+      "primary_error": "launch_firstfault/call failure original with separate capture/close/reap errors",
+      "normal_error_prefix": "uncreated/spawn/timeout/resource/poll/read/decode/settlement/capture/constructor/cleanup/publication included; remainingC01-C05",
+      "end": "existing absolute phase/shared900/end cleanup; no refresh",
+      "native_receipt_or_gate": "NOT_RUN",
+      "CODE_OPEN": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05"
+      ]
+    },
+    {
+      "case": "startup-as-negative",
+      "index": 1,
+      "original_expectation": {
+        "case": "startup-as-negative",
+        "consumer": "fixed supervisor -> fixed verifier",
+        "outer_exit": 0,
+        "outer_status": "STARTUP_CONTROL_CAUSE_CONFIRMED",
+        "inner_exit": 2,
+        "inner_status": "NOT_PROVEN",
+        "cause_type": "Refusal",
+        "cause": "pre-interpreter inherited limit mismatch",
+        "inner_AS_soft_hard": [
+          67108864,
+          67108864
+        ],
+        "GPG_calls": 0,
+        "private_home_intent": "NOT_ATTEMPTED",
+        "private_home_absence": null,
+        "complete_inner_and_outer_receipts": true
+      },
+      "actors": [
+        "caller.py",
+        "supervisor.py",
+        "verifier.py"
+      ],
+      "raw_custody": "stdout/stderr inclusive overflow and pending raw kept; canonical full supervisor/inner exact reversible preimages; writable/base64/count/SHA/prodcharge verified bothside",
+      "primary_error": "launch_firstfault/call failure original with separate capture/close/reap errors",
+      "normal_error_prefix": "uncreated/spawn/timeout/resource/poll/read/decode/settlement/capture/constructor/cleanup/publication included; remainingC01-C05",
+      "end": "existing absolute phase/shared900/end cleanup; no refresh",
+      "native_receipt_or_gate": "NOT_RUN",
+      "CODE_OPEN": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05"
+      ]
+    },
+    {
+      "case": "verify-node",
+      "index": 2,
+      "original_expectation": {
+        "case": "verify-node",
+        "consumer": "fixed supervisor -> fixed verifier -> six fixed GPG calls",
+        "outer_exit": 0,
+        "outer_status": "QUALIFIED_SUPERVISED_NODE_RAW_PUBLISHER_CHAIN_PROVEN",
+        "inner_exit": 0,
+        "inner_status": "QUALIFIED_NODE_RAW_PUBLISHER_CHAIN_PROVEN",
+        "calls": [
+          "show-raw-key",
+          "dearmor",
+          "check-self-signatures-and-bindings",
+          "positive-gpg",
+          "positive-gpgv-body",
+          "negative-same-path-changed-row"
+        ],
+        "independently_expected_primary": "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
+        "archive": "node-v22.23.2-linux-x64.tar.xz",
+        "archive_sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307",
+        "archive_bytes": 31058332,
+        "strict_signed_body_equals_gpgv_body": true,
+        "same_actual_gpg_signer": true,
+        "changed_row_exact_BADSIG_not_generic_failure": true,
+        "same_held_archive_inert_digest_mismatch": true,
+        "complete_inner_and_outer_receipts": true
+      },
+      "actors": [
+        "caller.py",
+        "supervisor.py",
+        "verifier.py"
+      ],
+      "raw_custody": "stdout/stderr inclusive overflow and pending raw kept; canonical full supervisor/inner exact reversible preimages; writable/base64/count/SHA/prodcharge verified bothside",
+      "primary_error": "launch_firstfault/call failure original with separate capture/close/reap errors",
+      "normal_error_prefix": "uncreated/spawn/timeout/resource/poll/read/decode/settlement/capture/constructor/cleanup/publication included; remainingC01-C05",
+      "end": "existing absolute phase/shared900/end cleanup; no refresh",
+      "native_receipt_or_gate": "NOT_RUN",
+      "CODE_OPEN": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd7",
+      "index": 3,
+      "original_expectation": {
+        "case": "supervisor-entry-fd7",
+        "consumer": "fixed supervisor strict pre-ctypes inherited0..5 guard",
+        "own_extra": {
+          "fd": 7,
+          "role": "ordinary-surplus.txt",
+          "readonly": true
+        },
+        "outer_exit": 2,
+        "outer_status": "NOT_PROVEN",
+        "cause_type": "Refusal",
+        "cause": "unknown bootstrap inherited descriptor",
+        "fork_state": "NOT_ATTEMPTED",
+        "GPG_calls": 0,
+        "runtime_callback": "NOT_PREPARED",
+        "complete_supervisor_receipt": true,
+        "inner_receipt": null
+      },
+      "actors": [
+        "caller.py",
+        "supervisor.py",
+        null
+      ],
+      "raw_custody": "stdout/stderr inclusive overflow and pending raw kept; canonical full supervisor/inner exact reversible preimages; writable/base64/count/SHA/prodcharge verified bothside",
+      "primary_error": "launch_firstfault/call failure original with separate capture/close/reap errors",
+      "normal_error_prefix": "uncreated/spawn/timeout/resource/poll/read/decode/settlement/capture/constructor/cleanup/publication included; remainingC01-C05",
+      "end": "existing absolute phase/shared900/end cleanup; no refresh",
+      "native_receipt_or_gate": "NOT_RUN",
+      "CODE_OPEN": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd127",
+      "index": 4,
+      "original_expectation": {
+        "case": "supervisor-entry-fd127",
+        "consumer": "fixed supervisor strict pre-ctypes inherited0..5 guard",
+        "own_extra": {
+          "fd": 127,
+          "role": "ordinary-surplus.txt",
+          "readonly": true
+        },
+        "outer_exit": 2,
+        "outer_status": "NOT_PROVEN",
+        "cause_type": "Refusal",
+        "cause": "unknown bootstrap inherited descriptor",
+        "fork_state": "NOT_ATTEMPTED",
+        "GPG_calls": 0,
+        "runtime_callback": "NOT_PREPARED",
+        "complete_supervisor_receipt": true,
+        "inner_receipt": null
+      },
+      "actors": [
+        "caller.py",
+        "supervisor.py",
+        null
+      ],
+      "raw_custody": "stdout/stderr inclusive overflow and pending raw kept; canonical full supervisor/inner exact reversible preimages; writable/base64/count/SHA/prodcharge verified bothside",
+      "primary_error": "launch_firstfault/call failure original with separate capture/close/reap errors",
+      "normal_error_prefix": "uncreated/spawn/timeout/resource/poll/read/decode/settlement/capture/constructor/cleanup/publication included; remainingC01-C05",
+      "end": "existing absolute phase/shared900/end cleanup; no refresh",
+      "native_receipt_or_gate": "NOT_RUN",
+      "CODE_OPEN": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05"
+      ]
+    },
+    {
+      "case": "verifier-entry-fd7",
+      "index": 5,
+      "original_expectation": {
+        "case": "verifier-entry-fd7",
+        "consumer": "fixed verifier strict inherited0..6 guard before general imports",
+        "own_extra": {
+          "fd": 7,
+          "role": "ordinary-surplus.txt",
+          "readonly": true
+        },
+        "exit": 1,
+        "stdout_bytes": 0,
+        "stderr": "complete bounded actual traceback ending RuntimeError: unknown bootstrap inherited descriptor newline",
+        "GPG_calls": 0,
+        "private_home": "externally planned absent name; no mkdir",
+        "inner_receipt": null,
+        "inner_resources": null,
+        "inner_resources_reason": "guard precedes general imports and JSON/resource initialization; unknown, never zero"
+      },
+      "actors": [
+        "caller.py",
+        "verifier.py",
+        null
+      ],
+      "raw_custody": "stdout/stderr inclusive overflow and pending raw kept; canonical full supervisor/inner exact reversible preimages; writable/base64/count/SHA/prodcharge verified bothside",
+      "primary_error": "launch_firstfault/call failure original with separate capture/close/reap errors",
+      "normal_error_prefix": "uncreated/spawn/timeout/resource/poll/read/decode/settlement/capture/constructor/cleanup/publication included; remainingC01-C05",
+      "end": "existing absolute phase/shared900/end cleanup; no refresh",
+      "native_receipt_or_gate": "NOT_RUN",
+      "CODE_OPEN": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05"
+      ]
+    }
+  ],
+  "original_gpg_calls": 6,
+  "first2_no_keyring_only": true,
+  "other4_explicit_rings": true,
+  "public_oracles_unchanged": true,
+  "new_runtime_credit": false
+}

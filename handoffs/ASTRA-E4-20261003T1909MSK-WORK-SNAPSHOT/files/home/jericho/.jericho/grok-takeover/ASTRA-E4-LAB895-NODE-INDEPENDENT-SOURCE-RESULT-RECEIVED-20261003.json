@@ -1,0 +1,403 @@
+{
+  "schema": "friday.e4.lab895.node-independent-result-received.v1",
+  "assignment": "ASTRA-E4-SOL079-NODE-ORDINARY-LEASE-ERROR-END-INDEPENDENT-REVIEW-LAB-895",
+  "generation": 1,
+  "job_id": "job_721ac1b059434c4cb91578c1d1406e47",
+  "result_message_id": "msg_66064b9cc96e4b34b0af099068cdeab3",
+  "received_utc": "2026-10-03 02:52:11 UTC",
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB895-INPUT-20261003.json",
+    "bytes": 41296,
+    "sha256": "cfa1ef7173015ea12f4d4923de68e5dcbc24c129252dded2e8c1be7907c4d4c4",
+    "identity9_decimal_strings": [
+      "2050",
+      "8531905",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "41296",
+      "1790995020726061752",
+      "1790995020784065079"
+    ],
+    "stable9": true
+  },
+  "run": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB895-RUN-20261003.json",
+    "bytes": 3871,
+    "sha256": "907f20d853a1e60d8d347782343b8b015f37001124f8e50c54122e2fb1ac9972",
+    "identity9_decimal_strings": [
+      "2050",
+      "8531906",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3871",
+      "1790995039255124593",
+      "1790995039308127632"
+    ],
+    "stable9": true
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-lab895-sol079-node-ordinary-lease-error-end-independent-source-review/manifest.json",
+    "bytes": 801,
+    "sha256": "b1002a09c9f8e9438539c0a0cdc471735a514385d991a86f1f73c43ad18bf1d7",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226844",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "801",
+      "1790995689613450825",
+      "1790995689613450825"
+    ],
+    "stable9": true
+  },
+  "pins": [
+    {
+      "path": "/var/tmp/friday-lab895-sol079-node-ordinary-lease-error-end-independent-source-review/manifest.json",
+      "bytes": 801,
+      "sha256": "b1002a09c9f8e9438539c0a0cdc471735a514385d991a86f1f73c43ad18bf1d7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226844",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "801",
+        "1790995689613450825",
+        "1790995689613450825"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab895-sol079-node-ordinary-lease-error-end-independent-source-review/review.json",
+      "bytes": 7831,
+      "sha256": "8a94df2f77d0359165659ad16de9ede6ba25131c8824f3ede59e7a228dca8c0b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226840",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7831",
+        "1790995689613450825",
+        "1790995689613450825"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab895-sol079-node-ordinary-lease-error-end-independent-source-review/pin-checks.json",
+      "bytes": 15311,
+      "sha256": "e427d3eed42859e42ca32deac5b46b7a7de43ab8d44bba82dfd1d96562118834",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226841",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15311",
+        "1790995689613450825",
+        "1790995689613450825"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab895-sol079-node-ordinary-lease-error-end-independent-source-review/result.json",
+      "bytes": 1657,
+      "sha256": "952349c40f9f7787f68c5d798198728bfe56f28cde6b7e8c6783589668515952",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226842",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1657",
+        "1790995689613450825",
+        "1790995689613450825"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab895-sol079-node-ordinary-lease-error-end-independent-source-review/pathset.json",
+      "bytes": 553,
+      "sha256": "d91976eb7d0cbcdf104c6fc87b8e5faf0ead93a4db7779e0d74081831c7f7802",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226843",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "553",
+        "1790995689613450825",
+        "1790995689613450825"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab895-sol079-node-ordinary-lease-error-end-independent-source-review/payload.json",
+      "bytes": 98,
+      "sha256": "8260e8f347686160b2aea80a937ec26f1d9170e6e361d1440d7fd0082ea1417e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226845",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "98",
+        "1790995689613450825",
+        "1790995689613450825"
+      ],
+      "stable9": true
+    }
+  ],
+  "owned_files": 6,
+  "decision": "E01_E02_SCOPED_NONAUTHOR_SOL079_DELTA_CREDIT_NOT_LAB891_WHOLE_ACCEPTANCE",
+  "review": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "assignment": "ASTRA-E4-SOL079-NODE-ORDINARY-LEASE-ERROR-END-INDEPENDENT-REVIEW-LAB-895",
+    "author_self_label_not_used_as_verdict": true,
+    "baseline_not_accepted": "LAB-891 whole acceptance is not claimed. Sol075 is not implemented.",
+    "c1": "CODE_OPEN",
+    "c2": "UNKNOWN_NOT_ZERO",
+    "children": 0,
+    "compiler_ABI": "NOT_RUN",
+    "decision": "E01_E02_SCOPED_CREDIT_NOT_WHOLE_ACCEPTED",
+    "e01": {
+      "adopt_receivers": "supervisor.py:3084 and verifier.py:2501 call adopt_outside_body, not the dup2 opener. adopt_exact_fd at supervisor 1436 and verifier 1470 publishes the already checked number 8 as RETURNED. finish_allocations at supervisor 1481 and verifier 1515 skips outside_body_number matches. retire_record at supervisor 1449 refuses a state other than RETURNED.",
+      "known_lease": "outside_body_number at 672 returns true for a held int, an alias int, or a RETURNED history row whose role is outside-body or outside-body-alias and whose number is that int. It returns false when the number is missing. close_final at 3818 and 3833 skips those known numbers. The second close loop at 3835 runs only for RETURNED. An ACQUIRE_UNKNOWN row is not closed. retire_and_close_owned at 1885 refuses an unregistered numeric close.",
+      "not_the_reached_opener": "The dup2 opener text is the same in all three files and looks up allocate_owned. That name exists in caller.py only. The supervisor and verifier mains do not call the opener.",
+      "outcome": "CREDIT",
+      "reached_producer": "caller.py:3712 calls open_caller_outside_body. Line 744 calls allocate_owned(os.dup2) for outside-body-alias onto 8. allocate_owned at 1810 preowns, blocks the short mask, sets ACQUIRE_UNKNOWN, then calls the native operation. publish_fd at 1801 stores the returned int and RETURNED before register. The mask is restored in the finally at 1822, including when register fails after RETURNED.",
+      "separate_launch_site": "Caller child sweep at 3030 keeps 8 in the allow set. Supervisor child closerange(7, 8) then closerange(9, 128) at 2339 leaves 8 out of that sweep. Those are launch tables, not the parent unknown-lease close. Caller entry at 3711 refuses an unknown inherited descriptor before the outside dup2."
+    },
+    "e02": {
+      "before_formatting": "render_original_body at caller 576 selects the stored traceback and at 590 appends cause and context. project_owned_error at 1623 does the same for the graph, including args, state, and notes at 1642. snapshot_owned_originals at 1118 writes reached outside originals into the prefix before encode. Those three helpers match in supervisor and verifier.",
+      "both_decoders": "Supervisor capture_inner_evidence at 2790 decodes the verifier frame with decode_channel_frame, then validate_received_error_graphs. Caller wire_receipt at 3514 and recover_wire_receipt at 3552 decode the supervisor frame the same way. Verifier defines the same decoder at 1227 and does not call it; encode_bounded at 2376 projects errors and then frames them. That is the producer side of the first hop.",
+      "cells": "All three define the same OUTSIDE_FAILURES phases acquire, adopt, commit, unlock, seal, consume, end, and publication. retain_outside_failure at caller 643, supervisor 300, and verifier 355 stores the original object and its traceback before rendering, and raises if a different object arrives for a phase that already has one.",
+      "commit_and_unlock": "commit_outside_body at caller 825 stores the primary in the commit cell. The finally at 831 stores a reached unlock failure in the unlock cell and does not clear the commit cell. The same text is in supervisor 434 and verifier 489.",
+      "invalidation": "finish_outside_end at caller 889 clears qualified_node_only, qualified, the named success statuses, and the qualified and verified globals. The fault check at 930 applies before the inherited-only branch, so an inherited actor with a sticky fault is invalidated too. Disposition stays NOT_RETIRED. timer_disarmed is set false. This helper does not disarm the interval.",
+      "one_publication": "Caller 4025, supervisor 3276, and verifier 2755 call finish_outside_end and then one publish_preowned_then_frame. A None result skips commit_existing_receiver. An exception around that attempt stores the publication cell and does not encode again. Supervisor 3267 and verifier 2747 clear the success flag when commit_outside_body raises, then still use that one publication. Caller 4016 clears qualified_node_only when seal or consume fails, then uses the same one publication.",
+      "outcome": "CREDIT",
+      "publication_slots": "retain_publication_failure assigns its phase cell without an empty-slot test. The reached terminal writes prefix and encoding at most once inside publish_preowned_then_frame. The outer handler uses the publication outside cell, not those two phases. A later encoding failure can replace the receipt field publication_failure. The earlier object remains in the commit cell and in the error journal."
+    },
+    "gates": "NOT_RUN",
+    "mtime_eq_ctime_drift_is_not_a_failure": true,
+    "obligations_remaining": "Original35, all6, all3, GPG6, F1F2, D1D2, current19, caps, and timers stay REQUIRED_NOT_RUN. The static credits above depend on this changed context and were not executed.",
+    "open_code": {
+      "C1": "CODE_OPEN. No native, stock, raw, or prebirth body is supplied, and both native ends stay open. os._exit follows the publication and is not custody. PO880 and rendered fields are labeled as transport.",
+      "C2": "UNKNOWN_NOT_ZERO. validate_publication_transport at caller 1537 requires the native allocator, decoder, and end cost field to stay unknown rather than zero. Local rows are not a whole-factory cost."
+    },
+    "pre_seal_heartbeat": "2026-10-03T02:48:09.591017Z pid=706328 epoch=15",
+    "prior_open_findings_addressed_by_these_lines": [
+      "S078-E01",
+      "S078-E02"
+    ],
+    "prior_review_decision": "REJECT_CONNECTED_ORDINARY_CLOSURE_WITH_SCOPED_CREDITS",
+    "rejoined_static": {
+      "D1": "CONTEXT_CREDIT. The three terminals call finish_outside_end before the frame, and the fault check covers inherited actors.",
+      "D2": "PRESERVED_NOT_NEW_CREDIT. finish_outside_end does not call setitimer. Child pre-exec disarm remains at caller 3044 and supervisor 2343, outside this helper. The timer_still_enforcing constant is not a measured credit.",
+      "D3": "CONTEXT_CREDIT. commit_outside_body uses lockf LOCK_EX|LOCK_NB over the whole file, waits with due and 0.01s, and keeps commit and unlock originals in separate cells.",
+      "D4": "CONTEXT_CREDIT. Simultaneous cap is 256 at caller 1711, supervisor 97, and verifier 152. Caller keeps a typed lease. Supervisor and verifier adopt into their typed ledger. Unknown acquisition state is not closed.",
+      "D5": "CONTEXT_CREDIT. Current6 after hashes match the sealed package: 4 changed, 2 equal. Before hashes match the predecessor files. The parts pin matches. The pinned census says 164 gapless parts; those part bodies were not re-expanded."
+    },
+    "relation": "Verifier places one prefix and one FR875 frame. Supervisor peels that stream, decodes the frame, and later places its own one prefix and frame. Caller peels the supervisor stream, decodes that frame during the outer encode, and places one outer publication. finish_outside_end is before each of those publications. Ordinary failure clears the visible success flag and does not start a second encode.",
+    "runtime": "NOT_RUN",
+    "schema": "friday.e4.lab895.sol079-node.changed-context-independent-review.review.v1",
+    "source_execution": 0,
+    "source_text_read_not_executed": true,
+    "task_done": false,
+    "unsafe_handling": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "unsafe_required": true,
+    "waiver_added": false,
+    "whole_accepted": false
+  },
+  "author_result": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "accepted": false,
+    "assignment": "ASTRA-E4-SOL079-NODE-ORDINARY-LEASE-ERROR-END-INDEPENDENT-REVIEW-LAB-895",
+    "author_self_label_not_used_as_verdict": true,
+    "c1": "CODE_OPEN",
+    "c2": "UNKNOWN_NOT_ZERO",
+    "children": 0,
+    "compiler_ABI": "NOT_RUN",
+    "completed_msk": "2026-10-03T05:48:09.612878+03:00",
+    "costs": {
+      "cumulative": 2100822,
+      "memory_hash": 26251,
+      "physical": 2046663,
+      "proc_bytes": 1963,
+      "sealed_tree_bytes": 26251,
+      "transport": 27908
+    },
+    "decision": "E01_E02_SCOPED_CREDIT_NOT_WHOLE_ACCEPTED",
+    "delivery_id": "del_22192131b6804a70900e713497107654",
+    "e01": "CREDIT",
+    "e02": "CREDIT",
+    "elapsed_s": 629.786332,
+    "gates": "NOT_RUN",
+    "input_bytes": 41296,
+    "input_sha256": "cfa1ef7173015ea12f4d4923de68e5dcbc24c129252dded2e8c1be7907c4d4c4",
+    "job_id": "job_721ac1b059434c4cb91578c1d1406e47",
+    "joined": "SCOPED_SOURCE_CREDIT_NOT_WHOLE_ACCEPTED",
+    "kind": "node-ordinary-lease-error-end-independent-review",
+    "output": "/var/tmp/friday-lab895-sol079-node-ordinary-lease-error-end-independent-source-review",
+    "prior_review_decision": "REJECT_CONNECTED_ORDINARY_CLOSURE_WITH_SCOPED_CREDITS",
+    "run_message_id": "msg_e54d36f61a424b6a9cf6ee900fd1744b",
+    "runtime": "NOT_RUN",
+    "schema": "friday.e4.lab895.sol079-node.changed-context-independent-review.run.v1",
+    "seal_elapsed_s": 0.005496,
+    "source_execution": 0,
+    "source_text_read_not_executed": true,
+    "task_done": false,
+    "verdict": "DUP2_KNOWN_LEASE_ORIGINALS_BOTH_DECODERS_ONE_PUBLICATION",
+    "vmrss_kib": 18348,
+    "waiver_added": false,
+    "whole_accepted": false
+  },
+  "Root_preserved_proof": {
+    "Sol079_current6_164_full_gapless_parts": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL079-NODE-CONNECTED-SOURCE-RESULT-RECEIVED-20261003.json",
+      "bytes": 25510,
+      "sha256": "dfd250b7503e380f6cf26d0444e018534b36324483ea4254cfda3aeea6346248",
+      "identity9_decimal_strings": [
+        "2050",
+        "8531888",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25510",
+        "1790994530694046255",
+        "1790994530747956326"
+      ],
+      "stable9": true
+    },
+    "current_Source6_exact_current9": [
+      {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/caller.py",
+        "bytes": 196772,
+        "sha256": "cca5c0c2ae075ff732390d8d83c8c7737c63bc11ca52870f213c617db050951d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226776",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "196772",
+          "1790993710147831822",
+          "1790993710147831822"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/expectations.json",
+        "bytes": 12120,
+        "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226780",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12120",
+          "1790993254569651871",
+          "1790993254699659341"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/launch-contract.json",
+        "bytes": 51549,
+        "sha256": "41b34c9a72de8d60d986ec5cf1eff09c0d6829140f24ff7bb794305bc29a0144",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226779",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51549",
+          "1790993709940819927",
+          "1790993709940819927"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226781",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790993254651656583",
+          "1790993254699659341"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/supervisor.py",
+        "bytes": 160864,
+        "sha256": "b0afe12983e920053bdd7adaedf98cefe28cff938dc021ed3429ec8eba821cab",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226777",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "160864",
+          "1790993710047826076",
+          "1790993710047826076"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/verifier.py",
+        "bytes": 130328,
+        "sha256": "cc555050158effe62096a6d7452ad74094893cfce641865fdad46cfe03591b33",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226778",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "130328",
+          "1790993709761809640",
+          "1790993709761809640"
+        ],
+        "stable9": true
+      }
+    ],
+    "reviewer_reexpanded164_parts": false,
+    "Root_prior_full164_exact9_reuse": true
+  },
+  "C1": "CODE_OPEN_NATIVE_STOCK_RAW_PREBIRTH_BODY_BOTH_NATIVE_ENDS",
+  "C2": "UNKNOWN_NOT_ZERO",
+  "runtime_gates": "NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "Source_execution": 0
+}

@@ -1,0 +1,96 @@
+{
+  "schema": "friday.sol089.actual-producer-to-both-ends-source-relation.v1",
+  "edges": [
+    [
+      "Caller._prepare_runtime",
+      "Caller._load_operands",
+      "full held/named SHA9+read debit of actual owned codec before selector use"
+    ],
+    [
+      "Caller._ObservedSelector.__init__",
+      "OperandOwner.birth",
+      "actual selected cls.__new__ result/error, actual body before original __init__"
+    ],
+    [
+      "OperandOwner.capture",
+      "Producer.value/note",
+      "actual full dictionary/scalar/container/stock member body and stable strongly held IDs; no fileno"
+    ],
+    [
+      "Caller.FullEventJournal.call",
+      "FrozenArguments",
+      "immutable actual begin operand snapshot before effect; completed note keeps original arguments"
+    ],
+    [
+      "Caller.FullEventJournal.call",
+      "selector.body.after",
+      "genuine post/partial/error cut joined to actual Source sequence"
+    ],
+    [
+      "RootNativeLauncher.setup",
+      "HeldLedger.bind_operand_stock",
+      "existing held source pin graph/capacity/adoption; bind actual stock module and codec before child"
+    ],
+    [
+      "HeldLedger.rows_from_held",
+      "RootChronology",
+      "actual full Root-held arrival order, birth ingest and one complete same-effect post cut"
+    ],
+    [
+      "RootChronology",
+      "OperandRegistry.fork/allocate",
+      "only true prior origins for same pid; own qualified Python allocation, not expected args"
+    ],
+    [
+      "ObservedMethodReplay.restore",
+      "OperandRegistry shared namespace",
+      "actual before-state scalars/containers/facade/raw/data aliases rejoined"
+    ],
+    [
+      "ObservedMethodReplay.call",
+      "unchanged same_typed",
+      "actual validated correspondence precedes original exact matcher, no relaxed types"
+    ],
+    [
+      "ObservedMethodReplay.call",
+      "OperandRegistry.decode/member",
+      "genuine captured after/result body with true SelectorKey/data aliases; no native ctor"
+    ],
+    [
+      "ObservedMethodReplay.run/after",
+      "original ordinary return/error/final state",
+      "existing first-error/success and all reached effects mandatory"
+    ],
+    [
+      "_ObservedSelector.__exit__",
+      "original one-close / both outside ends",
+      "one-close retained; complete native/helper/Root custody remains CODE"
+    ],
+    [
+      "original Source and Root dual ends",
+      "whole prospective capacity",
+      "caps not raised; data/aliases/read/CPU/native both-end cost UNKNOWN"
+    ]
+  ],
+  "negative_qualification": "No edge constitutes current execution, acceptance, full native/raw/error body, actual outside end or whole capacity proof.",
+  "known_gaps": [
+    "E02_NATIVE_RAW_ERROR_C1",
+    "BOTH_OUTSIDE_FINITE_ENDS",
+    "C2_WHOLE_COST",
+    "IMAGE_ABI_AND_NONAUTHOR_REVIEW"
+  ],
+  "Source_execution": 0,
+  "compiler_AST": "NOT_RUN",
+  "compiler_ABI": "NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "independent_changed_dependency_review": "REQUIRED_NOT_RUN",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

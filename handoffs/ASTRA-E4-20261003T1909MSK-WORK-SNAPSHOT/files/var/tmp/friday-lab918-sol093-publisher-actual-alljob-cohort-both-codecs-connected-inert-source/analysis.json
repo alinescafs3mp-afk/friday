@@ -1,0 +1,11 @@
+{
+  "c1": "CODE",
+  "c2": "UNKNOWN_NOT_ZERO",
+  "decision": "ALLJOB_EXTERNAL_STORE_FITS_EXISTING_TERMINAL_ROW_ENROLLED_SECOND_COPY_DOES_NOT",
+  "dynamic_prefix_may_exceed_packet_room": true,
+  "implementation_complete": false,
+  "schema": "friday.lab918.analysis.v1",
+  "self_acceptance": false,
+  "unit": 16222,
+  "why": "Callers already pass the terminal hold into every prepare. That row is the six stream ceilings plus the refusal reserve. Reservation.commit cannot spend past the row. A second full metadata ceiling on top of those streams is the old design. This layout reserves one equal unit per mutable file and three units for the store. The stacked allocation, not the whole output cap, limits the unit. Packets larger than the prefix and the native ends stay open."
+}

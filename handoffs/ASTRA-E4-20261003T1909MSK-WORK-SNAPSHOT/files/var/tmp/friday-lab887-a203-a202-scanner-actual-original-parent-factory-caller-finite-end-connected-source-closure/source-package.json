@@ -1,0 +1,146 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "assignment": "ASTRA-E4-A203-A202-SCANNER-ACTUAL-ORIGINAL-PARENT-FACTORY-CALLER-FINITE-END-CONNECTED-CLOSURE-LAB-887",
+  "author": "Grok lab",
+  "based_on": {
+    "a202_manifest_sha256": "9148d4365af54558dc26fdc39c2b745cc473b225fd2673881fd81a12569612ff",
+    "a202_source_sha256": "1220d0d6e83ac4668a27e5f415620dc80c495a538c888ca78358edfc0f6bbda3",
+    "authority_sha256": "eb9c3ae40fa532d26fb1f5cf2800a8c1ea4b283275e937b0389b394d0f22c478",
+    "input_sha256": "63fb4800ceae8ea3f684d06522cc62aa6591f39e804f395db68fdc739b50ccdb",
+    "lab886_verdict": "PREINIT_REFRESHES_GUARD_THEN_RETURN_READS_BODY",
+    "sol071_sha256": "c3f183af6e6addbc1a748ba370c849bb2c4309f5ef61ad83fb483f00b8f5bb11"
+  },
+  "current52": {
+    "changed": 1,
+    "equal": 51,
+    "extra_existing_native_header_changed": 0,
+    "extra_existing_native_header_unchanged": 1,
+    "materialized_here": 1,
+    "new_extra_dependency": 0,
+    "required": 52
+  },
+  "disposition": "BOUNDED_CONNECTED_SOURCE_IMPLEMENTATION_NOT_WHOLE_ACCEPTANCE_OR_EXECUTION",
+  "effects": {
+    "GPG": 0,
+    "Root": 0,
+    "Source_AST": 0,
+    "Source_compiler": 0,
+    "Source_execution": 0,
+    "archive": 0,
+    "gates": 0,
+    "install": 0,
+    "models_changed": 0,
+    "native": 0,
+    "network": 0,
+    "new_participants": 0,
+    "production": 0,
+    "roles_changed": 0,
+    "tests": 0
+  },
+  "factory_gap": {
+    "classification": "EVIDENCE_PREREQUISITE",
+    "conflict": "The five-argument opaque permit factory has no implementation pin in the searched authority. A new constructor would mint that permit, so this package does not add one.",
+    "declared_only": "native/scanner_selected_parent.h function pointer original_materials_factory, called from scanner_selected_root_callsite",
+    "required": "Exact source path and sha256 of the original five-argument opaque-permit factory, and of the outside issuer that calls friday_scanner_selected_parent_entry and retires both Source and Root bodies.",
+    "searched": [
+      {
+        "bytes": 24643,
+        "found": "custody decision, no factory implementation and no factory source pin",
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A197-SCANNER-EXISTING-ALLOCATOR-PHYSICAL-CUSTODY-DECISION-20261002.json",
+        "sha256": "eb9c3ae40fa532d26fb1f5cf2800a8c1ea4b283275e937b0389b394d0f22c478"
+      },
+      {
+        "bytes": 86942,
+        "found": "SOL071 input, no factory implementation and no factory source pin",
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL071-INPUT-20261003.json",
+        "sha256": "c3f183af6e6addbc1a748ba370c849bb2c4309f5ef61ad83fb483f00b8f5bb11"
+      },
+      {
+        "bytes": 32566,
+        "found": "launch_selected_source and existing_parent_source_entry require an already selected permit and do not construct one",
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/root_holder.py",
+        "sha256": "c328debde6b321ca9ae091ad21619bc4747ea96def79aa580aa40c848833b6a6"
+      },
+      {
+        "bytes": 99214,
+        "found": "RootNativeOwner requires the same already selected permit and does not construct one",
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/native_owner.py",
+        "sha256": "9f79a3225d5936badaa4fb938df0acd0f09698281451ba03df64a2aacedfdd79"
+      },
+      {
+        "bytes": 24555,
+        "found": "support helpers, no permit factory",
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/native_support.py",
+        "sha256": "cfd31b3d71c23c243ecad4764f3e4b880d2963c64712e22f825565d53000023f"
+      },
+      {
+        "bytes": 3074,
+        "found": "declares the enrollment pointer and states that its implementation is not supplied",
+        "path": "/var/tmp/friday-astra-a202-sol071-scanner-original-preinit-guard-task-start-and-final-receiver-connected-source/native/scanner_selected_parent.h",
+        "sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee"
+      }
+    ]
+  },
+  "gates": "NOT_RUN",
+  "generation": 1,
+  "historical_unsafe": {
+    "handling": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  },
+  "independent_acceptance": "NOT_RUN",
+  "label": "NEW",
+  "meaningful": {
+    "legacy": "LEGACY_PRESERVED_NOT_RUN",
+    "negative": "NEGATIVE_REQUIRED_NOT_RUN",
+    "positive": "POSITIVE_REQUIRED_NOT_RUN",
+    "waiver": false
+  },
+  "native_public_abi": {
+    "after": "0x4652413230320001",
+    "before": "0x4652413230320001",
+    "compiler_ABI": "NOT_RUN",
+    "layout_changed": false,
+    "reason": "Never-created uses the existing result fields. Header bytes stay the A202 bytes. That constant is not newly admitted."
+  },
+  "owned_source": {
+    "native/scanner_selected_parent.h": {
+      "bytes": 3074,
+      "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/native/scanner_selected_parent.h",
+      "sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee",
+      "stable9": true
+    },
+    "native/source_owner.c": {
+      "bytes": 190300,
+      "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/native/source_owner.c",
+      "sha256": "92a7a8298f4c3390e83b33936755f63e0f608bdbff878f379ddbd9f960fa3493",
+      "stable9": true
+    }
+  },
+  "resource_contract": {
+    "Root_fds": "Actual B+220 original independently granted Root domain; 4096 audit table not grant",
+    "Source_fds": 16,
+    "current_whole_fit": "UNKNOWN_NOT_ZERO",
+    "global_workers": 4,
+    "holder_baseline_bytes": 13500416,
+    "inherited_helper_NOT_FIT": {
+      "declaration_bytes": 268435456,
+      "immutable_red": true,
+      "not_Source_runtime_budget": true,
+      "peak_bytes": 630636544
+    },
+    "mandatory_body_pass_lower": {
+      "Root": 1490280568,
+      "Source": 1490280568,
+      "combined": 2980561136,
+      "overhead": "ADDITIONAL_UNKNOWN_NOT_ZERO"
+    }
+  },
+  "runtime": "NOT_RUN",
+  "schema": "friday.astra.connected-inert-source.v1",
+  "source_execution": 0,
+  "static_checked_msk": "2026-10-03T02:45:33.228838+03:00",
+  "whole_source_closed": false
+}

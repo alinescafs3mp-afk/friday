@@ -1,0 +1,104 @@
+{
+  "schema": "friday.sol092.connected-relations.v1",
+  "classification": "AUTHOR_INERT_IMPLEMENTATION_ATTEMPT_NOT_INDEPENDENT_ACCEPTANCE",
+  "Source_execution": 0,
+  "original_role_and_channel": "SAME enrolled RootToolAdapter.launch -> original fork/table + SAME held bootstrap/launcher -> StockChannel -> SAME Frame/_control/v6 full-prefix receiver -> original cleanup_actor/native final reader. No new role/channel/arg/token/grant/image.",
+  "fd_layout": {
+    "original_fixed_used": 0,
+    "stdout": 1,
+    "stderr": 2,
+    "unchanged_dynamic": "Original Root-selected bundle/request FDs; original response pipe duplicated onto 0. Values are carried by SAME launch_fact before argv.",
+    "protected_collisions_refused_before_fork": true,
+    "original_fd_cap_is_count_not_max_numeric_value": 128,
+    "reservation": "SAME actor-child-stdio-before-fork, original token generated at original reserve site; slots2->3 inside original total pool. No grant growth after fork; whole cost unproven."
+  },
+  "producer": [
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "line": 1276,
+      "literal": "stock_response_slot=0"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "line": 1312,
+      "literal": "dupbook.acquire(os.dup2,rsp_r,stock_response_slot"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "line": 1322,
+      "literal": "for fd in (bundle_fd,bootstrap.fd,req_w,stock_response_slot)"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "line": 1385,
+      "literal": "self.actor_bootstrap_seed={'bundle_fd':bundle_fd"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "line": 1394,
+      "literal": "self.frame.send({\"launch_fact\":self.actual_launch_fact})"
+    }
+  ],
+  "earliest_script_receiver": [
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "line": 935,
+      "literal": "stock.seed_preowned(None,0,None)"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "line": 936,
+      "literal": "launch=stock.receive_launch_seed()"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "line": 723,
+      "literal": "self.outgoing=request;self.owner_export_token=token"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "line": 941,
+      "literal": "child_book.seed_preowned"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "line": 948,
+      "literal": "decoded=tuple(map(int,sys.argv[1:]))"
+    }
+  ],
+  "consumer": [
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "line": 919,
+      "literal": "self._require_original_n2_seed()"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "line": 929,
+      "literal": "return self._consume_early_stock_prefix(request)"
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "line": 974,
+      "literal": "stock.seed_prefix_receipt=stock.fail_prefix"
+    }
+  ],
+  "alias_relation": "Root seed is SAME object in actual_launch_fact; existing token equals original owner_export_hold.token. Complete pre-exec graph has exact HELD/KEEP original rows; actual fstat9 and Root bundle/request/response physical9 match. Current strict v6 full arena still validates full launch raw/canonical body against SAME Root actual_launch_fact; no new seed flag as body/grant. New raw buffers and original row/packet objects are retained in existing StockChannel state/error graph.",
+  "ordinary_errors": "Short/missing/noninteger/mismatched argv after full original seed/table bind reaches same full prefix. Remaining seed fields/bundle construction failures after a valid original request/token are also attempted. Corrupt/missing route/token before binding cannot be guessed: exact N2 CODE. Secondary body-write/ACK/retirement errors remain strong original errors; no uncertain retry.",
+  "both_ends": "Pre-exec failure uses unchanged emit_failure/original banks/gates. Post-exec uses actual same fail_prefix/v6/_control/full-error/history/body reader. Original native table/owner/destructor/outside-end still unconfirmed; neither retained/complete nor wait4 is proof. Both ends are obligations, not closure claims.",
+  "nonoverlap": {
+    "content_unchanged": [
+      "source/owned_prefix_bank.py",
+      "source/selected_owned_values.py",
+      "source/lifetime.py",
+      "source/capacity.py",
+      "source/observer.py"
+    ],
+    "owner": "Existing LAB916",
+    "direct_codec_content_edited": false,
+    "original_H2_literal_unchanged": true,
+    "consumer23_unchanged": true,
+    "all_native_C_H_HASHONLY_unchanged_external": true
+  },
+  "original_scoped_credits": "Only unchanged actual byte dependencies retained as provenance. No old run/image/build/SourceReady/admission/GO credit moves to the two new Source files."
+}

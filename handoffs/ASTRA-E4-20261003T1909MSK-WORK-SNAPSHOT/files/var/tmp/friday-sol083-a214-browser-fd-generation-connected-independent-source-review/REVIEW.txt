@@ -1,0 +1,15 @@
+SOL083 — first non-author changed-context review of Root A214
+
+Decision: CREDIT_SCOPED_E03_FRESH_FD_GENERATION_CONNECTED_CORRECTION_NOT_WHOLE_ACCEPTED.
+
+The exact 45-byte correction routes the actual retained-readback os.open through the existing same-run FDJournal.acquire. The prospective acquisition receives a fresh token and replaces current[fd] before fstat, so legitimate numeric-FD reuse no longer substitutes an old closed generation for this producer. The actual R4 close alias and explicit True check reach this current generation; close-attempt is recorded before syscall and ambiguous close is not retried.
+
+Ordinary open/fstat/read/hash/identity/close-hook/close-syscall/deadline/cleanup branches are rejoined to the existing catch/finally/demotion path. Only a clean ordinary caller after finally sets finite_end_confirmed; failed or uncertain cleanup discards final stream qualification. BOTH actual stream receivers keep exact physical SHA/size/identity/PID+route+launch/material checks and reject failed/standalone candidate qualification. Both stream_join bodies are byte-equal (4178 bytes). These are source-level conditional credits, not executed observations or a complete allocation/raw/native theorem.
+
+Full12 before/after partitions cover both EOF; Executor changes only the unique acquire expression (+45B). ABI/Build each replace 2 current pins and A118 replaces 5; no other JSON semantic change and historical branches untouched. Exact Source15/current209/aux3 join is 4/4/0 changed, with all212 unique current physical SHA9 checked. Author package exact8 files/3 dirs and 7 manifest leaves checked. Pin closure is static proposed Source, not installation or admission.
+
+Existing E01 helper-loader, E02 actual owner PID/route/ordinary journal and E04 original receipt_write/deadline credits are preserved through the changed-context dependency rejoin. This does not independently accept Sol's own Sol081 baseline.
+
+Full native/stock/raw/pre-encode custody/alias/BOTH outside finite ends remain CODE. Inclusive costs/fit remain UNKNOWN_NOT_ZERO. Original216/all29/all6/all9/Source19/C01-C08/M01/capsule848/packet96/child32, caps, meaningful positives and negatives and final gates remain required NOT_RUN. Unsafe TWO hash-only required, waiver=false. SourceReady/Root_admission/GO/whole_accepted=false.
+
+No Source edits, supplied Source AST/import/compiler/eval/exec/tests, native/Root/network/live/UI/model/gates, child, or denied SOL075 action. Only new review JSON/text written. Evidence holds exact pins, partitions, literal contexts, branch matrix, final snapshot and honest costs/diagnostic incidents.

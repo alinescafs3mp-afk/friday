@@ -1,0 +1,32 @@
+{
+  "schema": "friday.sol093.exact-own-pathset.v1",
+  "files": [
+    "README.txt",
+    "evidence/code-conflicts.json",
+    "evidence/connected-relations.json",
+    "evidence/current134-source-map.json",
+    "evidence/current49-source-map.json",
+    "evidence/data-integrity.json",
+    "evidence/full-gapless-partitions.json",
+    "evidence/numerical-layout-conflict.json",
+    "evidence/original-obligations.json",
+    "evidence/qualification-and-costs.json",
+    "evidence/source-byte-materialization.json",
+    "evidence/validation-plan.json",
+    "manifest.json",
+    "pathset.json",
+    "received.json",
+    "source/capacity.py",
+    "source/observer.py"
+  ],
+  "source_files": [
+    "source/capacity.py",
+    "source/observer.py"
+  ],
+  "directories": [
+    ".",
+    "evidence",
+    "source"
+  ],
+  "all_other_Source_external": true
+}

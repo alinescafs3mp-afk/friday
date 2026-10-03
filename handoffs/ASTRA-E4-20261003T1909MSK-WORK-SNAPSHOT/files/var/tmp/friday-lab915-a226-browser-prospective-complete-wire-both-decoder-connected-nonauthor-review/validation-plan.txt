@@ -1,0 +1,8 @@
+Read the passport as a stale record and do not use its recorded pids.
+Hash and size the input and every absolute pin, then one level of absolute pins inside direct JSON files.
+Compare the four runs and encode bodies, and compare decode, copy, and equal with each previous text.
+Measure the empty header, the null frame, the node spellings, the descriptor, the reference, and the pair.
+Check the integer digit floor through 4095-bit samples and record the float width as an undercharge.
+Confirm the final exact cap, the raw or RLE choice, the expanded bound, and the debit before a node append.
+Confirm the three loader edits and the three current JSON pin edits, then the ten replacements and the hash graph.
+Leave C1 open, leave C2 unknown, and leave whole Root and GO false.

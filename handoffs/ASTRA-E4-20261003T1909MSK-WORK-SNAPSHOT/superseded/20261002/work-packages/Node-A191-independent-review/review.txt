@@ -1,0 +1,188 @@
+A191 independent WHOLE original-obligation Source review
+
+Decision: REJECT_CURRENT_SOURCE_PROTOCOL / CODE_OPEN. Review complete; Source
+closure is not established. New ordinary-path FD history capacity contradiction
+is definite from current source; complete stock shape/producer fit, full raw
+error-prefix delivery and recorder continuation remain open. No execution took
+place. Missing future Root/image/grant/clock/provider alone is NOT a CODE defect.
+
+Assignment ASTRA-E4-SOL062-NODE-WHOLE6-ALL35-ALL6-ALL3-INDEPENDENT-SOURCE-REVIEW-A191
+generation1; snapshot cecd28a9/schema50; installed0.208.58 unchanged.
+Review key SOL062-terminal64581c94cdd5-manifest5316343b810b-whole6-actual5changed1equal-all35all6all3-current19.
+Exact full INPUT SHA256 7de0512a468fee2125dda1d4f8fcc972cfe94b41fbea88f293cfec0d1062eb5a.
+
+Independent scope and evidence
+
+Read the full A191 INPUT, full original SOL062 INPUT, linked exact original
+A182/LAB865/A169/A172/A175/LAB863/A178 normative requirements and full A182/A184
+independent reviews. Original normative35 rows, case order/cases/caps/roles and
+all3/F1/F2/D1/D2 were used, not the author's residual count or claimed pass flags.
+Read all current caller2826/supervisor2160/verifier1687 lines (6673 total), full
+contract/expectations/plaintext and actual error/default/finalizer paths. Own
+plain-TEXT lexical ledger covers245 top-level partitions and26 nested def sites;
+this is complete file coverage, not an AST or executed call-graph proof.
+
+All166 pinned paths match full bytes/SHA/full9 at intake and final recheck.
+Source has exact133 leaves,131 payloads,15 directories; dirs700/files600,
+uidgid1000, regular single-link leaves, no symlinks. Seal binds131 payloads;
+manifest binds seal/current6/exact133 names; external author terminal binds
+manifest. DAG is acyclic. Historical helpers/manifests/results are inert
+provenance, not current execution authority. No supplied helper was executed.
+Original complete A182 review was additionally authenticated against its exact
+original receipt pin. Exact integers were stock JSON only, full9 transported
+as decimal strings. No V8 Number normalization of native large integers.
+
+Five current files changed, ordinary-surplus.txt is equal. All six current
+before/after base64 bodies authenticate their complete actual bytes. In THIS
+SOL062 delta, the equal plaintext base64 fields are PRESENT, not null; do not
+carry the older A182 absence grammar onto these new bytes. Original case_order
+and all six original oracle dictionaries are exactly equal. Changed cohort
+bindings are explicitly changed, not falsely required to equal original SHA.
+
+Current19: full72457444; supervisor subset7819077; verifier subset7791116.
+Own arithmetic from actual sizes and current source expressions gives fixed
+247788428 + running20647028 =268435456; minimum observe+exit recheck94216;
+actual numeric selection7943 bytes. All nineteen numeric9 values exactly match
+current physical SHA9. Literal chain verifier -> contract -> supervisor -> caller
+is coherent; local caller/expectations/plaintext use independent selected9 and
+actual paths/lengths, not a recursive caller selfhash. This is evidence-only,
+not Root-selected execution authority. Old delta arithmetic is not promoted.
+
+Genuine Source repairs, distinguished from full closure
+
+1. LAB865 full graph intended-cause consumer repair is preserved: supervisor
+check_inner and caller startup/entry validators validate the complete graph then
+recompute the exact original root Refusal cause. The old A182 top-level
+type/message contradiction is FIXED; do not repeat it. Verifier pre-import
+fd7 control remains original complete uncaught RuntimeError stderr, not JSON.
+2. SOL062 keeps native exception objects/tracebacks in a deferred journal and
+moves complete projection to publication. Graph error/value frontiers drain
+together, so late errors discovered through args/state/notes are materialized.
+Full cause/context (including suppressed context), group, byte arguments,
+field-presence distinctions, errno/filenames/notes and alias references remain.
+Both receivers validate full shape/references/reversible bytes and recomputed
+root cause. NOT_QUALIFIED native reconstruction alone is NOT a Source bug.
+3. Verifier.call now has finite secondary capacity11+2*writable. Reap/raw cell/
+stream-close/public-copy catches retain native failures. All existing raw cells
+are attempted before all stream firstcloses; public copying/projection follows.
+Primary exception and traceback are kept and rethrown ahead of secondary or
+publication failures. Prior designated exact_error interruption there is FIXED.
+4. Prospective allocation history owns returned FD numbers before wrapper/map/
+fstat. Both pipe endpoints are recorded. Unique generation is retired before
+first close; no numeric-slot close cache or retry on an uncertain reused slot.
+Caller aliases clear before batch firstclose. Designated terminal physical
+passes precede public graphs; selected DATA3 has separate once state.
+5. Returned raw pending chunks are retained before fallible charging/commit;
+offset arithmetic precedes masked commit. Supervisor attempts all transport
+cells before its fallible projection pass. Normal fullraw is retained only
+after settled production/size/EOF/identity agreement, with separate production
+and returned charges; writable cells carry complete bytes, not just hashes.
+Both receivers reject partial/null/unknown cells. Complete canonical same-object
+preimages are concretely reversed and checked against original full bodies.
+6. Original all3 typed resource schema/telemetry, first-two keyless versus
+four explicit-ring GPG routes, narrow exact detached proc retirement token,
+D1 CPU20/wall30/dynamic firstmax21845, D2 actual19/read joins are preserved.
+
+Current CODE findings (detailed normative/current sites in whole matrices)
+
+B04 DEFINITE NORMAL ALL6 FD HISTORY CAPACITY CONTRADICTION.
+Caller:702/737 has FD_ALLOCATION_CAP256 with monotonic FD_ALLOCATION_USED;
+closed transient proc acquisitions never reclaim a history slot. Exact current
+nineteen path parents plus /dev require22 component directories, and nineteen
+input opens19. Bootstrap self sample/direct children use4 more. Each normal
+case needs at least33 acquisitions: prelaunch children2; copies3+gate2+two
+stream pipes4+null1; held bind6; pre-gate complete observation7; running self
+sample2; adopted scan2; final child scan2; completed self sample2. Two supervisor
+surplus controls need34 each and verifier control35. Empty final known cleanup
+and terminal observation require8. Thus22+19+4+33+33+33+34+34+35+8 =255 even
+with ZERO running-loop live observations or descendant acquisitions.
+One ordinary legal complete running observe:1370 alone adds at least7
+(same_generation3 +status1 +observation_identity3): lower bound262>256. The
+subsequent tree opens only increase it. There is no hostile provider, arbitrary
+failure flood or new private-heap demand in this path. Zero-run-iteration
+255<=256 is the meaningful source-only negative comparison. Actual runtime
+was NOT_RUN; this is a deterministic static capacity contradiction on a normal
+allowed schedule, not a reproduced exploit or claim all current GPG ran.
+Original simultaneous NOFILE256 does NOT bound total lifetime acquisitions256.
+The new journal can refuse before a later original case or mandatory terminal
+sample despite room in the unchanged explicit running-read budget.
+
+B01 COMPLETE CHANGED STOCK FACTORY/SHAPE/PRODUCER FIT OPEN.
+Count caps256 owners and128 nodes/values/frames are not complete graph/history
+width, alias-copy, escape/default/optional/pending/decode-byte bounds. Caller
+metadata489472 and raw-only1669337(+newline already included)/margin427815 are
+valid partition arithmetic, not full new original-stock producer fit at
+inner32768/supervisor65536/outer2097152. Original35 complete message900/type32/
+native32/path160/clock32/two-byte ASCII escaping does not by itself bound the
+changed graph/cause/args/state/frame and repeated histories. Required stock
+bound must cover every actual producer/consumer/default/copy, not custom C
+heap reconstruction. Aggregate output65536 would need87384 base64 bytes alone;
+this only refutes caps-alone inference, NOT asserts pinned GPG emits65536.
+
+B02 COMPLETE OTHER-SIDE DELIVERY BEFORE PRIVATE OWNER END OPEN.
+Verifier:1674, supervisor:2149 and caller:2819 end natively on complete
+projection/encoding/fit/emission failure. Privately retained full raw/error
+owners disappear at that process end; no admitted full other-side owner or
+accepted complete original receipt covers that prefix. Normal complete
+reversible transport is credited. Honest absent/partial output and nonzero exit
+are rejection, not full mandatory raw delivery; no smaller summary substitute
+or new output cap/Root service is authorized to hide it.
+
+B03 ORIGINAL MANDATORY RAW PREFIX COMPLETENESS OPEN.
+Verifier.retain_cell:770 records attempted before fstat, quota and settled
+checks, and can close a cell with unread produced bytes after unknown fstat,
+unsettled producer, quota/short/drift/read/capture failure. Supervisor:1006 and
+caller:1754 likewise retain returned chunks/pending objects truthfully but do
+not turn unread/partial output into full produced raw before onceclose/end.
+Both actual consumers rightly reject those incomplete cells. Native ownership,
+rc/reap, produced charge and actual retained bytes remain distinct facts.
+
+B05 CONDITIONAL STOCK RECORDER CONTINUATION NOT CLOSED WHOLE-SOURCE.
+Designated verifier.call projection interruption is repaired (above). Other
+caller/supervisor/finalizer catch bodies still call deferred_error, which can
+raise on its exhausted256 owner journal, before later independent physical
+work. E.g caller capture-finally:2077 or terminal-failure:2806; supervisor raw
+retention:1006/cleanup_problem:1353/finalizer:2125; verifier finalizer:1635/1646.
+The current complete reachable stock journal/recorder cost proof is absent.
+A recorder failure there can skip another raw cell or later finish_allocations
+pass. This is a conditional original prefix obligation, NOT a mandate to
+serialize arbitrary native objects/private heaps, make malloc impossible, or
+assume such a failure occurred here. Actual native failures remain NOT_RUN.
+
+Whole producer/consumer coverage
+
+source-derived-matrices.json preserves all35 exact normative rows and current
+catch/root/store/copy joins, all current method partitions, source DAG, actual
+five-changed/one-equal full-byte evidence, original cohort, stock exact19 and
+read/capacity arithmetic. whole-producer-consumer-matrices.json independently
+joins all6 original cause/positive controls, six exact GPG raw/status/writable
+routes, all3 repairs, F1/F2/D1/D2, full default/partial/error/phase resources and
+every transitive performing family through final accepted receiver boundary.
+The full original methods outside named residuals were reviewed too.
+
+Future mandatory qualification is separate, not fabricated CODE
+
+New finite genuine Root grant/admission/clock/image, independent selected
+Source19 numeric9, executing stock interpreter/module/loader/provider/current
+environment, exact postexit proc relation, native Popen/teardown/factory bounds,
+current epoch key validity and LAB861 readonly keyless/ring/trustdb/agent/
+common.conf facts, actual original all6/resource/raw/once cleanup, full required
+gates/live/build/install/negative/final independent release remain NOT_RUN.
+Their absence alone is not a source defect or reason to rerun old proofs.
+Full interpreter C heap, arbitrary hostilekernel/custom native values, frame
+locals or arbitrary tuple-cycle reconstruction are not enlarged obligations.
+
+A169 remains ENDED RED, all6 invoked, ten pre-close Refusals, native
+unconfirmed-close list empty; absent changed fstat-field cause is UNKNOWN.
+Root cleanup is not Source GREEN; expired clock/old nineteen approval do not
+transfer. Unsafe historical obligations are abstract REQUIRED_NOT_RUN,
+required=true/waiver=false with operational payload/fixture/generator/repro/
+exploit=null. Normal ownchild/EOF/write/deadline/cleanup controls stay required.
+
+No Source/Git/index/config/guard/model/lock changes, import/AST/compiler/eval,
+tests/native/Root/GPG/Node/archive parse/network/UI/model/live/gates occurred.
+Only own private inert review JSON/TEXT and bounded trusted-stock readers.
+Review complete. SourceReady=false; Root_admission=false; Root_Image=false;
+runtime/gates=NOT_RUN; GO=false. Runtime native IO/RAM/CPU are UNKNOWN_NOT_ZERO,
+not a measured zero. Finish timestamp/actual elapsed and reviewer finite costs
+are in costs.json and protected RESULT; manifest provides output fullSHA9.

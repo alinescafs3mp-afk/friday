@@ -1,0 +1,27 @@
+{
+  "anchor_count": 49,
+  "anchor_role": "input source49 paths are the prior tree; the two joined files below are the reviewed bytes",
+  "baseline_role": "input source49 and current134 are anchors; they are not substituted for the two reviewed files",
+  "current134_anchor_items": 134,
+  "joined_changed": [
+    {
+      "bytes": 58684,
+      "name": "source/actor_bootstrap.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "sha256": "168fd8a2d1649dfe531c4d938d72f1d356a0afadf849dd4f743223a3da61e85a"
+    },
+    {
+      "bytes": 149208,
+      "name": "source/root_tool_adapter.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "sha256": "c3709fa05cf5fa1b008e4301ffd6cb39d23cab113eac8052bc9070c6741fbe50"
+    }
+  ],
+  "schema": "friday.lab917.sol092.n2.current-partitions.v1",
+  "source49_count": 49,
+  "unchanged_roots": {
+    "consumer": 23,
+    "native": 2,
+    "source": 24
+  }
+}

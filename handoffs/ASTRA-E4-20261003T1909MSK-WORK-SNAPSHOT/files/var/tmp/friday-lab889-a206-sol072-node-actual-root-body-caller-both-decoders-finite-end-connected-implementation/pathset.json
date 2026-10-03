@@ -1,0 +1,55 @@
+{
+  "files": [
+    {
+      "bytes": 188629,
+      "path": "caller.py",
+      "sha256": "1c86a4b1141385a87967cb6a15dfa55fc24a643764603b46a6450d044f4df2e9"
+    },
+    {
+      "bytes": 152193,
+      "path": "supervisor.py",
+      "sha256": "96ac9259e92f9812631ed093c0ef5db34fa3b3611e6c4931b486679eaa70e49b"
+    },
+    {
+      "bytes": 121795,
+      "path": "verifier.py",
+      "sha256": "bec97b0b194f675738a1ab99fabd9311def266254be85d51dfc7d6ec7b769fca"
+    },
+    {
+      "bytes": 51597,
+      "path": "launch-contract.json",
+      "sha256": "4ca1514c1f6bfbf017144ec622aea135dac3670644de58d07e6aff47bdf39bd4"
+    },
+    {
+      "bytes": 12120,
+      "path": "expectations.json",
+      "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb"
+    },
+    {
+      "bytes": 158,
+      "path": "ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    {
+      "bytes": 2682,
+      "path": "evidence/findings.json",
+      "sha256": "c3aceaea4fea203659c153210ed46ae8f6e3953572bf98c612bb6cf7c68b47bb"
+    },
+    {
+      "bytes": 88946,
+      "path": "evidence/partitions.json",
+      "sha256": "eec0dfe37783756a7e5e18faef33bfa030495c4fcc7d6d990da1ea6a4a989990"
+    },
+    {
+      "bytes": 16281,
+      "path": "evidence/pin-checks.json",
+      "sha256": "9e56104b4734fe401b17d5679025f8084809c47323f0ab80b1b2bee0fb093e51"
+    },
+    {
+      "bytes": 2478,
+      "path": "result.json",
+      "sha256": "32b2bdf275fd6208e43b9b683616acb403d7469bb59623844a718c1be6dd131c"
+    }
+  ],
+  "schema": "friday.e4.lab889.pathset.v1"
+}

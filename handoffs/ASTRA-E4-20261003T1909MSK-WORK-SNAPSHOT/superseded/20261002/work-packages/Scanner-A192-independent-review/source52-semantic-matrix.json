@@ -1,0 +1,693 @@
+{
+  "schema": "friday.a192.source52-independent-semantic-relations.v1",
+  "code28": 28,
+  "schema14": 14,
+  "refs61": 61,
+  "source52": 52,
+  "delta": {
+    "changed": 16,
+    "equal": 36,
+    "comparison": "FULL_BYTES",
+    "data_schema_control_plan24": "ALL_EQUAL"
+  },
+  "runtime": "NOT_RUN",
+  "SourceReady": false,
+  "files": [
+    {
+      "file": "controls/catalog.json",
+      "role": "FULL_ORIGINAL_CONTROL_DECLARATION",
+      "bytes": 12103,
+      "sha256": "a3a2c499df062b6d9c048416dc8c2dbf3aa4638b23bc47cfe5c5c219bfaa63e2",
+      "changed": false,
+      "description": "Entire original byte equality. Original all30/F0F11/C01C14/31+20+55/all6 remain; dangerous historical operating details abstract REQUIRED_NOT_RUN. Ordinary owned-child/EOF/write/deadline/cleanup/resource obligations remain performing required.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "controls/independent-contract.json",
+      "role": "FULL_ORIGINAL_CONTROL_DECLARATION",
+      "bytes": 1484,
+      "sha256": "0c45acead7156172974dbf89d8a7044fe90bc420724638501d86f7f927942ca0",
+      "changed": false,
+      "description": "Entire original byte equality. Original all30/F0F11/C01C14/31+20+55/all6 remain; dangerous historical operating details abstract REQUIRED_NOT_RUN. Ordinary owned-child/EOF/write/deadline/cleanup/resource obligations remain performing required.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "controls/whole-closure.json",
+      "role": "FULL_ORIGINAL_CONTROL_DECLARATION",
+      "bytes": 21559,
+      "sha256": "8208d4bc540dce0c0b7eabbd149d14ddc8686a68af851d8b6af22bad048aeced",
+      "changed": false,
+      "description": "Entire original byte equality. Original all30/F0F11/C01C14/31+20+55/all6 remain; dangerous historical operating details abstract REQUIRED_NOT_RUN. Ordinary owned-child/EOF/write/deadline/cleanup/resource obligations remain performing required.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "data/all202-identity-map.json",
+      "role": "ORIGINAL_CURRENT_DATA",
+      "bytes": 298123,
+      "sha256": "ffddb01d39713c2464856b717b7512733e7d2e68da58250cfc3ff599ea552529",
+      "changed": false,
+      "description": "Entire original byte equality plus independent full202 original named9/class/metadata/raw publisher join; archive bodies NOT_READ. c55 DATA expected evidence not a runtime or unsafe execution.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "data/c55-admission.json",
+      "role": "ORIGINAL_CURRENT_DATA",
+      "bytes": 159,
+      "sha256": "c276309c7b4ce03626eca641e2bba42bc79036b5f63247ae0c2787eb6e61d5da",
+      "changed": false,
+      "description": "Entire original byte equality plus independent full202 original named9/class/metadata/raw publisher join; archive bodies NOT_READ. c55 DATA expected evidence not a runtime or unsafe execution.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "data/c55-expected-output.json",
+      "role": "ORIGINAL_CURRENT_DATA",
+      "bytes": 356,
+      "sha256": "7ba0a58769f20b0c69d20d66f578ceb3d25b047d96e5103cd8c51101427db126",
+      "changed": false,
+      "description": "Entire original byte equality plus independent full202 original named9/class/metadata/raw publisher join; archive bodies NOT_READ. c55 DATA expected evidence not a runtime or unsafe execution.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "data/c55-held.json",
+      "role": "ORIGINAL_CURRENT_DATA",
+      "bytes": 63,
+      "sha256": "ff7f06af5898b00d8fb17b129906516807ef744f2595a0c0fa0317a18a78b012",
+      "changed": false,
+      "description": "Entire original byte equality plus independent full202 original named9/class/metadata/raw publisher join; archive bodies NOT_READ. c55 DATA expected evidence not a runtime or unsafe execution.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "data/c55-index.json",
+      "role": "ORIGINAL_CURRENT_DATA",
+      "bytes": 772,
+      "sha256": "fedcc9aab0857e605f54ea869919a855eebdcab077c035df536fa8882ad9fff0",
+      "changed": false,
+      "description": "Entire original byte equality plus independent full202 original named9/class/metadata/raw publisher join; archive bodies NOT_READ. c55 DATA expected evidence not a runtime or unsafe execution.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "future-scan-plan/plan.json",
+      "role": "ORIGINAL_PROPOSED_NOT_GRANTED_PLAN",
+      "bytes": 16241,
+      "sha256": "083fd2a22e468ab2adcced2a55e33225a6785b1c5dcb0362f139731c28b8f59c",
+      "changed": false,
+      "description": "Entire original byte equality. Proposed plan capacities are NOT_GRANTED and author review budget does not become Source allowance.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "input-index/index.json",
+      "role": "ORIGINAL_CURRENT_DATA",
+      "bytes": 238293,
+      "sha256": "41781d9297176e57c5b222a3692c737e8953cae175eec17e2477af9a48a31197",
+      "changed": false,
+      "description": "Entire original byte equality plus independent full202 original named9/class/metadata/raw publisher join; archive bodies NOT_READ. c55 DATA expected evidence not a runtime or unsafe execution.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "native/source_owner.c",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 111016,
+      "sha256": "3e1f2722141aa31a21187c9f03e4787300ed24682166978b24cf7bd38b325e06",
+      "changed": true,
+      "description": "Actual preinit allocator/FD/packet/slot/birth/directwait/minend/native120/216; both Source main and Root warm/cold endpoints reviewed. Root confirmed warm close-before-clear improved; Source C-global raw/error registry omitted at actual main consumer.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/archive-expectation.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 989,
+      "sha256": "75ad747bd30f63ce624d10c789c1a27003e7f8ea38dba0b83a958709d2a67427",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/broker-material-provenance.v1.keys.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 1919,
+      "sha256": "16239396207f90a3ab78158ebdd9abd58db304c3bc3061a081fba18d33489503",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/broker-snapshot-manifest.v1.keys.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 8823,
+      "sha256": "0038a130fc6cfc212180ec82f932f8ddd4d4d25ceeda27dda64713e4cf0755fc",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/custody-record.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 705,
+      "sha256": "4a8d71b72af9ff8fcef74f1de7a29fb20b94087975b347037080a70eedccee16",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/deb-member-observation.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 7833,
+      "sha256": "45924c3191e3197fc94373566bd3d244b2b61d070c580515cbd73989ebf3d0f3",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/future-scan-manifest.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 8050,
+      "sha256": "671cbc38574acfd4bc05ac74f7c8f0eec7b95fda6ebea39faecb5477655b9f32",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/held-custody.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 2990,
+      "sha256": "ac77bd4881f968bc58c24198afe0a4eb5befa1d7c0fe2665c2ef5ee7c55ec9b1",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/input-index.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 6332,
+      "sha256": "8eff7af829f21acc44705e580339bc76ce678fca0dc5475e86a1ed35acefa839",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/member-record.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 17438,
+      "sha256": "a40f2d7feecdd4298065b879c2c73ce49a3f2d081c1be683a1fdd7fe7e976708",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/scan-admission.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 7772,
+      "sha256": "88c1e2caa20b29c4fe242510b1d59e956c34e8dfd16b11d5a2756f6dd86b1ac7",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/scan-index.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 966,
+      "sha256": "fee19bd2e81076c01d25479a0144fdfd3f4192c14e66892bd20e9084478a9c85",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/scan-resource.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 39747,
+      "sha256": "d70d4914ce82272338b3f3972ed258f651743cb56087567e2d2673e6a6b889e4",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/scan-result.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 11609,
+      "sha256": "d1f40916d2b2e36c077b28888f9c4dd9712bc7a70b2e5c17c2699bbfd84c31cb",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "schemas/wheel-metadata-observation.v1.json",
+      "role": "SCHEMA_PRODUCER_CONSUMER",
+      "bytes": 17439,
+      "sha256": "5ac922c318c18ab9d3a562bd25c6cac28488a749fbd82b84feaeeaaa421bd875",
+      "changed": false,
+      "description": "Exact current byte-equal schema; see independent schema14-ref61.json for ids/aliases/61 pointer sites and target resolution. Every schema error/default consumer depends on actual same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/__init__.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 211,
+      "sha256": "d27706191c919459d23e8b27f17066132d4ee7311cd0d9630f75a3c1cb179bda",
+      "changed": false,
+      "description": "Unchanged finite public API export map; native selected owner remains performing prerequisite.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/bounds.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 19120,
+      "sha256": "d304b445915461a8f6ea7399cec8ce8861b660e349f45a4017d0fd9b2d9561e1",
+      "changed": true,
+      "description": "Meter owner/token precede fallible snapshot/factory; terminal meters alias same rawroot; release_live does not refund scratch reachable from captured graph; all actual native costs/caps required.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/broker_map.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 18753,
+      "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+      "changed": false,
+      "description": "Unchanged actual full material/snapshot producer with schemas/recipe/install/authority/current350/512 original joins; not runtime credit.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/canonical.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 9474,
+      "sha256": "492af27f62df7609010bcf40ace91153992f747a514437128dbf030baef39050",
+      "changed": true,
+      "description": "Strict raw JSON/full encoder byte bounds before fallible processing; reached exceptions capture exact raw before normal refusal.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/causes.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 10859,
+      "sha256": "c56f0a84275cad7b9c923ee8c4f84a92724dd0d9926456a6a8fbf664cae7a703",
+      "changed": true,
+      "description": "Typed policy evidence still distinct from actual raw; source_exception_detail captures primary before projection and captures projection recorder separately; no invented host origin for pure policy refusal.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/compression.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 19552,
+      "sha256": "81f845b58a41fd5e733a8e062f94f442718253563ceded26e9491fde72434274",
+      "changed": true,
+      "description": "Performing streaming decoder/reader and finite legacy DATA default both retained; selected codec stock first catches and wrapper BudgetStop capture actual cause/context before projection; scratch aliases never refunded after raw capture.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/context.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 20445,
+      "sha256": "43bbf91da3411a70986fc5e9d8518bc8197901dc74ca771d61fd4103fba12a4b",
+      "changed": true,
+      "description": "Seven raw roles/fullbytes/plan/current202/publisher raw and exact RequiresPython absence vs null join preserved; administrative/raw projection catches now capture before return.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/contracts.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 30961,
+      "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+      "changed": false,
+      "description": "Unchanged actual loaded module/native/default/closure/state relation and exact original350/512/recipe/installed/held/authority/provenance/schema joins. Reads reviewed in changed raw-root/state context, not author acceptance.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/controls.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 9780,
+      "sha256": "1603b21d0f65c116c3e46e7611e652a8ca2bdd2aa80e273ef212838d72003aef",
+      "changed": true,
+      "description": "All performing ordinary contract/census/default load routes and actual independent output/trace/raw failure preserved; historical unsafe bodies remain ABSTRACT_REQUIRED_NOT_RUN.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/custody.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 56605,
+      "sha256": "cba6ab3149298afe0b50dcdc53187bb0c363cc518f90d95b3c816b37bbd132bc",
+      "changed": true,
+      "description": "Original seven R2 raw first catches retained and generic wrapper defaults now own raw constructors; held/mount/named9/COMMIT minend/once-close and uncertainty unchanged.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/deb_archive.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 56876,
+      "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+      "changed": true,
+      "description": "Full AR/PAX/TAR/link/DEB822/default/streaming/replay methods preserved; actual generic and cleanup firstcatch same owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/digests.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 3970,
+      "sha256": "fd588bda6e4edbe2fe751ea69ac147a9b2bbd3271096c00b69af31bb70757b1d",
+      "changed": true,
+      "description": "Bounded original content/RECORD SHA256/384/512/CRC stock routes and defaults preserved; new caught ImportError/MemoryError/DigestStop now raw-owned before return.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/filename.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 1917,
+      "sha256": "12d9730bbacfbcf32896c448d9fbaa84c304b62a7b6d24210f3d3339bd2851f7",
+      "changed": false,
+      "description": "Unchanged five/six wheel filename and complete tag expansion; original94 joined.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/fixtures.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 1798,
+      "sha256": "baa60bba8f6bbb912663569e478d171f16c808ed6ccf9beb811cdd41c2a90762",
+      "changed": false,
+      "description": "Unchanged fixture-only ordinary inert builder text; not a performing runtime substitute and no fixture or unsafe operational body executed.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/guards.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 2031,
+      "sha256": "de34c880bd18b78d2e9b691008950809a31c466d581e3f232939b30d10969806",
+      "changed": false,
+      "description": "Unchanged ordinary member/link/path/casefold/collision checks; actual stock exceptions propagate into current reached owned public path.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/normalize.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 1458,
+      "sha256": "91053cc6010512819788b5adf11af85286c74ec32f90cbc76721e280cc28a43c",
+      "changed": false,
+      "description": "Unchanged original raw RequiresPython equality/normalization; absence versus null is not rewritten.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/pins.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 4553,
+      "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+      "changed": false,
+      "description": "Unchanged literal original bytes/schema/index/codec pins; current source image binding remains actual future independently selected evidence.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/public.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 60149,
+      "sha256": "ac5343b8d0fbb5630432277f07d8a1f1ef8c1529e2d6e20f23de7afea3ad1014",
+      "changed": true,
+      "description": "Actual public performing scan_retained/_run_owned, default scan_rows, aggregate and schema/encoder/final cleanup join; first catches now capture exact raw before exception detail/refusal; outer BaseException and reset retain exact same root.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/raw_relations.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 28991,
+      "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+      "changed": true,
+      "description": "Literal independent raw member/wheel/TAR/DEB replay remains; each normal-return caught actual host/policy exception captured first under current raw root.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/schema_validate.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 12176,
+      "sha256": "57ec66bc4faf68c12576cd34418c7af1a45add88bd0f881f43f7e043401bca15",
+      "changed": true,
+      "description": "All14 schemas/aliases/ref61 and strict real consumers; normal error catches preown raw; stock independent ref resolution confirms coordinates only, not runtime schema-engine PASS.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/semantics.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 3622,
+      "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+      "changed": false,
+      "description": "Unchanged supported member/DEB semantics alongside independent raw replay; no scope reduction.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "source/zip_wheel.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 63188,
+      "sha256": "12c732f0674edf432461c598f5149d65fbde67211e2366fdce4c12b0987133a8",
+      "changed": true,
+      "description": "Full central/local/Zip64/name/metadata/WHEEL/RECORD/digest/range/custody/streaming defaults preserved; actual generic and cleanup firstcatch routed to same raw owner.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "tools/native_owner.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 90243,
+      "sha256": "c24609bb6ccef3976d1922659596a595e13f3dcfeeb8a55960fded47498239ac",
+      "changed": false,
+      "description": "Unchanged actual Source/directRoot consumers, raw native observations, canonical slots, real EOF/directwait and both ACK families. Targeted Root prospective raw-origin nodes and finalkind2 caller are credited only in scope.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "tools/native_support.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 23613,
+      "sha256": "8025cd70dfd25481ca76c10957d90d9ce5c14dfa3388a8fb74dc2d37698b4b12",
+      "changed": true,
+      "description": "NativeHandle21 captures exact bound builtins on both real receivers; SourceRawOwner precommitted before constructor, pending primary/recorder exact aliases; actual ContextVar raw state predicate; ResultOwner borrows same root; RootRetainedCapsule/ExistingParentCaller maintain old direct relation.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "tools/root_holder.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 32079,
+      "sha256": "640e8e48dd70089e373b6f49965d713820b9b2d0a7e6540c071105d9b0c2d266",
+      "changed": false,
+      "description": "Unchanged existing-parent preinit permit/generation/end/child pair before constructor, actual full202 before Source birth, both called observer/final Root real receivers and partial constructor ownership.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "tools/state_binding.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 15906,
+      "sha256": "99e43760236702ad53c3fed9f7ed6462d937e8a7f9da38848d58e37b71dfd983",
+      "changed": true,
+      "description": "Actual new exemption only exact registered ContextVar+same native SourceRawOwner graph, no broad mutable-module allowance; held code/default/closure/native state still checked.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    },
+    {
+      "file": "tools/worker_entry.py",
+      "role": "PERFORMING_CODE_OR_TRUSTED_HELPER",
+      "bytes": 5919,
+      "sha256": "112b2fa914daa0e7268945da5818c84b04d8e6240b4f008911331f3574bd8de5",
+      "changed": false,
+      "description": "Unchanged independently sealed bootstrap, held selections, original SourceUID, real getppid topology, prescribed source root and actual public scan_retained_bytes.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "local_text_or_data_evidence": "PRESENT; no whole/runtime acceptance inferred"
+    }
+  ]
+}

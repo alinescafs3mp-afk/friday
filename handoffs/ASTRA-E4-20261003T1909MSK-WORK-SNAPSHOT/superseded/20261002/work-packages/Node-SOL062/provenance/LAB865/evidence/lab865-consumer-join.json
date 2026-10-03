@@ -1,0 +1,21 @@
+{
+  "caps_raised": false,
+  "graph": "friday.sol060.error-graph.v2",
+  "inner32KiB_complete_graph_fit": "NOT_PROVEN",
+  "native_object_reconstruction": "NOT_QUALIFIED",
+  "oracles_rewritten": false,
+  "projection": "nodes[root].type and nodes[root].message",
+  "schema": "friday.grok.lab865.consumer-join.v1",
+  "source_execution": 0,
+  "startup_controls": [
+    "startup-env-negative",
+    "startup-as-negative"
+  ],
+  "stock_cause_must_equal_projection": true,
+  "supervisor_entry_controls": [
+    "supervisor-entry-fd7",
+    "supervisor-entry-fd127"
+  ],
+  "verifier_entry_control": "verifier-entry-fd7",
+  "verifier_entry_oracle": "unchanged stderr RuntimeError text"
+}

@@ -1,0 +1,197 @@
+{
+  "schema": "friday.astra.a224.node.prospective-errorgraph.connected-source.manifest.v1",
+  "author": "Astra epoch4",
+  "recorded_utc": "2026-10-03 09:17:44 UTC",
+  "members": [
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/INTEGRATION.json",
+      "bytes": 9572,
+      "sha256": "cfc460b849fabbe6d6e06b45ed9c5b18e8eb850118e222778795c0b775260e76",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227373",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9572",
+        "1791019065048257151",
+        "1791019065103260307"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/README.txt",
+      "bytes": 740,
+      "sha256": "d133266b4d26d58db8a09bba7900cb2422515388a3d1c5fb12bcb69c23b4c224",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227375",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "740",
+        "1791019065233267766",
+        "1791019065288270923"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/SOURCE-JOIN.json",
+      "bytes": 9444,
+      "sha256": "8f98cb4687c3131b4520e4a0e5ff2486cea1fad2c048625a26528660369d41c9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227362",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9444",
+        "1791018993172134914",
+        "1791018993223137839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/VALIDATION-PLAN.json",
+      "bytes": 2821,
+      "sha256": "033823e79782719ad58680bafe5bd37d7d2f5b5be9b51d743c2d71a96173130d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227374",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2821",
+        "1791019065142262545",
+        "1791019065194265528"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/caller.py",
+      "bytes": 199266,
+      "sha256": "52a2c0c6369d2fc0b8a811288f751643d140a30052e52f5e6d90b6e2b25010ab",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227356",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "199266",
+        "1791018944643352015",
+        "1791018944643352015"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/expectations.json",
+      "bytes": 12120,
+      "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227360",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12120",
+        "1791018944669353506",
+        "1791018944721356488"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/launch-contract.json",
+      "bytes": 51509,
+      "sha256": "78696677e5dc89062d12148402a6053dcb2b7ef94ee941c2c2ed5c5f7ee96bc5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227359",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51509",
+        "1791018944266330395",
+        "1791018944318333377"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227361",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1791018944761358782",
+        "1791018944810361592"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/supervisor.py",
+      "bytes": 163358,
+      "sha256": "e4d98b693faccb41fd445078a4868faff7640db94d97fff153391cb08ab3388c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227357",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "163358",
+        "1791018944496343584",
+        "1791018944496343584"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/verifier.py",
+      "bytes": 132822,
+      "sha256": "a627290ae91076649ac22ddd066ca01fcfa6b66e661324dd18227ff3af91cea0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227358",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "132822",
+        "1791018944101320932",
+        "1791018944101320932"
+      ],
+      "stable9": true
+    }
+  ],
+  "expected_relative_files": [
+    "INTEGRATION.json",
+    "README.txt",
+    "SOURCE-JOIN.json",
+    "VALIDATION-PLAN.json",
+    "caller.py",
+    "expectations.json",
+    "launch-contract.json",
+    "manifest.json",
+    "ordinary-surplus.txt",
+    "supervisor.py",
+    "verifier.py"
+  ],
+  "files_including_manifest": 11,
+  "Source_bytes": 495446,
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "first_nonauthor_review": "NOT_RUN"
+}

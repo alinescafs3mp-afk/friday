@@ -1,0 +1,26 @@
+{
+  "schema": "friday.sol079.exact-owned-pathset.v1",
+  "root": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure",
+  "count": 17,
+  "paths": [
+    "caller.py",
+    "evidence/connected-root-and-bounds-map.json",
+    "evidence/current6-connected-checks.json",
+    "evidence/effects-and-costs.json",
+    "evidence/final-external-snapshot.json",
+    "evidence/original-obligations-preserved.json",
+    "evidence/original-pins-rejoin.json",
+    "expectations.json",
+    "findings.json",
+    "launch-contract.json",
+    "manifest.json",
+    "ordinary-surplus.txt",
+    "pathset.json",
+    "received.json",
+    "result.json",
+    "supervisor.py",
+    "verifier.py"
+  ],
+  "only_allowed_source_and_JSON": true,
+  "source_execution": 0
+}

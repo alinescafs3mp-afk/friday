@@ -1,0 +1,26 @@
+{
+  "schema": "friday.sol093.actual-connected-relations.v1",
+  "implementation_attempt": [
+    "current LAB916 source5 joined with SOL092 changed2 and SOL091 other42",
+    "new RootObserver early proposal/first-effect-qualified=False",
+    "new capacity validate_complete_capacity -> require_publisher_whole_layout known-mode predicate -> exact all15 output floor CODE",
+    "No old terminal12M->16M growth is mislabeled whole closure; actual over-cap reservation never attempted"
+  ],
+  "Root_prepare": "RootToolAdapter.prepare retains partial RootObserver -> Source early proposal -> same OutputStore -> actual prepare_full_body endpoints -> admission.qualify -> RootNative._run primary+late -> original signature -> known admission -> validate_image -> validate_complete_capacity numerical conflict -> no actor/helper green claimed",
+  "ordinary_failure": "RootNative._run/RootToolAdapter.launch -> ForkOwner.emit_failure -> _emit_failure_preowned_bank -> actual full_value_arena original three roots+history -> PrefixBodyMailbox primary physical publish -> receive_preowned_fork_failure -> read_parent/full schema/validate_full_value_arena/history -> ACK same B gate",
+  "late_failure": "emit_late_failure(error,phase) -> distinct original late bank -> full arena/raw/mapping cut -> physical publish once -> SAME both readers late-first -> actual ACK -> last errors/end still CODE",
+  "both_receivers": [
+    "RootNative._run original early full fork, ordinary failure and terminal owner paths",
+    "RootToolAdapter.launch actual preexec fork/ordinary failure/bootstrap prefix/terminal paths"
+  ],
+  "codec": "LAB916 full encoder+validator retained literal except RootObserver constructor insertion; shared v7 bytes/offset schema unchanged; no alternate body/hash/schema sampling",
+  "custody": "Mapping birth/fd/actual row/credit/cut full before-effect raw aliases unchanged; known self-bank conflict retained; native/callback flags cannot certify end",
+  "N2": "SOL092 actor_bootstrap.py58684 SHA168fd8a2d1649dfe531c4d938d72f1d356a0afadf849dd4f743223a3da61e85a and root_tool_adapter.py149208 SHAc3709fa05cf5fa1b008e4301ffd6cb39d23cab113eac8052bc9070c6741fbe50 EXACT_EXTERNAL_UNCHANGED; original source launcher/native and all23consumer unchanged relative selected inputs",
+  "signatures": [
+    "PrefixBodyMailbox.prepare(carrier, metadata_carrier)",
+    "attach_late(carrier, metadata)",
+    "RootObserver.__init__(cgroup, admission, observer_id, started_ns=None, carried_hash=0, preowner=None)",
+    "validate_complete_capacity(admission,enrollment,observer,installed)"
+  ],
+  "no_author_independent_acceptance": true
+}

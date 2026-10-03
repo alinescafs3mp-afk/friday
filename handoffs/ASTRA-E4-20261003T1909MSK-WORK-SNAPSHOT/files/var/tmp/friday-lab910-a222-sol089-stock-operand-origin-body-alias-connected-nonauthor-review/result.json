@@ -1,0 +1,221 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "author_self_acceptance_used": false,
+  "author_text_used_as_credit": false,
+  "c1": "CODE",
+  "c2": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+  "changed_files": {
+    "caller.py": {
+      "bytes": 60201,
+      "sha256": "58f79d594cfef987f0b30b298cc23c3cb962d4733ca7b1d01825b91b4d3b7da9"
+    },
+    "ordinary_root_consumers.py": {
+      "bytes": 102053,
+      "sha256": "96c6b6a368d8b00aae07c761d96610a0254131bff0f01ab66550adc908022244"
+    },
+    "root_native_launcher.py": {
+      "bytes": 116415,
+      "sha256": "e68f9de758ccd98b55f9663eb82cfe2283c7de65612e8eb0f7cad58bac7bae92"
+    },
+    "sender_operand_codec.py": {
+      "bytes": 31023,
+      "sha256": "389575b32c9627e057d098b7a2f1efa66e646ba41c61ef73519f6afe05a3e650"
+    }
+  },
+  "classification": "NONAUTHOR_TEXT_REVIEW",
+  "compiler_ABI": "NOT_RUN",
+  "constructors_executed": 0,
+  "costs": {
+    "completed_msk": "2026-10-03T11:34:58.137068+03:00",
+    "cumulative": 10628104,
+    "elapsed_s": 608.267583,
+    "memory_hash": 107658,
+    "physical": 10400782,
+    "proc": 2071,
+    "proc_read_bytes_counter": 0,
+    "seal_elapsed_s": 0.024923335993662477,
+    "sealed_tree": 107658,
+    "transport": 119664,
+    "vmrss_kib": 29916
+  },
+  "current_blocker": false,
+  "current_reassignment": false,
+  "decision": "STOCK_PYTHON_BIRTH_BODY_ALIAS_REPLAY_CREDITED_C1_ENDS_ABI_AND_C2_OPEN",
+  "decision_changes_next_action": true,
+  "delivery_id": "del_1bd8737634544bc18813271ecc754194",
+  "duties_not_run": {
+    "compiler_ABI": "NOT_RUN",
+    "gates": "NOT_RUN",
+    "image": "NOT_RUN",
+    "runtime": "NOT_RUN",
+    "scenarios": "NOT_RUN"
+  },
+  "equal_files": {
+    "controller.py": {
+      "bytes": 30313,
+      "sha256": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9"
+    },
+    "native_grammar.py": {
+      "bytes": 38131,
+      "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853"
+    },
+    "receipt_physical.py": {
+      "bytes": 1963,
+      "sha256": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17"
+    },
+    "source_grammar.py": {
+      "bytes": 127594,
+      "sha256": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a"
+    },
+    "staged_sender.py": {
+      "bytes": 65443,
+      "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f"
+    }
+  },
+  "gates": "NOT_RUN",
+  "image_abi": "NOT_RUN",
+  "implementation_complete": false,
+  "implementation_submitted": false,
+  "input_bytes": 76907,
+  "input_sha256": "285033faef07f38de4de6dc594a298bb45e0ad6d87bfa7b12e8ebc7890ce2be0",
+  "job_id": "job_ac3f73b4245b467c99aebe467c74a40d",
+  "joined": "STOCK_OPERAND_REVIEW_NOT_ADMITTED",
+  "kind": "sol089-stock-operand-connected-nonauthor-review",
+  "operational_payload": null,
+  "output_cap_bytes": 16777216,
+  "output_names": [
+    "bound.json",
+    "bound.txt",
+    "manifest.json",
+    "pathset.json",
+    "payload.json",
+    "pin-checks.json",
+    "relation.json",
+    "result.json",
+    "validation-plan.txt"
+  ],
+  "outside_ends": "CODE",
+  "passport_consulted": true,
+  "passport_recorded_pids_used": false,
+  "pins_declared": 148,
+  "pins_matched": 138,
+  "pre_seal_heartbeat": "2026-10-03T08:34:57.245060Z pid=793654 epoch=15",
+  "predicate_ids_in_equal_bytes": 132,
+  "prospective_graph_cost": "UNKNOWN_NOT_ZERO",
+  "qualification": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+  "qualification_required": true,
+  "repair_authored": false,
+  "residuals": [
+    {
+      "actual_path": "Capture raises NativeBodyUnavailable for an unknown type. Validate rejects a native or private kind. restore_error says native traceback, frame locals, and the C heap are not reconstructed. The producer keeps a local damage record and an unconfirmed durable-custody string.",
+      "decision": "CODE",
+      "id": "C1",
+      "invariant": "A native, raw, or private field still has no admitted full body. An error graph that keeps local damage is not complete native custody.",
+      "required_validation": "A separately qualified native and raw body supplier, plus the matching error custody, on these bytes. This review does not supply that body.",
+      "status": "CODE"
+    },
+    {
+      "actual_path": "The incomplete sideband yield still carries outside raw-owner acceptance REQUIRED_NOT_CONFIRMED. The incomplete prefix recipe still carries outside acceptance REQUIRED_NOT_CONFIRMED. Tail finish sets helper native end verified false, native C memory retirement NOT_QUALIFIED, and GO false. outside_wait4 records a wait and does not flip those strings. The selector close path remains the Python one-close.",
+      "decision": "CODE",
+      "id": "BOTH_OUTSIDE_ENDS",
+      "invariant": "Both outside finite native ends stay unconfirmed. The Python one-close path is not those ends.",
+      "required_validation": "The existing outside native owner for both finite ends, including raw-owner acceptance, on a later qualified review. Do not treat the Python close as that owner.",
+      "status": "CODE"
+    },
+    {
+      "actual_path": "bind_operand_stock checks version_info[:2] == (3, 14) and the pinned stock and codec bytes. Its own text says the ABI still needs independent qualification. No compiler, image, or ABI run was performed.",
+      "decision": "NOT_RUN",
+      "id": "IMAGE_ABI",
+      "invariant": "A version pair and a pinned stock file are not an image or ABI qualification.",
+      "required_validation": "Independent image and compiler ABI qualification of the selected stock class. Leave this NOT_RUN until that exists.",
+      "status": "NOT_RUN"
+    },
+    {
+      "actual_path": "The launcher meter snapshot and the whole resource compliance field still say UNKNOWN_NOT_ZERO_NOT_PROVEN. No source was executed, so this review measured no cost.",
+      "decision": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "id": "C2",
+      "invariant": "Whole graph, replay, framing, loader, and stock cost stays unmeasured and is not zero.",
+      "required_validation": "Measure the whole cost only after native, image, ABI, and resource qualification. Do not emit a zero.",
+      "status": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+    }
+  ],
+  "run_message_id": "msg_f07e8566642c4f768d384785f797b62c",
+  "runtime": "NOT_RUN",
+  "same_typed_unchanged": true,
+  "schema": "friday.astra.lab910.sol089.stock-operand.connected-nonauthor.run.v1",
+  "source_execution": 0,
+  "source_imported": false,
+  "source_proof": false,
+  "stamp_inequality": 32,
+  "stamp_inequality_is_host_drift": false,
+  "status_bytes": {
+    "LAB_STATE.md": 33195,
+    "control.json": 6373,
+    "job_ac3f73b4245b467c99aebe467c74a40d.json": 4684,
+    "watch.heartbeat": 48
+  },
+  "stock_path": [
+    {
+      "decision": "CREDITED_STOCK_BIRTH",
+      "finding": "caller _ObservedSelector configures the codec catalog, asks for the selected-class descriptor, and calls DefaultSelector.__new__ before __init__. Birth records that object under selector.allocate. A failed __new__ is noted and raised. The following selector.create call passes DefaultSelector.__init__ and the same raw object.",
+      "step": "performing_birth"
+    },
+    {
+      "decision": "CREDITED_EMPTY_DICT_BODY",
+      "finding": "OperandOwner.birth refuses a second birth and a type other than the selected class. Capture of a stock instance reads object.__getattribute__ of the instance dictionary. It does not call fileno, a constructor, or an empty stand-in. An empty pre-init dictionary is stored as a real dictionary node. Unknown types raise NativeBodyUnavailable.",
+      "step": "capture"
+    },
+    {
+      "decision": "CREDITED_FRAMING_NOT_SUBSTITUTE",
+      "finding": "Recorder.call wraps selector arguments in FrozenArguments, whose wire uses the codec encoder. For selector.create the raw operand is the first argument; for the other selector operations it is the bound self. Success and failure each note selector.body.after once for that same object. Chronology keeps one post-body per completed effect and joins it to the same owner and sequence.",
+      "step": "frozen_and_post_body"
+    },
+    {
+      "decision": "CREDITED_STOCK_PATH_ONLY",
+      "finding": "Codec value checks the selected stock class, then the stock key class, before the fileno branch. Producer.note and FrozenArguments use that encoder. After attach, selector notes go through the producer. The journal encoder has no selected-class arm and raises for an unrepresented object; it does not call fileno. The caller module-level encoder still has a fileno branch for a non-stock value that reaches it. That branch is not the pre-init birth encoder.",
+      "step": "fileno_boundary"
+    },
+    {
+      "decision": "PIN_CHECK_NOT_ABI_GRANT",
+      "finding": "bind_operand_stock requires the stock module path and the codec path to be pinned, the held byte objects to match, and lstat of both paths to match the pinned nine-field stamp. It also requires the version pair (3, 14). The same check says the ABI still needs independent qualification. It then builds OperandRegistry. This is not an image or ABI grant.",
+      "step": "root_bind"
+    },
+    {
+      "decision": "CREDITED_EMPTY_BIRTH_REFUSES_POST_INIT",
+      "finding": "Chronology calls ingest_birth on a successful selector.allocate before decode. Ingest requires the selected-class descriptor, a consecutive ordinal, and a dictionary body that is an empty list. A non-empty dictionary is refused, so a finished initializer is not replaced by that empty list. Registry allocate takes the earliest untaken birth and calls only object.__new__. It checks the empty dictionary and does not call selector __init__.",
+      "step": "ingest_and_allocate"
+    },
+    {
+      "decision": "CREDITED_READONLY_REPLAY",
+      "finding": "Replay builds the selector through allocate, then journal.call of selector.create with function None. StrictJournal.call discards that function and does not invoke it. driver.call requires a later post-body and decode with restore. Arrival decode defers stock graphs, so the held wire is not materialized early. match requires bidirectional object identity in the registry maps before the structural checks, including set membership by object identity.",
+      "step": "replay"
+    },
+    {
+      "decision": "UNCHANGED",
+      "finding": "The same_typed function text in the current consumer is the same text as the pinned lab873 consumer and the pinned lab896 consumer. It compares type, dictionary keys, list and tuple length, then equality. It has no stock special case. Stock graphs are decoded by the held registry.",
+      "step": "same_typed"
+    },
+    {
+      "decision": "PRIOR_CREDIT_KEPT",
+      "finding": "restore_error still builds the exception from its arguments, then sets filename and filename2 only when same_typed disagrees, and only then compares the text. The same order is repeated for errno, filename, and filename2 after the state update. Native traceback, frame locals, and the C heap stay unrebuilt.",
+      "step": "error_filename"
+    },
+    {
+      "decision": "UNCHANGED_BYTES_NOT_A_SUPPLIER",
+      "finding": "controller.py, native_grammar.py, receipt_physical.py, source_grammar.py, and staged_sender.py are byte-identical to the pinned lab873 copies. They do not become the stock-operand supplier. The changed caller, consumer, and launcher, plus the new codec, are the stock path.",
+      "step": "equal_modules"
+    },
+    {
+      "decision": "INVENTORY_PRESENT_NOT_EXECUTED",
+      "finding": "All 132 predicate identifier strings listed by the package preservation file occur in those five equal modules. That file states 16 pure, 12 class, and 72 effect obligations. The case table lists 32 original rows and R01 through R07. None of those rows was executed. Gates, runtime, and compiler ABI stay NOT_RUN.",
+      "step": "preservation"
+    }
+  ],
+  "task_done": false,
+  "verdict": "EMPTY_PREINIT_DICT_AND_READONLY_REPLAY_LEAVE_NATIVE_C1_BOTH_ENDS_AND_C2_OPEN",
+  "waiver": false,
+  "whole_accepted": false
+}

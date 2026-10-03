@@ -1,0 +1,59 @@
+{
+  "schema": "friday.sol093.qualification-and-costs.v1",
+  "accepted_msk": "2026-10-03 17:58:14 MSK",
+  "source_frozen_utc": "2026-10-03 15:09:23 UTC",
+  "task_caps": {
+    "deadline_sec": 3600,
+    "seal_sec": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 33554432,
+    "local": 4,
+    "children": 0,
+    "network": 0,
+    "retry": 0,
+    "friday": 0
+  },
+  "primary_explicit_read_subtotal": 33863894,
+  "read_subtotal_components": {
+    "exact_INPUT_recursive_full_SHA9_twice": 22185010,
+    "current_original_49_44_134_baseline63_compact_obligations_twice": 11678884
+  },
+  "additional_source_literal_reads": {
+    "initial7_texts": 391739,
+    "own_capacity_final": 21935,
+    "observer_final_old_and_new": 202201
+  },
+  "other_explicit_read": "Source targeted sed/rg/jq, native protocol dependencies, input materialization and own sealing reads not all aggregated: UNKNOWN_NOT_ZERO; subtotal not whole read upper/proof",
+  "peak_RAM_CPU_RSS": "UNKNOWN_NOT_ZERO full turn; no Source factory/native execution measured",
+  "Source_execution": 0,
+  "Source_AST_parser_import_compiler_tests": 0,
+  "native_Root_product_execution": 0,
+  "network_model_calls": 0,
+  "children": 0,
+  "friday_calls": 0,
+  "execution_retry": 0,
+  "admin_faults": [
+    "One trusted Node literal-check command exceeded OS argument-size limit before process creation; capacity check already succeeded, observer compared by same tiny trusted literal replacement from pinned LAB916 text. No Source code execution/eval/import/compiler or denied Scanner action."
+  ],
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "C1": "CODE",
+  "C2": "UNKNOWN_NOT_ZERO",
+  "image_ABI_runtime": "REQUIRED_NOT_RUN",
+  "independent_acceptance": false,
+  "models_ultra_tier_provider_guards_writerlocks": "UNCHANGED",
+  "original_global_caps": {
+    "body": 80000000,
+    "metadata": 2000000,
+    "whole_output": 33554432,
+    "whole_read": 40960000000,
+    "whole_RAM": 8589934592,
+    "FD": 128,
+    "workers": 4,
+    "original_clocks_and_gates": true,
+    "all_original_cases_required": true,
+    "unsafe_required_no_waiver": true
+  }
+}

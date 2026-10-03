@@ -1,0 +1,408 @@
+{
+  "pins": [
+    {
+      "bytes": 6959,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A206-NODE-ACTUAL-ROOT-BODY-CALLER-CONNECTED-IMPLEMENTATION-DECISION-20261003.json",
+      "sha256": "1c8c0a024292704fb84ad62fdc76825492714cf19433d874706437f82ce1b8f5"
+    },
+    {
+      "bytes": 5880,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB830-NODE-SOURCE-ACCEPTED-20261001.json",
+      "sha256": "d29ad65ae1f6b1c1373c021cb1cad334bfc204f3c62c93381b7346d1fb904023"
+    },
+    {
+      "bytes": 3724,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB830-ROOT-SOURCE-MATERIALIZED-20261001.json",
+      "sha256": "893dabaca55b8abe3d4fe80ef04593f30f6d1a133bd8df9c53868729965c7cbc"
+    },
+    {
+      "bytes": 21155,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB875-INPUT-20261002.json",
+      "sha256": "7c6f43af45113036951e0f9e9387614a2caabdd2d1695b71784ee354e46d59b8"
+    },
+    {
+      "bytes": 30558,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB880-INPUT-20261002.json",
+      "sha256": "ca28384498d70535f73bdaa631ee1b66d6b2359653b8a4cd504d31f0e39ee7ba"
+    },
+    {
+      "bytes": 35854,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB883-INPUT-20261003.json",
+      "sha256": "92384d9489da2ec487c79e6c7acfb456ababa3449651f3319badea2bb145e079"
+    },
+    {
+      "bytes": 35465,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB889-INPUT-20261003.json",
+      "sha256": "7973d75366bf3c93b78337c2350430a18c4b23845311b02f73ccf9bc230af282"
+    },
+    {
+      "bytes": 3647,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB889-RUN-20261003.json",
+      "sha256": "5bbc349d8590faeae19f0cf2e5f520c824b0ea03f5de234efe987ddceb8b8fd6"
+    },
+    {
+      "bytes": 38618,
+      "mode": "0600",
+      "mtime_equals_ctime": true,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL072-INPUT-20261003.json",
+      "sha256": "d0bf008b34078995df2b6806e90ebe1d4bf927d0573e913487894068969e6748"
+    },
+    {
+      "bytes": 34555,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL072-NODE-SOURCE-RESULT-RECEIVED-20261003.json",
+      "sha256": "8d313961c33426a15232390f61017b8fbed83eae55d5aae947aac3c4d0a2b332"
+    },
+    {
+      "bytes": 31058332,
+      "mode": "0600",
+      "mtime_equals_ctime": true,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/runtime/friday-toolchain22.bSt8Uu/archives/node-v22.23.2-linux-x64.tar.xz",
+      "sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+    },
+    {
+      "bytes": 466956,
+      "mode": "0600",
+      "mtime_equals_ctime": true,
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json",
+      "sha256": "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2"
+    },
+    {
+      "bytes": 1186456,
+      "mode": "0755",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/usr/bin/gpg",
+      "sha256": "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754"
+    },
+    {
+      "bytes": 302296,
+      "mode": "0755",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/usr/bin/gpgv",
+      "sha256": "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d"
+    },
+    {
+      "bytes": 27616,
+      "mode": "0755",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/usr/bin/prlimit",
+      "sha256": "cb28811cb3902773c1a0f3ac0ea554c7a1e232724e9d4cae055ede54b65a7bc4"
+    },
+    {
+      "bytes": 7477160,
+      "mode": "0755",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/usr/bin/python3.14",
+      "sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+    },
+    {
+      "bytes": 64184,
+      "mode": "0644",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0",
+      "sha256": "1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa"
+    },
+    {
+      "bytes": 31058332,
+      "mode": "0600",
+      "mtime_equals_ctime": true,
+      "nlink": 1,
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/archives/node/node-v22.23.2-linux-x64.tar.xz",
+      "sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+    },
+    {
+      "bytes": 4696,
+      "mode": "0600",
+      "mtime_equals_ctime": true,
+      "nlink": 1,
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/metadata/node/SHASUMS256.txt.asc",
+      "sha256": "cfcf12eb3146d641be185d08ca018166b98495b1d8e5f7f94ab77f9965b651d2"
+    },
+    {
+      "bytes": 3163,
+      "mode": "0600",
+      "mtime_equals_ctime": true,
+      "nlink": 1,
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/metadata/node/publisher-key.asc",
+      "sha256": "e31e1aa40a8331f01d753cef475f7b9eab934fc25f5f0b36995bfd80bd66ad27"
+    },
+    {
+      "bytes": 400979,
+      "mode": "0600",
+      "mtime_equals_ctime": true,
+      "nlink": 1,
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/transport-receipts.ndjson",
+      "sha256": "180c44ad4439a96f89335a62e35a5668327a228ce164d1f31b503b867b05fe9b"
+    },
+    {
+      "bytes": 142411,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+      "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6"
+    },
+    {
+      "bytes": 10863,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/expectations.json",
+      "sha256": "7bf7a8f30abcb5a0af4e1b3e1b5f74f53228e0f979eaa18b453ddfc96cdc3ece"
+    },
+    {
+      "bytes": 49539,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/launch-contract.json",
+      "sha256": "04fe265d1136155f5d5786fbaa0ed852ae35e1eff3d970346d37d890cb71beb3"
+    },
+    {
+      "bytes": 158,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    {
+      "bytes": 111330,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+      "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452"
+    },
+    {
+      "bytes": 83369,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+      "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6"
+    },
+    {
+      "bytes": 179046,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/caller.py",
+      "sha256": "e7801afaa87f593dee61081e846f28e55de4f0cb7d8752258604df62c27e183c"
+    },
+    {
+      "bytes": 11427,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/connected-design.json",
+      "sha256": "12950d54873ce7888ea2b369a274b28b2d3721f5002f4e999e77f925a32e80bf"
+    },
+    {
+      "bytes": 7441,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/actual-LAB880-LAB883-baseline-reconciliation.json",
+      "sha256": "2a4024373369bc75e474630d294c55dd105c1278942db969a71bd0c2cd1f92a5"
+    },
+    {
+      "bytes": 1405,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/author-resources.json",
+      "sha256": "4931eac14e6a4548c058956581374f32c10567c38700ad586493fd37ce10731f"
+    },
+    {
+      "bytes": 13005,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/current19-original-read-arithmetic.json",
+      "sha256": "1815f06e390400bf44c347d8c428c699df8f278f135c6b37c63c86a828256557"
+    },
+    {
+      "bytes": 1399841,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/current6-gapless-byte-partitions.json",
+      "sha256": "e3247462e9380ac2a0bf8924469bf257d746f80886ef25ecaed2c060832b4f16"
+    },
+    {
+      "bytes": 46852,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/external-pins-and-normative-chain.json",
+      "sha256": "e41f6e1315f96e690fee359ada331d7db2c26a443d55769958178c97535dde6c"
+    },
+    {
+      "bytes": 31899,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/intake.json",
+      "sha256": "1d969406255b2f9e014676cdaacb127d76f57e46e5b89669680ffa808328ed56"
+    },
+    {
+      "bytes": 1120,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/metadata-check1-failure.json",
+      "sha256": "4f67cfd8f82ef4275c20ab19c2db3ef4b6448e558392c3e80bcfc396572fb3f5"
+    },
+    {
+      "bytes": 15258,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/original-scope-and-finite-end.json",
+      "sha256": "e8677fcac929b119ca0ca84e508c902e311bc8f2b70d6af568cc9c0704d23cc7"
+    },
+    {
+      "bytes": 820,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/provenance-dag.json",
+      "sha256": "19c01eec7eeafe7957ce6ad0f9d5aed7220eba37817c4547c005ea2277432b5c"
+    },
+    {
+      "bytes": 12050,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/static-byte-joins.json",
+      "sha256": "811b41c3671093dd93e6ef7569187fe886f31379fab4dc26128762f209a1bd84"
+    },
+    {
+      "bytes": 120606,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/evidence/whole35-current-roots.json",
+      "sha256": "a1e10344280e15ef443db1d66dc8949d0ee05499903e76eb404dc319e3b47a8d"
+    },
+    {
+      "bytes": 12120,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/expectations.json",
+      "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb"
+    },
+    {
+      "bytes": 3408,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/findings.json",
+      "sha256": "8c4b3669f6db859e2e6f6ba77f626f7b8887cd610c6aba19affa32f06289bc8e"
+    },
+    {
+      "bytes": 3844,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/intake.py",
+      "sha256": "4de71ddea2526858ee9f0aa2dd7c4bfd29f1307089843824b7ab45b12b55ef58"
+    },
+    {
+      "bytes": 51470,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/launch-contract.json",
+      "sha256": "29eceb367d91803c18acb2adc1ee46d865fc7ec7d4c63e21578c10dbc67f844c"
+    },
+    {
+      "bytes": 15692,
+      "mode": "0600",
+      "mtime_equals_ctime": true,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/manifest.json",
+      "sha256": "9f63f991a0d503a47d80dda68a58d9e081d3bbd81bb0726441101cfd64790436"
+    },
+    {
+      "bytes": 158,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    {
+      "bytes": 2100,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/received.json",
+      "sha256": "c417f5ee01dcedfbc3eae11b669b2da587a66483d70e92f9e5566892ecbc9cf2"
+    },
+    {
+      "bytes": 24372,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/seal_metadata.py",
+      "sha256": "ca2e5743271ffbece176c82c0b0e0cccdb711850a811cc2466ad70f73bb947bb"
+    },
+    {
+      "bytes": 143262,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/supervisor.py",
+      "sha256": "89cb5c6dfbc4c49e86a0237b6e708032a04fcb1ebc36f57c376e81f82966ce9a"
+    },
+    {
+      "bytes": 113456,
+      "mode": "0600",
+      "mtime_equals_ctime": false,
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol072-lab883-node-preowned-body-actual-outside-caller-both-decoders-finite-end-connected-source-closure/verifier.py",
+      "sha256": "db065d2e7e260e5846a9ab43ce2d1da17dbc1d3f6d6e0497fb222895ccf51020"
+    }
+  ],
+  "pins_verified": 50,
+  "predecessor_ctime_drift_not_a_failure": true,
+  "schema": "friday.e4.lab889.pin-checks.v1",
+  "unique_pin_paths": 50
+}

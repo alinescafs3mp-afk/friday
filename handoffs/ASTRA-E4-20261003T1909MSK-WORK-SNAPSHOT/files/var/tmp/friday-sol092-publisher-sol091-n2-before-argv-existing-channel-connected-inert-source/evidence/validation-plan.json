@@ -1,0 +1,227 @@
+{
+  "schema": "friday.sol092.required-validation-plan.v1",
+  "original_obligations": {
+    "name": "evidence/original-obligations.json",
+    "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/evidence/original-obligations.json",
+    "bytes": 38970,
+    "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371734",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "38970",
+      "1791022108009371618",
+      "1791022242519576230"
+    ],
+    "stable9": true
+  },
+  "original_plan": {
+    "name": "evidence/validation-plan.json",
+    "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/evidence/validation-plan.json",
+    "bytes": 9399,
+    "sha256": "3057a4e5407444ce3c2e96040b805734744142a75aeb7402fd1444df87a06a29",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371735",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "9399",
+      "1791022108049861752",
+      "1791022242519576230"
+    ],
+    "stable9": true
+  },
+  "original_controls_all_preserved": "original69/exact6/all15/schema20/current134/full58/full22/ABI128/all30/original11/original9/all27/all5/F0-F11/r5RED/r6ABSENT/twofullpositives/meaningfulnegatives + predecessor22 required, all REQUIRED_NOT_RUN",
+  "new_controls": [
+    {
+      "id": "P1-SAME-ROOT-SEED-NORMAL-ARGV",
+      "invariant": "Original valid Root seed/rows/token reaches the same actor_main and final reader without a second launch read or extra argument/token.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "P2-ORIGINAL-SHORT-ARGV",
+      "invariant": "Fewer than original four script values, including no token argv, is detected only after actual original seed/table bind; original error/full alias reaches old v6 receiver, no pass/end before retirement.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N1-NONINTEGER-ARGV",
+      "invariant": "Original map(int) error after seed carries exact error args/TB/frame/source/raw aliases; no guessed endpoint.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N2-FOUR-ARG-MISMATCH",
+      "invariant": "Bundle/request/response/token mismatch is rejected against Root-selected relation, not selected from argv; Root does not mint token or forgive mismatch.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N3-MISSING-LAUNCH-FRAME",
+      "invariant": "EOF/partial first frame retained with original seed buffers/error; route-before-body-end CODE, no process exit/hash/typed failure as accepted end.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N4-MALFORMED-FIRST-FRAME",
+      "invariant": "Size/JSON/duplicate-key/numeric corruptions before route cannot become guessed supplier or accepted native body; all partial/raw aliases retained.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N5-MISSING-OR-CORRUPT-ROUTE-TOKEN",
+      "invariant": "Missing bootstrap_seed/request/token and wrong export token stay explicit CODE or original Root authentication refusal; original token is not recovered from argv.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N6-PARENT-PID-ROW-FORGED",
+      "invariant": "Foreign parent/child identity, duplicate HELD rows, wrong fstat9, missing KEEP or cross-pipe alias rejected; Source label/flag is not authority.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N7-MISSING-LATE-SEED-FIELDS",
+      "invariant": "After genuine original request/token bind, extra/missing bundle/seed fields preserve real original error via same full-prefix attempted path; full body/end not fabricated.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N8-PROTECTED-FD0-COLLISION",
+      "invariant": "Existing bootstrap/executable/bundle/request/gate/preexec receiver at 0 refuses BEFORE fork/dup2; captures1/2 and protected roles unchanged.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N9-UNKNOWN-CLOSE-AND-DUP2-ERROR",
+      "invariant": "Original0 close UNKNOWN cannot be overwritten/retried. Duplicate0/source rsp close failure preserves exact original pre-exec body/table/error/gate path.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N10-HIGH-NUMERIC-FD",
+      "invariant": "A genuinely preowned descriptor number greater than127 but within total128-count pool is not rejected merely for its number; no original valid-case domain reduction.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N11-INITIAL-CONSTRUCTOR-ERROR",
+      "invariant": "Stock/child-journal partial object before __init__/bind/argv keeps exact original graph/error. Allocation before usable script channel remains N1/N2 CODE.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N12-ROOT-SEED-OBJECT-TOKEN-ALIAS",
+      "invariant": "Root seed must be same held object in actual_launch_fact, same current token and exact original argv/physical rows; copied flag/callback/request label cannot satisfy full-body or end.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N13-PREFIX-BODY-RAW-ALIAS-NEGATIVE",
+      "invariant": "Changed raw launch/span/source preimage/history/physical alias rejected by unchanged strict v6 readers. Unsupported foreign public/native state cannot be relabeled complete.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N14-PREFIX-DELIVERY-ACK-END",
+      "invariant": "Write/receiver/ACK error retained; original one-attempt guard preserved. ownership_retired=False/retained/complete never yields a passed original endpoint.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N15-NO-POSTEXEC-PREEXEC-PIPE",
+      "invariant": "CLOEXEC child_w failure endpoint not called after exec and not claimed as surviving receiver; fd0 reuses rsp channel only.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N16-RESOURCE-CLOCK-FIT",
+      "invariant": "Original body80M/metadata2M/output33554432/read40960000000/RAM8589934592/FD128count/workers4/G-A-B/clocks preserved; all new alias/buffer/row/copies/Source/compiler/native lifetimes included in actual whole future bound.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N17-BOTH-FULL-RECEIVERS-FINAL",
+      "invariant": "Both actual ordinary and final native readers must validate same current full body/errors before owner loss, including last publication/close/destructor uncertainty; no old scoped run transfer.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    },
+    {
+      "id": "N18-STOCK-BEFORE-MAIN",
+      "invariant": "Missing interpreter/script argc and stock import/constructor errors before main remain required native/image/fence CODE, not waived or replaced with stderr/pidfd/hash/native private scan.",
+      "required": true,
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "waiver": false,
+      "operational_payload": null
+    }
+  ],
+  "all_original_caps_clocks_gates": {
+    "body": 80000000,
+    "metadata": 2000000,
+    "whole_output": 33554432,
+    "whole_read": 40960000000,
+    "whole_RAM": 8589934592,
+    "FD": 128,
+    "workers": 4,
+    "original_clocks_and_gates": true,
+    "all_original_cases_required": true,
+    "unsafe_required_no_waiver": true
+  },
+  "independent_review": "Actual whole connected new producer/stock bootstrap/current full receivers/raw aliases/ordinary error/BOTH end/cost package required on final SHA9, no author self-acceptance.",
+  "compiler_ABI": "REQUIRED_NOT_RUN",
+  "runtime": "REQUIRED_NOT_RUN",
+  "gates": "REQUIRED_NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false,
+    "operational_payload": null
+  }
+}

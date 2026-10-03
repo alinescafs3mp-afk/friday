@@ -1,0 +1,112 @@
+{
+  "schema": "friday.astra.a215.sender.selector.actual-supplier.reconciliation.v1",
+  "recorded_utc": "2026-10-03T04:13:17Z",
+  "owner": "Astra active Lead Architect epoch4",
+  "existing_root": "Sender R05e linked to existing C1 actual native/stock/preencode body, not a new product root",
+  "decision": "ACTUAL_CREATE_OPERAND_REQUIRES_ORIGIN_TIED_NATIVE_SUPPLIER_NOT_LOCAL_FACADE_PATCH",
+  "pins": {
+    "actual_caller": {
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/caller.py",
+      "bytes": 65491,
+      "sha256": "ff6fd365165a3e94971aabb546d051e1c7cbd313273a1b8917aab0ab1bdb43cc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225618",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "65491",
+        "1790956169964899288",
+        "1790956169964899288"
+      ],
+      "stable9": true
+    },
+    "actual_consumer": {
+      "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/source/ordinary_root_consumers.py",
+      "bytes": 93844,
+      "sha256": "814db7af6a4183f5e7ff1f389ffea65a0ef5a02e4e21faa048350d3cca8d6e81",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226873",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "93844",
+        "1790996661665123584",
+        "1790996661665123584"
+      ],
+      "stable9": true
+    },
+    "non_author_review": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL082-SENDER-CONNECTED-SOURCE-RESULT-RECEIVED-20261003.json",
+      "bytes": 10338,
+      "sha256": "7d6ece71682eeeedd5139069632cd67c25ec65a72831d59957287415f6b59115",
+      "identity9_decimal_strings": [
+        "2050",
+        "8532103",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10338",
+        "1790999804739273610",
+        "1790999804821278311"
+      ],
+      "stable9": true
+    },
+    "baseline_original96": "Use exact baseline received actual96_join and source_delta_from_lab870; original54/current96/all32/all7 remain required, not executed by this intake. Native/cost/BOTH ends remain open; unsafe only refs/hash."
+  },
+  "actual_paths": [
+    {
+      "invariant": "Exact performing stock constructor operand retained before actual init, not future FD/data or expected-result substitute",
+      "producer": "Caller:359 allocates native DefaultSelector with __new__; Caller:362 passes that self to actual stock __init__ through FullEventJournal.call",
+      "recording": "Caller:248-266 preserves actual args in effect-owner slot and raw journal before native call. Attached client.note receives original arguments at208; bootstrap scalar-only value path173-192 has no DefaultSelector representation and fails closed.",
+      "consumer": "Current consumer:772 passes zero args to journal.call; exact matcher864 requires original [list(args),kwargs]. Both actual successful method outcome1007-1008 and all reached-effects1017 remain mandatory."
+    },
+    {
+      "invariant": "Readonly reconstruction must come from actual independently held source value and original alias/body relation, not facade class/name alone",
+      "receiver": "RootChronology:197 decodes actual held event arguments. Decoder62-129 supports exact named shapes, not a preinit DefaultSelector body/alias native node supplier. Method-state restore736-746 maps only facade identity; state source132-134 deliberately marks that facade by name, not the raw native instance.",
+      "root_supplier_dependency": "Full actual native/stock/preencode body capture, stable raw alias membership and original outside finite custody remain existing C1 CODE. No current compatible native operand supplier is proven by adding selector.create membership or restoring a local context manager."
+    },
+    {
+      "invariant": "Do not invent a second recorder-order defect",
+      "reconciled_non_defect": "method_sites:1044-1045 selects reached EFFECTS/JOURNAL only. .begin rows are not selected into the current replay list. Therefore absence of an explicit .begin consume in StrictJournal981-985 alone is NOT a newly established mismatch; no code finding or patch minted from it."
+    }
+  ],
+  "preserved_credits": [
+    "Sol082 independent filename-before-str method-state restoration",
+    "Unchanged separate full effect-error constructor restoration",
+    "R02/M01 and context-valid prior scoped R03/R05 credits",
+    "Conditional local selector membership/context/one-close only"
+  ],
+  "required_closure": {
+    "owner": "Astra existing Source integration/ownership",
+    "condition": "Supply the actual permitted independently Root-held native value/body/alias operand path and rejoin Caller preinit->actual captured event->typed decoder->consumer exact matcher->method outcome->original finite retirement as ONE connected package before whole Source review.",
+    "prohibited_substitutes": [
+      "Copying expected event args into caller input",
+      "Inventing file_handle/FD/class-tag carrier for the preinit native object",
+      "Calling a real native constructor during pure-Python replay",
+      "Relaxing same_typed/exact argument matcher",
+      "Replacing original successful method with a known unavailable/error result",
+      "Disabling required selector path or relabelling it beta"
+    ],
+    "scopes": "No Source/native/grant implementation, no new service/observer, no denied Scanner operation continuation/rephrasing/delegation. Unsafe HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false."
+  },
+  "classification": {
+    "current_gap": "CODE_CONTRACT_SUPPLIER_NOT_EXECUTION_ONLY",
+    "ordinary_error_credits": "INDEPENDENTLY_SCOPED_SOURCE_ONLY",
+    "prospective_cost": "UNKNOWN_NOT_ZERO",
+    "compiler_ABI": "NOT_RUN",
+    "runtime": "NOT_RUN",
+    "gates": "NOT_RUN"
+  },
+  "current_Source_source_edits": 0,
+  "Source_execution": 0,
+  "whole_accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "original_obligations": "Original54/current96/all32/all7/R01–R07, Caller65491/Sender65443 within65536, all meaningful positive and negative cases retained."
+}

@@ -1,0 +1,3092 @@
+{
+  "schema": "friday.a155.independent-all32-full-original-branches.v1",
+  "count": 32,
+  "no_case_cut": true,
+  "common_obligations": {
+    "domains": "Only original strict-inherited-fd may use caller bootstrap; specific original early Sender cases remain early Sender; stock prelude is outside ordinary case reachability and must not be relabeled.",
+    "fields": "All12 exact named original variable purposes, typed values, current full9 and actual operation/index/path; NOT_REACHED needs true original branch proof, not missing optional data/event.",
+    "ordering": "All earlier original per-field predicates/operations, earliest failure/stdlib error, complete native125/0 relations and case-specific actual child/cleanup/handoff cause.",
+    "producers": "Full original controller/dispatcher writer prefixes and actual read streams, exclusive worker stdout AND stderr bytes/current held refs; full original caller stderr, no filler or assumed zero.",
+    "resources": "Original54/full control, Source controller+receiver16MiB, Sender32MiB, source literals65536, native262144, softAS64MiB,4workers/whole8GiB; allpath damage/encoding/transport/implicit IO not silently omitted.",
+    "outside": "Actual existing outside Root independently held process/FD generation, final acceptance/adoption/native wait/close/tail; live Root authority alone remains future."
+  },
+  "cases": [
+    {
+      "case": "adopted-child-pending",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/adopted-child-pending.json",
+        "bytes": 392028,
+        "sha256": "a5990c24761899a2b428eab353a0d300fb9bc6b57aee673e2a6f036d48ff983d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073759",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "392028",
+          "1790884738519479593",
+          "1790884738519479593"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": [
+          {
+            "parent_pid": 43209,
+            "pid": 43211,
+            "reaped": false,
+            "start_ticks": 123456800,
+            "terminal_children": null,
+            "wait4_raw_usage": null,
+            "wait4_status": null
+          }
+        ],
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.child_tree.adopted_exact_generations"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "CLEANUP actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": null,
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "CLEANUP",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "STOP_UNCONFIRMED",
+        "initiating_cause": "own_tree_terminal_unconfirmed"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "cleanup.confirmed false, native125; no signals/retry/global absence",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "sample_tree/Generation.children/cleanup/OwnScope.terminal",
+        "ordinary_family": "ordinary cleanup lacks adopted terminal proof",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Sticky cleanup refusal is now joined to original native125 relation, but exact adopted-generation transfer, acceptance and final durable custody are missing, not replaced by cleanup.confirmed=false.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "blocked-SIGCHLD",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/blocked-SIGCHLD.json",
+        "bytes": 244226,
+        "sha256": "a2b948cf2e67020753bee7e574179e1a95c95435d287b6c730824cde361c1589",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073760",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "244226",
+          "1790884738522544341",
+          "1790884738522544341"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": "BLOCKED",
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.child_tree.SIGCHLD"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "PREPARE actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "SIGCHLD_blocked",
+        "controller_spawned": false,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "PREPARE",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "SIGCHLD_blocked"
+      },
+      "original_reached_phases": [
+        "BOOTSTRAP",
+        "PREPARE",
+        "PREPARE_REFUSAL",
+        "CLOSE",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual blocked mask, no fake process/mask fact",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "OwnScope.__init__ pthread_sigmask guard",
+        "ordinary_family": "ordinary inherited mask rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Actual mask guard emits frozen predicate sites. OwnScope method state and original blocked-mask branch/reachability are not covered by the16 pure-function replays; no child may be invented.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "body-context-bool",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/body-context-bool.json",
+        "bytes": 236106,
+        "sha256": "eb4a4ac709c7d00512b609bd1dc5392b568d08934531ebd936b93b432ce1f562",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073761",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "236106",
+          "1790884738526442965",
+          "1790884738526442965"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": true,
+        "before": 1,
+        "dependent_rebindings": "Only canonical byte length/SHA/identity size and expected body byte pin; independently fixed expected run_context.generation remains exact int1",
+        "path": "body_document.run_context.generation"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "body_shape -> context_shape BEFORE equality",
+        "caller_exit_status": 125,
+        "cause": "phase_or_role",
+        "controller_spawned": false,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "PREPARE",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "phase_or_role"
+      },
+      "original_reached_phases": [
+        "BOOTSTRAP",
+        "PREPARE",
+        "PREPARE_REFUSAL",
+        "CLOSE",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual nested context type error; bool is not exact int",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "body_shape/context_shape",
+        "ordinary_family": "ordinary nested exact-int type rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Pure body/context strict integer-vs-bool checks are replayed with full typed inputs; complete ordered prior operations and original field-cause/native path still depend on whole chronology.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "body",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/oracles/body.json",
+        "bytes": 234607,
+        "sha256": "1ea12b293a4198d738cadf11f7ab55a68079fa4dd87c2b8fd154a883d3d84679",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073749",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "234607",
+          "1790884738488894605",
+          "1790884738488894605"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 33188,
+        "before": 33024,
+        "path": "stage1.expectation.admission_identity[2]"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "validate_stage1 -> expectation_shape -> named body mode0400 require",
+        "caller_exit_status": 125,
+        "cause": "issuer_body",
+        "controller_spawned": false,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "PREPARE",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED",
+        "initiating_cause": "issuer_body"
+      },
+      "original_reached_phases": [
+        "BOOTSTRAP",
+        "PRE_SESSION_VALIDATION",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual typed body rejection, no child fabricated",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "prepare_inputs -> body_shape/object_wire",
+        "ordinary_family": "ordinary issuer-body rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Pure validate_stage1/expectation/body nested typed replay and current version map are genuine improvements. Complete original issuer-body first-field and earlier/current operation chain must remain, not only a family label.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "clock-drift",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/clock-drift.json",
+        "bytes": 304938,
+        "sha256": "51ef700af94cdd1aa0eb60ebe2ba99dfb31ea8f7c6bc23548c120069399a330b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073762",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "304938",
+          "1790884738530136278",
+          "1790884738530136278"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": {
+          "monotonic": 900026,
+          "wall": 1790864840
+        },
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.phase_clock.paired_observations.preauth_wall_epoch"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "AUTH actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "clock drift",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "AUTH",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "clock drift"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual wall/monotonic samples violate original <=2 relation",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Clock.now/caller._first_line",
+        "ordinary_family": "ordinary clock correspondence refusal",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Original paired wall/monotonic anchors and unrefreshed end are preserved. Clock/Session method predicates are not fully replayed from owned state; a family 'clock drift' does not finish the original causal branch.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "controller-output-bound",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/controller-output-bound.json",
+        "bytes": 479711,
+        "sha256": "966a47c19f89773772ae658b73cd8688c2b3726f38aafa6649b6fd488fc8a556",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073763",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "479711",
+          "1790884738534076805",
+          "1790884738534480452"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 32769,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.controller_output_total_bytes"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "RUN_RETURNED actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "controller_output_bound",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "RUN_RETURNED",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "STOP_UNCONFIRMED",
+        "initiating_cause": "controller_output_bound"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual producer bytes exceed remaining capture; bounded prefix+first probe, stopped not EOF",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "IO.pump/cleanup actual bounded cap+probe",
+        "ordinary_family": "actual ordinary capture overflow",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Overflow probe, capture_stopped and prefix relation are connected to actual Source outcomes; EOF/silent-zero is not invented. Whole original writer byte order, full sideband failure capacity and durable prefix consumer remain open.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "deadline",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/oracles/deadline.json",
+        "bytes": 305130,
+        "sha256": "9420bad9fac325ecfecd16742956f2637494e668153138b487ca015955c9b72b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073750",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "305130",
+          "1790884738493547973",
+          "1790884738493547973"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": {
+          "monotonic": 900190,
+          "wall": 1790864999
+        },
+        "before": {
+          "monotonic": 900026,
+          "wall": 1790864835
+        },
+        "note": "One paired progress observation; unchanged wall/mono anchors, drift0, fixed AUTH boundary reached",
+        "path": "observations.phase_clock.paired_observations.preauth_wall_epoch"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "Session.preauth -> original Clock.left(auth) > 0; wall/mono progress remains anchored",
+        "caller_exit_status": 125,
+        "cause": "fixed_deadline",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "PRE_AUTH",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "fixed_deadline"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "body",
+        "expectation",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual original ends and reached expiry, never refresh anchors",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "validate_stage1/Clock/IO.pump",
+        "ordinary_family": "original deadline failure",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Original fixed clock/auth/handoff ends retained, frozen predicates present. Pure grammar support does not close Clock/Session progress/reachability or entire actual original end chain.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "final-ancestor-boundary",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/final-ancestor-boundary.json",
+        "bytes": 304936,
+        "sha256": "f9a18aad92e53ae155f78abe958bd648d8afd2944320bfbcf44682ab9a1a11cf",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073764",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "304936",
+          "1790884738539180398",
+          "1790884738539180398"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 1800000000000000010,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.protected_namespace_final_before_AUTH[4].identity[8]"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "AUTH actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "stale_identity",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "AUTH",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "stale_identity"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual all-five/source-directory boundary comparison fails; prior partial AUTH writes retained",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "preauth/final_namespace before every AUTH write",
+        "ordinary_family": "ordinary final namespace refusal",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Directory current full9 checks and sticky closes are repaired. Exact final pre-AUTH ancestor predicate, prior method state and byte-delivery ordering still require whole method/producer proof.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "handle-close-error",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/handle-close-error.json",
+        "bytes": 391596,
+        "sha256": "5879a6ab78478a692ca358c7c078d553cb7d2f0af14e7bea95695a4f0adebcb9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073765",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391596",
+          "1790884738543617353",
+          "1790884738543617353"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": "OSError",
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.handle_close_error"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "CLOSE actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": null,
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "CLOSE",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "STOP_UNCONFIRMED",
+        "initiating_cause": "handle_close_errors"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual close exception retained, confirmed cleanup false, native125",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Session.close after IO.detach",
+        "ordinary_family": "actual handle close error",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "One attempted close generation is sticky and original/error cleanup owners are locally separate. Original close uncertainty is not a confirmed outside adoption/final-close receipt.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "initial-scope-nonempty",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/initial-scope-nonempty.json",
+        "bytes": 244354,
+        "sha256": "13eb01bd931fe97f9fb1a2028e5666032f3a7e83904e1c46c7e5753205c13de7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073766",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "244354",
+          "1790884738546481139",
+          "1790884738548343626"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": [
+          43299
+        ],
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.child_tree.initial_own_children"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "PREPARE actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "initial_own_scope_not_empty",
+        "controller_spawned": false,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "PREPARE",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "initial_own_scope_not_empty"
+      },
+      "original_reached_phases": [
+        "BOOTSTRAP",
+        "PREPARE",
+        "PREPARE_REFUSAL",
+        "CLOSE",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual initial nonempty own children; no child created by fixture",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "OwnScope.__init__/Session.spawn",
+        "ordinary_family": "ordinary initial own-scope rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Original OwnScope children-before-spawn guard remains. Generic listdir/field absence does not establish exact original children-read purpose or method branch reachability.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "nonzero-dispatcher",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/nonzero-outcome.json",
+        "bytes": 391302,
+        "sha256": "09d4a82412606a6972457baa7181a8116e81b4f6d5154ca24b8cbead1c9f05b3",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073747",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391302",
+          "1790884738485477646",
+          "1790884738485477646"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "caller_exit_status": 125,
+        "cause": null,
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": null,
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "RUN_REPORTED",
+        "initiating_cause": null
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "body",
+        "expectation",
+        "stage1",
+        "init",
+        "claim",
+        "task",
+        "stage2",
+        "auth",
+        "report"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "RUN_REPORTED with exact nonzero dispatcher code retained, native125; stderr comes from actual dispatcher/controller producers",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "validate_report -> perform_staged_send -> caller.main",
+        "ordinary_family": "genuine ordinary nonzero dispatcher",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Current version join is no longer an obstacle. Original real nonzero code domain is connected and allows RUN_REPORTED/native125, but all producers/exclusive streams/native final custody and resources remain mandatory.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "ordinary-regular-artifact-refusal",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/ordinary-regular-artifact-refusal.json",
+        "bytes": 391628,
+        "sha256": "7b42c2f9028ab8598b4f13ceda02858f2cf79009aca19320b483c0bc80ba3b51",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073767",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391628",
+          "1790884738551481425",
+          "1790884738552953991"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 67108865,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.ordinary_artifact_attempt_bytes"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "RUN actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": null,
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "RUN",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "RUN_REPORTED",
+        "initiating_cause": null
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual worker/dispatcher/controller error outputs at real edges; no padding or silence",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "unchanged Source54 execute_pair/controller -> validate_report",
+        "ordinary_family": "ordinary worker regular artifact rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Confirmed static contract conflict A155-N03: original inert oracle RUN_REPORTED/native125 is rejected by the generic RUN_REPORTED negative veto before artifact-specific actual-child check. Actual child output bytes/ordinary effect remain future and must not be padded.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": "A155-N03",
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "pid-generation",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/oracles/pid-generation.json",
+        "bytes": 296248,
+        "sha256": "92757480b878bd5f38ebb9f55d5b692deec4d96f447f6a6faeef9da5bb458f2e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073751",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "296248",
+          "1790884738495478218",
+          "1790884738495478218"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 123456790,
+        "before": 123456789,
+        "path": "claim.holder_start_ticks"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "validate_claim -> actual own child startticks equality",
+        "caller_exit_status": 125,
+        "cause": "pid_generation",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "CUSTODY_READY",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "pid_generation"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "body",
+        "expectation",
+        "init",
+        "claim",
+        "report"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual PID/start ticks acquisition/match failure, sticky cleanup UNKNOWN when visibility fails",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Generation.stat/check + validate_claim/validate_stage2",
+        "ordinary_family": "ordinary own-generation mismatch",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Pure validate_claim current PID/ticks typed comparison is replayed; genuine independently held native/process generation and whole acquisition/close/terminal custody remain incomplete outside.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "pin",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/oracles/pin.json",
+        "bytes": 296398,
+        "sha256": "74709b1f78061cc01687469687b96ed20d8377f50218fead644ff3e295b0d073",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073752",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "296398",
+          "1790884738499478447",
+          "1790884738499478447"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": "5292dade260284490448a3d6a90906196336d33d2ccb82b6c428ea59e703b488",
+        "before": "5292dade260284490448a3d6a90906196336d33d2ccb82b6c428ea59e703b489",
+        "path": "stage2.expected_task_sha256"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "validate_stage2 -> digest(encode(task)) == external expected_task_sha256",
+        "caller_exit_status": 125,
+        "cause": "pin_mismatch",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "STAGE2",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "pin_mismatch"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "body",
+        "expectation",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual byte SHA mismatch at reached consumer; no counterfeit admission",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Named.check/Held.check/validate_stage2",
+        "ordinary_family": "ordinary pin rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Pure validate_stage2 digest relation now uses same-version constants and frozen original input. Exact ordered underlying ownership/prior scope/reachability and all native/output joins still not whole closed.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "positive",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/benign-handoff.json",
+        "bytes": 391227,
+        "sha256": "dee120a1b63a660aba026261dff56bb039bdfc5b77eaee346c638c8c6ea58add",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073746",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391227",
+          "1790884738479541967",
+          "1790884738479541967"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "caller_exit_status": 0,
+        "cause": null,
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": null,
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "RUN_REPORTED",
+        "initiating_cause": null
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "body",
+        "expectation",
+        "stage1",
+        "init",
+        "claim",
+        "task",
+        "stage2",
+        "auth",
+        "report"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "RUN_REPORTED,codes[0],confirmed cleanup+delivery,actual native0",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Session.run/validate_report/cleanup -> IO.terminal",
+        "ordinary_family": "complete ordinary success",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "F01/F12 fixed; current graph can no longer be rejected solely for stale index/stat branch. Positive requires complete all-actor producer/input/output/cleanup/outside native/capacity evidence; code labels, absent errors or static464 IDs do not grant success.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "proc-acquisition-error",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/proc-acquisition-error.json",
+        "bytes": 247233,
+        "sha256": "1a2991a0a7ea2bb75580780b2242db67fe8140143021451d0da931576e5312a3",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073768",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "247233",
+          "1790884738554481597",
+          "1790884738554481597"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": "OSError",
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.proc_generation_acquisition"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "SPAWN actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "OSError",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "SPAWN",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "STOP_UNCONFIRMED",
+        "initiating_cause": "OSError"
+      },
+      "original_reached_phases": [
+        "BOOTSTRAP",
+        "PREPARE",
+        "SPAWN",
+        "GENERATION_ACQUISITION_REFUSAL",
+        "CLEANUP_EOF_BEFORE_INIT",
+        "CLOSE",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "report"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual acquisition error/type/errno; not fabricated proc bytes",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "OwnScope/Generation os.open/pidfd_open/proc_read",
+        "ordinary_family": "ordinary proc acquisition error",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Actual open/pidfd errors and original operation-specific checks are now present. Full partial constructor/Popen/Generation internal owners, first raw error and durable final adoption remain incomplete.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "read-write",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/oracles/read-write.json",
+        "bytes": 296266,
+        "sha256": "57063719718b2155abb1635d9ba88dffdac225f64a6fb835860c32c59cbae477",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073753",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "296266",
+          "1790884738502478619",
+          "1790884738502478619"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 557057,
+        "before": 557056,
+        "path": "observations.held198.fdinfo_original_flags"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "Held.__init__ -> require(original_flags & O_ACCMODE == O_RDONLY)",
+        "caller_exit_status": 125,
+        "cause": "fd_not_readonly",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "CUSTODY_READY",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "fd_not_readonly"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "body",
+        "expectation",
+        "init",
+        "claim",
+        "report"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual original/opened fd flags fail readonly invariant",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Held.flags/check_held_observation",
+        "ordinary_family": "ordinary held descriptor role rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Original held readonly/CLOEXEC flags and pure check_held_observation replay are genuinely connected. Held method full physical before/opened/current read chronology, reservations and outside ownership still need closure.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "report-custody-bool",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/report-custody-bool.json",
+        "bytes": 391636,
+        "sha256": "3b5a1cf6f7d11e9ea1a031a7f5e9822464e74e69c08775733179a90a9c982652",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073769",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391636",
+          "1790884738558481826",
+          "1790884738560481941"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": false,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "controller_report.completed[0].run_context.parent_custody.expectation_identity[5]"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "RUN_RETURNED actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "controller_report",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "RUN_RETURNED",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "controller_report"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual report custody nested bool rejected at typed consumer",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "validate_report/custody_shape/check_held_observation",
+        "ordinary_family": "ordinary strict custody type rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Typed custody-shape/report replay rejects bool-as-int with ordered pure grammar. Exact originating report byte producer/first-field, method prior state and full real output/native chain remain mandatory.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "report-namespace-bool",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/report-namespace-bool.json",
+        "bytes": 391672,
+        "sha256": "52cd2364a56ce4c70a9eccc8a1f0cbdc80b2366bda1c54cebcf07f16f6975839",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073770",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391672",
+          "1790884738564100932",
+          "1790884738564100932"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": false,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "controller_report.completed[0].run_context.parent_custody.namespace_identities[1].identity[4]"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "RUN_RETURNED actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "ancestry_spec_mismatch",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "RUN_RETURNED",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "ancestry_spec_mismatch"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual report identity9 nested bool rejected",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "validate_report/namespace_shape",
+        "ordinary_family": "ordinary strict namespace type rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Nested pure namespace/custody/report checks are real. Complete exact original ancestry field's earliest reached consumer and ordinary whole input/output chain are not established by a family allowance.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "report-resource-bool",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/report-resource-bool.json",
+        "bytes": 391648,
+        "sha256": "55030f5f687484138f113b7b101ff72234a7f7574dce86943f484afd2f879a0a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073771",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391648",
+          "1790884738567897551",
+          "1790884738568482399"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": true,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "controller_report.completed[0].run_context.run_context.generation"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "RUN_RETURNED actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "resources_topology_changed",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "RUN_RETURNED",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "resources_topology_changed"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual report resource bool rejected; original topology retained",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "validate_report/context_shape",
+        "ordinary_family": "ordinary strict resource type rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Pure resource/run-context typed grammar is real, original canonical resources unchanged. Whole resource ownership/RAM/implicit IO and exact original typed report field/native cause remain unproven.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "sender-read-bound",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/sender-read-bound.json",
+        "bytes": 296406,
+        "sha256": "d062ab5f602ef344b3140a32b7e93b457fcbbd2eac3430fd2038d2c14fccbd37",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073772",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "296406",
+          "1790884738572686526",
+          "1790884738572686526"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 33554433,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.sender_next_read_observed_plus_cap"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "AUTH actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "read_bound",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "AUTH",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "STOP_UNCONFIRMED",
+        "initiating_cause": "read_bound"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual prefix charged bytes + actual denied consumer request >33554432; zero charge for denial; NOT_PROVEN until supplied",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Budget.read/strings/_refuse + TypedOrdinaryContract.consume",
+        "ordinary_family": "genuine compatible read-prefix denial, unresolved witness",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Owned full raw read result/reservation and denial event exist under unchanged32MiB. Complete initial/current prefix cost, all later denials/errors and damage-safe independent custody still required; no read result may move to Root accounting.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "spawn-constructor-error",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/spawn-constructor-error.json",
+        "bytes": 244432,
+        "sha256": "7e06fe14a3bd6cd8c3dab40f71947b9a1910b8654648e29f82ac720136b533df",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073773",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "244432",
+          "1790884738576482857",
+          "1790884738576482857"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": "OSError_NO_RETURNED_CHILD",
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.spawn_exception"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "SPAWN actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "OSError",
+        "controller_spawned": "UNKNOWN_NO_RETURNED_CHILD",
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "SPAWN",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "STOP_UNCONFIRMED",
+        "initiating_cause": "OSError"
+      },
+      "original_reached_phases": [
+        "BOOTSTRAP",
+        "PREPARE",
+        "SPAWN",
+        "CLOSE",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual constructor error with spawn_attempted; no unobserved child promoted to no-child proof",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Session.spawn OwnedPopen -> spawn.error -> cleanup",
+        "ordinary_family": "actual constructor failure",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Popen object exists before constructor and uncertainty stays sticky; original spawn.error relation is connected. Sender stock subprocess internals are not fully hooked by sender-local module proxies; no returned child/PID/EOF may be invented.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "stale-identity",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/oracles/stale-identity.json",
+        "bytes": 296268,
+        "sha256": "2901a2ce3b2d16b9211c8eebc7848b2e575d9d535ccd554903499f66eea862d6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073754",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "296268",
+          "1790884738506478848",
+          "1790884738506478848"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 1800000000000010005,
+        "before": 1800000000000010004,
+        "path": "observations.held198.before_identity[8]"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "Held.check -> require(before == opened)",
+        "caller_exit_status": 125,
+        "cause": "stale_identity",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "CUSTODY_READY",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "stale_identity"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "body",
+        "expectation",
+        "init",
+        "claim",
+        "report"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual identity9 mismatch at reached comparison",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Named/Directory/Held before-open-held-after-named checks",
+        "ordinary_family": "ordinary identity mismatch",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Held.before/opened/current9 checks retained, stat representation fixed. Method exact state/prior ordering and actual same-generation acquisition/read/close custody are outside pure replay closure.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "strict-inherited-fd",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/strict-inherited-fd.json",
+        "bytes": 232897,
+        "sha256": "57674079ee12fd42276aa24ce431e963f875ba3f218bc258a4d6f9c146a94548",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073774",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "232897",
+          "1790884738578482972",
+          "1790884738579483029"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": [
+          4
+        ],
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.exact_fd_roles.unknown_inherited"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "main active BaseException owner -> _prepare_runtime strict guard -> _bootstrap_failure",
+        "caller_exit_status": 125,
+        "cause": "caller_bootstrap",
+        "controller_spawned": false,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "BOOTSTRAP",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED",
+        "initiating_cause": "strict_inherited_0_1_2"
+      },
+      "original_reached_phases": [
+        "BOOTSTRAP",
+        "HANDOFF_ATTEMPT"
+      ],
+      "original_reached_control_components": [],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": true,
+        "causal_constraint": "actual inherited role guard fails before optional imports; native125, exact bootstrap wire/prefix",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "caller._prepare_runtime/_live_fds -> _bootstrap_failure",
+        "ordinary_family": "ordinary strict original fd rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Confirmed A155-N01: _bootstrap_failure cannot construct intended line due unbound quoted. Only this original case permits the bootstrap domain; stock prelude/other early domains must not substitute for it.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": "A155-N01",
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "terminal-original-end",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/terminal-original-end.json",
+        "bytes": 391731,
+        "sha256": "9ecfe25a7673f72ecdae5c8328cde913294b838d1f9e9a42d68845c860443e6a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073775",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391731",
+          "1790884738583483258",
+          "1790884738583483258"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 1790871999,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.phase_clock.terminal_complete_wall_epoch"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "HANDOFF actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": null,
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "HANDOFF",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "FAILED_HANDOFF",
+        "initiating_cause": "failed_handoff_deadline"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual completed prefix/clock relation fails one original end; delivery false, native125",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "IO.terminal -> after_delivery/outside_capture",
+        "ordinary_family": "actual final write original-end failure",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Original fixed ends and delivery.failed_handoff_deadline comparison retained. Full actual last write/complete prefix/clock/native external exit and final custody need qualified protocol, not refreshed timeout.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "terminal-pipe-error",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/terminal-pipe-error.json",
+        "bytes": 391719,
+        "sha256": "9659df39cd7042d85b409d34287cafff49002349ed138d617e26ad2b821f15ea",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073776",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391719",
+          "1790884738587483487",
+          "1790884738588483544"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": "BrokenPipeError",
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.terminal_write_exception"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "HANDOFF actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": null,
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "HANDOFF",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "FAILED_HANDOFF",
+        "initiating_cause": "failed_handoff_write"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual error/errno, any earlier successful terminal prefix retained; native125",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "IO.terminal os.write -> after_delivery/outside_capture",
+        "ordinary_family": "actual terminal pipe error",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Native original failed-delivery/error-type checks are present. Full raw write error, partial original-channel prefix, stderr representation and durable outside native/final-close chain remain open.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "terminal-tree-list-missed",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/terminal-tree-list-missed.json",
+        "bytes": 391562,
+        "sha256": "4a00a9bbaa4aecbadb49a007d1fb917e3f5ac79822f715e3359d6c3c185f8218",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073777",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391562",
+          "1790884738592483774",
+          "1790884738592483774"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": true,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.child_tree.missed_branch_or_terminal_list"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "CLEANUP actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": null,
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "CLEANUP",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "STOP_UNCONFIRMED",
+        "initiating_cause": "own_tree_visibility"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "sticky UNKNOWN and cleanup false even after later empty observations",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Generation.children(terminal=True)/OwnScope.terminal/cleanup",
+        "ordinary_family": "ordinary terminal own-tree visibility failure",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Original cleanup visibility is sticky; no clean terminal tree or silent list may be invented. Full method/operation-specific missed-list causality and outside adopted ownership remain incomplete.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "unsealed",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/oracles/unsealed.json",
+        "bytes": 296246,
+        "sha256": "f332cc459f1b55c917b9cf60e1f9e679158f1849aa495364ee26c68c13504f52",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073755",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "296246",
+          "1790884738509479020",
+          "1790884738509479020"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": 7,
+        "before": 15,
+        "path": "observations.held198.fcntl_F_GET_SEALS"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "Held.check -> check_held_observation -> four seals require",
+        "caller_exit_status": 125,
+        "cause": "seals_incomplete",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "CUSTODY_READY",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "seals_incomplete"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "body",
+        "expectation",
+        "init",
+        "claim",
+        "report"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual seal-bit comparison refuses; no fabricated seal observation",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "Held.check/check_held_observation",
+        "ordinary_family": "ordinary incomplete seals",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Pure held observation validates exact four seals and strict identity9; method reads/flags/reopened-generation and complete physical custody/resources still required.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "usage-integer-bool",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/usage-integer-bool.json",
+        "bytes": 391525,
+        "sha256": "b59e607de31b3aaac88d51d5c12957dcb20650c6019528270ce4a313d9ef6dce",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073778",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391525",
+          "1790884738597484060",
+          "1790884738597484060"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": true,
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "controller_report.raw_usage[2]"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "RUN_RETURNED actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": "telemetry_type",
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "RUN_RETURNED",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED_OR_FAILED",
+        "initiating_cause": "telemetry_type"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual bool in integer-only usage field rejected",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "validate_report/TypedOrdinaryContract.variables",
+        "ordinary_family": "ordinary exact usage type rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Pure validate_report strict usage integer slots and float finite first slots are replayed. Exact actual original wait4/report producer and per-field first cause/native chronology are not complete whole proof.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "wait4-unavailable",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/wait4-unavailable.json",
+        "bytes": 391029,
+        "sha256": "33c2bf90c86718292f9d73881a4a6b659588dcde11569c681be0f9e2cff849f0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073779",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391029",
+          "1790884738601484289",
+          "1790884738602484346"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": "ChildProcessError",
+        "kind": "ONE_ORDINARY_SOURCE_BOUNDARY",
+        "path": "observations.wait4_exception"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": true,
+        "RUN_started": true,
+        "actual_consumer": "CLEANUP actual Source edge; see caller-graph.json",
+        "caller_exit_status": 125,
+        "cause": null,
+        "controller_spawned": true,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "CLEANUP",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "STOP_UNCONFIRMED",
+        "initiating_cause": "exact_own_wait4"
+      },
+      "original_reached_phases": [
+        "PREPARE",
+        "INIT",
+        "CUSTODY_READY",
+        "EXTERNAL_ROOT_STAGE2",
+        "AUTH",
+        "RUN_RETURNED",
+        "CLEANUP",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1",
+        "expectation",
+        "body",
+        "init",
+        "claim",
+        "report",
+        "task",
+        "stage2",
+        "auth"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual unavailable owned wait4, cleanup false; no fabricated status/usage",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "cleanup os.wait4 direct/adopted generation paths",
+        "ordinary_family": "actual own wait4 unavailable",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Full original error and native125/sticky cleanup relation improved; absence of successful wait cannot imply no generation. Exact same-held PID-generation/outside native wait/adoption/durable final chain remains open.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "wrong-field",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/oracles/wrong-field.json",
+        "bytes": 234686,
+        "sha256": "509029790f35e7304bfca7876d8fdc1a3409fa3c8d3c88713b3f4ae8ecdcbedb",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073756",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "234686",
+          "1790884738512479192",
+          "1790884738512479192"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": "ordinary inert DATA",
+        "before": "ABSENT",
+        "path": "stage1.ordinary_note"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "validate_stage1 -> exact(STAGE1_KEYS)",
+        "caller_exit_status": 125,
+        "cause": "exact_key_set",
+        "controller_spawned": false,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "PREPARE",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED",
+        "initiating_cause": "exact_key_set"
+      },
+      "original_reached_phases": [
+        "BOOTSTRAP",
+        "PRE_SESSION_VALIDATION",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "exact observed object field-set failure at actually reached consumer",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "exact/validate_stage1/validate_stage2/validate_report",
+        "ordinary_family": "ordinary exact field-set rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Pure exact-key-set and ordered schema replay is genuinely connected; original pre-session domain is retained, no substituted bootstrap status. Whole earlier startup and failure custody still open.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    },
+    {
+      "case": "wrong-role",
+      "original_base_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/oracles/wrong-role.json",
+        "bytes": 234587,
+        "sha256": "c3b780b6c7960f94e5fd20386f9acc8ae7bee59985d4d5cacde1047a969f8249",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073757",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "234587",
+          "1790884738515479364",
+          "1790884738515479364"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "single_original_initiating_cause": {
+        "after": "AUTHORIZE",
+        "before": "PREPARE",
+        "path": "stage1.phase"
+      },
+      "original_inert_case_oracle": {
+        "AUTH_sent": false,
+        "RUN_started": false,
+        "actual_consumer": "validate_stage1 -> PREPARE role require",
+        "caller_exit_status": 125,
+        "cause": "phase_or_role",
+        "controller_spawned": false,
+        "execution": "NOT_RUN",
+        "first_refusal_stage": "PREPARE",
+        "kind": "INDEPENDENT_SPECIFICATION_NOT_EXECUTED_SOURCE_LOOKUP",
+        "later_unconsumed_controls": "Separate model wire rows with reached=false; cleanup/report/handoff here are reached outcomes",
+        "source_status": "REFUSED",
+        "initiating_cause": "phase_or_role"
+      },
+      "original_reached_phases": [
+        "BOOTSTRAP",
+        "PRE_SESSION_VALIDATION",
+        "HANDOFF"
+      ],
+      "original_reached_control_components": [
+        "stage1"
+      ],
+      "original_phase_oracle_count": 7,
+      "inert_not_actual_observation": true,
+      "original_complete_branch": {
+        "bootstrap_domain_allowed": false,
+        "causal_constraint": "actual role failure, role fields never authenticate Root",
+        "check_consumer": "TypedOrdinaryContract.consume domain/witness ordering + actual case_relation/guard scopes; exact whole correspondence remains incomplete",
+        "first_relevant_consumer": "validate_stage1/validate_claim/validate_stage2",
+        "ordinary_family": "ordinary phase/role rejection",
+        "stock_prelude_domain": "outside actual native failure, consume_stock_prelude; never fabricated caller_bootstrap JSON",
+        "unreached_branches": "explicitly NOT_REACHED; no invented observations or successful EOF/close/wait"
+      },
+      "current_consumer_paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py"
+      ],
+      "independent_current_assessment": "Pure original PREPARE role predicate and early sender domain are preserved/replayed; whole original startup/first-fault/owned failure/native prefix/custody remain mandatory.",
+      "remaining_common_findings": [
+        "A144-F02",
+        "A144-F03",
+        "A144-F06",
+        "A144-F07",
+        "A144-F08",
+        "A144-F09",
+        "A144-F10",
+        "A144-F11"
+      ],
+      "case_specific_new_defect": null,
+      "whole_closure": false,
+      "SourceReady": false,
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false,
+      "SOL059_whole_closure": false,
+      "SOL059_current_evidence": "author/all32-causal-phase-custody-cost.json"
+    }
+  ],
+  "whole_closure": false,
+  "SourceReady": false,
+  "GO": false
+}

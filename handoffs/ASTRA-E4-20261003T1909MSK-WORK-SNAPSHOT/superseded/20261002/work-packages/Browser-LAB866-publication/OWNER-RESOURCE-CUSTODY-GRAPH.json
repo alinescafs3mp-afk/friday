@@ -1,0 +1,726 @@
+{
+  "original_graph": {
+    "edges": [
+      {
+        "edge": "external ordinary caller -> typed Root input",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A087-PUBLIC-DRIVER.py",
+            "bytes": 93286,
+            "sha256": "c512f57b3074c0bbe49c1d2ceda14b62fa13c41e6b2cbb1381c312c585786c14",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978884",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "93286",
+              "1790921985744461206",
+              "1790921985744461206"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            605,
+            676
+          ]
+        },
+        "verdict": "51_CONNECTED_165_REJECTED_BEFORE_CLONE",
+        "finding": "SOL057-01"
+      },
+      {
+        "edge": "Controls canonical input -> selected spec",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-lab858-a158-whole216-all6-remaining-connected-source-implementation/source/A071-CONTROLS.py",
+            "bytes": 190485,
+            "sha256": "a46c7e64211cd1c7157a8a83a099cd6dfb4f5ca2511acffa36f2d899a8e3c4b8",
+            "identity9_decimal_strings": [
+              "2050",
+              "6979166",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "190485",
+              "1790923970023061669",
+              "1790923970023061669"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            412,
+            429
+          ]
+        },
+        "verdict": "EXACT_OLD216_SCHEMA_AND_PRODUCER_PRECEDE_FALLBACK",
+        "finding": "SOL057-01"
+      },
+      {
+        "edge": "Root selector/register -> separate actual producer START",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-BOOTSTRAP.c",
+            "bytes": 68593,
+            "sha256": "4f6495fff30d4ac4c863622a526073f0523541af79ea81b2b5a5f1305ee854e4",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978878",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "68593",
+              "1790920210069855767",
+              "1790920210069855767"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            344,
+            363
+          ]
+        },
+        "additional": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-BOOTSTRAP.c",
+            "bytes": 68593,
+            "sha256": "4f6495fff30d4ac4c863622a526073f0523541af79ea81b2b5a5f1305ee854e4",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978878",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "68593",
+              "1790920210069855767",
+              "1790920210069855767"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            565,
+            579
+          ]
+        },
+        "verdict": "GENUINE_SCOPED_SOURCE_GUARD_NOT_ROOT_ADMISSION"
+      },
+      {
+        "edge": "original coordinator -> actual role0 clone",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-OWNED.c",
+            "bytes": 40557,
+            "sha256": "1b75390eec0bd1062d35dfa6847fa65dfb2c8fc2bd0134937f3f7524d14e72d4",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978877",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "40557",
+              "1790920210067855652",
+              "1790920210067855652"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            274,
+            328
+          ]
+        },
+        "verdict": "REAL_OWNER_PIDFD_GENERATION_REGISTRATION_PENDING_EXECUTION"
+      },
+      {
+        "edge": "actual delegated child -> JOIN/FINISH/readonly projection",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-OWNED.c",
+            "bytes": 40557,
+            "sha256": "1b75390eec0bd1062d35dfa6847fa65dfb2c8fc2bd0134937f3f7524d14e72d4",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978877",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "40557",
+              "1790920210067855652",
+              "1790920210067855652"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            391,
+            464
+          ]
+        },
+        "verdict": "DISTINCT_CONTEXT_NO_INHERITED_SESSION_RESET_NO_WAIT_AUTHORITY"
+      },
+      {
+        "edge": "producer -> original approved consumer",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-lab858-a158-whole216-all6-remaining-connected-source-implementation/source/A071-CONTROLS.py",
+            "bytes": 190485,
+            "sha256": "a46c7e64211cd1c7157a8a83a099cd6dfb4f5ca2511acffa36f2d899a8e3c4b8",
+            "identity9_decimal_strings": [
+              "2050",
+              "6979166",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "190485",
+              "1790923970023061669",
+              "1790923970023061669"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            472,
+            596
+          ]
+        },
+        "additional": {
+          "source_pin": {
+            "path": "/var/tmp/friday-lab858-a158-whole216-all6-remaining-connected-source-implementation/source/A071-CONTROLS.py",
+            "bytes": 190485,
+            "sha256": "a46c7e64211cd1c7157a8a83a099cd6dfb4f5ca2511acffa36f2d899a8e3c4b8",
+            "identity9_decimal_strings": [
+              "2050",
+              "6979166",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "190485",
+              "1790923970023061669",
+              "1790923970023061669"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            1274,
+            1368
+          ]
+        },
+        "verdict": "51_REAL_FIXED_CONSUMERS_136_REDUCERS_29_ABSTRACT",
+        "finding": "SOL057-02"
+      },
+      {
+        "edge": "producer original stdout/stderr -> same coordinator capture",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-lab858-a158-whole216-all6-remaining-connected-source-implementation/source/A071-CONTROLS.py",
+            "bytes": 190485,
+            "sha256": "a46c7e64211cd1c7157a8a83a099cd6dfb4f5ca2511acffa36f2d899a8e3c4b8",
+            "identity9_decimal_strings": [
+              "2050",
+              "6979166",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "190485",
+              "1790923970023061669",
+              "1790923970023061669"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            607,
+            773
+          ]
+        },
+        "verdict": "GENUINE_FIXED_RAW_GUARD_FREEZE_BEFORE_SEMANTICS; NOT_TARGET_OPERATION_PROOF"
+      },
+      {
+        "edge": "coordinator private wait4/Root REAP_ACK/close -> external typed consumer",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A087-PUBLIC-DRIVER.py",
+            "bytes": 93286,
+            "sha256": "c512f57b3074c0bbe49c1d2ceda14b62fa13c41e6b2cbb1381c312c585786c14",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978884",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "93286",
+              "1790921985744461206",
+              "1790921985744461206"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            677,
+            779
+          ]
+        },
+        "verdict": "GENUINE_COMMON_ACTOR_GRAPH_NOT_FULL_ORIGINAL_EXPECTED_OPERATION",
+        "finding": "SOL057-05"
+      },
+      {
+        "edge": "original G1 resource physical observations -> new reducer",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-lab858-a158-whole216-all6-remaining-connected-source-implementation/source/A071-CONTROLS.py",
+            "bytes": 190485,
+            "sha256": "a46c7e64211cd1c7157a8a83a099cd6dfb4f5ca2511acffa36f2d899a8e3c4b8",
+            "identity9_decimal_strings": [
+              "2050",
+              "6979166",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "190485",
+              "1790923970023061669",
+              "1790923970023061669"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            956,
+            995
+          ]
+        },
+        "verdict": "NON_EQUIVALENT_DEMAND_AND_FIRST_FAULT",
+        "finding": "SOL057-04"
+      },
+      {
+        "edge": "FULL normal first allocation -> owned child/error raw receipt",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-FULL-CONTROLS.py",
+            "bytes": 65233,
+            "sha256": "6efe9b3bb6a14678b2d82d1952a5fd42e80b23b2544abf396e5704cb4482a3cb",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978882",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "65233",
+              "1790921254749627442",
+              "1790921254749627442"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            260,
+            521
+          ]
+        },
+        "verdict": "A156_01_AND_02_ACTUAL_SCOPED_REPAIR_CREDIT_NOT_RUN"
+      },
+      {
+        "edge": "A079 normal first allocation -> owned child/error raw receipt",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A079-NATIVE-PUBLIC-DRIVER.py",
+            "bytes": 23943,
+            "sha256": "73474e892116959f56f8a67caf3bb4f919269a503bc5c561d1b25e3c7620edbc",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978883",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "23943",
+              "1790921254770628644",
+              "1790921254770628644"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            135,
+            396
+          ]
+        },
+        "verdict": "A156_01_AND_02_ACTUAL_SCOPED_REPAIR_CREDIT_NOT_RUN"
+      },
+      {
+        "edge": "immutable G1/R4/CA/current bill -> same native cap/helpers",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-EXECUTOR.py",
+            "bytes": 46722,
+            "sha256": "869ed6b5118242e851f513424e3330b1f2c5306e5a6f163b4cc7a058134541b7",
+            "identity9_decimal_strings": [
+              "2050",
+              "6979005",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "46722",
+              "1790921121851988543",
+              "1790921121851988543"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            120,
+            175
+          ]
+        },
+        "verdict": "GENUINE_ROOT_SELECTED_CURRENT_BILL_WITH_IMMUTABLE_DEPENDENCIES_NOT_GRANT"
+      },
+      {
+        "edge": "same19 descriptors/image/OS -> native preinterpreter/typed normal entry",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-BOOTSTRAP.c",
+            "bytes": 68593,
+            "sha256": "4f6495fff30d4ac4c863622a526073f0523541af79ea81b2b5a5f1305ee854e4",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978878",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "68593",
+              "1790920210069855767",
+              "1790920210069855767"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            778,
+            802
+          ]
+        },
+        "verdict": "FUTURE_ROOT_IMAGE_FACTS_NOT_CODE_DEFECT_BY_ABSENCE"
+      },
+      {
+        "edge": "common actual limits/proc/cgroup/read error observations",
+        "evidence": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-CONTRACT.py",
+            "bytes": 25065,
+            "sha256": "db5cae1cf7748ebb25a83bcd5f3896b380615a12ef1d3c4def60666d57ae2fc2",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978879",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "25065",
+              "1790919345572385978",
+              "1790919345572385978"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            354,
+            410
+          ]
+        },
+        "verdict": "GENUINE_SCOPED_KERNEL_RESOURCE_CODE_WHOLE_RAM_IMPLICIT_IO_UNKNOWN"
+      }
+    ],
+    "all6_dimensions": [
+      {
+        "dimension": "N216-INPUT",
+        "scope": "51 exact canonical sealed selector/position/ID/producer/fixed operands;165 old producer bindings and external stock dispatch unreconciled.",
+        "credit51": "SCOPED_ACTUAL_SOURCE_NOT_RUN",
+        "remaining165": "MANDATORY_CONNECTED_CODE_GAP",
+        "SourceReady": false
+      },
+      {
+        "dimension": "N216-OWNER",
+        "scope": "Real original coordinator and one delegated producer; no actual target-child generation/lifetime where original operation missing.",
+        "credit51": "SCOPED_ACTUAL_SOURCE_NOT_RUN",
+        "remaining165": "MANDATORY_CONNECTED_CODE_GAP",
+        "SourceReady": false
+      },
+      {
+        "dimension": "N216-REGISTRY",
+        "scope": "Root actual role0 registered generation and separate START/FINISH. Does not register original required3 target workers; inherited reset prohibited.",
+        "credit51": "SCOPED_ACTUAL_SOURCE_NOT_RUN",
+        "remaining165": "MANDATORY_CONNECTED_CODE_GAP",
+        "SourceReady": false
+      },
+      {
+        "dimension": "N216-PRODUCER",
+        "scope": "51 direct original fixed consumers;136 synthetic reducers;29 abstract labels with no proven dangerous-ID classifier.",
+        "credit51": "SCOPED_ACTUAL_SOURCE_NOT_RUN",
+        "remaining165": "MANDATORY_CONNECTED_CODE_GAP",
+        "SourceReady": false
+      },
+      {
+        "dimension": "N216-CAUSAL-OUTPUT",
+        "scope": "Common raw/wait/ACK/close code real; original per-operation state/stage/body/hash/count/reached-unreached and first fault absent for165.",
+        "credit51": "SCOPED_ACTUAL_SOURCE_NOT_RUN",
+        "remaining165": "MANDATORY_CONNECTED_CODE_GAP",
+        "SourceReady": false
+      },
+      {
+        "dimension": "N216-RESOURCES",
+        "scope": "Original64+192/256MiB/global4/48MiB/raw1MiB and original clocks retained. Resource consumer equivalence/extra-parent topology not closed.",
+        "credit51": "SCOPED_ACTUAL_SOURCE_NOT_RUN",
+        "remaining165": "MANDATORY_CONNECTED_CODE_GAP",
+        "SourceReady": false
+      }
+    ],
+    "whole_acceptance": false,
+    "future_external_facts_not_alleged_as_code_bugs": true,
+    "runtime": "NOT_RUN",
+    "GO": false
+  },
+  "original_resource_review": {
+    "task_budget": {
+      "wall_seconds": 6600,
+      "seal_reserve_seconds": 600,
+      "cumulative_read_bytes": 268435456,
+      "memory_bytes": 8589934592,
+      "output_bytes": 16777216,
+      "local_workers": 4,
+      "model_children": 0,
+      "network": 0,
+      "retries": 0
+    },
+    "original_caps": {
+      "outer_bytes": 67108864,
+      "outer_slots": 1,
+      "inner_bytes": 201326592,
+      "global_inners": 4,
+      "aggregate_bytes": 268435456,
+      "actor_AS_bytes": 50331648,
+      "raw_each_bytes": 1048576,
+      "ordinary_work_hard": [
+        170,
+        180
+      ],
+      "production_work_hard": [
+        1140,
+        1200
+      ],
+      "retries": 0
+    },
+    "raw_phase_lifetime": "actual acquisition ownership before first FD; same actual child error/drain/wait/reap/close; raw frozen before predicates; false/unknown original completeness retained",
+    "memory_graph": "selected held full bytes + table216 + parsed typed args/hex bytes + mutable capture + immutable raw + raw hex transport + parsed receipts + Root/native ledger + interpreter/libraries/IO nonzero; current51 topology2 not whole target workers",
+    "whole_Source_peak_RAM_and_implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PASS",
+    "extra_waiting_parent_or_role_reset_approved": false,
+    "caps_raise_or_resource_oracle_reduction_approved": false,
+    "physical_helper_bytes_phase1": 15906476,
+    "physical_helper_bytes_phase2": 8985577,
+    "manual_read_and_tool_reserve_bytes": 83886080,
+    "stock_import_runtime_reserve_bytes": 16777216,
+    "apply_patch_reserve_bytes": 8388608,
+    "native_normal_transport_reserve_bytes": 16777216,
+    "seal_reserve_bytes": 16777216,
+    "reserves_are_conservative_not_actual_whole_IO_measurements": true,
+    "model_token_cached_reasoning_cost": "UNKNOWN_NOT_ZERO_NOT_MEASURED",
+    "children": 0,
+    "network": 0,
+    "candidate_runtime_or_gate_effects": 0
+  },
+  "current_Source": {
+    "caller": {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 101546,
+      "sha256": "ca7fbfb013653ebae18b4b7a23c38c871579dce51c84a62d87d2bdf5bf1c17e0",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979797",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101546",
+        "1790935043669313999",
+        "1790935043669313999"
+      ],
+      "stable9": true
+    },
+    "performer": {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 227193,
+      "sha256": "cf99fae2979256597c658fb889699798e2a46d578a734903f59d490c36c6970c",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979794",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "227193",
+        "1790935043667313884",
+        "1790935043667313884"
+      ],
+      "stable9": true
+    },
+    "actual_dependencies": [
+      {
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-EXECUTOR.py",
+        "bytes": 46722,
+        "sha256": "869ed6b5118242e851f513424e3330b1f2c5306e5a6f163b4cc7a058134541b7",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979005",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "46722",
+          "1790921121851988543",
+          "1790921121851988543"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A071-SUPERVISOR.py",
+        "bytes": 54263,
+        "sha256": "e35ff3b99508109588b15d2b09495880703f075cebb3685492b98d8475c687d8",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979796",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "54263",
+          "1790935043669313999",
+          "1790935043669313999"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-CONTRACT.py",
+        "bytes": 25065,
+        "sha256": "db5cae1cf7748ebb25a83bcd5f3896b380615a12ef1d3c4def60666d57ae2fc2",
+        "identity9_decimal_strings": [
+          "2050",
+          "6978879",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25065",
+          "1790919345572385978",
+          "1790919345572385978"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-BOOTSTRAP.c",
+        "bytes": 68593,
+        "sha256": "4f6495fff30d4ac4c863622a526073f0523541af79ea81b2b5a5f1305ee854e4",
+        "identity9_decimal_strings": [
+          "2050",
+          "6978878",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "68593",
+          "1790920210069855767",
+          "1790920210069855767"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-OWNED.c",
+        "bytes": 40557,
+        "sha256": "1b75390eec0bd1062d35dfa6847fa65dfb2c8fc2bd0134937f3f7524d14e72d4",
+        "identity9_decimal_strings": [
+          "2050",
+          "6978877",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "40557",
+          "1790920210067855652",
+          "1790920210067855652"
+        ],
+        "stable9": true
+      }
+    ],
+    "helper_pins": {
+      "G1": {
+        "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1.py",
+        "bytes": 46980,
+        "sha256": "ba70d584ab4b145195283456b17d98a8ff129a8f7bb3be3595c711fe97d6c223",
+        "identity9_decimal_strings": [
+          "2050",
+          "9176708",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "46980",
+          "1790809499402626239",
+          "1790809499402626239"
+        ],
+        "stable9": true
+      },
+      "R4": {
+        "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1-R4.py",
+        "bytes": 38388,
+        "sha256": "a68f62ce16883f108992a8f237b9614d964ff0141d9002b5e714fdc2887b414c",
+        "identity9_decimal_strings": [
+          "2050",
+          "9176754",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "38388",
+          "1790814359154276295",
+          "1790814359154276295"
+        ],
+        "stable9": true
+      }
+    }
+  },
+  "original_product_caps": {
+    "body_bytes_max": 956301312,
+    "connect_timeout_sec": 15,
+    "directories_max": 3,
+    "disk_bytes_max": 2147483648,
+    "header_bytes_max": 65536,
+    "network_gets_max": 3,
+    "regular_files_max": 6,
+    "request_timeout_sec": 300,
+    "reserve_sec": 60,
+    "retries": 0,
+    "rss_bytes_max": 268435456,
+    "wall_sec": 1200,
+    "workers_global_max": 4
+  },
+  "assignment_resources": {
+    "wall_seconds": 6600,
+    "seal_reserve_seconds": 600,
+    "cumulative_read_bytes": 268435456,
+    "memory_bytes": 8589934592,
+    "output_bytes": 16777216,
+    "local_workers": 4,
+    "model_children": 0,
+    "network": 0,
+    "retries": 0
+  },
+  "gap_proofs": {
+    "G1_leaf": "201326592 - nonnegative actual memory.current < 268435456; original G1.resources demand unchanged. Later ancestor/disk/host failures cannot be selected after unavoidable leaf failure.",
+    "global_processes": "coordinator1 + delegated producer1 + original target workers3 =5 > original inner/global4. Current original Root fr_controller requests permit only selected producer. Do not reinterpret producer as target or grant child session reset.",
+    "single_output_file": "original output_disk one sparse2147483649 file > original RLIMIT_FSIZE2147483648; honest exact CODE gap, no two-file replacement or cap raise",
+    "typed_full_raw": "original producer frame32768 and raw per-stream1048576 unchanged; physical observed operation prefix/input/inventory may exceed frame. Full raw is never silently omitted/hash-only substituted; final runtime envelope remains unproven.",
+    "exceptional_dependency_cleanup": "original RetainedTree/BoundedOutput/RuntimeClosure exceptional close behavior not executed or declared independently qualified by Source text; no retry unknown close."
+  },
+  "new_role_authority": false,
+  "native_Root_process_changes": false,
+  "runtime": "NOT_RUN"
+}

@@ -1,0 +1,47 @@
+{
+  "routes": [
+    {
+      "attempt": "source metering remains after interpreter startup; inherited stdio is not recertified",
+      "id": "R01",
+      "package": "C01",
+      "status": "CODE_OPEN_NOT_RUN"
+    },
+    {
+      "attempt": "direct caller wait remains; helper_native_end_verified stays false",
+      "id": "R02",
+      "package": "C02",
+      "status": "CODE_OPEN_NOT_RUN"
+    },
+    {
+      "attempt": "method error post-state now binds stored text and constructor args",
+      "id": "R03",
+      "package": "C03",
+      "status": "CODE_OPEN_NOT_RUN"
+    },
+    {
+      "attempt": "original caps stay; unknown whole RAM and IO stay unknown and not zero",
+      "id": "R04",
+      "package": "C04",
+      "status": "CODE_OPEN_NOT_RUN"
+    },
+    {
+      "attempt": "non-cleanup replay consumes method_enter and scoped.invoke checks, and module syscalls use the journal call order",
+      "id": "R05",
+      "package": "C05",
+      "status": "SOURCE_TEXT_REPAIRED_NOT_RUN"
+    },
+    {
+      "attempt": "per-pipe physical order and equal-prefix refusal stay; whole chronology stays open",
+      "id": "R06",
+      "package": "C06",
+      "status": "CODE_OPEN_NOT_RUN"
+    },
+    {
+      "attempt": "not-reached still requires complete failed-method replay; whole32 flags stay false",
+      "id": "R07",
+      "package": "C07",
+      "status": "CODE_OPEN_NOT_RUN"
+    }
+  ],
+  "schema": "friday.grok.lab867.all7-routes.v1"
+}

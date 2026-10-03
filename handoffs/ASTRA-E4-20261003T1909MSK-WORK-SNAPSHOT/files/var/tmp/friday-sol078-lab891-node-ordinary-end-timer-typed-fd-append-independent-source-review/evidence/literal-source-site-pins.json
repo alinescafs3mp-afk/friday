@@ -1,0 +1,288 @@
+{
+  "schema": "friday.sol078.literal-site-hash-evidence.v1",
+  "sites": [
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "method": "outside_body_fault",
+      "first_line": 629,
+      "last_line": 634,
+      "slice_sha256": "072fffc8da4c5d67eb906472283ab60b2da3611a3e8e248e49f86094c1480831",
+      "bytes": 126
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "method": "outside_body_number",
+      "first_line": 635,
+      "last_line": 644,
+      "slice_sha256": "5b855ddaf0ff5daa54cc3006316f83a03877a3b7b2439b73425629bd49ca97bb",
+      "bytes": 233
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "method": "open_caller_outside_body",
+      "first_line": 664,
+      "last_line": 687,
+      "slice_sha256": "7d1184cb010800c1fea9f2abe25420da811481b54504f57d2e04ae92c79f2eca",
+      "bytes": 1029
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "method": "adopt_outside_body",
+      "first_line": 688,
+      "last_line": 705,
+      "slice_sha256": "434fb0ebff3eca654486f4c263b697c31d13ccdc011eefcb25e718e650088277",
+      "bytes": 618
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "method": "commit_outside_body",
+      "first_line": 706,
+      "last_line": 765,
+      "slice_sha256": "666eb8c32c60186680e320a12117ed13f1ca345dd3982b87b8a4f75da1b41a44",
+      "bytes": 2415
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "method": "finish_outside_end",
+      "first_line": 813,
+      "last_line": 883,
+      "slice_sha256": "0dbd4298e2e89e1174bce0c76f954a29ebe7c52c9dc1e79787ecf9e1832625ff",
+      "bytes": 3114
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "method": "append_parent_bytes",
+      "first_line": 936,
+      "last_line": 998,
+      "slice_sha256": "def6964ed7fdc4d7bac6f5551ac50bd4c99b8b7c95ddf2b6632c58749c930630",
+      "bytes": 3138
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "method": "publish_preowned_then_frame",
+      "first_line": 1070,
+      "last_line": 1107,
+      "slice_sha256": "b72afc5084d91c231b79416e060832a274edb162d4a9426065f319e5cc0305cd",
+      "bytes": 1935
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "method": "commit_existing_receiver",
+      "first_line": 3810,
+      "last_line": 3819,
+      "slice_sha256": "157667996f12d7587275e82d59810491f44d8fda08d376330995513f9c5a9003",
+      "bytes": 416
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+      "actual_endpoint_and_timer_line_numbers": {
+        "finish_outside_end()": [
+          813,
+          3919
+        ],
+        "publish_preowned_then_frame(R": [
+          3920
+        ],
+        "setitimer(": [
+          2939,
+          3598
+        ],
+        "os._exit(0 if": [
+          3934
+        ],
+        "commit_outside_body(), \"outside body commit before publication\"": []
+      }
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "method": "outside_body_fault",
+      "first_line": 286,
+      "last_line": 291,
+      "slice_sha256": "072fffc8da4c5d67eb906472283ab60b2da3611a3e8e248e49f86094c1480831",
+      "bytes": 126
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "method": "outside_body_number",
+      "first_line": 292,
+      "last_line": 301,
+      "slice_sha256": "5b855ddaf0ff5daa54cc3006316f83a03877a3b7b2439b73425629bd49ca97bb",
+      "bytes": 233
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "method": "open_caller_outside_body",
+      "first_line": 321,
+      "last_line": 344,
+      "slice_sha256": "7d1184cb010800c1fea9f2abe25420da811481b54504f57d2e04ae92c79f2eca",
+      "bytes": 1029
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "method": "adopt_outside_body",
+      "first_line": 345,
+      "last_line": 362,
+      "slice_sha256": "434fb0ebff3eca654486f4c263b697c31d13ccdc011eefcb25e718e650088277",
+      "bytes": 618
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "method": "commit_outside_body",
+      "first_line": 363,
+      "last_line": 422,
+      "slice_sha256": "666eb8c32c60186680e320a12117ed13f1ca345dd3982b87b8a4f75da1b41a44",
+      "bytes": 2415
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "method": "finish_outside_end",
+      "first_line": 470,
+      "last_line": 540,
+      "slice_sha256": "0dbd4298e2e89e1174bce0c76f954a29ebe7c52c9dc1e79787ecf9e1832625ff",
+      "bytes": 3114
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "method": "append_parent_bytes",
+      "first_line": 587,
+      "last_line": 649,
+      "slice_sha256": "def6964ed7fdc4d7bac6f5551ac50bd4c99b8b7c95ddf2b6632c58749c930630",
+      "bytes": 3138
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "method": "publish_preowned_then_frame",
+      "first_line": 721,
+      "last_line": 758,
+      "slice_sha256": "b72afc5084d91c231b79416e060832a274edb162d4a9426065f319e5cc0305cd",
+      "bytes": 1935
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "method": "commit_existing_receiver",
+      "first_line": 3021,
+      "last_line": 3029,
+      "slice_sha256": "4b11aa7c0e8a874efc14d2bd67e029bb1429d4e92570ec58c38ec3b336844985",
+      "bytes": 443
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "actual_endpoint_and_timer_line_numbers": {
+        "finish_outside_end()": [
+          470,
+          3163
+        ],
+        "publish_preowned_then_frame(R": [
+          3164
+        ],
+        "setitimer(": [
+          2238,
+          2975
+        ],
+        "os._exit(0 if": [
+          3188
+        ],
+        "commit_outside_body(), \"outside body commit before publication\"": [
+          3162
+        ]
+      }
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "method": "outside_body_fault",
+      "first_line": 341,
+      "last_line": 346,
+      "slice_sha256": "072fffc8da4c5d67eb906472283ab60b2da3611a3e8e248e49f86094c1480831",
+      "bytes": 126
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "method": "outside_body_number",
+      "first_line": 347,
+      "last_line": 356,
+      "slice_sha256": "5b855ddaf0ff5daa54cc3006316f83a03877a3b7b2439b73425629bd49ca97bb",
+      "bytes": 233
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "method": "open_caller_outside_body",
+      "first_line": 376,
+      "last_line": 399,
+      "slice_sha256": "7d1184cb010800c1fea9f2abe25420da811481b54504f57d2e04ae92c79f2eca",
+      "bytes": 1029
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "method": "adopt_outside_body",
+      "first_line": 400,
+      "last_line": 417,
+      "slice_sha256": "434fb0ebff3eca654486f4c263b697c31d13ccdc011eefcb25e718e650088277",
+      "bytes": 618
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "method": "commit_outside_body",
+      "first_line": 418,
+      "last_line": 477,
+      "slice_sha256": "666eb8c32c60186680e320a12117ed13f1ca345dd3982b87b8a4f75da1b41a44",
+      "bytes": 2415
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "method": "finish_outside_end",
+      "first_line": 525,
+      "last_line": 595,
+      "slice_sha256": "0dbd4298e2e89e1174bce0c76f954a29ebe7c52c9dc1e79787ecf9e1832625ff",
+      "bytes": 3114
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "method": "append_parent_bytes",
+      "first_line": 641,
+      "last_line": 703,
+      "slice_sha256": "def6964ed7fdc4d7bac6f5551ac50bd4c99b8b7c95ddf2b6632c58749c930630",
+      "bytes": 3138
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "method": "publish_preowned_then_frame",
+      "first_line": 775,
+      "last_line": 812,
+      "slice_sha256": "b72afc5084d91c231b79416e060832a274edb162d4a9426065f319e5cc0305cd",
+      "bytes": 1935
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "method": "commit_existing_receiver",
+      "first_line": 2260,
+      "last_line": 2268,
+      "slice_sha256": "08645aa407e731d1452692264c7b1e52257a1d32bf4fa678f84ea625c020a51c",
+      "bytes": 450
+    },
+    {
+      "file": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "actual_endpoint_and_timer_line_numbers": {
+        "finish_outside_end()": [
+          525,
+          2643
+        ],
+        "publish_preowned_then_frame(R": [
+          2644
+        ],
+        "setitimer(": [
+          2411
+        ],
+        "os._exit(0 if": [
+          2667
+        ],
+        "commit_outside_body(), \"outside body commit before publication\"": [
+          2642
+        ]
+      }
+    }
+  ],
+  "E01_exact_literal_prefix_asserted": true,
+  "E02_actual_literal_no_first_exception_store_asserted": true,
+  "not_runtime_proof": true,
+  "unsafe_not_read_or_rendered": true
+}

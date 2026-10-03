@@ -1,0 +1,282 @@
+{
+  "schema": "friday.sol092.LAB916-exact-interface-request.v1",
+  "not_an_implemented_patch_or_authority_callback": true,
+  "content_write_overlap": false,
+  "owner": "Astra Lead integration; existing LAB916 N3 codec/bank/lifetime/capacity scope",
+  "targets": [
+    {
+      "pin": {
+        "name": "source/lifetime.py",
+        "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/lifetime.py",
+        "bytes": 42385,
+        "sha256": "2c3f61022a0d581c698debba9f3957bf35f86de91e7252b8201db8ce8e828c46",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371705",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42385",
+          "1791021678684225237",
+          "1791022242521576346"
+        ],
+        "stable9": true,
+        "materialized": false,
+        "changed": false,
+        "partitions": [
+          {
+            "byte_start": 0,
+            "byte_end_exclusive": 7021,
+            "line_start": 1,
+            "line_count": 128,
+            "sha256": "bfa94e179bbb75272484aa15f9fd67155f36ade753afea8ea9e4470d36723eea"
+          },
+          {
+            "byte_start": 7021,
+            "byte_end_exclusive": 14643,
+            "line_start": 129,
+            "line_count": 128,
+            "sha256": "6bd10fa74cbda72e22a0e65186fb2d7eb662ad30f717dfc21b5574de9bddb03c"
+          },
+          {
+            "byte_start": 14643,
+            "byte_end_exclusive": 22170,
+            "line_start": 257,
+            "line_count": 128,
+            "sha256": "8fe607c266837191b5f9ce04cc6656dc617852e103f8361432dc8f8af5d50e7f"
+          },
+          {
+            "byte_start": 22170,
+            "byte_end_exclusive": 29626,
+            "line_start": 385,
+            "line_count": 128,
+            "sha256": "325cf6388b9b592960c9c69a47bb0cb6d272415cfab5e0ee4826b7cabad202d9"
+          },
+          {
+            "byte_start": 29626,
+            "byte_end_exclusive": 37019,
+            "line_start": 513,
+            "line_count": 128,
+            "sha256": "535b9db1a3a66b1e5309fca81e78872cb97e3b85c457a06388f884f60880a1b8"
+          },
+          {
+            "byte_start": 37019,
+            "byte_end_exclusive": 42385,
+            "line_start": 641,
+            "line_count": 96,
+            "sha256": "521d0a6ee351832a17feceab9c216098ec376448bc93f03d759c1f3d1b815be9"
+          }
+        ],
+        "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+      },
+      "exact_interfaces": [
+        "ForkOwner.emit -> receive_fork_owner before exec",
+        "ForkOwner.emit_failure / emit_late_failure -> receive_preowned_fork_failure",
+        "ForkOwner.record_parent_table_end(pid,status)",
+        "child_failure_can_end(owner)"
+      ],
+      "required_relation": "Keep original 0 close + new duplicate0 and old rsp close history in same complete actual fork domain. Seed points to the unique active 0/request/bundle rows, not numeric FD ownership. Rejoin all full body/raw/error aliases/late writes and ACKs before any original native end. Original record_parent_table_end is only actual wait4/table cancellation, never full-body outside end."
+    },
+    {
+      "pin": {
+        "name": "source/observer.py",
+        "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/observer.py",
+        "bytes": 100524,
+        "sha256": "994c2f9d46889110cb7835d0d921bff9eec71612c50d19631951cdcd97153769",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371708",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "100524",
+          "1791021399579210482",
+          "1791022242522576403"
+        ],
+        "stable9": true,
+        "materialized": false,
+        "changed": false,
+        "partitions": [
+          {
+            "byte_start": 0,
+            "byte_end_exclusive": 5828,
+            "line_start": 1,
+            "line_count": 128,
+            "sha256": "f0a6d8c02b54a76220d3c1625d6b59baeae73e3b40bfde50bcf2a357afc00e07"
+          },
+          {
+            "byte_start": 5828,
+            "byte_end_exclusive": 13128,
+            "line_start": 129,
+            "line_count": 128,
+            "sha256": "3ab5a774b2b1c2594f455c6f3d3cf3a8feac4735429c217826f403cfe0c9aec2"
+          },
+          {
+            "byte_start": 13128,
+            "byte_end_exclusive": 21168,
+            "line_start": 257,
+            "line_count": 128,
+            "sha256": "fcc464696dc03ef5515cfde6d36bb668850a4a86977ff9e82448f67172b40b5d"
+          },
+          {
+            "byte_start": 21168,
+            "byte_end_exclusive": 28054,
+            "line_start": 385,
+            "line_count": 128,
+            "sha256": "aead22c54cd154323f3e33744868bdbeed65f35f9b483256ea08d8b5210af76a"
+          },
+          {
+            "byte_start": 28054,
+            "byte_end_exclusive": 37546,
+            "line_start": 513,
+            "line_count": 128,
+            "sha256": "2c111b1b67c66f0ddfb40b5cfc85e7e8d778626caa667e42080ad133cd4f253e"
+          },
+          {
+            "byte_start": 37546,
+            "byte_end_exclusive": 47600,
+            "line_start": 641,
+            "line_count": 128,
+            "sha256": "17b4549250402515e2aafabd6ebc9db34719442a27ed010782e4acd05aaf800d"
+          },
+          {
+            "byte_start": 47600,
+            "byte_end_exclusive": 56187,
+            "line_start": 769,
+            "line_count": 128,
+            "sha256": "6271b55da3a7c6f151fc96eefb42336bd7e09628b7763e823ce078dc09c0f35d"
+          },
+          {
+            "byte_start": 56187,
+            "byte_end_exclusive": 63227,
+            "line_start": 897,
+            "line_count": 128,
+            "sha256": "9a68da77cdb5085cf9be5cde604c7d7834cb8c1805c55396d2d66f484b64c669"
+          },
+          {
+            "byte_start": 63227,
+            "byte_end_exclusive": 70709,
+            "line_start": 1025,
+            "line_count": 128,
+            "sha256": "d153899142cc1c61ec1caf607e905bb871d17b32678188ae298e3a0fbc83d727"
+          },
+          {
+            "byte_start": 70709,
+            "byte_end_exclusive": 77959,
+            "line_start": 1153,
+            "line_count": 128,
+            "sha256": "8ee7de39bbabfbd0130e1681e4b353d5619d7c80e57086f290ed6cb984a37889"
+          },
+          {
+            "byte_start": 77959,
+            "byte_end_exclusive": 85110,
+            "line_start": 1281,
+            "line_count": 128,
+            "sha256": "f3792e34117edcebc6339ee3675068934c6512c835f975b31aef6955fb6319e1"
+          },
+          {
+            "byte_start": 85110,
+            "byte_end_exclusive": 92510,
+            "line_start": 1409,
+            "line_count": 128,
+            "sha256": "32ad069fdbd6eb7b84a00f8b90b9ee30d5da14ca50fe01099f40c339aea17d7e"
+          },
+          {
+            "byte_start": 92510,
+            "byte_end_exclusive": 100524,
+            "line_start": 1537,
+            "line_count": 122,
+            "sha256": "7530f94895ffe0a69e403209db2d170bf27d4aa528b0aaf459ec5ea6bcc7c8c7"
+          }
+        ],
+        "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+      },
+      "exact_interface": "validate_fd_value_histories(nodes,domains) original literal4829B unchanged; actual full_value_arena and both validators",
+      "required_relation": "Selected Root/stock seed raw/bytearray/decoded packet/original rows/active-error-TB fields stay in complete original graph. No public native state/hash/flag as complete body. H2 literal credit is not new whole graph/runtime admission."
+    },
+    {
+      "pin": {
+        "name": "source/owned_prefix_bank.py",
+        "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/owned_prefix_bank.py",
+        "bytes": 9288,
+        "sha256": "7b9449fc2d1d0f27864441abe4523fad54180ee579089ceeb937144b646ba6ae",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371718",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9288",
+          "1791021134440997128",
+          "1791022242522576403"
+        ],
+        "stable9": true,
+        "materialized": false,
+        "changed": false,
+        "partitions": [
+          {
+            "byte_start": 0,
+            "byte_end_exclusive": 7226,
+            "line_start": 1,
+            "line_count": 128,
+            "sha256": "48452c999debf9b7facd4ee7e94e1f84cb8964b552d3d23ea6ec367c9f3f4999"
+          },
+          {
+            "byte_start": 7226,
+            "byte_end_exclusive": 9288,
+            "line_start": 129,
+            "line_count": 36,
+            "sha256": "f1e2bc40d803300ebf38e4f37d7c0440aecad3aeaf8f5ad1285b7bc1c47bca68"
+          }
+        ],
+        "scope": "UNCHANGED_EXTERNAL_NO_NEW_ACCEPTANCE"
+      },
+      "exact_interface": "PrefixBodyMailbox.prepare / attach_late / read_parent",
+      "required_relation": "Numerically fit whole new seed/table/buffers plus original primary+late80M/metadata2M Source/output pools BEFORE effects; do not exhaust original total output before future mandatory late metadata. No uncertainty retry/overwrite."
+    },
+    {
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "exact_literal": "return {'retained':True,'complete':current_bindings and complete is True,\\n            'selected_body_consumed':current_bindings and error_complete is True and not unsupported and not foreign,\\n            'ownership_retired':False}",
+      "patch_boundary": "Immediately AFTER current strict _consume_early_stock_prefix complete physical/error/history/alias validation, BEFORE existing return. A real original same-role body/source/mapping/native row/owner retirement supplier and last-error finite receipt is required. Supplied original code does not provide it. Do not change False to True, invent a callback/header/grant or claim this JSON as the implementation."
+    }
+  ],
+  "stock_route_before_read_conflict": {
+    "id": "CODE-N2-EARLIEST-READ-ROUTE-TOKEN-AND-STOCK-ALLOCATION",
+    "status": "OPEN",
+    "invariant": "Missing/corrupt earliest seed and all ordinary errors require full original body/alias custody and BOTH finite ends, not a typed failure or process loss.",
+    "boundaries": [
+      {
+        "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+        "line": 935,
+        "literal": "stock.seed_preowned(None,0,None)"
+      },
+      {
+        "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+        "line": 676,
+        "literal": "try:self.seed_packet=self.read()"
+      },
+      {
+        "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+        "line": 686,
+        "literal": "bootstrap-seed-missing-original-route_CODE"
+      },
+      {
+        "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+        "line": 720,
+        "literal": "bootstrap-seed-missing-original-token_CODE"
+      },
+      {
+        "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+        "line": 984,
+        "literal": "bootstrap-seed-route-before-body-and-end_CODE"
+      }
+    ],
+    "actual_attempt": "Root duplicates SAME existing response pipe onto existing fd0 before exec. main reads original launch_fact and validates actual Root-owned selected rows before argv/constructors, then binds SAME original request endpoint/token. Valid-route later errors use actual fail_prefix/_control/full error arena. Partial raw framing/packet/row/error aliases are retained prospectively, no unbounded reply archive.",
+    "exact_conflict": "Before the first launch_fact framing/JSON/row/token validation succeeds, the original dynamic request FD and export token are unavailable. Fixed response fd0 alone cannot write a full prefix. Pre-exec child_w is CLOEXEC and does not survive exec. Stock __new__/initial field allocation and top-level stock imports can also fail before a usable Source channel exists. This package records original/secondary errors but cannot certify full original body or finite original endpoint retirement at those cuts.",
+    "smallest_original_role_alternative": "Actual already-enrolled original launcher/bootstrap's prospectively owned supplier/receiver for the required earliest selected rows/token/raw errors and both native ends independent of fallible script parse/allocation. Exact existing source has no such after-exec native supplier. Lead must rejoin the original public/table/channel relation within original role/image/fence; no guessed FD/token, new arg/token/grant, descriptor scan, private/native heap, image patch, or typed failure as custody."
+  },
+  "Source_execution": 0
+}

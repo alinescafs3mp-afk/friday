@@ -1,0 +1,71 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "author_accepts_own_source": false,
+  "chain": {
+    "caller_bytes": 191129,
+    "caller_sha256": "5c47c9b2cf13f4e002f7c06cf1f7f99ed56b0ab54e6e42bfc86597e70c45217d",
+    "contract_bytes": 51517,
+    "contract_sha256": "a9745e8b13656d1fda2f1229962ccb1f1cb94109197c9e916cfc71140ac4f1de",
+    "supervisor_bytes": 155024,
+    "supervisor_sha256": "660477909be790ceb9f7872c2dbe57d2d2646470823f4f210fe30f6dec209607",
+    "verifier_bytes": 124618,
+    "verifier_sha256": "a9cf2df726de2eff7fbd7ce77759540686467ea4761f91e1bed7af8244c33c39"
+  },
+  "compiler_ABI": "NOT_RUN",
+  "current6_changed": 4,
+  "current6_equal": 2,
+  "custody": "ORIGINAL_MEMFD_NOT_RENDERED_TRANSPORT",
+  "decision": "ORDINARY_END_TIMER_FD_APPEND_SOURCE_NOT_ACCEPTANCE",
+  "edges": {
+    "C1": "CODE_OPEN. The marker, the typed fd 8 alias, and the append lock are ordinary transport accounting. They do not mint the original native body or a readonly outside receiver.",
+    "append": "commit_outside_body waits on a nonblocking per-process POSIX record lock inside the existing due() bound, then unlocks. It does not use flock or an open-file-description lock, and it does not move the deadline.",
+    "terminal": "finish_outside_end runs after the fields the frame will carry are assigned and before publish_preowned_then_frame. A real end fault clears qualified_node_only, qualified, verified, and a success status before the frame is built.",
+    "timer": "The finish path no longer calls setitimer with a zero interval. The original arming call remains. The pre-exec child disarm remains. timer_disarmed stays false and the interval stays enforcing."
+  },
+  "fd_append": {
+    "alias_fd": 8,
+    "body_acceptance": false,
+    "caller_alias_registered_before_dup2": true,
+    "caller_held_keeps_allocation_type": true,
+    "cap": 32768,
+    "child_alias_adopted_into_existing_ledger": true,
+    "flock": false,
+    "ofd_lock": false,
+    "reservation": "per-process POSIX record lock"
+  },
+  "gates": "NOT_RUN",
+  "historical_unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+  "historical_unsafe_required": true,
+  "historical_unsafe_waiver": false,
+  "joined": "SCOPED_SOURCE_NOT_WHOLE_ACCEPTED",
+  "native_body": "CODE_OPEN",
+  "native_ends": "CODE_OPEN",
+  "new_dependencies": [],
+  "outside_readonly_receiver": "CODE_OPEN",
+  "prefix_rewrites": {
+    "caller.py": 1,
+    "launch-contract.json": 4,
+    "supervisor.py": 1,
+    "verifier.py": 1
+  },
+  "qualification": "REQUIRED_NOT_RUN",
+  "residuals": [
+    "Original native body, readonly outside receiver, and native ends stay CODE_OPEN.",
+    "Image, compiler, native ABI, grants, clock, and gates were not run.",
+    "Whole RAM, IO, native, stock, copy, read, header, FD, hash, encoder, decoder, and error overlap stay UNKNOWN_NOT_ZERO.",
+    "The outside alias stays in the allocation history and is not closed while that native body stays open.",
+    "32768 is the existing stream cap, not a new grant.",
+    "Meaningful positives, negatives, legacy, and live qualification stay REQUIRED_NOT_RUN."
+  ],
+  "runtime": "NOT_RUN",
+  "schema": "friday.e4.lab891.a208.findings.v1",
+  "source_execution": 0,
+  "task_done": false,
+  "timer_disarmed": false,
+  "timer_still_enforcing": true,
+  "verdict": "TIMER_ARMED_END_BEFORE_FRAME_TYPED_FD_LOCK",
+  "whole_self_acceptance": false
+}

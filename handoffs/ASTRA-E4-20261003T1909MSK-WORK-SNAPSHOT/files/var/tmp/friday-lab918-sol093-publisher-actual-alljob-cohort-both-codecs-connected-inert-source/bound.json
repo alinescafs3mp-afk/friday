@@ -1,0 +1,13 @@
+{
+  "caps_changed": false,
+  "duplication_shortfall": 578683,
+  "historical_shortfall": 2451212,
+  "live": 583992,
+  "packet_room": 16094,
+  "row_output_remaining": 11420104,
+  "row_reads_remaining": 14832016,
+  "schema": "friday.lab918.bound.v1",
+  "selected": 8043432,
+  "store_width": 48666,
+  "unit": 16222
+}

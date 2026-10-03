@@ -1,0 +1,100 @@
+{
+  "partitions": [
+    {
+      "name": "caller.py",
+      "changed": true,
+      "partitions": 45,
+      "before_sha256": "1c86a4b1141385a87967cb6a15dfa55fc24a643764603b46a6450d044f4df2e9",
+      "after_sha256": "5c47c9b2cf13f4e002f7c06cf1f7f99ed56b0ab54e6e42bfc86597e70c45217d",
+      "EOF_both": true
+    },
+    {
+      "name": "expectations.json",
+      "changed": false,
+      "partitions": 1,
+      "before_sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+      "after_sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+      "EOF_both": true
+    },
+    {
+      "name": "launch-contract.json",
+      "changed": true,
+      "partitions": 11,
+      "before_sha256": "4ca1514c1f6bfbf017144ec622aea135dac3670644de58d07e6aff47bdf39bd4",
+      "after_sha256": "a9745e8b13656d1fda2f1229962ccb1f1cb94109197c9e916cfc71140ac4f1de",
+      "EOF_both": true
+    },
+    {
+      "name": "ordinary-surplus.txt",
+      "changed": false,
+      "partitions": 1,
+      "before_sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "after_sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "EOF_both": true
+    },
+    {
+      "name": "supervisor.py",
+      "changed": true,
+      "partitions": 51,
+      "before_sha256": "96ac9259e92f9812631ed093c0ef5db34fa3b3611e6c4931b486679eaa70e49b",
+      "after_sha256": "660477909be790ceb9f7872c2dbe57d2d2646470823f4f210fe30f6dec209607",
+      "EOF_both": true
+    },
+    {
+      "name": "verifier.py",
+      "changed": true,
+      "partitions": 49,
+      "before_sha256": "bec97b0b194f675738a1ab99fabd9311def266254be85d51dfc7d6ec7b769fca",
+      "after_sha256": "a9cf2df726de2eff7fbd7ce77759540686467ea4761f91e1bed7af8244c33c39",
+      "EOF_both": true
+    }
+  ],
+  "total_partitions": 158,
+  "helpers_literal_hashes": {
+    "outside_body_number": {
+      "caller.py": "5b855ddaf0ff5daa54cc3006316f83a03877a3b7b2439b73425629bd49ca97bb",
+      "supervisor.py": "5b855ddaf0ff5daa54cc3006316f83a03877a3b7b2439b73425629bd49ca97bb",
+      "verifier.py": "5b855ddaf0ff5daa54cc3006316f83a03877a3b7b2439b73425629bd49ca97bb"
+    },
+    "outside_relation_bytes": {
+      "caller.py": "285ecee53bd2fdb56b12384b98aa38cd2e01e5406486cb043d1ef64343a0d6d3",
+      "supervisor.py": "285ecee53bd2fdb56b12384b98aa38cd2e01e5406486cb043d1ef64343a0d6d3",
+      "verifier.py": "285ecee53bd2fdb56b12384b98aa38cd2e01e5406486cb043d1ef64343a0d6d3"
+    },
+    "open_caller_outside_body": {
+      "caller.py": "7d1184cb010800c1fea9f2abe25420da811481b54504f57d2e04ae92c79f2eca",
+      "supervisor.py": "7d1184cb010800c1fea9f2abe25420da811481b54504f57d2e04ae92c79f2eca",
+      "verifier.py": "7d1184cb010800c1fea9f2abe25420da811481b54504f57d2e04ae92c79f2eca"
+    },
+    "adopt_outside_body": {
+      "caller.py": "434fb0ebff3eca654486f4c263b697c31d13ccdc011eefcb25e718e650088277",
+      "supervisor.py": "434fb0ebff3eca654486f4c263b697c31d13ccdc011eefcb25e718e650088277",
+      "verifier.py": "434fb0ebff3eca654486f4c263b697c31d13ccdc011eefcb25e718e650088277"
+    },
+    "commit_outside_body": {
+      "caller.py": "666eb8c32c60186680e320a12117ed13f1ca345dd3982b87b8a4f75da1b41a44",
+      "supervisor.py": "666eb8c32c60186680e320a12117ed13f1ca345dd3982b87b8a4f75da1b41a44",
+      "verifier.py": "666eb8c32c60186680e320a12117ed13f1ca345dd3982b87b8a4f75da1b41a44"
+    },
+    "seal_outside_body": {
+      "caller.py": "17c068eda6ef2dd5ffe66516cce193b69a3a18175a6217fca6524d52693df8ef",
+      "supervisor.py": "17c068eda6ef2dd5ffe66516cce193b69a3a18175a6217fca6524d52693df8ef",
+      "verifier.py": "17c068eda6ef2dd5ffe66516cce193b69a3a18175a6217fca6524d52693df8ef"
+    },
+    "consume_outside_body": {
+      "caller.py": "8435da75786c8af5045efb5c1a8d2c18b7c6114d1d0391de41254c8768b3b251",
+      "supervisor.py": "8435da75786c8af5045efb5c1a8d2c18b7c6114d1d0391de41254c8768b3b251",
+      "verifier.py": "8435da75786c8af5045efb5c1a8d2c18b7c6114d1d0391de41254c8768b3b251"
+    },
+    "finish_outside_end": {
+      "caller.py": "0dbd4298e2e89e1174bce0c76f954a29ebe7c52c9dc1e79787ecf9e1832625ff",
+      "supervisor.py": "0dbd4298e2e89e1174bce0c76f954a29ebe7c52c9dc1e79787ecf9e1832625ff",
+      "verifier.py": "0dbd4298e2e89e1174bce0c76f954a29ebe7c52c9dc1e79787ecf9e1832625ff"
+    },
+    "publish_preowned_then_frame": {
+      "caller.py": "b72afc5084d91c231b79416e060832a274edb162d4a9426065f319e5cc0305cd",
+      "supervisor.py": "b72afc5084d91c231b79416e060832a274edb162d4a9426065f319e5cc0305cd",
+      "verifier.py": "b72afc5084d91c231b79416e060832a274edb162d4a9426065f319e5cc0305cd"
+    }
+  }
+}

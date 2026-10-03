@@ -1,0 +1,4 @@
+LAB-913 independent text review of the A224 prospective complete error-graph producer joined to both original v2 receivers.
+Credited text: the lower bound is reserved before references, values, nodes, traceback names, and base64. The exact seal still measures canonical JSON and requires a string message. Both decoders still validate that v2 object. A local None message is assigned only after str and the 900 cap, and a failed projection does not commit a frame.
+E01 and E02 are rejoined only where the lease, adoption, outside-end, and one-publication text matches Sol079. The new producer is the changed body. The two data files match and are not whole acceptance.
+Still open: arbitrary message-factory allocation, native C1, and the unknown native end cost. Source text was read and was not executed or installed. Whole Root and GO stay false.

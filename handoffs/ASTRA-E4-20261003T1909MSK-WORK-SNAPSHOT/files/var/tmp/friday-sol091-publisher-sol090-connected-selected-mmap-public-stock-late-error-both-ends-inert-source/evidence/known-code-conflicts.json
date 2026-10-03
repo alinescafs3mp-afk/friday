@@ -1,0 +1,161 @@
+{
+  "schema": "friday.sol091.actual-connected-code-conflicts.v1",
+  "status": "INERT_ATTEMPT_EXACT_CODE_CONFLICTS_NOT_WHOLE_CLOSURE",
+  "residuals": [
+    {
+      "id": "CODE-N1-PREFIX-BODY-END-BEFORE-MODULE-ALLOCATION",
+      "requirements": {
+        "id": "CODE-N1-PREFIX-RETIREMENT",
+        "invariant": [
+          "Actual producer before OutputStore/source carriers exists",
+          "Prefix roots must have full accepted custody and an actual finite end, not retained=True"
+        ],
+        "actual_failure": "complete_prefix retains original owner/error and attempts full graph but returns ownership_retired=False. The original Source-prefix retirement still needs initialized Source qualification/carriers. Native invocation allocation/module-registration failure before current context can retain only the independently existing caller's pending error, not this candidate's full accepted receipt.",
+        "allowed_original_role_direction": "Within SAME enrolled native entry, provide a prospectively retained before-entry prefix envelope and its full native current-v2 receipt/reader/owned-row retirement independent of Source constructor fields. No new role, Source-issued grant, fallback Python owner or flag. Link/cost/ABI qualification follows source implementation."
+      },
+      "actual_attempt": [
+        "SAME original C invoke borrows explicit preowned original-caller run storage before debit/module/Source effects; original error type/value/TB cells do not allocate/normalize on fetch.",
+        "prefix_envelope before Source fields reaches current full codec through actual complete_prefix; receipt/end never fabricated."
+      ],
+      "boundary": [
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/native/publisher_owned_custody.c",
+          "line": 539,
+          "literal": "save_error_cell(&r->prefix_error,\"before-Source-object-allocation\")"
+        },
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/native/publisher_owned_custody.c",
+          "line": 547,
+          "literal": "save_error_cell(&r->prefix_error,\"before-Source-module-registration\")"
+        },
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/existing_root_caller.py",
+          "line": 230,
+          "literal": "'ownership_retired':False,'GO':False"
+        }
+      ],
+      "exact_conflict": "Pre-module allocation/registration failure returns to original C caller before active_run and performing-receiver/codec exist. Original triples and callable/args are preheld, but no full accepted current-v2 prefix body or finite row/Source end exists at that cut. Normal complete_prefix captures but cannot retire all original roots. Actual missing CODE, not merely build/admission NOT_RUN.",
+      "smallest_original_role_alternative": "Actual SAME original caller's prospective native prefix full-body reader/receipt/storage/table end, independent of fallible module creation and Source final-arena fields. Supplied Source has no code for that old caller's original table/source supplier. Do not invent authority callback/grant, new role, retry or schema generation from a Source flag."
+    },
+    {
+      "id": "CODE-N3-SELF-WRITING-MAPPING-RAW-BOUND-AND-LATE-END",
+      "requirements": {
+        "id": "CODE-N3-SELECTED-MAPPING-AND-ACK-UNCERTAINTY",
+        "invariant": [
+          "Ordinary AND final receiver must validate full raw body/history before child owner loss",
+          "All late write/ACK/close errors and aliases remain represented"
+        ],
+        "actual_failure": "Dedicated body and metadata rows/banks precede census/fork; normal v3 and both full/final readers are joined; original G/A/B/deadline used only after full validation. BUT selected mmap objects reached through actual bank/error frames remain unsupported in full_value_arena, and stock foreign module/builtin state is not complete. A body-write/ACK failure after a single publication cannot be replaced by a second bank publication/seal or exit; the code retains uncertainty and refuses native_child_failure_bank_acceptance_end_CODE. Closing a numeric fd is not mmap retirement. Therefore not all original positive/failure ends close.",
+        "allowed_original_role_direction": "Within original prepaid Root/child roles, extend performing full codec/readers to selected OWNED mmap/public stock state with stable actual physical alias/cost relations; prospectively retain a distinct after-publication error cell in original parent storage, and make the original gate/end protocol consume it before child loss. Preserve 80M body + separate 2M metadata, original FD/RAM pools and no retry of rejected/uncertain effect."
+      },
+      "actual_attempt": [
+        "Actual Root-prepared body/meta mappings retain birth record BEFORE mmap/register, exact row/credit/backing9, own public buffer full raw, stable cut/position and reader width/alias joins. mmap.close differs from fd close.",
+        "Both actor/native parents create DISTINCT late-error body/meta banks BEFORE census/fork. Shared full reader on BOTH existing paths. Primary attempt commits before serialization; no uncertain primary retry. Original G/A/B/absolute deadlines retained."
+      ],
+      "boundary": [
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/selected_owned_values.py",
+          "line": 81,
+          "literal": "selected_mapping_self_encoding_physical_alias_CODE"
+        },
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/owned_prefix_bank.py",
+          "line": 55,
+          "literal": "capacity=min(80_000_000,available)"
+        },
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/lifetime.py",
+          "line": 473,
+          "literal": "def emit_late_failure(self,error,phase):"
+        },
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/lifetime.py",
+          "line": 719,
+          "literal": "def child_failure_can_end(owner):"
+        }
+      ],
+      "exact_conflict": "Error/frame/Source-global graph reaches the exact mmap writing that graph. Copying it into itself cannot preserve stable actual physical alias, so producer refuses. Required full raw mapping cuts consume the same original 80M body / 33,554,432-byte total output / 8GiB RAM pools; actual cumulative widths and future late/meta/output must fit together, not only each individual bank. Current maximum-remaining PrefixBodyMailbox.prepare does not reserve the future late bank: when output is the limiting dimension it consumes the remainder before mandatory late metadata. No whole-cost fit or finite late end is claimed. Failure of late publication/ACK has no further complete accepted error/end.",
+      "smallest_original_role_alternative": "Within original Root/child roles and pools, implement a prospective immutable retained physical cut/cohort and a complete before-effect layout of BOTH original/late banks plus remaining Source/metadata operations, with actual producers/BOTH readers and full raw/alias joins. Preserve 80M body cap, total 33,554,432-byte output and separate 2M metadata; no trimming/hash-only projection/allowed-case-width reduction/primary overwrite/new deadline/role. Need actual numerical whole bound and physical-cohort source; if the required reachable raw data cannot fit the exact original pools, Lead decides that precise contract conflict. Not an author waiver."
+    },
+    {
+      "id": "CODE-N3-PRESCRIBED-PUBLIC-STOCK-NOT-FULL-NATIVE-STATE",
+      "actual_attempt": [
+        "Only prescribed actual sys.modules identity and builtin bound self PUBLIC attributes; explicit own mmap birth registry. No arbitrary/private/other-process heap/pointer fabrication.",
+        "v7 producer/shared strict reader distinguish own mmap/public stock. Public-only stock remains unsupported; receiver rejects relabeling complete."
+      ],
+      "boundary": [
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/selected_owned_values.py",
+          "line": 139,
+          "literal": "def public_stock_cut(value,pin_for):"
+        },
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/observer.py",
+          "line": 179,
+          "literal": "selected_public_native_state_not_complete_CODE"
+        }
+      ],
+      "exact_conflict": "Full functions/modules/errors retain foreign public stock builtin/type/loader/native state. Namespace, name, image pin or callable self is not complete original native body/alias/lifetime. Missing actual image supplier/public interface cannot become layout proof; unavailable private interpreter state is not authorized to read.",
+      "smallest_original_role_alternative": "Actual prescribed OWNED/public-buffer/native supplier in SAME original caller/stock role with current concrete image/birth/alias/prepaid cost and BOTH readers for precisely supported relation. If original full relation requires inaccessible private state, retain exact Lead scope/thesis decision, not inspect it or call a projection full."
+    },
+    {
+      "id": "CODE-N4-AUTHENTIC-ORIGINAL-PREPARED-ROW-AND-LAST-END",
+      "requirements": {
+        "id": "CODE-N4-FULL-GRAPH-AND-LAST-END",
+        "invariant": [
+          "Current-v2 full actual document and post-seal errors",
+          "Source full banks transfer -> close -> owner-close -> retirement -> actual native outside end"
+        ],
+        "actual_failure": "Exact Source roots/row/raw aliases are held before transfer; failed-seal full reader uses same row without another seal; native close retains actual rc/errno before post-close allocation and forbids repeated uncertain close; current-v2 full-reader is invoked on exact bytes. Full graph still reaches unsupported stock/mapping objects, so require_completed cannot become true on those cuts. Last native write/fsync/close error remains a native-held original error after its earlier document, not a complete accepted final body/end. Release/destructor overlap and total cost are not proven. No all-N4 closure claimed.",
+        "allowed_original_role_direction": "Close the selected full-value codec and original-parent after-document error receiver/physical alias end, then qualify exact original caller binding, complete cost and finite destruction/retirement. Do not annotate the old pin, clear a dict, skip carriers, issue a Source grant, or promote last-close flags to whole proof."
+      },
+      "actual_attempt": [
+        "Preowned native after-document scalar/error cell records write progress and last rc/errno BEFORE post-close Python allocation. Original triple+immutable v2 document reaches same actual full reader; old document never patched/resealed.",
+        "Native permits only independently original supplied final row/credit/fd. Source-created credit.fd_rows alone cannot close arbitrary numeric FD.",
+        "Actual mapping transfer/one close precedes backing close; distinct original mapping/error custody not whole end."
+      ],
+      "boundary": [
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/native/publisher_owned_custody.c",
+          "line": 265,
+          "literal": "original_native_prepared_row_supplier_NOT_PRESENT_CODE"
+        },
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/native/publisher_owned_custody.c",
+          "line": 305,
+          "literal": "Last native syscall scalars"
+        },
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/existing_root_caller.py",
+          "line": 245,
+          "literal": "def consume_native_after_document(self):"
+        },
+        {
+          "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source/existing_root_caller.py",
+          "line": 186,
+          "literal": "def close_prepared(self,body,receipt):"
+        }
+      ],
+      "exact_conflict": "Bindings independently supply only original final_fd_row/final_fd_credit, not authentic native Source-prepared row table. Other rows refuse instead of Source-made authority dictionary; Source bank-close/owner-close/retirement cannot complete. Last-error body still hits stock/mapping conflicts; held original error or accepted memory cut alone not finite outside end. Retired mapping/full graph/destructor/C2 overlap unproven.",
+      "smallest_original_role_alternative": "Exact original native caller/table's prospective preparation/birth/borrowed-row supplier and full-body reader/end for existing Source banks, no Source row enrollment or unimplemented authority callback. Join current-v2 doc+after-document original errors+last outcome to real finite end and full destructor/byte/RSS/IO cost. UNKNOWN close retained, not retried."
+    },
+    {
+      "id": "N2-LEAD-SEPARATE-STOCK-PREARGV-IMAGE-DECISION",
+      "requirements": {
+        "id": "N2_RETAINED_SEPARATE_SOURCE_IMAGE_DECISION",
+        "invariant": [
+          "Seed selected channel/table before constructors and bundle/import effects",
+          "Failure before argc/endpoint decoding must still reach the original parent"
+        ],
+        "actual_failure": "Seeding and actual pre-exec launch move before journal/Source effects; exact STARTED/ERROR/COMPLETE imports now reach v6 reader. main still validates/decodes sys.argv BEFORE selected stock endpoints exist. A Root context in the supervising process is not a native child supplier after exec. No complete pre-argv/pre-seed body/end is supplied by this candidate.",
+        "decision": "Do not silently close N2 by Root context, guessed FD/token or changed actual stock/provider image. Preserve original preargv ordinary-failure path; Lead resolves exact existing source-dependency authority. No duplicated general audit or nativebody Source authority mint."
+      },
+      "unchanged_scope": "Actual preargv/endpoint supplier remains open as SOL090. Codec name added to prefix classifier for consistent current Source, not live stock/provider image change/native child issuer. Lead resolves exact existing image/source-dependency authority.",
+      "Source_execution": 0
+    }
+  ],
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

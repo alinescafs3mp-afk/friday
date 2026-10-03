@@ -1,0 +1,229 @@
+A184 independent WHOLE inert Source review: LAB865, original qualified stock fence
+
+Decision: REJECT_CURRENT_SOURCE_CLOSURE. This completed review reads the whole
+current performing6 and original normative fences. It verifies genuine fixes,
+including the new full-graph stock-cause joins, but does not establish mandatory
+whole error/raw/history prefix delivery and new producer fit. Two current
+evidence artifacts also describe the prior performing bytes. This is a Source
+TEXT verdict, not a compiler/runtime/Root/native/live/gate acceptance.
+
+Assignment ASTRA-E4-LAB865-NODE-WHOLE6-ALL35-ALL6-STOCK-CAUSE-BOUND-INDEPENDENT-SOURCE-REVIEW-A184#1.
+Exact full INPUT SHA256 d0434c55ae39a52955fa8335f00d665a9ba27a5fda85c19e8abc046616b651c7.
+Contract SHA256 c9c7372d06a2df3fbf50ec93218e37243674c6d2db7f33b5eb098facc2967456.
+REVIEW KEY LAB865-manifest3e0df6d644bc1280-current6-fivechanged-all35-all6-original-stock-cause.
+Snapshot cecd28a92ac4fd4e34c4d3813d0c598debe09436 /0.208.64/schema50;
+installed0.208.58 unchanged. No original Source/Git/index/config/model/lock edits.
+Accepted 2026-10-02 14:00:58 MSK. Completion/elapsed are in protected RESULT.
+
+Evidence and limits
+
+The exact INPUT was read fully. All current caller2638/supervisor1983/verifier1509
+lines, complete launch-contract/expectations/plaintext bodies and the original
+scope, exact original6 pins, all35 stock factory/root/store/domain rows, prior
+A178/A182 review evidence and physical19 bindings were read as inert text/data.
+No supplied source was imported, parsed as AST, compiled, executed or tested.
+No GPG/Node/Root/native/archive parse/extract/network/install/UI/model/gates ran.
+Own bounded stock JSON/integer/hash/stat/text metadata work is the only code
+used for observations. Normative integers above2^53 stayed raw/stock-integer
+JSON or decimal strings; no V8 normalization was used.
+
+Authentication.json verifies196 unique full declared pins from A184 and linked
+A178, with complete9 integer fields, hashes and stable before/after identities;
+zero pin faults. Current root has exactly71 leaves, private700 directories and
+regular600 uid1000 single-link leaves. Internal65-leaf seal pins and68-leaf Grok
+pathset pins match. The source DAG is65 payload leaves -> seal -> manifest ->
+author result, then68 payload leaves -> Grok pathset -> Grok manifest -> publish
+payload. Manifest/pathset/result do not self-pin. Direct current6 hashes are
+authoritative for this review; no old acceptance or ended clock transfers.
+
+Whole method ledger covers230 top-level function/class text sections plus
+explicit module/header/finalizer text, with complete byte coverage. It is a
+lexical TEXT ledger, not AST or a mechanically proved call graph. Each original
+35 store/root/copy row is joined to literal current catches. New projection,
+constructor, raw codec, cleanup and module-finalizer methods are included too.
+
+Actual immediate SOL060->LAB865 delta is five changed files and one equal
+158-byte ordinary-surplus.txt. The input old/new pins match the full physical
+bodies. All original case_order and cases JSON semantics remain equal.
+author/whole6-full-byte-delta.json contains internally valid historical
+LAB863->SOL060 before/after base64 pairs. Its five after bodies are the old
+SOL060 bodies, not current LAB865; it is not a fresh current delta proof.
+The equal row retains ABSENT/null base64 fields and its actual bodies are equal.
+This provenance distinction does not invalidate the authenticated current6
+bytes, nor turn a historical artifact into current evidence.
+
+Verified Source credits
+
+1. All three exact_error producers now keep the complete graph.v2 and add
+   stock_cause from nodes[0]. original_stock_cause independently validates the
+   exact schema, integer root, node id/type/message and equality of stock_cause
+   to nodes[root]. supervisor.check_inner:1565, caller.validate_canonical:2130
+   and caller.validate_entry:2190 compare that recomputed cause to the unchanged
+   Refusal oracles. Startup ENV/AS and both supervisor surplus-FD controls thus
+   no longer compare graph.v2 with the obsolete two-field receipt. A182 E01 is
+   closed on these actual bytes. No runtime control success is asserted.
+2. caller.retire_and_close_owned:713 now computes one retained graph and reuses
+   it in the allocation record/close-failure row. The duplicate dictionary-key
+   projection from A182 is removed; no duplicate-key evaluation credit carries.
+3. Fixed256 descriptor-history slots are reserved before acquisition and used
+   by explicit counters. ERROR_OBJECT_CAP256, exception/value/frame caps128 are
+   explicit prospective guards. These are finite count guards; they are not
+   asserted to be a preallocated native C heap or complete shape/memory proof.
+4. Whole once-close ownership repairs remain present: exact returned FD number
+   recorded before wrapping/maps/fstat, both pipe endpoints recorded before
+   either wrapper, unique generation/lease, RETIRE_UNKNOWN before first close,
+   sticky unknown with no second native close, and finite cleanup of unpublished
+   exact returned allocations. Undefined numeric close caches remain removed.
+5. Verifier.call preowns stdout/stderr/status/writable cells, primary traceback,
+   secondary owners and process record. Exact returned rc/reaped are recorded
+   after successful normal or cleanup wait. All existing cells are attempted
+   before stream firstclose. Returned bytes/chunks, decode byte arguments and
+   writable base64 are held losslessly; size/EOF/identity agreement controls
+   retained=true, and unknown/partial is not a fullraw claim.
+6. Supervisor/caller retain complete raw transport plus original parsed bodies.
+   Exact same-inner and same-raw preimages are checked against count/SHA/full
+   canonical bytes, with caller's concrete recover_wire_receipt equality check.
+   This is reversible byte sharing where its actual preimage exists. Overflow
+   never substitutes a hash-only smaller proof; absent/partial output refuses.
+7. All3 credits survive: typed heterogeneous supervisor resources and exact
+   verifier phases, first two --no-keyring calls versus four explicit-ring calls,
+   and caller's narrow same-held detached terminal-proc retirement token. Fixed
+   immutable input9 stays immutable. Original raw high-water is not subtracted;
+   missing live/exited observations retain original null/reason distinctions.
+8. D1 executable GPG CPU20/wall30 and dynamic quota
+   floor((65536-TOTAL_OUTPUT)/(3+writable_slots)) remain exact, maximum21845 for
+   the first call. Kernel/inherited AS/FD/output/wall/resource caps and all six
+   call labels/oracles are preserved. No scope or threshold reduction was made.
+
+Current original-domain findings
+
+E01 SECONDARY PROJECTION CAN STILL INTERRUPT MANDATORY FINITE PREFIX WORK.
+  New count guards do not isolate fallible projection from its cleanup/capture
+  continuation. Verifier.call:865/877/891 appends exact_error in finally branches
+  without another protected continuation. If that stock projection refuses or
+  fails, later cells/closes and the final original-primary rethrow are skipped.
+  Caller capture-finally:1911 and supervisor terminal:1895/1902/1948 similarly
+  depend on successful projection before later actions or finish_allocations.
+  Preowned native first/secondary references and retire-before-close are real
+  credits, but a retained first reference is not proof of terminal publication.
+  The bounded original stock allocation/error-prefix contract needs a finite
+  continuation whose own projection failure cannot replace firstfailure or
+  erase required later raw/known-owner bookkeeping. This is a conditional CODE
+  closure gap, not an assertion that MemoryError/native failure occurred here.
+  No requirement for arbitrary custom objects or interpreter-wide C-heap
+  serialization is introduced. Native actual costs/failures remain UNKNOWN.
+
+E02 NEW COMPLETE STOCK GRAPH/HISTORY/PRODUCER FIT REMAINS UNPROVEN.
+  Original message<=900 ASCII, type/native<=32, path<=160, clock<=32 and original
+  two-byte escapes bind qualified reachable factories, not every field of the
+  new graph. New full args/state/bytes/cause/context/frame/value arrays, duplicate
+  references, repeated history/error copies and new catch/default complements
+  need a fresh width/count/lifetime/delivery bound against the existing roles.
+  Finite caps256/128 improve termination, but128 frames/nodes plus message/args
+  duplication are not a proof that each original2048-byte error cell fits, nor
+  that256 history rows with full close-error graphs fit the former512-byte cells.
+  No closed whole allocation-count bound relates repeated proc/custody/poll
+  acquisitions to the new256 history cap. It must cover original valid paths
+  and all mandatory terminal reserves rather than silently reducing them.
+
+  Exact outer raw-only partition still is196644*6=1179864;
+  +489472 metadata+newline=1669337, margin427815 under2097152. This arithmetic
+  is true and does not prove the new489472 metadata/error/history factory bound.
+  Pending chunks can be both already appended and retained in a pending slot at
+  an interrupted commit; every normal/error/optional copy must be charged.
+  The old A1752095321/margin1831 is not applied to LAB865.
+
+  Base64 for65536 allowed aggregate GPG raw alone is87384 bytes, above32768.
+  This only shows original caps alone do not imply complete inner fit. It is
+  NOT a claim that the fixed pinned stock calls actually produce65536 bytes.
+  A complete tighter bound for those exact inputs/providers/recipes and full
+  metadata/error prefixes could establish fit, but none is connected to these
+  new bodies. Normal same-inner preimage sharing helps duplication in the outer
+  transport; it does not establish the inner32768 producer or supervisor65536
+  producer bound. Missing current provider qualification alone is future work,
+  not the asserted CODE defect; the changed format lacks the required bound.
+
+E03 MANDATORY FULLRAW/ERROR-PREFIX DELIVERY REMAINS OPEN UNDER ORIGINAL ROLE.
+  retain_cell:625 sets attempted before fstat/quota/settlement/read. Unknown
+  fstat, unsettled producer, short/drifting read, quota refusal or a projection/
+  codec interruption retains honest partial/null with returned byte owners.
+  Produced but unread bytes are not fullraw; later cleanup can close that FD.
+  Supervisor.retain_produced_transport:856 similarly preserves partial prefixes,
+  and caller has bounded overflow/EOF/pending state rather than an invented full
+  stream. Both downstream fullraw validators correctly reject partial cells.
+  Honest rejection does not itself complete the mandatory produced-byte custody.
+  Failed inner/supervisor full serialization exits at verifier1501/supervisor1977
+  without a smaller substitute; original private objects end with the process.
+  There is no admitted original other-side durable fullraw route for the missing
+  bytes/error/cause record. Native rc/reap unknown is kept separate from raw
+  count/charge/retention unknown; no missing fact is coerced to zero or success.
+  This concerns exact original produced bytes and safe known-owner prefixes,
+  not recovery of arbitrary unavailable host memory or foreign native state.
+
+E04 CURRENT EVIDENCE/BYTE BINDING IS STALE (D2 AND HISTORICAL DELTA).
+  author/current19-read-plan.json sizes and totals, result.pinned_read_arithmetic
+  and inherited author whole6 base64 delta still belong to SOL060. Actual current
+  performing sizes are caller132543/supervisor101776/verifier73847/contract48792/
+  expectations10129/plain158. Newly recomputed physical19 is72427019;
+  supervisor subset7798174, verifier subset7770245;
+  hash_subsets=10*(7798174+7)+2*(7770245+7)=93522314;
+  fixed_nonrunning247476072 + running20959384 =268435456.
+  Differences from the copied plan: full19+6894, subsets+4881/+4869,
+  hash_subsets+58548, fixed+72923, running-72923.
+  Caller.install_plan dynamically reads current local lengths and computes
+  the correct prospective plan; its executable formula is not the stale data.
+  There is no demonstrated cap overflow or budget transfer here. The package's
+  claimed current ledger/delta evidence must be refreshed to these bytes. Own
+  independent arithmetic authenticates this review only and does not repair
+  the author's files or confer runtime/native aggregate resource fit.
+
+Original stock fence: precise obligations and exclusions
+
+The supplied normative scope admits exact installed stock Python3.14/Linux/libc/
+stdlib, current loader/binary/GPG/provider facts and explicitly reviewed roots.
+Original35 factories retain complete supported type/message/native/path/time
+operands within their original fences, including slot33's actual loader format
+families. Fullraw, native first/secondary causes, suppression/context links,
+supported stock bytes/containers and repeated aliases actually used by these
+roots, absence/UNKNOWN semantics, exact known native ownership and terminal
+delivery remain mandatory. All35 rows are retained, including six case stores
+per group, both copies of each cleanup problem, four terminal stages and exact
+outer/terminal/selected-DATA failures. The new graph does not clip messages.
+
+Graph ref() retains exception cycles by node index and val() retains stock
+nonprimitive byte/list/tuple/dict alias identities within each projection;
+primitive literals/float_hex keep values. errno/filename/filename2/notes may be
+null, cause/context may be absent, and BaseExceptionGroup remains optional,
+not a fabricated current native occurrence. Full traceback coordinates are
+projected; arbitrary frame locals are not an added normative payload. Native
+object_reconstruction=NOT_QUALIFIED is not, by itself, a Source bug in the
+original projection-only receipt role. Arbitrary custom values/C heaps/tuple
+reconstruction/universal hostile provider or foreign-FD adversaries are not
+invented to force a red verdict. E01-E03 are the actual original-domain prefix,
+shape and delivery gaps, not a pass-through of author C04 wording.
+
+Future facts, separate from CODE
+
+New genuine finite Root scope/clock/admission, fresh exact numeric19-int9 DATA,
+current Source/image/loader/ENV3/namespace/cache/diagnostic aliases and stock
+native factory bindings, same-held Linux terminal-proc owner transition, actual
+LAB861 readonly home/no-keyring, explicit-ring/trustdb/locks, agent and common.conf
+behaviors, actual original all6 full rc/raw/proc/resource/once-cleanup under
+unchanged caps. These were not run or self-minted here. Source-only static
+credits are not fresh SourceReady, Root image/admission or native acceptance.
+Whole CPU/RAM/implicit IO/native costs stay UNKNOWN_NOT_ZERO_NOT_PROVEN.
+
+Original obligations remain unchanged
+
+Original all6/all35/all3/F1/F2/D1/D2, complete selected19/numeric int9/mode fences,
+all30/F0..F11/full mandatory gates/live/build/install/negative controls remain.
+Historical A169 is ENDED RED: all6 invoked, ten pre-close Refusals, recorded
+unconfirmed-native-close list empty, absent changed fstat-field cause UNKNOWN.
+Root cleanup is not Source GREEN; no old clock/grant/approval is reused.
+Unsafe historical obligations are ABSTRACT_REQUIRED_NOT_RUN only,
+required=true/waiver=false/operational_payload=null. No unsafe fixture,
+generator, reproduction, exploit or waiver was created or executed.
+
+SourceReady=false; Root_admission=false; Root_Image=false; GO=false.
+Compiler/ELF/ABI/runtime/native/Root/GPG/Node/live/gates/build/install NOT_RUN.
+The review is complete; current Source closure remains rejected for E01-E04.

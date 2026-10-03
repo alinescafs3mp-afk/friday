@@ -1,0 +1,18 @@
+{
+  "files": 12,
+  "dirs": 2,
+  "pathset": [
+    "REVIEW.txt",
+    "evidence/current-source-rejoin.json",
+    "evidence/effects-and-costs.json",
+    "evidence/final-external-snapshot.json",
+    "evidence/full-gapless-parts.json",
+    "evidence/initial-pin-checks.json",
+    "evidence/literal-context-rejoin.json",
+    "evidence/review-matrix.json",
+    "manifest.json",
+    "pathset.json",
+    "received.json",
+    "result.json"
+  ]
+}

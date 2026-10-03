@@ -1,0 +1,62 @@
+{
+  "schema": "friday.sol092.qualification-and-costs.v1",
+  "resources": {
+    "deadline_sec": 3600,
+    "seal_sec": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 33554432,
+    "local": 4,
+    "children": 0,
+    "network": 0,
+    "retry": 0,
+    "friday": 0
+  },
+  "original_pool_obligations": {
+    "body": 80000000,
+    "metadata": 2000000,
+    "whole_output": 33554432,
+    "whole_read": 40960000000,
+    "whole_RAM": 8589934592,
+    "FD": 128,
+    "workers": 4,
+    "original_clocks_and_gates": true,
+    "all_original_cases_required": true,
+    "unsafe_required_no_waiver": true
+  },
+  "known_primary_pinned_and_Source_read_bytes": 32163192,
+  "known_read_scope": "Two full input-dedup277 SHA9 passes, two actual source/original/old-tree literal-partition/hash passes, exact original2 source cache read196278B and original-obligations38970B. Source utility fs.readFile of input/materialization, diagnostic sed/jq/diff/protocol/library reads and repeated metadata are additional and not fully aggregated. This subtotal is NOT a whole-read PASS or zero for unknown.",
+  "additional_host_IO_and_full_peak_RAM": "NOT_FULLY_AGGREGATED_UNKNOWN_NOT_ZERO",
+  "Source_product_IO_CPU_RSS_allocator_destructor_C2": "UNKNOWN_NOT_ZERO_NOT_PROVEN; Source/Root/native never executed",
+  "Source_freeze_utc": "2026-10-03 14:07:58 UTC",
+  "Source_deadline_limit_sec": 3000,
+  "seal_reserve_sec": 600,
+  "children_created": 0,
+  "network_calls": 0,
+  "friday_calls": 0,
+  "Source_execution": 0,
+  "Root_execution": 0,
+  "Source_AST_parser_import_compiler_preprocess_eval_exec_tests_native_archive_GPG": 0,
+  "source_budget_formulas": "Original formulas/bounds retained as constraints, not measured numerical whole fit. Additional original dup2 row reserved before fork in same hold; total FD128 count unchanged, numeric descriptor domain not narrowed.",
+  "mandatory_qualifications": {
+    "independent_connected_Source_review": "REQUIRED_NOT_RUN",
+    "syntax_AST_parser": "NOT_RUN_SCOPE_PROHIBITION",
+    "compiler_ELF_ABI": "REQUIRED_NOT_RUN",
+    "image_stock_prescript_provider_grants_clocks": "REQUIRED_NOT_RUN",
+    "Root_admission": "NOT_GRANTED",
+    "both_full_body_native_ends": "CODE_OPEN",
+    "whole_C2": "UNKNOWN_NOT_ZERO",
+    "all_original_positives_negatives_controls": "REQUIRED_NOT_RUN",
+    "all_new20_abstract_controls": "REQUIRED_NOT_RUN",
+    "enabled_build_install_restore_rollback_live_independent_release": "REQUIRED_NOT_RUN"
+  },
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false,
+    "operational_payload": null
+  }
+}

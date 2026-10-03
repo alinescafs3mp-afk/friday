@@ -1,0 +1,116 @@
+{
+  "lifecycle": "LIFECYCLE assignment=ASTRA-E4-OWNER-GITHUB-CHECKPOINT-PRIVACY-SAFETY-REVIEW-A194 generation=1 context=fresh owner_scope=turn",
+  "schema": "friday.owner.github.checkpoint-publication-review.v1",
+  "assignment": "ASTRA-E4-OWNER-GITHUB-CHECKPOINT-PRIVACY-SAFETY-REVIEW-A194",
+  "generation": 1,
+  "accepted_msk": "2026-10-02T16:18:23+03:00",
+  "review_completed_msk": "2026-10-02T16:27:50.889338+03:00",
+  "selection": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-GITHUB-CHECKPOINT-BACKUP-SELECTION-20261002.json",
+    "bytes": 541853,
+    "sha256": "6ec6d5abf9e55734bfb58e187a68fb44d4a413cb7863d5ce624a88f083ffbf47"
+  },
+  "decision": "UNSAFE_AS_SELECTED_EXCLUDE_LISTED_ENTIRE_FILES",
+  "remaining_publication_decision": "ALLOW_INERT_CHECKPOINT_AFTER_EXACT_EXCLUSIONS",
+  "scope": "Publication/privacy review only. No Source/runtime/gate/release acceptance.",
+  "coverage": {
+    "entries": 768,
+    "unique_source_paths": 753,
+    "unique_archive_paths": 768,
+    "bytes": 41619288,
+    "utf8_entries": 768,
+    "fullSHA9_pass": 768,
+    "fullSHA9_fail": 0,
+    "final_source9_metadata_mismatches": 0,
+    "method": "Full pinned bytes read as inert UTF-8 text; bounded text/JSON lexical scan followed by targeted semantic projections. Supplied code never imported, compiled, executed, or tested."
+  },
+  "privacy": {
+    "actual_credentials_identified": 0,
+    "private_personal_data_identified": 0,
+    "credential_like_findings": "A TEST_TOKEN constant is a synthetic fixture marker; schema/protocol token fields are not authentication values. Apparent email occurrences are a systemd cgroup unit marker. Synthetic cryptographic test generators are not live private credentials.",
+    "no_secret_values_reproduced": true
+  },
+  "content": {
+    "excluded_count": 5,
+    "excluded_bytes": 277946,
+    "remaining_entries": 763,
+    "remaining_bytes": 41341342,
+    "operational_excerpts_reproduced": false,
+    "abstract_required_not_run_records_allowed": true,
+    "ordinary_negative_validation_and_recording_model_code_distinguished_from_operational_hostile_specimens": true,
+    "encoded_metadata": "Hex byte-delta evidence inspected as inert JSON only, not decoded or executed."
+  },
+  "source_only_semantics": {
+    "structured_selected_JSON_GO_true_findings": 0,
+    "publication_is_not_execution_or_qualification": true,
+    "GO": false,
+    "partial_package_warning": "Selected original seals/closures reference the full original package including exclusions. Published reduced backup must be explicitly labelled a partial inert checkpoint, preserving original proof provenance without asserting a complete executable package or successful gate."
+  },
+  "exclusions": [
+    {
+      "index": 603,
+      "source_path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "archive_relative_path": "work-packages/Browser-current209/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "category": "operational_historical_hostile_fixture_and_protocol_forgery_reproduction",
+      "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+      "bytes": 78027
+    },
+    {
+      "index": 677,
+      "source_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/harness_selfcheck.py",
+      "archive_relative_path": "work-packages/Sender-current96/Source54/tests/harness_selfcheck.py",
+      "category": "operational_audit_fence_bypass_and_hostile_hook_probe_bodies",
+      "sha256": "20cf1bf2d232a8093306c720cc1c75e3adbc9e3dd67fc159960f26482f5a4295",
+      "bytes": 47038
+    },
+    {
+      "index": 682,
+      "source_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_archive.py",
+      "archive_relative_path": "work-packages/Sender-current96/Source54/tests/test_archive.py",
+      "category": "operational_hostile_archive_path_link_and_expansion_fixture_generator",
+      "sha256": "ed4996cb5dc3865b231702ee81b7751260b6d428b1af4b9a680fde410d318546",
+      "bytes": 25422
+    },
+    {
+      "index": 687,
+      "source_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_install_recovery.py",
+      "archive_relative_path": "work-packages/Sender-current96/Source54/tests/test_install_recovery.py",
+      "category": "operational_install_journal_authority_lineage_forgery_and_substitution_reproduction",
+      "sha256": "b9d7a634f1e63b077cbfcf561e3e081e169579f702c871a48b6b6ba394c49673",
+      "bytes": 79615
+    },
+    {
+      "index": 689,
+      "source_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_manifest.py",
+      "archive_relative_path": "work-packages/Sender-current96/Source54/tests/test_manifest.py",
+      "category": "operational_startup_hook_and_filesystem_identity_substitution_fixture_bodies",
+      "sha256": "1202130c8f44bc4288cb3df77f70fce0a4e5f0be4f1b71bf62b01a8ca1cd21bc",
+      "bytes": 47844
+    }
+  ],
+  "resource_accounting": {
+    "limits": {
+      "wall_seconds": 900,
+      "read_bytes": 134217728,
+      "RAM_bytes": 1073741824,
+      "local_parallelism": 4,
+      "supplied_children": 0,
+      "network": 0,
+      "retries": 0
+    },
+    "accounted_reader_bytes": 99911687,
+    "pre_scan_selection_reads_and_initial_sed_bytes": "Additional <=1100000 bytes; aggregate safely below 128MiB",
+    "whole_RAM": "UNKNOWN_NOT_ZERO",
+    "whole_IO": "UNKNOWN_NOT_ZERO",
+    "whole_token_usage": "UNKNOWN_NOT_ZERO",
+    "aggregate_tool_output": "UNKNOWN_NOT_ZERO; bounded individual outputs, no source bodies in artifacts",
+    "long_scan_readers_AS_limit_bytes": 1073741824,
+    "diagnostic_shell_tail_errors": 2,
+    "diagnostic_shell_tail_error_effect": "Two successful inert focused reads had an extra here-doc terminator treated as a missing shell command. No supplied code ran; no source mutation or lost scan coverage."
+  },
+  "scope_exclusions": [
+    "No addendum read; fresh A195 owns separate added selection.",
+    "No secrets/auth bindings or unrelated files accessed.",
+    "No original source or clone modifications; no archive handling, supplied execution, network, native queue, model, or service changes."
+  ]
+}

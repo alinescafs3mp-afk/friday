@@ -1,0 +1,35 @@
+# Data-only bothside validation. Exact original table/order/cause is separate.
+def a171_validate_input(data,meta,need):
+    args=data["arguments"];consumer=meta["consumer"];case=data["id"]
+    if data["producer"]!="a171_actual":return
+    schemas={"sealed_bytes":{"parent","relative","sha256","cap"},
+        "require_absent_target":{"parent","relative"},"RetainedTree.check":{"parent","inventory"},
+        "BoundedOutput/G1.Output.check/create":{"parent","relative","raw_hex"},
+        "R4.guarded_digest":{"parent","relative","cap","sha256"},
+        "ca_context/R4.guarded_digest":{"parent","relative","cap","sha256"},
+        "ca_context/SSLContext.load_verify_locations":{"parent","relative","cap","sha256"},
+        "G1.resources":set(),"acquisition_resources":set(),
+        "Supervisor.runtime_preflight":{"parent","manifest_sha256"},
+        "Supervisor.cgroup_values":{"parent"},"Supervisor.HeldSource.bytes":{"parent","relative","sha256"},
+        "terminal_bytes":{"value"},"Run.guard":set()}
+    wanted=schemas.get(consumer,set())
+    if consumer=="RetainedTree.check" and case!="retained_positive":wanted=wanted|{"mutation_hex"}
+    if consumer=="emit_terminal" and case in ("terminal_output_path","terminal_sink_blocked"):wanted={"value"}
+    if meta["owned_children"]:wanted=set()
+    need(type(args) is dict and set(args)==wanted,"A171_BOTHSIDE_EXACT_TYPED_OPERANDS")
+    if "parent" in args:
+        need(type(args["parent"]) is str and len(args["parent"])<=256 and
+            args["parent"].startswith("/var/tmp/astra-e4-browser3-a061-offline-") and
+            os.path.dirname(args["parent"])=="/var/tmp","A171_ORIGINAL_OWNED_INPUT_SCOPE")
+    if "relative" in args:
+        need(type(args["relative"]) is str and len(args["relative"])<=256 and
+            all(part not in ("",".","..") for part in args["relative"].split("/")),"A171_OWNED_PATH_OPERAND")
+    for key in ("sha256","manifest_sha256"):
+        if key in args:need(type(args[key]) is str and len(args[key])==64 and
+            all(ch in "0123456789abcdef" for ch in args[key]),"A171_TYPED_SHA_OPERAND")
+    if "cap" in args:need(type(args["cap"]) is int and 0<=args["cap"]<=2147483648,"A171_EXACT_INTEGER_CAP")
+    for key in ("raw_hex","mutation_hex"):
+        if key in args:need(type(args[key]) is str and len(args[key])<=524288 and
+            len(args[key])%2==0 and all(ch in "0123456789abcdef" for ch in args[key]),"A171_OWNED_INERT_BYTES")
+    if "inventory" in args:need(type(args["inventory"]) is dict and
+        args["inventory"].get("root")==args["parent"]+"/held","A171_ORIGINAL_RETAINED_INPUT_DOMAIN")

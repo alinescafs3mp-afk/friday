@@ -1,0 +1,37 @@
+{
+  "schema": "friday.sol060.original3-F1-F2-connected.v1",
+  "all3": [
+    {
+      "id": "A16901",
+      "credit": "typed actual phase resources+telemetry bothside unchanged; error graph extended",
+      "future_actual": "NOT_RUN"
+    },
+    {
+      "id": "A16902",
+      "credit": "--no-keyring only first2 / explicit original rings other4; authority/rc/fingerprint/signature/body/archive/negative checks unchanged",
+      "LAB8614_actual_readonly_agent_trustdb_commonconf": "NOT_RUN"
+    },
+    {
+      "id": "A16903",
+      "credit": "caller terminal exact owned proc generation immutable_input9 versus scoped proc retirement token unchanged",
+      "historical_RED10_preclose_Refusals": "UNCHANGED; native unconfirmed-close empty; missing field UNKNOWN",
+      "future_proc_provider": "NOT_RUN"
+    }
+  ],
+  "F1": {
+    "attempt": "allocation tokens/prospective history before effect; RETIRE_UNKNOWN before close; old numeric caches removed; finite knownreturned cleanup",
+    "genuine_text_delta": true,
+    "full_bound_partial_constructor_native_retirement": "CODE_OPEN"
+  },
+  "F2": {
+    "attempt": "preowned full raw/writable/base64/produced countcharge/rc and original+secondary errors before close; no hashonly oversized replacement",
+    "bothside_receivers": "supervisor.validate_common_inner/caller.validate_fullraw_layers and reversible originalraw codecs",
+    "full_allprefix_inner32KiB_and_lifetime": "CODE_OPEN"
+  },
+  "D1": {
+    "GPG_CPU": 20,
+    "GPG_wall": 30,
+    "firstcall_dynamic_quota_max": 21845,
+    "no_executable_cap_increase": true
+  }
+}

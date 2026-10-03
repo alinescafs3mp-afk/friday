@@ -1,0 +1,310 @@
+{
+  "frozen_scope": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "new_source_paths": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure",
+    "old_Source_acceptance_transfer": false,
+    "old_runtime_transfer": false,
+    "original_all6_preserved": true,
+    "original_roles_and_grants_preserved": true,
+    "source_execution_or_import_or_compile_or_tests": false
+  },
+  "gaps": [
+    "Independent WHOLE exact sixfile Source review, including all35 closed normal/error shapes, full900-prefix/current factory bounds and 32/64KiB producer plus 2MiB whole fit",
+    "NEW actual Root materialization/identity9/independent installed image, loader/namespace/alias and stock message factory qualification; do not rebind old acceptance",
+    "Current stock no-keyring/explicit-keyring sixcall behavior under original0500home/NPROC0 and exact public authenticated Node oracles; LAB861 exact four readonly/agent/trustdb/common.conf gaps retained in continuation-LAB861-DATA.json",
+    "Exact Linux owned completed proc generation fstat owner transition/token relation under unchanged limits; old changedfield UNKNOWN",
+    "Only after admission: NEW all6 actual native run with complete raw custody/CPU/RAM/FD/output/error matrices, genuine partial credits, no old runtime transfer",
+    "Generic productGO/gates/globalRAM/globalimplicitIO remain ungranted"
+  ],
+  "lab863_status": "ERROR_RAW_ONCECLOSE_RETIREMENT_AUTHORED_NOT_RUN",
+  "matrices": {
+    "GPG_original6": {
+      "consumers": [
+        "verifier oracles",
+        "supervisor.validate_positive_inner",
+        "caller.validate_canonical"
+      ],
+      "doc_meaning": "--no-default-keyring without an alternate --keyring still uses default ring; --no-keyring suppresses all rings and overrides explicit rings",
+      "doc_pin": {
+        "path": "/usr/share/man/man1/gpg.1.gz",
+        "sha256": "84f8996b777c108987ee472fd1a820d607f1b937c30f034c6ddce4d8067e3884",
+        "size": 56529
+      },
+      "home_mode": "0500",
+      "labels": [
+        "show-raw-key",
+        "dearmor",
+        "check-self-signatures-and-bindings",
+        "positive-gpg",
+        "positive-gpgv-body",
+        "negative-same-path-changed-row"
+      ],
+      "native_option_behavior": "NOT_RUN; exact current qualified provider behavior must be independently established before effects",
+      "producer": "verifier.call",
+      "recipes": [
+        {
+          "calls": [
+            1,
+            2
+          ],
+          "ring": "--no-default-keyring AND --no-keyring; no explicit --keyring"
+        },
+        {
+          "calls": [
+            3,
+            4,
+            6
+          ],
+          "ring": "--no-default-keyring AND exactly one explicit --keyring on sealed own binary-key FD; --no-keyring absent"
+        },
+        {
+          "calls": [
+            5
+          ],
+          "ring": "stock gpgv explicit --homedir + --keyring; --no-default-keyring and --no-keyring absent"
+        }
+      ],
+      "unchanged": [
+        "ENV3",
+        "unprivileged1000 credentials",
+        "no-options/noauto/crosscert",
+        "NPROC0",
+        "AS64MiB",
+        "CPU30",
+        "NOFILE128",
+        "CORE0",
+        "FSIZE32768",
+        "totalGPGoutput65536",
+        "six actual statuses, rc, reaping, fingerprints/primary/bindings/body, samepath changedrowBADSIG, archive fullSHA"
+      ]
+    },
+    "clocks_and_cleanup": {
+      "actual_own_only": true,
+      "child_proof": "Strict held pidfd POLLIN/generation relation and actual same-TUI owned lineage; no HUPonly/ERR/NVAL exit, no foreignsignal",
+      "no_new_time_window": true,
+      "phases": "Original canonical end -25s; controls reserve5s and outerfinal20s; original single cleanup/terminal budget preserved",
+      "unknown_failure_sticky": true,
+      "whole_seconds": 900
+    },
+    "custody": {
+      "acquired_proc": "Exact registered original allocation object, generation lease, held proc device/inode/mode/uid/gid, original nine retained without refresh",
+      "full19": [
+        "prlimit",
+        "python",
+        "gpg",
+        "gpgv",
+        "ffi",
+        "supervisor",
+        "verifier",
+        "contract",
+        "bill",
+        "receipts",
+        "raw",
+        "key",
+        "archive",
+        "original_archive",
+        "accepted",
+        "materialized",
+        "caller",
+        "expectations",
+        "plain"
+      ],
+      "historical_field_gap": "A169 joins ten Refusal cells to completed trackedprocfd leases; raw does not retain changed final fstat field. uid/gid or other field-specific old cause remains UNKNOWN.",
+      "immutable_inputs": "All original acquired full9 plus exact component path/nonlink/sha rules unchanged; initial/subset/terminal fullSHA; no mutable policy token for byte inputs",
+      "numeric_protocol": "Retained stock JSON exact integers only; package author hash9 uses decimalstrings; no float/V8 identity conversion",
+      "old_accepted_materialized": "Historical immutable DATA pins retained, never newbytes authority. NEW independent current Root observation/materialization/admission required",
+      "retirement": "Original first-close retirement and leasegeneration/OWN object guards; no recycled alias close, unknown blindclose, retry, reopening, foreignsignal, clock renewal, or input relaxation",
+      "terminal_proc": "Only registered original tracked held proc lease: actual strict sameheld pidfd POLLIN plus detachment proof and exact OWN identity. Preserve all original9, capture separate actual terminal9 before first trackedclose. Same dev/ino/mode, acquiredowner pair or separately qualified Linux root0:0. Subsequent retirement requires all9 exactly match terminal token."
+    },
+    "disjoint_publication": {
+      "artifact": "publication-bound.json",
+      "cap": 2097152,
+      "credit": "Stock metadata/schema width arithmetic ONLY. No fixture/payload/native tests; exact new closed normal/error shapes need independent whole Source review and current Root proof",
+      "fixed19_allowance": 32768,
+      "fixed19_symbolic_bound": 28717,
+      "fixed_metadata": 489472,
+      "margin": 1831,
+      "new_all_optional_slot_symbolic_bound": 4603,
+      "new_slot_residual": 517,
+      "owned32_slot_bytes": 5120,
+      "payload_sum": 1605848,
+      "payloads": [
+        294948,
+        294948,
+        294948,
+        262180,
+        262180,
+        196644
+      ],
+      "retained": "All rawstdout+overflow/stdout64KiB, rawstderr+overflow/stderr32KiB, complete parsed64KiBsupervisor and duplicated32KiBverifier; fixed metadata once; observedpast+reservedfuture; no dedup/removal",
+      "total_with_newline": 2095321
+    },
+    "outer_resource": {
+      "AS_bytes": 134217728,
+      "CPU_seconds": [
+        60,
+        120
+      ],
+      "FD_cap": 256,
+      "FSIZE_and_whole_output": 2097152,
+      "consumer": "caller admission/current/RSS checks plus complete raw publication",
+      "current_fields": [
+        "VmSize_kib",
+        "VmRSS_kib",
+        "VmHWM_kib",
+        "VmPeak_kib"
+      ],
+      "missing": "Genuine unavailable sample remains explicit reason/null or sticky failure; not fabricated zero",
+      "peak_subtraction": false,
+      "phases": [
+        "entry",
+        "running_<each original6>",
+        "completed_<each original6>",
+        "terminal"
+      ],
+      "producer": "caller.sample_outer",
+      "raw_HWM_cap_kib": 131072,
+      "raw_self_fields": "All16 original getrusage fields; ru_utime/stime causal numeric lexemes remain in complete original raw evidence"
+    },
+    "performing_read": {
+      "actual_source_full19_bytes": 72386093,
+      "artifact": "performing-read-budget.json",
+      "not_zero": "sameheldpoll/fstat/native and implicitIO UNKNOWN; Source-author task resource caps are not performing grants",
+      "originalcap_bytes": 268435456,
+      "retirement_added_proc_content_reads": 0,
+      "running_bucket_bytes": 21478186,
+      "total_reserved_bytes": 268435456
+    },
+    "raw_and_errors": {
+      "all_wait4": "Caller actual waits retain all16 raw rusage fields. Reaped-by-descendant reason/null preserved; no invented wait4. Supervisor parent raw RSS and verifier raw own/largestchild/current values remain full.",
+      "complete_errors": "No str(exc)/str(why) slices remain in new caller/supervisor/verifier. Full producer messages retained; original finite caps remain, overflow causes incomplete refusal, never acceptance or field removal.",
+      "descriptor_errors": "Both original complete descriptor closure copies retained, exact FD+leasegeneration+errno/type; old failures are pre-close Refusal, not failed os.close syscalls",
+      "original_all35": "all35-successor-matrix.json explicitly covers complete35 cells; unchanged historical map preserved in evidence/all35-producer-consumer-matrix.json",
+      "original_raw": "evidence/source-stdout.native remains byte-for-byte authoritative for all numeric lexemes, presence, complete nested raw/status/stderr/causal messages",
+      "per35_source_bound": "Full message<=900 ASCII; class/native32; path160; clock32; stock namespace/loader/factory prefixes and JSON two-byte escape domain must be qualified for exact NEW bytes. All35 two copies/cells as originally disjoint.",
+      "producer_fit": "Original inner32KiB/supervisor64KiB bounds unchanged. NEW complete normal/error schemas and source prefixes require whole review plus actual newqualification; historical small receipts do not prove newworstcase fit"
+    },
+    "supervisor_resource": {
+      "AS_soft_hard_bytes": [
+        33554432,
+        117440512
+      ],
+      "NOFILE_soft_hard": [
+        64,
+        128
+      ],
+      "consumer": "caller.supervisor_resources",
+      "gpg_fork_transient_cap_kib": 114688,
+      "parent_cap_kib": {
+        "other": 114688,
+        "startup_as_negative": 65536
+      },
+      "parent_wait4": "actual raw_wait4_ru_maxrss_kib <=114688 and genuine live count join; no inherited prefix subtraction",
+      "producer": "supervisor.sample_self / observe_parent",
+      "schema": "friday.e4.node.supervisor-resources.a172.v1",
+      "self_cap_kib": 32768,
+      "self_cell_fields": [
+        "current",
+        "ru_maxrss_self_kib",
+        "elapsed_seconds",
+        "enforced_as_soft_hard_bytes",
+        "enforced_nofile_soft_hard"
+      ],
+      "self_phases": [
+        "bootstrap_startup",
+        "last_live_supervisor",
+        "postexit"
+      ],
+      "telemetry": {
+        "last_fd_counts": {
+          "caps": [
+            64,
+            128,
+            128
+          ],
+          "fields": [
+            "supervisor",
+            "verifier",
+            "gpg",
+            "optional gpg_missing_reason"
+          ],
+          "observed_sum_cap": 320,
+          "unknown": "GPG null requires actual reason; observed-only sum excludes unknown and does NOT prove unknown=zero"
+        },
+        "last_live_aggregate": {
+          "fields": [
+            "supervisor",
+            "verifier",
+            "gpg",
+            "as_kib",
+            "fd_counts"
+          ],
+          "gpg_samples": "0 or1 actual pre-FD-observation snapshots; no fake null->live conversion",
+          "join": "as_kib equals exact captured current VmSize sum and preserved scalar; fd_counts equals exact preserved typed FD tuple",
+          "not_proven": "Not atomic all-role globalRAM lifetime proof; independent actual Root qualification remains mandatory"
+        },
+        "last_observed_aggregate_as_kib": {
+          "cap": 262144,
+          "type": "integer"
+        },
+        "last_parent_sample": {
+          "fields": [
+            "sample",
+            "missing_reason",
+            "complete_live_samples"
+          ],
+          "missing": "actual nonempty reason required for null; count genuine positive"
+        }
+      }
+    },
+    "verifier_resource": {
+      "caps_kib": {
+        "aggregate_raw_self_child_supervisor": 262144,
+        "largest_child": 114688,
+        "other": 114688,
+        "startup_as": 65536
+      },
+      "consumers": [
+        "supervisor.validate_common_inner",
+        "caller.validate_canonical"
+      ],
+      "exact_fields": [
+        "ru_maxrss_self_kib",
+        "ru_maxrss_largest_child_kib",
+        "current_proc_self_status",
+        "elapsed_seconds"
+      ],
+      "negative_entry": "Guard before JSON/resource initialization. Inner receipt/resource null + exact actual reason; absent is not zero",
+      "producer": "verifier.resources",
+      "schema": "friday.e4.node.verifier-resources.a172.v1",
+      "startup_controls_phases": [
+        "startup",
+        "before_cleanup"
+      ],
+      "verify_node_phases": [
+        "startup",
+        "before_call_1",
+        "before_call_2",
+        "before_call_3",
+        "before_call_4",
+        "before_call_5",
+        "before_call_6",
+        "verification_end",
+        "before_cleanup"
+      ]
+    }
+  },
+  "schema": "friday.a172.complete-connected-resource-raw-custody-error-matrix.v1",
+  "status": "INERT_SOURCE_AUTHORED_NO_RUNTIME_OR_ROOT_CREDIT",
+  "validation": {
+    "Root_image": "NOT_PROVEN",
+    "Source_review": "NOT_INDEPENDENT; next required independent WHOLE exactbytes review",
+    "exploitation_or_reproduction_payloads": "NONE",
+    "gates": "NOT_RUN",
+    "manual_diff_review": "All substantive caller/supervisor/verifier/contract changes read as inert TEXT; resource sample->consumer arithmetic join, keyless/keyed exactcall join, proc retirement provenance and firstclose guard reviewed",
+    "runtime": "NOT_RUN",
+    "stock_metadata_relations": "candidate-text-relations.json actual raw-text/JSON size/hash/schema matches ONLY; not executable Source tests"
+  }
+}

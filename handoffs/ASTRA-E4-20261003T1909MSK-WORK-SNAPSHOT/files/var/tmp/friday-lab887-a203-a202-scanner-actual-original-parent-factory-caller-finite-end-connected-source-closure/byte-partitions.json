@@ -1,0 +1,95 @@
+{
+  "assignment": "ASTRA-E4-A203-A202-SCANNER-ACTUAL-ORIGINAL-PARENT-FACTORY-CALLER-FINITE-END-CONNECTED-CLOSURE-LAB-887",
+  "generation": 1,
+  "parts": [
+    {
+      "after": {
+        "bytes": 190300,
+        "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/native/source_owner.c",
+        "sha256": "92a7a8298f4c3390e83b33936755f63e0f608bdbff878f379ddbd9f960fa3493",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 188353,
+        "path": "/var/tmp/friday-astra-a202-sol071-scanner-original-preinit-guard-task-start-and-final-receiver-connected-source/native/source_owner.c",
+        "sha256": "1220d0d6e83ac4668a27e5f415620dc80c495a538c888ca78358edfc0f6bbda3",
+        "stable9": true
+      },
+      "name": "native/source_owner.c",
+      "parts": [
+        {
+          "after_length": 120247,
+          "after_offset": 0,
+          "after_sha256": "fd9ff5626ecee1c2383e2c6ca59adc48688fbd10919db726fa9e50f1168e8c70",
+          "before_length": 120247,
+          "before_offset": 0,
+          "before_sha256": "fd9ff5626ecee1c2383e2c6ca59adc48688fbd10919db726fa9e50f1168e8c70",
+          "kind": "equal"
+        },
+        {
+          "after_length": 2186,
+          "after_offset": 120247,
+          "after_sha256": "efad5939e25ebcada40188cbcd4ff4514669de5d9692eb35ff147c81096a5051",
+          "before_length": 1432,
+          "before_offset": 120247,
+          "before_sha256": "a59a1eff660f4547218d9333210416f5ecd8466988cadd871ea618de1484e89c",
+          "kind": "replace"
+        },
+        {
+          "after_length": 52067,
+          "after_offset": 122433,
+          "after_sha256": "da86b484ca42fe94337bff8957131922e9a5ac13fa0ad1153452d6508b8c08c8",
+          "before_length": 52067,
+          "before_offset": 121679,
+          "before_sha256": "da86b484ca42fe94337bff8957131922e9a5ac13fa0ad1153452d6508b8c08c8",
+          "kind": "equal"
+        },
+        {
+          "after_length": 1999,
+          "after_offset": 174500,
+          "after_sha256": "9f4298bbbc58a3927de3a93e9edd61eab10a7178c6f43ac6e8f518d11c9c99b9",
+          "before_length": 806,
+          "before_offset": 173746,
+          "before_sha256": "b2d94e73882a6c8c782154acb4c681ded8ce9466330f8dacf88d04779c2d8941",
+          "kind": "replace"
+        },
+        {
+          "after_length": 13801,
+          "after_offset": 176499,
+          "after_sha256": "e80fe33840745611bc8ef7cebdb0d307aa381a7417c540d90a21bbccbd4d543e",
+          "before_length": 13801,
+          "before_offset": 174552,
+          "before_sha256": "e80fe33840745611bc8ef7cebdb0d307aa381a7417c540d90a21bbccbd4d543e",
+          "kind": "equal"
+        }
+      ]
+    },
+    {
+      "after": {
+        "bytes": 3074,
+        "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/native/scanner_selected_parent.h",
+        "sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee",
+        "stable9": true
+      },
+      "before": {
+        "bytes": 3074,
+        "path": "/var/tmp/friday-astra-a202-sol071-scanner-original-preinit-guard-task-start-and-final-receiver-connected-source/native/scanner_selected_parent.h",
+        "sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee",
+        "stable9": true
+      },
+      "name": "native/scanner_selected_parent.h",
+      "parts": [
+        {
+          "after_length": 3074,
+          "after_offset": 0,
+          "after_sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee",
+          "before_length": 3074,
+          "before_offset": 0,
+          "before_sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee",
+          "kind": "equal"
+        }
+      ]
+    }
+  ],
+  "schema": "friday.astra.actual-byte-partitions.v1"
+}

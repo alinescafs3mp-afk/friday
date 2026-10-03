@@ -1,0 +1,991 @@
+{
+  "schema": "friday.e4.sol079.node.ordinary-acquire-unknown-errors.connected-source.input.v1",
+  "assignment": "ASTRA-E4-SOL078-NODE-ORDINARY-DUP2-UNCERTAINTY-ORIGINAL-ERRORS-CONNECTED-CLOSURE-SOL079",
+  "generation": 1,
+  "owner": "Astra active Lead Architect epoch4",
+  "candidate": "Frozen product cecd28a/0.208.64/schema50 unchanged; new own inert Node Source package only",
+  "before": {
+    "manifest": {
+      "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/manifest.json",
+      "bytes": 1745,
+      "sha256": "39e0cff4c0173219c2d6a732d53e3fe13917c420be93b06304e69065ced1ff9d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226744",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1745",
+        "1790991216949704390",
+        "1790991216949704390"
+      ],
+      "stable9": true
+    },
+    "received": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB891-NODE-SOURCE-RESULT-RECEIVED-20261003.json",
+      "bytes": 22482,
+      "sha256": "f0b1832b6389bc988645aacbce4e23c130ec881da112c86512474da6a714fb76",
+      "identity9_decimal_strings": [
+        "2050",
+        "8531031",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "22482",
+        "1790991867014075114",
+        "1790991867063077931"
+      ],
+      "stable9": true
+    },
+    "owned13": [
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/manifest.json",
+        "bytes": 1745,
+        "sha256": "39e0cff4c0173219c2d6a732d53e3fe13917c420be93b06304e69065ced1ff9d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226744",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1745",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+        "bytes": 191129,
+        "sha256": "5c47c9b2cf13f4e002f7c06cf1f7f99ed56b0ab54e6e42bfc86597e70c45217d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226733",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "191129",
+          "1790991216948704333",
+          "1790991216948704333"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/evidence/findings.json",
+        "bytes": 3394,
+        "sha256": "5d308163efab475d426ea525d7666517311723a709e2e9a5ef6aae5d582af69b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226739",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3394",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/evidence/partitions.json",
+        "bytes": 65020,
+        "sha256": "5d57e186310a793c3cc41b6f980ece10ab4426b4873c944643a825cfe775ef0b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226740",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "65020",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/evidence/pin-checks.json",
+        "bytes": 6192,
+        "sha256": "014063425d3a37f958b4e5896be3182b42ca73844b4653eab27bb3a61a76dbb2",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226741",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6192",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/expectations.json",
+        "bytes": 12120,
+        "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226737",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12120",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/launch-contract.json",
+        "bytes": 51517,
+        "sha256": "a9745e8b13656d1fda2f1229962ccb1f1cb94109197c9e916cfc71140ac4f1de",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226736",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51517",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226738",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/pathset.json",
+        "bytes": 1451,
+        "sha256": "8243133be72790c309f84380710e5c7b6061058c1fab765dc1054b6160604ff0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226742",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1451",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/result.json",
+        "bytes": 2621,
+        "sha256": "7f4434661bfc6460541f6934875d3704f89510acf2c3a0d220ee9c610bede095",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226743",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2621",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+        "bytes": 155024,
+        "sha256": "660477909be790ceb9f7872c2dbe57d2d2646470823f4f210fe30f6dec209607",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226734",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "155024",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+        "bytes": 124618,
+        "sha256": "a9cf2df726de2eff7fbd7ce77759540686467ea4761f91e1bed7af8244c33c39",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226735",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "124618",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/publish/payload.json",
+        "bytes": 99,
+        "sha256": "3ef29ecea76b58dd2bb08cbb65656105dc98f8d4e11963055695984b7139637a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226745",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "99",
+          "1790991216949704390",
+          "1790991216949704390"
+        ],
+        "stable9": true
+      }
+    ],
+    "actual6": [
+      {
+        "name": "caller.py",
+        "before": {
+          "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/caller.py",
+          "bytes": 188629,
+          "sha256": "1c86a4b1141385a87967cb6a15dfa55fc24a643764603b46a6450d044f4df2e9",
+          "identity9_decimal_strings": [
+            "2050",
+            "3849492",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "188629",
+            "1790987976870479467",
+            "1790987976870479467"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+          "bytes": 191129,
+          "sha256": "5c47c9b2cf13f4e002f7c06cf1f7f99ed56b0ab54e6e42bfc86597e70c45217d",
+          "identity9_decimal_strings": [
+            "2050",
+            "4226733",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "191129",
+            "1790991216948704333",
+            "1790991216948704333"
+          ],
+          "stable9": true
+        },
+        "changed": true,
+        "parts": 45
+      },
+      {
+        "name": "expectations.json",
+        "before": {
+          "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/expectations.json",
+          "bytes": 12120,
+          "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+          "identity9_decimal_strings": [
+            "2050",
+            "3849496",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "12120",
+            "1790987976870479467",
+            "1790987976870479467"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/expectations.json",
+          "bytes": 12120,
+          "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4226737",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "12120",
+            "1790991216949704390",
+            "1790991216949704390"
+          ],
+          "stable9": true
+        },
+        "changed": false,
+        "parts": 1
+      },
+      {
+        "name": "launch-contract.json",
+        "before": {
+          "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/launch-contract.json",
+          "bytes": 51597,
+          "sha256": "4ca1514c1f6bfbf017144ec622aea135dac3670644de58d07e6aff47bdf39bd4",
+          "identity9_decimal_strings": [
+            "2050",
+            "3849495",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "51597",
+            "1790987976870479467",
+            "1790987976870479467"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/launch-contract.json",
+          "bytes": 51517,
+          "sha256": "a9745e8b13656d1fda2f1229962ccb1f1cb94109197c9e916cfc71140ac4f1de",
+          "identity9_decimal_strings": [
+            "2050",
+            "4226736",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "51517",
+            "1790991216949704390",
+            "1790991216949704390"
+          ],
+          "stable9": true
+        },
+        "changed": true,
+        "parts": 11
+      },
+      {
+        "name": "ordinary-surplus.txt",
+        "before": {
+          "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/ordinary-surplus.txt",
+          "bytes": 158,
+          "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+          "identity9_decimal_strings": [
+            "2050",
+            "3849497",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "158",
+            "1790987976870479467",
+            "1790987976870479467"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/ordinary-surplus.txt",
+          "bytes": 158,
+          "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+          "identity9_decimal_strings": [
+            "2050",
+            "4226738",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "158",
+            "1790991216949704390",
+            "1790991216949704390"
+          ],
+          "stable9": true
+        },
+        "changed": false,
+        "parts": 1
+      },
+      {
+        "name": "supervisor.py",
+        "before": {
+          "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/supervisor.py",
+          "bytes": 152193,
+          "sha256": "96ac9259e92f9812631ed093c0ef5db34fa3b3611e6c4931b486679eaa70e49b",
+          "identity9_decimal_strings": [
+            "2050",
+            "3849493",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "152193",
+            "1790987976870479467",
+            "1790987976870479467"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+          "bytes": 155024,
+          "sha256": "660477909be790ceb9f7872c2dbe57d2d2646470823f4f210fe30f6dec209607",
+          "identity9_decimal_strings": [
+            "2050",
+            "4226734",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "155024",
+            "1790991216949704390",
+            "1790991216949704390"
+          ],
+          "stable9": true
+        },
+        "changed": true,
+        "parts": 51
+      },
+      {
+        "name": "verifier.py",
+        "before": {
+          "path": "/var/tmp/friday-lab889-a206-sol072-node-actual-root-body-caller-both-decoders-finite-end-connected-implementation/verifier.py",
+          "bytes": 121795,
+          "sha256": "bec97b0b194f675738a1ab99fabd9311def266254be85d51dfc7d6ec7b769fca",
+          "identity9_decimal_strings": [
+            "2050",
+            "3849494",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "121795",
+            "1790987976870479467",
+            "1790987976870479467"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+          "bytes": 124618,
+          "sha256": "a9cf2df726de2eff7fbd7ce77759540686467ea4761f91e1bed7af8244c33c39",
+          "identity9_decimal_strings": [
+            "2050",
+            "4226735",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "124618",
+            "1790991216949704390",
+            "1790991216949704390"
+          ],
+          "stable9": true
+        },
+        "changed": true,
+        "parts": 49
+      }
+    ],
+    "current6_changed": 4,
+    "current6_equal": 2,
+    "gapless_partitions": 158,
+    "input": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB891-INPUT-20261003.json",
+      "bytes": 19231,
+      "sha256": "56bf1759735d0db71cf88cdcf776e11f739f796c53a641fffc068afac245f309",
+      "identity9_decimal_strings": [
+        "2050",
+        "8530637",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19231",
+        "1790990199826242093",
+        "1790990199887245599"
+      ],
+      "stable9": true
+    },
+    "run": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB891-RUN-20261003.json",
+      "bytes": 3778,
+      "sha256": "f23f1dfecdf5d81ad030f6144f2acc3e398952c817acb4f8bc729cdadee4d0ac",
+      "identity9_decimal_strings": [
+        "2050",
+        "8530674",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3778",
+        "1790990200025253531",
+        "1790990200072256233"
+      ],
+      "stable9": true
+    }
+  },
+  "original_scope_input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL078-INPUT-20261003.json",
+    "bytes": 22902,
+    "sha256": "cd0d5fa0136b1f98433097c16e7f98a74d390f1aeeddef933e6b7713737a2c2e",
+    "identity9_decimal_strings": [
+      "2050",
+      "8531032",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "22902",
+      "1790991949272803963",
+      "1790991949322806838"
+    ],
+    "stable9": true
+  },
+  "independent_review": {
+    "manifest": {
+      "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/manifest.json",
+      "bytes": 4706,
+      "sha256": "d9822693e00ad7116c44cd16d0b0e4604f524c39170d54ff2403f4f542b9b43c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226772",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4706",
+        "1790992501439482044",
+        "1790992501493485139"
+      ],
+      "stable9": true
+    },
+    "received": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL078-NODE-INDEPENDENT-SOURCE-RESULT-RECEIVED-20261003.json",
+      "bytes": 22739,
+      "sha256": "bcc29e2fb92a923b9e39dbb0c94215ba43d8c86643c8e200c18c33b84879aaab",
+      "identity9_decimal_strings": [
+        "2050",
+        "8531251",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "22739",
+        "1790992912602044135",
+        "1790992912652047001"
+      ],
+      "stable9": true
+    },
+    "owned11": [
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/manifest.json",
+        "bytes": 4706,
+        "sha256": "d9822693e00ad7116c44cd16d0b0e4604f524c39170d54ff2403f4f542b9b43c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226772",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4706",
+          "1790992501439482044",
+          "1790992501493485139"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/evidence/effect-and-author-accounting.json",
+        "bytes": 1745,
+        "sha256": "2ba311986326d36bcdd5176586a6a937bb435c4317697c80650d3adabb9ac803",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226769",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1745",
+          "1790992478179149093",
+          "1790992478179149093"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/evidence/final-external-snapshot.json",
+        "bytes": 117347,
+        "sha256": "88e5e61d11ba0fcd63d3340595a24799d923471ae75a29b2d188c5bb825bd977",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226771",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "117347",
+          "1790992449080481563",
+          "1790992478243152761"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/evidence/independent-census-and-partitions.json",
+        "bytes": 4599,
+        "sha256": "1dc9f8526f815991ec7da008fe63a1096cfe42501547a95b4f906f55d5b51373",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226754",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4599",
+          "1790992223868575556",
+          "1790992418234713910"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/evidence/intake.json",
+        "bytes": 12588,
+        "sha256": "41088e99bb1c63016770d495857ebef2a07baf9f856877cc53672541462da463",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226753",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12588",
+          "1790992065207468788",
+          "1790992065266472180"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/evidence/literal-source-site-pins.json",
+        "bytes": 10958,
+        "sha256": "071aee0884e5814beebb1e5ccfa9e0b20a62093b09c3138de04ff4d773cbf867",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226770",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10958",
+          "1790992418167710071",
+          "1790992418234713910"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/evidence/original-controls-current-binding-and-method-rejoin.json",
+        "bytes": 33027,
+        "sha256": "b0fb5ab5c8dc2adede0f85706d5ae3d6231af3b89b2f89d5a661afb829e3afc7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226756",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "33027",
+          "1790992302040055256",
+          "1790992418233713853"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/evidence/original-pins-and-obligations.json",
+        "bytes": 124993,
+        "sha256": "30e5631d85e5bab4d47f4788ca30c777569da5893ca5b529fc93f78b572d93ca",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226755",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "124993",
+          "1790992223868575556",
+          "1790992418233713853"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/evidence/required-controls-and-actual-routes.json",
+        "bytes": 4144,
+        "sha256": "59766cee03932bd4b4905d76d523771ddcead420d62e75ad8c7a10404dd1a03c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226768",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4144",
+          "1790992448862863181",
+          "1790992448862863181"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/findings.json",
+        "bytes": 13281,
+        "sha256": "651f566baccb45ed02a5dd836b25f48883fa8d8ce7c1b4df4f0a8f2326dce854",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226767",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13281",
+          "1790992389492066792",
+          "1790992418234713910"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol078-lab891-node-ordinary-end-timer-typed-fd-append-independent-source-review/received.json",
+        "bytes": 970,
+        "sha256": "55a09829536cc8713b2634e6f4a5f662d78abf42207141e23ce8145324615d95",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226751",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "970",
+          "1790992065206468731",
+          "1790992065266472180"
+        ],
+        "stable9": true
+      }
+    ],
+    "result": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL078-RESULT.json",
+      "bytes": 1802,
+      "sha256": "3d30efa8f09898809f33230e36fc4c637ef99241b979d9ea6c9b59dee4b473fb",
+      "identity9_decimal_strings": [
+        "2050",
+        "8531141",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1802",
+        "1790992527808993182",
+        "1790992527857995990"
+      ],
+      "stable9": true
+    },
+    "findings": {
+      "schema": "friday.sol078.lab891.independent-scoped-source-findings.v1",
+      "assignment": "ASTRA-E4-LAB891-NODE-ORDINARY-END-TIMER-TYPED-FD-APPEND-INDEPENDENT-REVIEW-SOL078",
+      "generation": 1,
+      "decision": "REJECT_CONNECTED_ORDINARY_CLOSURE_WITH_SCOPED_CREDITS",
+      "review_complete": true,
+      "non_author_of_LAB891": true,
+      "prior_Sol072_authorship_not_own_whole_acceptance": true,
+      "scope": "Only changed LAB891 ordinary Python Source4/current6, relevant original methods/bindings/control obligations; not a repeat whole product/native-body audit and not denied SOL075 operation.",
+      "review_key": "Actual three main endpoints -> locked append and both existing transport consumers -> typed FD acquisition and sticky close -> terminal variables before frame -> original absolute timer and cleanup",
+      "snapshot": {
+        "current6_changed": 4,
+        "current6_equal": 2,
+        "gapless_partitions": 158,
+        "owned13_exact": true,
+        "unchanged_actual_method_rejoins": 45,
+        "original35": 35,
+        "original_cases": 6,
+        "original_controls": 3,
+        "original_GPG_calls": 6,
+        "current_selection": 19
+      },
+      "scoped_credits": [
+        {
+          "id": "S078-D1",
+          "credit": "SCOPED_CREDIT_TERMINAL_ORDER_AND_ACTUAL_VARIABLES",
+          "sites": {
+            "caller": "caller.py:3886-3934; finish_outside_end:813-885",
+            "supervisor": "supervisor.py:3140-3188; finish_outside_end:470-542",
+            "verifier": "verifier.py:2615-2668; finish_outside_end:525-597"
+          },
+          "fact": "All three reached main endpoints set their final fields first, call finish_outside_end before publish_preowned_then_frame and encode, then commit once. Helper invalidates R.qualified_node_only/R.qualified, recognized success status and the ACTUAL global qualified/verified variables, not merely a detached dictionary. The original late helper after already committed frame is gone.",
+          "limits": "Only the actual end-observation failure flags/order. Original native error custody, subsequent fallible publication/costs/whole native ends remain OPEN. Not an assertion that an already physically emitted frame can be changed."
+        },
+        {
+          "id": "S078-D2",
+          "credit": "SCOPED_CREDIT_REMOVED_EXPLICIT_END_TIMER_DISABLE",
+          "sites": {
+            "caller": "caller.py:813-885,3596-3598; child-only disarm2939",
+            "supervisor": "supervisor.py:470-542,2974-2975; child-only disarm2238",
+            "verifier": "verifier.py:525-597,2410-2411"
+          },
+          "fact": "Changed finish_outside_end has no setitimer(ITIMER_REAL,0), no new end or deadline refresh and no raw close claiming a completed native end. Original main arming/due and the pre-exec child-only disarm are unchanged. disposition honestly remains NOT_RETIRED.",
+          "limits": "timer_still_enforcing=True is a literal report, not observed timer state or a full finite-end proof. One-shot expiration, error/cleanup paths and actual both outside native ends remain REQUIRED_NOT_RUN/CODE_OPEN; no claim that a caught expired alarm is still armed."
+        },
+        {
+          "id": "S078-D3",
+          "credit": "SCOPED_CREDIT_NORMAL_APPEND_RESERVATION",
+          "sites": {
+            "caller": "caller.py:705-762",
+            "supervisor": "supervisor.py:362-419",
+            "verifier": "verifier.py:417-474"
+          },
+          "fact": "Exactly equal literal implementation all three uses lockf LOCK_EX|LOCK_NB with whole-file start0 and length0; contested wait uses ORIGINAL due() then0.01s, no deadline update. fstat/current extent, marker, per-process relation/prefix delta, unchanged32768 aggregate cap and pwrite cursor are inside lock; finally unlocks. No flock or LOCK_OFD substitute. Successful source path is serialized by the explicitly intended per-process POSIX record-lock protocol.",
+          "limits": "Installed lock behavior/interprocess overlap not executed. Error-prefix original object retention fails E02 below. Locks, marker and rendered relation are transport accounting, not original native-body/read-only receiver custody. Read/RAM/IO/encode/decode/alias/lock costs not free."
+        },
+        {
+          "id": "S078-D4",
+          "credit": "SCOPED_CREDIT_NORMAL_TYPED_ALIAS_AND_EXISTING_LIVE_SLOT_RECLAMATION",
+          "sites": {
+            "caller": "caller.py:664-701,1682-1703,3707-3806",
+            "supervisor": "supervisor.py:345-358,1331-1398",
+            "verifier": "verifier.py:400-413,1365-1432"
+          },
+          "fact": "Successful actual caller retains OwnedFD lease instead of int, reserves an alias record before dup2 then publish_fd(8) and stores typed alias. Actual supervisor/verifier adopt8 into their existing AllocationFD ledgers. Changed outside_body_number recognizes int subclasses. Successful outside aliases remain counted and deliberately unretired; cleanup skips these body aliases while body OPEN. Existing45 relevant method literals including confirmed-close exact-slot reclamation/sticky no-retry/transport state and decoders are independently byte equal.",
+          "limits": "Not complete prospective acquisition on ordinary signal/failure prefix: E01 below. Lifetime acquisitions do NOT imply simultaneous occupancy over256. No invented lifetime512 cap or revival of old normal255+7 argument; no unconfirmed-close reclaim and no outside alias retirement/transfer credited."
+        },
+        {
+          "id": "S078-D5",
+          "credit": "SCOPED_CREDIT_INERT_INTEGRITY_AND_BINDINGS",
+          "fact": "Exact SHA9 pinned owned13/current6; all158 gapless before/after partitions checked on actual slices through both EOF; original full134 Source bytes hashed only as context, no re-audit or execution. Current contract has exactly9 path/hash/size leaf updates and no schema/control/resource changes. Exact verifier->contract->supervisor literals->caller hash/size DAG matched. expectations and ordinary-surplus are equal before/after. All35 slots/all6/all3/GPG6/F1/F2/D1/D2/19 required, no waiver.",
+          "limits": "Sealed bytes and correct chain are not Source acceptance, Root admission, runtime qualification or full cost-fit."
+        }
+      ],
+      "findings": [
+        {
+          "id": "S078-E01",
+          "classification": "CODE_OPEN_ORDINARY_ALIAS_ACQUISITION_PREFIX",
+          "severity": "HIGH",
+          "runtime_observed": false,
+          "sites": [
+            "caller.py:675-683",
+            "caller.py:1682-1720",
+            "caller.py:3707-3744,3795-3806",
+            "caller.py:3596-3607,3886-3920"
+          ],
+          "invariant": "Before every original actual descriptor acquisition/duplication, exact attempted/unknown/returned state and original error owners survive any ordinary failing boundary; no PLANNED fiction after possible native effect.",
+          "actual_path": "main open_caller_outside_body -> preown_fd('outside-body-alias') -> raw os.dup2 -> publish_fd -> stored OUTSIDE_BODY aliases -> actual close_final/history/terminal.",
+          "fact": "preown_fd returns PLANNED with number=None. Newly added raw dup2 is NOT in the existing masked allocate_owned protocol, never writes ACQUIRE_UNKNOWN, and does not store its original exception in alias_record. A same original armed SIGALRM/ordinary exception between successful dup2 return and publish_fd leaves an actual alias8 with a PLANNED/no-number record. A synchronous dup2 exception also leaves the attempt classified PLANNED rather than recorded. close_final accepts PLANNED in its allocation-state predicate; outside_body_number unconditionally exempts numeric8, irrespective of typed record. This is not complete prospective ownership and cannot be credited as attempted outcome/returned identity.",
+          "symbolic_path": [
+            "actual original main timer already armed",
+            "alias record PLANNED created",
+            "dup2 physically returns8",
+            "original finite alarm before publish_fd or publication fails",
+            "alias record remains PLANNED/no number; OUTSIDE_BODY alias_lease not established",
+            "exact normal cleanup cannot infer absence or accepted transfer of8; original body/end remains open"
+          ],
+          "qualification": "Conditional original ordinary stock signal/failure branch, not an observed failing run, offensive fixture, arbitrary custom factory or a demand for universal private heap.",
+          "closure": "Repair safe original Python acquisition/error accounting within existing exact lease protocol; independently review changed path. No numeric recovery/guessed close/new native body, role or authority. No implementation performed here."
+        },
+        {
+          "id": "S078-E02",
+          "classification": "CODE_OPEN_ORIGINAL_APPEND_AND_END_EXCEPTION_CUSTODY",
+          "severity": "HIGH",
+          "runtime_observed": false,
+          "sites": [
+            "caller.py:705-762,837-874",
+            "supervisor.py:362-419,494-531,3162-3175",
+            "verifier.py:417-474,549-586,2642-2655",
+            "all3 outside_body_fault and outside_relation_bytes"
+          ],
+          "invariant": "Original stock primary and reached secondary exception/TB/cause/context/aliases retained before diagnostic formatting or replacement; full body and both decoder failure obligations unchanged.",
+          "fact": "commit_outside_body catches BaseException WITHOUT binding/storing original at the whole lock/fstat/pread/render/pwrite boundary and at the newly added unlock boundary; only string fault reasons survive. finish_outside_end similarly catches its actual new fstat/end observation exception without retaining it. Called require(commit_outside_body(),...) subsequently raises a NEW Refusal which is the only recorded publication error. Thus newly reached lock/unlock/fstat exceptions and any secondary unlock fault are not original retained objects/TBs in ERROR_OBJECTS/EMERGENCY/PUBLICATION_FAILURES/allocation records or the outside relation. Failure flags are honest refusal, not complete original error custody.",
+          "limits": "The generic prefix/encoding/commit_public transport helpers DO retain their caught exc/TB first; their45 unchanged methods were rejoined and are not accused of this discard. This defect is the actual outside append/end helpers, not a future ABI/image qualification label.",
+          "closure": "A bounded, original-owner first-store path for primary and reached secondary errors is still needed through actual allthree caller/consumer endpoints and original caps; retaining a reason string or surrogate Refusal is insufficient. No Source fix or tests authored."
+        }
+      ],
+      "retained_code": [
+        {
+          "id": "C1",
+          "classification": "CODE_OPEN_ORIGINAL_NATIVE_BODY_OUTSIDE_READONLY_RECEIVER_AND_BOTH_NATIVE_ENDS",
+          "fact": "memfd marker+F0..F5/derived numbers/rendered exception bytes, typed fd8, sealed/writable transport, fstat regular, consumed label, exit/wait4/ACK/hash cannot supply original prebirth native/stock/raw/error/private-state/body aliases, actual original performing outside readonly consumer or finite both-owner end. Actual caller.consume/admit_supervisor and supervisor.verifier decoding remain derived transport; no native body/grant/source was added. Exact original Source requirement unchanged; not another audit root."
+        },
+        {
+          "id": "C2",
+          "classification": "CODE_OPEN_ORIGINAL_FACTORY_CAUSE_RAW_COST_BOUNDS",
+          "fact": "Existing full6/original35/default/alias/error/projection/decoder paths and conditional stock/graph/raw partition arithmetic are not complete finite actual factory/catch/multiplicity or native/error/body cost proof. Original cap checks after materialization are refusal, not normal allcase fit proof; no claim arbitrary maximal encoded strings were actually produced."
+        }
+      ],
+      "costs": {
+        "classification": "UNKNOWN_NOT_ZERO",
+        "scope": "Whole actual native/stock/error/lock/sleep/FD/encoder/decoder/parser/copy/hash/header/body/RAM/physical IO/overlap/cleanup/end prospective costs remain unproved under original caps. Added operations need accounting; author sealer byte/RSS observations do not qualify product.",
+        "original_caps_preserved": true,
+        "author_owned13_bytes": 615088,
+        "author_sealed_tree_bytes": 615088,
+        "author_owned_byte_count_reconciled": true,
+        "author_remaining_full_io": "UNKNOWN_NOT_ZERO; no claim a budget exceeded from partial counters"
+      },
+      "qualification": {
+        "classification": "EVIDENCE_OR_ENVIRONMENT_QUALIFICATION_REQUIRED_NOT_RUN",
+        "scope": "Exact current image/module/stock/provider/namespace/selected19 numeric-int9, independent whole Source acceptance, compiler/native ABI/grants/prebirth/outside source authority, actual clocks/resource peaks/positives/negative/gates. Missing future facts alone not declared a new CODE defect.",
+        "runtime": "NOT_RUN",
+        "compiler_ABI": "NOT_RUN",
+        "gates": "NOT_RUN"
+      },
+      "unsafe": {
+        "handling": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "source_copied": false,
+        "decoded": false,
+        "reconstructed": false,
+        "executed": false
+      },
+      "ordinary_connected_closure": false,
+      "whole_accepted": false,
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false,
+      "source_execution": 0,
+      "children": 0,
+      "next": "One connected SAFE original Python repair of E01+E02 and corresponding resource/error/terminal joins, then non-author changed-context review; separately retain C1/C2/new admission/full mandatory controls. No SOL075 native continuation, guard bypass or new outside body authority."
+    }
+  },
+  "scope": "One connected SAFE original ordinary Python package across actual caller/supervisor/verifier/current6 + binding dependencies: S078E01 prospective typeddup acquisition state and S078E02 original primary/reached secondary exception/TB/cause/context retention before formatting on append/lock/unlock/end and actual consuming endpoints. No C/native body/Root authority/allocator/grant implementation.",
+  "closure": [
+    "E01 actual open_caller_outside_body -> original lease/preown -> dup2 -> publish_fd -> outside alias -> close_final/history/terminal must classify attempted/unknown/returned state conservatively BEFORE possible effects and preserve original caught errors; no PLANNED fiction after potential successful dup. Reuse existing authorized exact lease/acquire protocol, preserve finite clock and sticky close. No guessed numeric close, raw8 absence inference, rearm or unbounded alarm suppression.",
+    "E02 all3 commit_outside_body and finish_outside_end must store original primary and reached secondary exception/TB/aliases before formatting, including unlock-on-error and later end failures. Strings/new Refusal surrogates cannot replace originals. Actual producer/receiver/error/terminal relation and bounds must remain coherent; no unused helper.",
+    "Check connected producer->transport/parser->BOTH actual receiver/caller->ordinary failure->terminal and finite retirement before submission. Preserve valid scoped S078D1-D5 only with exact changed dependency joins. Retain existing simultaneous256/confirmed-close reclamation; no old lifetime512 cap.",
+    "Original C1 native/stock/raw/outside readonly original body/actual native ends and C2 full factory/catch/wholecost obligations stay CODE/UNKNOWN; do not relabel Source markers/strongrefs/error arrays as native custody or SourceReady."
+  ],
+  "retained": "Original Source35/all6/3/GPG6/F1F2D1D2/new19/caps/resources/topology/clocks and all meaningful positives/negative obligations unchanged. Unsafe original material HASHONLY/ABSTRACT_REQUIRED_NOT_RUN no reconstruct/copy/render/exec. No reduction/blanket function disabling to make source green.",
+  "resources": {
+    "wall_seconds": 4200,
+    "seal_reserve_seconds": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 16777216,
+    "local_workers": 4,
+    "model_children": 0,
+    "network": 0,
+    "retries": 0,
+    "friday_calls": 0
+  },
+  "effects": "NEW own inert SAFE Python Source text/metadata JSON ONLY in output plus official RESULT. Exact safe Source literal/hash/stat reads allowed. No Source import/AST/compiler/preprocess/eval/exec/tests/native/Root/Node/GPG/archive/network/install/live/UI/model/gates, C/native Root/body/grant implementation or original/Git/index/config/models/ultra/tier/provider/guard/lock writes.",
+  "output": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure",
+  "result_ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL079-RESULT.json",
+  "done_when": "Finite connected package handles both actual ordinary failure roots across allthree actual main/end/caller/both receiver paths coherently, full current6+deps/gapless byte partitions/originalbindings/resources/caught-primary-secondary/positive-negative obligations sealed. Author reports partial task_done=false while originalnativebody remains open; no selfacceptance.",
+  "guard_boundary": "NOT refused Sol075 Scanner native factory/body/grant operation, continuation, rephrasing, reconstruction or other participant route. No new service/role/observer/native grant/TUI or guard/model/lock change.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "source_execution": 0,
+  "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false; no rendering/copy/exec/repro"
+}

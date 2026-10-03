@@ -1,0 +1,10 @@
+{
+  "schema": "friday.sol062.package-checkpoint.v1",
+  "native_profile": "sol",
+  "native_queue_count": 0,
+  "native_items": [],
+  "basis": "one read-only native_queue.py inspect after connected Source stabilization, before full final proofs",
+  "A184_same_generation_final_INFO_received": false,
+  "prior_or_current_independent_acceptance_transferred": false,
+  "no_polling_loop": true
+}

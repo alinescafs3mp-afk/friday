@@ -1,0 +1,480 @@
+{
+  "schema": "friday.sol081.sealed-author-package.v1",
+  "assignment": "ASTRA-E4-SOL080-BROWSER-ACTUAL-CALLER-STREAM-ROUTE-DEADLINE-CONNECTED-CLOSURE-SOL081",
+  "generation": 1,
+  "root": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure",
+  "pathset": "pathset.json",
+  "exact_files_count_including_manifest": 25,
+  "exact_directories": [
+    ".",
+    "evidence",
+    "source"
+  ],
+  "leaf_count_excluding_manifest": 24,
+  "bytes_excluding_manifest": 1624759,
+  "leaves": [
+    {
+      "name": "evidence/connected-implementation-matrix.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/connected-implementation-matrix.json",
+      "bytes": 10104,
+      "sha256": "b2a65a2b156264b5e1d9cd1a267d1f6a308ffe1a238e206c0f5d1a1b55468baf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226887",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10104",
+        "1790997605447371593",
+        "1790997766325438855"
+      ]
+    },
+    {
+      "name": "evidence/current-source-join.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/current-source-join.json",
+      "bytes": 282150,
+      "sha256": "0d34a04707724e070aab475e3ec017bda11c1b4834458219655aa96203cf5365",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226884",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "282150",
+        "1790997426192943626",
+        "1790997426289949185"
+      ]
+    },
+    {
+      "name": "evidence/effects-and-costs.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/effects-and-costs.json",
+      "bytes": 4366,
+      "sha256": "082d1c577f47008e3c41443bedc894a208b3b1eea97de0635011cb27e488c97a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226889",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4366",
+        "1790997766208432148",
+        "1790997766326438912"
+      ]
+    },
+    {
+      "name": "evidence/final-external-snapshot.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/final-external-snapshot.json",
+      "bytes": 129094,
+      "sha256": "31112e984bb97d2fabeaa7a67e96eca8ce47fa0d1ad5f9641d44c44c808dd80e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226886",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129094",
+        "1790997605400215177",
+        "1790997766326438912"
+      ]
+    },
+    {
+      "name": "evidence/full-gapless-parts.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/full-gapless-parts.json",
+      "bytes": 180924,
+      "sha256": "aa444ffc372aeb808aa5c2154bb98598870f7d3271815ab8916d482ec52f4f28",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226883",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "180924",
+        "1790997426190943511",
+        "1790997426289949185"
+      ]
+    },
+    {
+      "name": "evidence/initial-pin-checks.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/initial-pin-checks.json",
+      "bytes": 128839,
+      "sha256": "f72428eb8e4d10d41820cac358941176e5909598cf5b9d0d85d13858c2d88a9d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226866",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "128839",
+        "1790996337838562975",
+        "1790996956520023636"
+      ]
+    },
+    {
+      "name": "evidence/literal-bindings.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/literal-bindings.json",
+      "bytes": 1900,
+      "sha256": "b3cf1b1f54f0aab647966dc376262ff5d4f2ff3c33d9790cc28f4fac57fa8252",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226881",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1900",
+        "1790997492658753217",
+        "1790997492658753217"
+      ]
+    },
+    {
+      "name": "evidence/method-context-rejoin.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/method-context-rejoin.json",
+      "bytes": 32011,
+      "sha256": "0db73d497ba99174bf02a7cc9fc9d6478f569d73c254193034d1da28262878a1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226885",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32011",
+        "1790997492507744561",
+        "1790997766326438912"
+      ]
+    },
+    {
+      "name": "evidence/original-obligations-preserved.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/original-obligations-preserved.json",
+      "bytes": 3863,
+      "sha256": "2fcbb0229851244dc9856227b25742e4a27dcb59d37255c4848651c7a0a5c105",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226888",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3863",
+        "1790997704529896939",
+        "1790997766326438912"
+      ]
+    },
+    {
+      "name": "evidence/shared-interfaces.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/evidence/shared-interfaces.json",
+      "bytes": 3834,
+      "sha256": "a1139b58c2d14cf72c1fb4de248d9fb99916966acddaee904f5be028428df855",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226882",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3834",
+        "1790997314515542697",
+        "1790997426289949185"
+      ]
+    },
+    {
+      "name": "pathset.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/pathset.json",
+      "bytes": 1310,
+      "sha256": "376374c934481a40f27c87ee982d2d845f1ad526ee551d30d7044c00f26eacfa",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226891",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1310",
+        "1790997766255434843",
+        "1790997766325438855"
+      ]
+    },
+    {
+      "name": "received.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/received.json",
+      "bytes": 1241,
+      "sha256": "f445ac69441af765b23913b6b7fbc7444144a51bb176f43d73151299c9bb0f87",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226854",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1241",
+        "1790996232938266048",
+        "1790996232986553337"
+      ]
+    },
+    {
+      "name": "result.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/result.json",
+      "bytes": 3853,
+      "sha256": "25cd3b6a06906b4f74b189c2ec8e3498dbdf745bb8cc64295bd18da60fdcff36",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226890",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3853",
+        "1790997766209432206",
+        "1790997766325438855"
+      ]
+    },
+    {
+      "name": "source/A025-G1-R4.py",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+      "bytes": 57488,
+      "sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226855",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57488",
+        "1790997245331577317",
+        "1790997245331577317"
+      ]
+    },
+    {
+      "name": "source/A025-G1.py",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1.py",
+      "bytes": 101856,
+      "sha256": "c18c296f1c5f349a063e2657e1d2a53fd2b4c07dccabf12f7a117608281cc24f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226856",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101856",
+        "1790997245220570954",
+        "1790997245220570954"
+      ]
+    },
+    {
+      "name": "source/A069-DATA-CODEC.py",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A069-DATA-CODEC.py",
+      "bytes": 30108,
+      "sha256": "2aa56db8c3521cf5e56ea0307bb4a5c23d3a2240830d925a790559bfb7a3ffa2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226857",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30108",
+        "1790996337568547498",
+        "1790996337658552658"
+      ]
+    },
+    {
+      "name": "source/A071-ABI-MAPPING.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-ABI-MAPPING.json",
+      "bytes": 69099,
+      "sha256": "f52f64e693d2d71b1cef16bcb63332f29c42ae4afb97a18cdcc14e40af552f08",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226858",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "69099",
+        "1790997314324531749",
+        "1790997314324531749"
+      ]
+    },
+    {
+      "name": "source/A071-BUILD-RECIPE.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-BUILD-RECIPE.json",
+      "bytes": 89364,
+      "sha256": "317086d49f3f84b0fb227befe20c3c45b44a37caf88ea8f73c44f7bf1e71319e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226859",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "89364",
+        "1790997314328531979",
+        "1790997314328531979"
+      ]
+    },
+    {
+      "name": "source/A071-EXECUTOR.py",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-EXECUTOR.py",
+      "bytes": 75320,
+      "sha256": "868d4c93f76c15e0fae23ba9e1db4b9b5316492123043719b7ecd15bba9eba48",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226860",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75320",
+        "1790997245436583335",
+        "1790997245436583335"
+      ]
+    },
+    {
+      "name": "source/A071-OWNER.py",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+      "bytes": 9774,
+      "sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226865",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9774",
+        "1790996759397725275",
+        "1790996759397725275"
+      ]
+    },
+    {
+      "name": "source/A071-SUPERVISOR.py",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-SUPERVISOR.py",
+      "bytes": 123038,
+      "sha256": "c5a3d1ead2990e2482c1c30b7eac0ff785e63452e39e3c89678d24625f99206d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226861",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "123038",
+        "1790997138129079962",
+        "1790997138129079962"
+      ]
+    },
+    {
+      "name": "source/A071-WORKER.py",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-WORKER.py",
+      "bytes": 9557,
+      "sha256": "571da66c347d9c3ec941f4c3b146be98dfacceb132eed325b135c1c2238d790e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226862",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9557",
+        "1790997245333577431",
+        "1790997245333577431"
+      ]
+    },
+    {
+      "name": "source/A087-PUBLIC-DRIVER.py",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 200423,
+      "sha256": "a1d2097212ae19c585f8fa696c32c80eab73ba411542b44441f6799883ac8d86",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226863",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "200423",
+        "1790997138131432957",
+        "1790997138131432957"
+      ]
+    },
+    {
+      "name": "source/A118-CONNECTED-CONTRACT.json",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A118-CONNECTED-CONTRACT.json",
+      "bytes": 75243,
+      "sha256": "f767514f37b0b9a833997460e7301bca90a231c490ef60c3014d6e9bf8d207e5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226864",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75243",
+        "1790997314489541207",
+        "1790997314489541207"
+      ]
+    }
+  ],
+  "identity9_order": [
+    "dev",
+    "ino",
+    "mode",
+    "uid",
+    "gid",
+    "nlink",
+    "size",
+    "mtime_ns",
+    "ctime_ns"
+  ],
+  "whole_pathset_mode_uid_nlink_sha9_verified": true,
+  "source_current_join_sealed": true,
+  "source_summary": {
+    "Source14": {
+      "total": 14,
+      "changed": 9,
+      "equal": 5
+    },
+    "Source15_including_existing_Owner": {
+      "total": 15,
+      "changed": 10,
+      "equal": 5
+    },
+    "current209": {
+      "changed": 8,
+      "equal": 201
+    },
+    "aux3": {
+      "changed": 2,
+      "equal": 1
+    },
+    "all_gapless_parts": 353,
+    "part_mismatches": 0,
+    "part_read_bytes": 1859190,
+    "new_owned_safe_files": 11,
+    "new_owned_native_files": 0
+  },
+  "parts": {
+    "count": 353,
+    "gapless": true,
+    "both_EOF": true,
+    "mismatches": 0
+  },
+  "author_accepts_own_source": false,
+  "finite_author_package_complete": true,
+  "task_done": false,
+  "whole_accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "source_execution": 0,
+  "compiler_ABI": "NOT_RUN",
+  "runtime_gates": "NOT_RUN",
+  "independent_acceptance": "REQUIRED_NOT_RUN"
+}

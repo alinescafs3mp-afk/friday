@@ -1,0 +1,290 @@
+{
+  "schema": "friday.sol094.connected.nonauthor.review.manifest.v1",
+  "assignment": "ASTRA-E4-A229-NATIVE-CALLER-FULL-BANK-TRANSFER-RETIREMENT-INDEPENDENT-SOURCE-REVIEW-SOL094",
+  "generation": 1,
+  "root": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review",
+  "task": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-TASK-20261003.txt",
+    "bytes": 1872,
+    "sha256": "9680639223ef9f1a326b62b152a35f77eca81bfcfdeb0a228b85cc53f2e4ea0c",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534290",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1872",
+      "1791040907922749956",
+      "1791040907996754693"
+    ],
+    "stable9": true
+  },
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-INPUT-20261003.json",
+    "bytes": 41535,
+    "sha256": "0abd5747a396e16b86839d74877a227ab56bfaf6a1c555642c5d2cc08e7319c9",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534288",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "41535",
+      "1791040877485802062",
+      "1791040877566807246"
+    ],
+    "stable9": true
+  },
+  "compact": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-PRE-TASK-COMPACT-20261003.json",
+    "bytes": 3062,
+    "sha256": "74afb86bc6e7ef81bfcb190f99f8ecda1ddab4bb7194bcd3897677a03f662102",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534292",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3062",
+      "1791040927155980839",
+      "1791040927213984551"
+    ],
+    "stable9": true
+  },
+  "source_manifest": {
+    "path": "/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/manifest.json",
+    "bytes": 40262,
+    "sha256": "6ab1655494f66a919f21291cb3528f8b267a36e5476579f396a1e6ef18ddcd43",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371833",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "40262",
+      "1791040806306246741",
+      "1791040806359250133"
+    ],
+    "stable9": true
+  },
+  "checkpoint": {
+    "path": "/home/jericho/.jericho/runtime/ASTRA-E4-CHECKPOINT-20261003T1800MSK.json",
+    "bytes": 138496,
+    "sha256": "c0f8e1417c1ea2f0afa19d144a28cb9fb43cc3f795e594c0fcfb5dc725e5eb9b",
+    "identity9_decimal_strings": [
+      "2050",
+      "9068708",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "138496",
+      "1791039629129169663",
+      "1791039629217174711"
+    ],
+    "stable9": true
+  },
+  "accepted": {
+    "utc": "2026-10-03 15:22:15 UTC",
+    "msk": "2026-10-03 18:22:15 MSK",
+    "epoch": 1791040935000
+  },
+  "sealed_utc": "2026-10-03 15:32:36 UTC",
+  "elapsed_sec": 622,
+  "files": [
+    {
+      "name": "README.txt",
+      "path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/README.txt",
+      "bytes": 1288,
+      "sha256": "20e73aeb883965f4446291f3321d62cf7fa343ed817189169a0b92eec8a549fb",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714906",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1288",
+        "1791041415929261200",
+        "1791041524984240462"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "costs.json",
+      "path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/costs.json",
+      "bytes": 1766,
+      "sha256": "23a988e2d8be44dba9aec8e1da880e84466502d91858c22cbe3a48773e003476",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714910",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1766",
+        "1791041524930237006",
+        "1791041524984240462"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "pathset.json",
+      "path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/pathset.json",
+      "bytes": 545,
+      "sha256": "1bad463221020c51275095a1867ce3904589415b92a193b4c079fd68ca252526",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714911",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "545",
+        "1791041524931237070",
+        "1791041524984240462"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "pins.json",
+      "path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/pins.json",
+      "bytes": 152248,
+      "sha256": "b0b4ac9b57317eedca4a0651cbd6111b3f1fe186a6bdfcd617b92b9cebe8c9f9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714907",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "152248",
+        "1791041415932261392",
+        "1791041524984240462"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "received.json",
+      "path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/received.json",
+      "bytes": 2810,
+      "sha256": "49c2735163ab71285d6efd8a16fa8441ebbf4479edaf023c67cf78bd439af27b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714904",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2810",
+        "1791041012495722673",
+        "1791041012551445948"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "review.json",
+      "path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/review.json",
+      "bytes": 25644,
+      "sha256": "5bea6562333ce28f41f1a72c8ba58cc3ff62f94a5998398ee6368f54f4b9f4a6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714905",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25644",
+        "1791041524904235342",
+        "1791041524984240462"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "source-integrity.json",
+      "path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/source-integrity.json",
+      "bytes": 88809,
+      "sha256": "860d5848b32ea3f0e6f6553609c91b9bf5c10a4c693f186df813ded13875b399",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714909",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "88809",
+        "1791041460073086310",
+        "1791041524984240462"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "validation-plan.json",
+      "path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/validation-plan.json",
+      "bytes": 5049,
+      "sha256": "8f8192b425c1b2b6ef58efd34ca3befabece742bdfa4134e60f27f1d59ecdd6f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714908",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5049",
+        "1791041415933261456",
+        "1791041524984240462"
+      ],
+      "stable9": true
+    }
+  ],
+  "files_excludes_self": true,
+  "pathset": [
+    "README.txt",
+    "costs.json",
+    "manifest.json",
+    "pathset.json",
+    "pins.json",
+    "received.json",
+    "review.json",
+    "source-integrity.json",
+    "validation-plan.json"
+  ],
+  "directories": [
+    {
+      "path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714903",
+        "16832",
+        "1000",
+        "1000",
+        "2",
+        "4096",
+        "1791041524932237134",
+        "1791041524932237134"
+      ],
+      "mode": "0700"
+    }
+  ],
+  "total_excludes_manifest": 278159,
+  "source49_count": 49,
+  "current134_count": 134,
+  "source3_manual_text_review": true,
+  "nonauthor": true,
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "C1": "CODE",
+  "C2": "UNKNOWN_NOT_ZERO",
+  "whole_accepted": false,
+  "finite_review_done": true,
+  "decision": "SCOPED_STRONG_REFERENCE_CUSTODY_CREDIT_P1_CLOSED_MAPPING_G1_OUTER_E1_ERROR_END_P3_PUBLICATION_R1_COST_OPEN",
+  "qualification": "ALL_ORIGINAL_AND_NEW_REQUIRED_NOT_RUN_NO_WAIVER",
+  "no_source_code_written": true,
+  "children": 0
+}

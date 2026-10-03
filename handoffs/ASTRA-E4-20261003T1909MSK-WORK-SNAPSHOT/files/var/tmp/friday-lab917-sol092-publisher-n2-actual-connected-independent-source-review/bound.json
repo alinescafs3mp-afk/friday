@@ -1,0 +1,21 @@
+{
+  "FD": 128,
+  "all_original_cases_required": true,
+  "body": 80000000,
+  "caps_redefined_in_changed_files": false,
+  "metadata": 2000000,
+  "original_clocks_and_gates": true,
+  "pools_added": false,
+  "refusal_reserve": 4096,
+  "schema": "friday.lab917.sol092.n2.bound.v1",
+  "source_execution": 0,
+  "stdio_slots_after": 3,
+  "stdio_slots_before": 2,
+  "unsafe_required": true,
+  "unsafe_waiver": false,
+  "wall": 4200,
+  "whole_RAM": 8589934592,
+  "whole_output": 33554432,
+  "whole_read": 40960000000,
+  "workers": 4
+}

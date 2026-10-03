@@ -1,0 +1,2838 @@
+{
+  "schema": "friday.sol062.whole3-resource-error-raw-phase.v1",
+  "rows": [
+    {
+      "actor": "caller.py",
+      "phase": "bootstrap",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "allocation",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "first native error",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "raw production",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "pending raw commit",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "exact reap",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "raw capture",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "known-owner firstclose",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "publication projection",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "encoding",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "durable receiver delivery",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "caller.py",
+      "phase": "terminal",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/caller.py",
+        "bytes": 142411,
+        "sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142411",
+          "1790940963524031229",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain_pipes": [
+          {
+            "file": "caller.py",
+            "line": 1754,
+            "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+          }
+        ],
+        "close_final": [
+          {
+            "file": "caller.py",
+            "line": 2670,
+            "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+          }
+        ],
+        "public_partition_bytes": [
+          {
+            "file": "caller.py",
+            "line": 2445,
+            "body_sha256": "0f996c2841fb048bf420ddd3d6aed63feb62937141aa873023dd8be071c856e1"
+          }
+        ],
+        "encode_complete": [
+          {
+            "file": "caller.py",
+            "line": 2760,
+            "body_sha256": "c3eb26d52467e77e2a130490272b035d73b906c86de2f31c134ee346d57ba3c0"
+          }
+        ],
+        "emit_complete": [
+          {
+            "file": "caller.py",
+            "line": 2775,
+            "body_sha256": "d16750bc38362a8bbbced9b29f4149eb1ed45d6ce4972d556c9e487538715e5d"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "bootstrap",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "allocation",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "first native error",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "raw production",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "pending raw commit",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "exact reap",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "raw capture",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "known-owner firstclose",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "publication projection",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "encoding",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "durable receiver delivery",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "supervisor.py",
+      "phase": "terminal",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+        "bytes": 111330,
+        "sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111330",
+          "1790940963523736912",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "launch": [
+          {
+            "file": "caller.py",
+            "line": 1847,
+            "body_sha256": "365ff6888e9eec4b19f086333e359d1b83bde1d976af1077c99df02c5805d1fc"
+          },
+          {
+            "file": "supervisor.py",
+            "line": 1189,
+            "body_sha256": "6ea998ddf3066e85d777c5a42eeddc57c61a8ed7ed06a5155aaf09c28a584de8"
+          }
+        ],
+        "drain": [
+          {
+            "file": "supervisor.py",
+            "line": 930,
+            "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+          }
+        ],
+        "retain_produced_transport": [
+          {
+            "file": "supervisor.py",
+            "line": 1006,
+            "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode": [
+          {
+            "file": "supervisor.py",
+            "line": 2024,
+            "body_sha256": "afecee84867d0f2e62223a669d60252f797a670b3daf32daa3bc84af9357eead"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "bootstrap",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "allocation",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "first native error",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "raw production",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "pending raw commit",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "exact reap",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "raw capture",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "known-owner firstclose",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "publication projection",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "encoding",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "durable receiver delivery",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "actor": "verifier.py",
+      "phase": "terminal",
+      "Source_pin": {
+        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
+        "bytes": 83369,
+        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "83369",
+          "1790940873412305125",
+          "1790941477973909544"
+        ],
+        "stable9": true
+      },
+      "methods": {
+        "call": [
+          {
+            "file": "verifier.py",
+            "line": 929,
+            "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+          }
+        ],
+        "retain_cell": [
+          {
+            "file": "verifier.py",
+            "line": 770,
+            "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+          }
+        ],
+        "finish_allocations": [
+          {
+            "file": "supervisor.py",
+            "line": 446,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          },
+          {
+            "file": "verifier.py",
+            "line": 501,
+            "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+          }
+        ],
+        "encode_bounded": [
+          {
+            "file": "verifier.py",
+            "line": 1306,
+            "body_sha256": "27aa25a72bfc05c38975031ef1f002be791ee471bb1a5749425a188416a330d7"
+          }
+        ],
+        "emit": [
+          {
+            "file": "supervisor.py",
+            "line": 2041,
+            "body_sha256": "6ee84942b10e0dcb80166298a98b3037dc9330e9928c18f166b08469eefeabc7"
+          },
+          {
+            "file": "verifier.py",
+            "line": 1319,
+            "body_sha256": "e67d9b86caaa08d72037254377f4a21a3f0003ad488eaf4d0632799f4685bc71"
+          }
+        ]
+      },
+      "primary_secondary": "private original object+first caught traceback before graph; fallible projection not native settlement proof",
+      "RAM_CPU_FD_explicit_implicit_IO": "original caps and typed honest metrics retained; whole new lifetime/implicit costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "copies_factory_encoded_fit_and_native_end": "C01-C05 CODE_OPEN where not joined; future independent image/native qualification is separately NOT_RUN",
+      "clock": "original finite scope, no resetting cleanup/start deadline",
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "original_common_receipt": {
+    "complete_transport": "exact wait4 + full raw usage + stdout EOF<=65536 + stderr EOF<=32768, no truncation",
+    "custody": "Root independent full9/hash selection, NOFOLLOW all components and readonly leaves, named-before/opened/after, full SHA, retained through actual terminal/postexit",
+    "source_pins": "Exact NEW caller/supervisor/verifier/contract bytes require independent WHOLE review and NEW actual Root materialization/admission. Old accepted/materialized fixed pins remain historical inert DATA, not acceptance of these bytes.",
+    "ownership": "direct own gate, full PID/pidfd/proc-start registration before one-byte release, bounded actual descendant reconciliation/subreaper adoption, exact owned cleanup only; the numeric slot leaves its owner before os.close, and an unconfirmed close is sticky and is not retried",
+    "resources": "outer current VmSize/VmRSS/VmHWM/VmPeak plus all raw self/wait4 fields, unknown stays null+reason; no peak subtraction; original target caps preserved",
+    "refusal": "complete observed raw and parsed receipts survive validation refusal; missing/partial/unknown transport or cleanup cannot qualify; stdout, stderr, status and writable bytes already produced stay counted and hashed on timeout, live-resource, read, decode and cleanup prefixes, and a short or capped capture stays partial",
+    "scope": "only qualified exact Node publisher chain and own intended-cause controls; no generic crypto/gate/GO/image/RAMIO/native-Root authority proof",
+    "held_proc_lease": "Acquired immutable inputs retain ALL9. Only exact registered detached pidfd-ended proc generations get terminal ALL9 retirement tokens before any tracked first close; same dev/ino/mode and independently qualified owner transition; once-close stickyunknown unchanged."
+  },
+  "publication_partition": {
+    "schema": "friday.sol060.lossless-raw-preimage-publication.v1",
+    "fixed_metadata_bound_bytes": 489472,
+    "case_payload_bound_bytes": [
+      196644,
+      196644,
+      196644,
+      196644,
+      196644,
+      196644
+    ],
+    "all_case_payload_bound_bytes": 1179864,
+    "complete_bound_with_newline_bytes": 1669337,
+    "inner_complete_producer_cap_bytes": 32768,
+    "every_raw_stdout_and_stderr_reserved": true,
+    "overflow_byte_reserved_on_every_stream": true,
+    "whole_metadata_reserved_once": true,
+    "past_payloads_measured_future_payloads_reserved": true,
+    "field_removal_or_peak_subtraction": false,
+    "fixed_producer_encoding": "full raw once; exact canonical same-object preimage refs, checked reversible before emission",
+    "execution_authority": false,
+    "bound_scope": "ARITHMETIC_PARTITION_ONLY_NOT_NEW_STOCK_FACTORY_WIDTH_OR_FULL_DELIVERY_PROOF"
+  },
+  "capacity_note": "prefunding256 does not prove actual new full stock factory width/history or complete delivery; original metadata partition not new proof",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

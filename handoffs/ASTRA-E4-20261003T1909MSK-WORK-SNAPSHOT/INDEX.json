@@ -1,0 +1,576 @@
+{
+  "schema": "friday.fresh.verifiable.inert.work.snapshot.v1",
+  "snapshot_capture_completed_msk": "2026-10-03T19:11:22.346931+03:00",
+  "snapshot_directory": "handoffs/ASTRA-E4-20261003T1909MSK-WORK-SNAPSHOT",
+  "product_baseline_sha": "cecd28a92ac4fd4e34c4d3813d0c598debe09436",
+  "product_version": "0.208.64",
+  "product_schema": 50,
+  "installed_runtime_recorded": "0.208.58_NOT_REPROBED_UNCHANGED",
+  "final_wheel": "ABSENT",
+  "lead": {
+    "model": "gpt-6.1-sol",
+    "reasoning": "ultra",
+    "provider": "openai_https",
+    "role": "Astra active Lead Architect",
+    "epoch": 4,
+    "deputy": "Kimi",
+    "basis": "Current native thread/read (2026-10-03), authoritative leadership.json exact pinned record; no model or role change."
+  },
+  "lead_role_evidence": {
+    "path": "/home/jericho/.jericho/team/kimi/state/leadership.json",
+    "bytes": 623,
+    "sha256": "2cf8da83024e86b81fff7bff320e7ddc9087ef8eba4bf0add132130c7d0ed0e9",
+    "identity9_decimal_strings": [
+      "2050",
+      "10747907",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "623",
+      "1790624563209772577",
+      "1790624563209772577"
+    ],
+    "stable9": true
+  },
+  "previous_published_work_snapshot": "handoffs/ASTRA-E4-20261002-WORK-CHECKPOINT",
+  "archive_semantics": "Exact inert source/evidence export. NOT source admission, execution authority, independent whole acceptance or release GO. Original bytes are not rewritten. Local absolute pins remain historical provenance, not portable executable configuration.",
+  "packages": [
+    {
+      "id": "Browser-A226",
+      "component": "Browser",
+      "state": "CURRENT_INERT_SCOPED_NONAUTHOR_PROPERTIES_NOT_WHOLE_ACCEPTED",
+      "manifest": "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/manifest.json",
+      "manifest_sha256": "b5e7874b3d911f0292ed0f68d95b5d205cf1628ccfca79d97cb087c08dee73f1"
+    },
+    {
+      "id": "Scanner-LAB887",
+      "component": "Scanner",
+      "state": "CURRENT_SCOPED_R02_R03_NOT_WHOLE_ACCEPTED",
+      "manifest": "files/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/manifest.json",
+      "manifest_sha256": "3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee"
+    },
+    {
+      "id": "Publisher-SOL093",
+      "component": "Publisher",
+      "state": "CURRENT_BASE_INERT_NOT_ACCEPTED",
+      "manifest": "files/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/manifest.json",
+      "manifest_sha256": "bc20b224a1bce05110804d9d7b1f85a88fc7ca1c4832f002b3b36a1eb4c4c7ed"
+    },
+    {
+      "id": "Publisher-A229",
+      "component": "Publisher",
+      "state": "CURRENT_NATIVE_OVERLAY_WHOLE_REJECTED_BY_SOL094_SCOPED_CREDITS_RETAINED",
+      "manifest": "files/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/manifest.json",
+      "manifest_sha256": "6ab1655494f66a919f21291cb3528f8b267a36e5476579f396a1e6ef18ddcd43"
+    },
+    {
+      "id": "Publisher-LAB918",
+      "component": "Publisher",
+      "state": "LATEST_AUTHOR_OVERLAY_UNINTEGRATED_UNREVIEWED_IMPLEMENTATION_INCOMPLETE",
+      "manifest": "files/var/tmp/friday-lab918-sol093-publisher-actual-alljob-cohort-both-codecs-connected-inert-source/manifest.json",
+      "manifest_sha256": "457f659e7e0e6f73b04cfd86e8bd9e9cc6d02df5a0287552d57c91f80e7174af"
+    },
+    {
+      "id": "Publisher-SOL092-N2",
+      "component": "Publisher",
+      "state": "CURRENT_N2_INPUT_RETAINED_WHOLE_REJECTION_FROM_LAB917",
+      "manifest": "files/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/manifest.json",
+      "manifest_sha256": "f0d15d2ad0e549838d3065c4b03f7ad7d1e559ae07ac5a4039fde089ec0bfc83"
+    },
+    {
+      "id": "Sender-SOL089",
+      "component": "Sender",
+      "state": "CURRENT_STOCK_PYTHON_SCOPED_NONAUTHOR_CREDITS_NOT_WHOLE_ACCEPTED",
+      "manifest": "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/manifest.json",
+      "manifest_sha256": "2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133"
+    },
+    {
+      "id": "Node-A224",
+      "component": "Node",
+      "state": "CURRENT_FOUR_SCOPED_NONAUTHOR_CREDITS_NOT_WHOLE_ACCEPTED",
+      "manifest": "files/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/manifest.json",
+      "manifest_sha256": "70b8ad85e62a5089668f128aadc1fc1ddfe0fb9e886c497128119df748e57fc7"
+    }
+  ],
+  "changes_since_previous_snapshot": [
+    "Browser A226 full current209/Source15/aux3 with prospective complete-wire floor in four producers and actual scoped LAB915 review.",
+    "Scanner LAB887 Source52 narrow R02/R03 closure and A205 review; denied Sol075 WIP not promoted.",
+    "Publisher Source49/current134-reference, SOL092 N2, SOL093 N3, A229 native full-bank/28-root transfer and actual SOL094 whole rejection; LAB918 latest four-file author implementation unintegrated/unreviewed.",
+    "Sender SOL089 nine-file stock Python body/alias package and LAB910 scoped nonauthor review.",
+    "Node A224 six-file error-graph/prospective producer/both-receiver package and LAB913 scoped nonauthor review."
+  ],
+  "accepted_closures": [
+    {
+      "component": "Browser",
+      "review": "LAB915",
+      "evaluated_package": "Browser-A226",
+      "package_identity": {
+        "archived_path": "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/manifest.json",
+        "sha256": "b5e7874b3d911f0292ed0f68d95b5d205cf1628ccfca79d97cb087c08dee73f1"
+      },
+      "scope": "Seven changed-context producer/decoder/caller/pin-DAG properties; not whole/native/C2 acceptance",
+      "existing_evidence": [
+        {
+          "original_path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/manifest.json",
+          "archived_path": "files/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/manifest.json",
+          "sha256": "ab0bdedc4f4b15176ce6ae63cca63d6dd0ef2291d006659cef3dca979a27c840"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/bound.json",
+          "archived_path": "files/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/bound.json",
+          "sha256": "6e141a57b0ef7572549a6c4578b0f20f17664776ab57fe358d6627dd95f5b3b3"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/bound.txt",
+          "archived_path": "files/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/bound.txt",
+          "sha256": "b151a42a3a695933622bc3e91636d119be467308985794d65fcda3c2b6c985eb"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/pathset.json",
+          "archived_path": "files/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/pathset.json",
+          "sha256": "b902051d57ede95b84692e4c08edfad2ce79503bf28e763b1458aa1f3634871a"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/payload.json",
+          "archived_path": "files/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/payload.json",
+          "sha256": "95ebd5c159935f18b1e63c00a58af51cb4e8ba3648002a19c5061cfb96dfbdb8"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/pin-checks.json",
+          "archived_path": "files/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/pin-checks.json",
+          "sha256": "67971832d4eb9b6bdfd0c06b27baf7db3bebd26f1996912622ab7f093ba1a1d6"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/relation.json",
+          "archived_path": "files/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/relation.json",
+          "sha256": "b01d87562d700a18cd9af40975e9f608538acb44899ac748a887d8d22b36ce7c"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/result.json",
+          "archived_path": "files/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/result.json",
+          "sha256": "20ac6f08635f86335d0fb51eb5af54aba82f7461d2d5ad9b46d6d25a73efb6f8"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/validation-plan.txt",
+          "archived_path": "files/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/validation-plan.txt",
+          "sha256": "9a818e45b450f924368857445348d5d400bff1d894571a0c3fe1c1527045ba3a"
+        },
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB915-BROWSER-SOURCE-REVIEW-RESULT-RECEIVED-20261003.json",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB915-BROWSER-SOURCE-REVIEW-RESULT-RECEIVED-20261003.json",
+          "sha256": "3bde91a01850829492a20cfed72972c98f23337b5911e49a34e9f78c5188fd2a"
+        }
+      ],
+      "target_runtime_verified": false
+    },
+    {
+      "component": "Browser",
+      "review": "SOL083",
+      "evaluated_package": "Browser-A226-SUPERSEDED-BASE",
+      "package_identity": {
+        "original_path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/manifest.json",
+        "archived_path": "files/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/manifest.json",
+        "sha256": "b48767637bddf842ae1d2cd1e1afe01af0970c17ba590cfc6f4773ca6d18fc66"
+      },
+      "scope": "Historical A214 FD generation source review; not automatic whole-current credit",
+      "existing_evidence": [
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/manifest.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/manifest.json",
+          "sha256": "d53f604189cdb2e1342c0fe47f48dae411ea0167fb7b09cb9c60b41961c08893"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/REVIEW.txt",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/REVIEW.txt",
+          "sha256": "88b9934aeaff25dfbe20178de1818fc2bd1c26262520585789436836de96323f"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/current-source-rejoin.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/current-source-rejoin.json",
+          "sha256": "43a06d774cf8cf40e1b0728e6c52538c17ec5264fa44c95acca33ec363490795"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/effects-and-costs.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/effects-and-costs.json",
+          "sha256": "c8a9bef965a2e91c1f71bbf1fc35df34c286698cd519cd80b758fbeed150ea70"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/final-external-snapshot.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/final-external-snapshot.json",
+          "sha256": "fec96f0b3b14d45e51124aa2bf36beffdc103253c28fb2bbc8dd7b0a8715b7dd"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/full-gapless-parts.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/full-gapless-parts.json",
+          "sha256": "26b7bf2de5b769c9e0d4992684cea5832ff11fe85168d6c8bb7968d68432becf"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/initial-pin-checks.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/initial-pin-checks.json",
+          "sha256": "5b83fda4fa87928d62746630c1bf9f3fd490bb10448d3d322cd958edfd0aff78"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/literal-context-rejoin.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/literal-context-rejoin.json",
+          "sha256": "d90bf8aa441c48dfa3167d0a2af6b088a14587b4492d582f0499cabeff214d30"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/review-matrix.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/review-matrix.json",
+          "sha256": "c8df3d0fca6a1322a6986d431600ff5ce12310abf0513abc44ea3a7a54e58d71"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/pathset.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/pathset.json",
+          "sha256": "78e4723349c2b6b214cf2c5179daf6ed0ad2418793a32ff30958a10aa3c9261c"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/received.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/received.json",
+          "sha256": "b3dedda6ab539b769beea21827e2b75cbe16c6ba04771784141c7da4db016940"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/result.json",
+          "archived_path": "files/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/result.json",
+          "sha256": "54f3d8dc4af299c97bcd962015d872d9831954dcb9dcf2d91176d336db215104"
+        },
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-BROWSER-FD-GENERATION-SOURCE-RESULT-RECEIVED-20261003.json",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-BROWSER-FD-GENERATION-SOURCE-RESULT-RECEIVED-20261003.json",
+          "sha256": "f888d119ebca0d47747ac04699bfc7033008fca91992110ce41ce03512b8bd3f"
+        }
+      ],
+      "target_runtime_verified": false
+    },
+    {
+      "component": "Scanner",
+      "review": "A205",
+      "evaluated_package": "Scanner-LAB887",
+      "package_identity": {
+        "archived_path": "files/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/manifest.json",
+        "sha256": "3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee"
+      },
+      "scope": "R02/R03 scoped source closure only; both native endpoints/factory remain open",
+      "existing_evidence": [
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A205-LAB887-SCANNER-SCOPED-NON-AUTHOR-SOURCE-REVIEW-20261003.json",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-A205-LAB887-SCANNER-SCOPED-NON-AUTHOR-SOURCE-REVIEW-20261003.json",
+          "sha256": "f03181a4172753f9356d204b293716e3f196a52e0d76b9617872707a9d551997"
+        }
+      ],
+      "target_runtime_verified": false
+    },
+    {
+      "component": "Publisher",
+      "review": "SOL094",
+      "evaluated_package": "Publisher-A229",
+      "package_identity": {
+        "archived_path": "files/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/manifest.json",
+        "sha256": "6ab1655494f66a919f21291cb3528f8b267a36e5476579f396a1e6ef18ddcd43"
+      },
+      "scope": "WHOLE_REJECTED; S1/S2/S3 conditional/S4 retained; P1/G1/E1/P3 open",
+      "existing_evidence": [
+        {
+          "original_path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/manifest.json",
+          "archived_path": "files/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/manifest.json",
+          "sha256": "dcee8cdac240a54c06876ee64b58288c8d6b444e49fbe7b262e12f7d79a7f5a7"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/README.txt",
+          "archived_path": "files/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/README.txt",
+          "sha256": "20e73aeb883965f4446291f3321d62cf7fa343ed817189169a0b92eec8a549fb"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/costs.json",
+          "archived_path": "files/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/costs.json",
+          "sha256": "23a988e2d8be44dba9aec8e1da880e84466502d91858c22cbe3a48773e003476"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/pathset.json",
+          "archived_path": "files/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/pathset.json",
+          "sha256": "1bad463221020c51275095a1867ce3904589415b92a193b4c079fd68ca252526"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/pins.json",
+          "archived_path": "files/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/pins.json",
+          "sha256": "b0b4ac9b57317eedca4a0651cbd6111b3f1fe186a6bdfcd617b92b9cebe8c9f9"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/received.json",
+          "archived_path": "files/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/received.json",
+          "sha256": "49c2735163ab71285d6efd8a16fa8441ebbf4479edaf023c67cf78bd439af27b"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/review.json",
+          "archived_path": "files/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/review.json",
+          "sha256": "5bea6562333ce28f41f1a72c8ba58cc3ff62f94a5998398ee6368f54f4b9f4a6"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/source-integrity.json",
+          "archived_path": "files/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/source-integrity.json",
+          "sha256": "860d5848b32ea3f0e6f6553609c91b9bf5c10a4c693f186df813ded13875b399"
+        },
+        {
+          "original_path": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/validation-plan.json",
+          "archived_path": "files/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review/validation-plan.json",
+          "sha256": "8f8192b425c1b2b6ef58efd34ca3befabece742bdfa4134e60f27f1d59ecdd6f"
+        },
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-A229-SOURCE-REVIEW-RESULT-RECEIVED-20261003.json",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-A229-SOURCE-REVIEW-RESULT-RECEIVED-20261003.json",
+          "sha256": "759da3fde41e4140400fe31351c6bf29fc2a74e942262793dedaf86afdc92cb1"
+        },
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-RESULT.json",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-RESULT.json",
+          "sha256": "fe7868c2fc41e4b59027e70cd15baed1c9e1b2f10733bce17f4faed6e9b22b38"
+        },
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-TASK-20261003.txt",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-TASK-20261003.txt",
+          "sha256": "9680639223ef9f1a326b62b152a35f77eca81bfcfdeb0a228b85cc53f2e4ea0c"
+        },
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-INPUT-20261003.json",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-INPUT-20261003.json",
+          "sha256": "0abd5747a396e16b86839d74877a227ab56bfaf6a1c555642c5d2cc08e7319c9"
+        }
+      ],
+      "target_runtime_verified": false
+    },
+    {
+      "component": "Publisher",
+      "review": "LAB917",
+      "evaluated_package": "Publisher-SOL092-N2",
+      "package_identity": {
+        "archived_path": "files/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/manifest.json",
+        "sha256": "f0d15d2ad0e549838d3065c4b03f7ad7d1e559ae07ac5a4039fde089ec0bfc83"
+      },
+      "scope": "WHOLE_REJECTED; earliest failure/preseed and both-end obligations remain",
+      "existing_evidence": [
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/manifest.json",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/manifest.json",
+          "sha256": "b97b0bb6e48c297979ec3e6a065098bd358027b94c5ed44eaf827e7ae86ed979"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/analysis.json",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/analysis.json",
+          "sha256": "d57921c9aeb6544a7c801ff37593ff56e23e6f9b751db9823009f1ae068ff7a6"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/bound.json",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/bound.json",
+          "sha256": "63aed27b6151282278c0e56e7b15a0558f8dd714c9a32ae04738b6e7982cf576"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/bound.txt",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/bound.txt",
+          "sha256": "bf019d3d6a51408d80c5a87d3e23dba7b98c8290170250428fe69f3bf8022c8f"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/current-partitions.json",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/current-partitions.json",
+          "sha256": "425e6754ca345610652c597b66b731468bebec650d3682ade4b7fdd580476b83"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/pathset.json",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/pathset.json",
+          "sha256": "93ae16d47ff92e78bbe09c6b276b0db9bc3d9f0804cc7eaf1bfe211d5f35b4ef"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/payload.json",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/payload.json",
+          "sha256": "019c3fad905d329c9c03d8ba73f7838836deea3cf4d0e8855eedc37f5ad9f89f"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/pin-checks.json",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/pin-checks.json",
+          "sha256": "14cdc054cc69b3ee714605fdeb74969f9e586feb6f76add9bcc4da9d4e72742e"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/relation.json",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/relation.json",
+          "sha256": "7b36fab401478983f4a565589e62c72b01886d0253a4c93b205e5aac5e3b2522"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/result.json",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/result.json",
+          "sha256": "b395c0cfe5fd9e4ef1fe8dde85d02738d1bf45c9fd62c3a75faf8d794fdfb497"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/validation-plan.txt",
+          "archived_path": "files/var/tmp/friday-lab917-sol092-publisher-n2-actual-connected-independent-source-review/validation-plan.txt",
+          "sha256": "7dc5a9b3e72d400225142a852d2e09e5d5bea4fbe97efa7b2b62f7185b93f165"
+        },
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB917-N2-SOURCE-REVIEW-RESULT-RECEIVED-20261003.json",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB917-N2-SOURCE-REVIEW-RESULT-RECEIVED-20261003.json",
+          "sha256": "f1b96da3cad1aa3025aaf8f1c69c4ef9e869e7d25b7caa0e02558f223e24e2f2"
+        }
+      ],
+      "target_runtime_verified": false
+    },
+    {
+      "component": "Sender",
+      "review": "LAB910",
+      "evaluated_package": "Sender-SOL089",
+      "package_identity": {
+        "archived_path": "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/manifest.json",
+        "sha256": "2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133"
+      },
+      "scope": "Stock Python birth/body/alias/read-only replay scoped credit; no native/whole acceptance",
+      "existing_evidence": [
+        {
+          "original_path": "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/manifest.json",
+          "archived_path": "files/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/manifest.json",
+          "sha256": "6bf597e490a64eb1aed34359512f81468e1252e5bef10c7635d4d63a58949b7d"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/bound.json",
+          "archived_path": "files/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/bound.json",
+          "sha256": "629c90f2be77579a7104ad0b00c54cc5bc81a5ab5fbef1d7a03f2b03488e4a17"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/bound.txt",
+          "archived_path": "files/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/bound.txt",
+          "sha256": "98dc6562c935492a00eed53506ca209b6928850b37bb1a0be8cd49c6fab75d1b"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/pathset.json",
+          "archived_path": "files/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/pathset.json",
+          "sha256": "83a409f8bc22826c3796486287e28d5273430eea5d604bcf2156e507e84f4fb6"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/payload.json",
+          "archived_path": "files/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/payload.json",
+          "sha256": "2252dba3aa1338af8386e99a42d4a176d29ba599694decf0c4292add2fd64217"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/pin-checks.json",
+          "archived_path": "files/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/pin-checks.json",
+          "sha256": "9c4d6560a7395e7c815afeb7a2955cc070a68f4f4182eb87c6c600ebc3c6fde5"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/relation.json",
+          "archived_path": "files/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/relation.json",
+          "sha256": "8ac8b9135e16135bacbd6e621664c6b73d4536d47f92de4cac84040870c23aad"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/result.json",
+          "archived_path": "files/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/result.json",
+          "sha256": "283d5cd796f25e4f74731bf8423812d66c52bf4231f1e72e8165960c5b50d7b1"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/validation-plan.txt",
+          "archived_path": "files/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/validation-plan.txt",
+          "sha256": "e015395154ee21d2358ff6174e5785d97b2c308d54593d65a631b07250c62994"
+        },
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB910-SENDER-NONAUTHOR-SOURCE-RESULT-RECEIVED-20261003.json",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB910-SENDER-NONAUTHOR-SOURCE-RESULT-RECEIVED-20261003.json",
+          "sha256": "d6301f9df02014f82eb76ac99aaab80bc65dc87f9dd8a909f6ef132a6490e67f"
+        }
+      ],
+      "target_runtime_verified": false
+    },
+    {
+      "component": "Node",
+      "review": "LAB913",
+      "evaluated_package": "Node-A224",
+      "package_identity": {
+        "archived_path": "files/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/manifest.json",
+        "sha256": "70b8ad85e62a5089668f128aadc1fc1ddfe0fb9e886c497128119df748e57fc7"
+      },
+      "scope": "Four changed-context source properties; no whole/native/C2 acceptance",
+      "existing_evidence": [
+        {
+          "original_path": "/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/manifest.json",
+          "archived_path": "files/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/manifest.json",
+          "sha256": "0de9cd649dcf3dcd1567e8d914dd34e4fc7a65ec16e7fcfea6946cc1642fb995"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/bound.json",
+          "archived_path": "files/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/bound.json",
+          "sha256": "37ab327bf2bc8a02e7200fc40216072ede8d0cf99d983e3605fa40e7a099541a"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/bound.txt",
+          "archived_path": "files/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/bound.txt",
+          "sha256": "928602259d1b36222e3b9c09ec442bf0330f61dc339dbac64bc01da765132fea"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/pathset.json",
+          "archived_path": "files/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/pathset.json",
+          "sha256": "cad90c5a2ffdd360bd6d5a1f72cbdb9412aa8786242c7871131054b311a9b996"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/payload.json",
+          "archived_path": "files/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/payload.json",
+          "sha256": "ab18fc97b5fb4e6e829aeaa846a0d2f821b87abde379c2805e8a798661ad5805"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/pin-checks.json",
+          "archived_path": "files/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/pin-checks.json",
+          "sha256": "1442e00d3a896a6280a5926a3c22ea5f0d944f0ce4907ecde5fe97e098bb2966"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/relation.json",
+          "archived_path": "files/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/relation.json",
+          "sha256": "9f9d6c299328715cc89839d3beffa58834bb217ff8740c5e984e6bbb1182e7f5"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/result.json",
+          "archived_path": "files/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/result.json",
+          "sha256": "a5249cc1bb0654025b3ec0b9db32f56f0295fe1cee34fc3b29ebc49a415a2db7"
+        },
+        {
+          "original_path": "/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/validation-plan.txt",
+          "archived_path": "files/var/tmp/friday-lab913-a224-node-prospective-error-graph-both-receiver-connected-nonauthor-review/validation-plan.txt",
+          "sha256": "c53ddafa33ea2a8ee5ecb079cfebae574a0bd72800f870569dd9c19d8becc849"
+        },
+        {
+          "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB913-NODE-PROSPECTIVE-ERROR-GRAPH-NONAUTHOR-RESULT-RECEIVED-20261003.json",
+          "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB913-NODE-PROSPECTIVE-ERROR-GRAPH-NONAUTHOR-RESULT-RECEIVED-20261003.json",
+          "sha256": "074454d7cb5f7ae4743da84983db86b3619ee33fc9a36e65d7c72bf9dcd2cc60"
+        }
+      ],
+      "target_runtime_verified": false
+    }
+  ],
+  "whole_release_blocking_roots_independently_closed": 0,
+  "remaining_blockers": {
+    "Browser": "Native/stock/raw/pre-encode/error/full alias/both finite ends C1 CODE; full factory/CPU/RSS/implicit IO C2 UNKNOWN.",
+    "Scanner": "Actual Source main and Root original outside caller custody/factory/both finite ends C1/C2 remain; denied WIP route is not retried or delegated.",
+    "Publisher": "SOL094 P1 closed-mapping readback, G1 actual outside caller/Bindings, E1 finite late-error handover, P3 completion representation. LAB918 N3 author result still incomplete/unreviewed; no combined overlay acceptance. N1/N2/public native/full C2/image/ABI remain.",
+    "Sender": "Native/raw/error supplier and both outside finite endpoints CODE; C2 UNKNOWN.",
+    "Node": "Native/raw/prebirth/both ends CODE; formatter-before-debit and whole C2 UNKNOWN."
+  },
+  "next_required_release_stage": "Necessary connected source closure and independent whole-source acceptance, then actual stable image/compiler/native ABI/provider/grants/resources/finite-clock Source+Root admission. No runtime release stage newly executable.",
+  "required_execution": "r5 immutable RED/no reuse; r6 absent; full pair/all30/F0-F11 incomplete. Exact-release change+exact union, mandatory live160, official A+B, B09 independent content/binder, applicable R10/enabled/build/install/restore/rollback/target/independent acceptance still required; export runs none.",
+  "active_assignments_preserved": [
+    {
+      "id": "ASTRA-E4-A229-NATIVE-CALLER-P1G1E1P3-CONNECTED-SOURCE-CLOSURE-SOL095",
+      "generation": 1,
+      "state": "RUNNING_CURRENT_IMPLEMENTATION_NOT_CAPTURED",
+      "output": "/var/tmp/friday-sol095-a229-native-caller-p1g1e1p3-connected-inert-source",
+      "reason": "Active mutable output is excluded; prior frozen inputs and completed compact preserved. No interruption."
+    }
+  ],
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "tests_rerun_for_export": 0,
+  "source_execution": 0,
+  "omissions_file": "OMISSIONS.json",
+  "references_file": "REFERENCES.json",
+  "capture_cut": "Stable packages completed by 2026-10-03T19:11:22.346931+03:00; active SOL095 edits intentionally excluded.",
+  "coverage_summary": {
+    "Browser": "Source15 15/15; current209 208/209 plus aux3 3/3. One restricted historical hostile control omitted.",
+    "Scanner": "Source52 45/52 and complete owned LAB887/native header; seven historical hash-only fixture/data bodies omitted. Denied SOL075 WIP not current acceptance.",
+    "Publisher": "Source49 49/49 for frozen SOL093 and A229 native overlay separately; current134 reference 134/134. Latest LAB918 author branch Source50 exact selection = 46 unchanged + 3 changed + 1 NEW alljob_cohort.py local dependency. Not combined with A229, independently accepted, or current134-qualified.",
+    "Sender": "Selected Source9 9/9; local Source54/support dependencies and available safe tests included. Four original unsafe sender test/control bodies omitted with SHA.",
+    "Node": "Selected current Source6 6/6; original qualification/dependency/provenance files and existing LAB913 review included. Whole source/runtime remains unaccepted."
+  }
+}

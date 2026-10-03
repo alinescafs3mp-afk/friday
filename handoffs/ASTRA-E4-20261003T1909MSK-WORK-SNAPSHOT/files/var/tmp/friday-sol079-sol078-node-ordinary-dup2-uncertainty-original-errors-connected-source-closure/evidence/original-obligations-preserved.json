@@ -1,0 +1,526 @@
+{
+  "original35_abstract_scope": [
+    {
+      "slot": 1,
+      "original_store": "cases[0].failure",
+      "case": "startup-env-negative",
+      "roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_canonical"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 2,
+      "original_store": "cases[1].failure",
+      "case": "startup-as-negative",
+      "roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_canonical"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 3,
+      "original_store": "cases[2].failure",
+      "case": "verify-node",
+      "roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_canonical"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 4,
+      "original_store": "cases[3].failure",
+      "case": "supervisor-entry-fd7",
+      "roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_entry"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 5,
+      "original_store": "cases[4].failure",
+      "case": "supervisor-entry-fd127",
+      "roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_entry"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 6,
+      "original_store": "cases[5].failure",
+      "case": "verifier-entry-fd7",
+      "roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_entry"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 7,
+      "original_store": "cases[0].cleanup_failure",
+      "case": "startup-env-negative",
+      "roots": [
+        "settle_owned"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 8,
+      "original_store": "cases[1].cleanup_failure",
+      "case": "startup-as-negative",
+      "roots": [
+        "settle_owned"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 9,
+      "original_store": "cases[2].cleanup_failure",
+      "case": "verify-node",
+      "roots": [
+        "settle_owned"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 10,
+      "original_store": "cases[3].cleanup_failure",
+      "case": "supervisor-entry-fd7",
+      "roots": [
+        "settle_owned"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 11,
+      "original_store": "cases[4].cleanup_failure",
+      "case": "supervisor-entry-fd127",
+      "roots": [
+        "settle_owned"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 12,
+      "original_store": "cases[5].cleanup_failure",
+      "case": "verifier-entry-fd7",
+      "roots": [
+        "settle_owned"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 13,
+      "original_store": "cases[0].closure_transport_failure",
+      "case": "startup-env-negative",
+      "roots": [
+        "drain_pipes"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 14,
+      "original_store": "cases[1].closure_transport_failure",
+      "case": "startup-as-negative",
+      "roots": [
+        "drain_pipes"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 15,
+      "original_store": "cases[2].closure_transport_failure",
+      "case": "verify-node",
+      "roots": [
+        "drain_pipes"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 16,
+      "original_store": "cases[3].closure_transport_failure",
+      "case": "supervisor-entry-fd7",
+      "roots": [
+        "drain_pipes"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 17,
+      "original_store": "cases[4].closure_transport_failure",
+      "case": "supervisor-entry-fd127",
+      "roots": [
+        "drain_pipes"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 18,
+      "original_store": "cases[5].closure_transport_failure",
+      "case": "verifier-entry-fd7",
+      "roots": [
+        "drain_pipes"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 19,
+      "original_store": "cases[0].completion_resource_failure",
+      "case": "startup-env-negative",
+      "roots": [
+        "sample_outer"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 20,
+      "original_store": "cases[1].completion_resource_failure",
+      "case": "startup-as-negative",
+      "roots": [
+        "sample_outer"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 21,
+      "original_store": "cases[2].completion_resource_failure",
+      "case": "verify-node",
+      "roots": [
+        "sample_outer"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 22,
+      "original_store": "cases[3].completion_resource_failure",
+      "case": "supervisor-entry-fd7",
+      "roots": [
+        "sample_outer"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 23,
+      "original_store": "cases[4].completion_resource_failure",
+      "case": "supervisor-entry-fd127",
+      "roots": [
+        "sample_outer"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 24,
+      "original_store": "cases[5].completion_resource_failure",
+      "case": "verifier-entry-fd7",
+      "roots": [
+        "sample_outer"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 25,
+      "original_store": "owned_cleanup_problems.freeze_or_descendants.copy1",
+      "case": null,
+      "roots": [
+        "exited",
+        "now",
+        "require",
+        "same_generation",
+        "signal_held",
+        "status",
+        "tree"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 26,
+      "original_store": "owned_cleanup_problems.freeze_or_descendants.copy2",
+      "case": null,
+      "roots": [
+        "exited",
+        "now",
+        "require",
+        "same_generation",
+        "signal_held",
+        "status",
+        "tree"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 27,
+      "original_store": "owned_cleanup_problems.exact_parent_stop_reap.copy1",
+      "case": null,
+      "roots": [
+        "stop_record"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 28,
+      "original_store": "owned_cleanup_problems.exact_parent_stop_reap.copy2",
+      "case": null,
+      "roots": [
+        "stop_record"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 29,
+      "original_store": "terminal_once.problems.known_own_cleanup",
+      "case": null,
+      "roots": [
+        "settle_owned"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 30,
+      "original_store": "terminal_once.problems.terminal_own_observation",
+      "case": null,
+      "roots": [
+        "direct_children",
+        "exited",
+        "require"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 31,
+      "original_store": "terminal_once.problems.terminal_full_custody",
+      "case": null,
+      "roots": [
+        "custody",
+        "require"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 32,
+      "original_store": "terminal_once.problems.terminal_current_resources",
+      "case": null,
+      "roots": [
+        "sample_outer"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 33,
+      "original_store": "failure",
+      "case": null,
+      "roots": [
+        "finish_terminal",
+        "direct_children",
+        "entry_fds",
+        "full9",
+        "hold",
+        "install_plan",
+        "kernel_policy",
+        "now",
+        "public_plan_fits",
+        "read_at",
+        "remaining_cases_fit",
+        "require",
+        "sample_outer",
+        "selection_data",
+        "strict_json",
+        "take_budget"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 34,
+      "original_store": "terminal_failure",
+      "case": null,
+      "roots": [
+        "finish_terminal"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    },
+    {
+      "slot": 35,
+      "original_store": "selected_DATA_closure_failure",
+      "case": null,
+      "roots": [
+        "full9",
+        "require"
+      ],
+      "factory_domain": "original stock type32/native32/path160/clock32/shared900 two-byte escapes; no universal native custom/C heap requirement",
+      "runtime": "REQUIRED_NOT_RUN"
+    }
+  ],
+  "original3": [
+    "A16901",
+    "A16902",
+    "A16903"
+  ],
+  "original6": [
+    "startup-env-negative",
+    "startup-as-negative",
+    "verify-node",
+    "supervisor-entry-fd7",
+    "supervisor-entry-fd127",
+    "verifier-entry-fd7"
+  ],
+  "original_GPG6": [
+    "show-raw-key",
+    "dearmor",
+    "check-self-signatures-and-bindings",
+    "positive-gpg",
+    "positive-gpgv-body",
+    "negative-same-path-changed-row"
+  ],
+  "original_root_limits": {
+    "whole900s": true,
+    "outer_AS_bytes": 134217728,
+    "outer_CPU_soft_hard_seconds": [
+      60,
+      120
+    ],
+    "outer_NOFILE": 256,
+    "outer_FSIZE_public_bytes": 2097152,
+    "outer_stdout_stderr_complete": 2097152,
+    "outer_canonical_explicit_read_bytes": 268435456,
+    "outer_case_stdout_bytes": 65536,
+    "outer_case_stderr_bytes": 32768,
+    "Root_preparation_capture_seal_explicit_read_ceiling_bytes": 268435456,
+    "Root_preparation_memory_allowance_bytes": 8589934592,
+    "Root_seal_capture_reserve_seconds": 120,
+    "source_process_deadline_never_refreshed": true,
+    "canonical_caps_raised": false,
+    "Root_model_children": 0,
+    "network_calls": 0,
+    "retries": 0
+  },
+  "current19_names": [
+    "prlimit",
+    "python",
+    "gpg",
+    "gpgv",
+    "ffi",
+    "supervisor",
+    "verifier",
+    "contract",
+    "bill",
+    "receipts",
+    "raw",
+    "key",
+    "archive",
+    "original_archive",
+    "accepted",
+    "materialized",
+    "caller",
+    "expectations",
+    "plain"
+  ],
+  "current19_exact_SCHEMA": {
+    "all_pin_fields": [
+      "path",
+      "size",
+      "sha256",
+      "identity9"
+    ],
+    "execution_authority": false,
+    "fields": [
+      "schema",
+      "pins"
+    ],
+    "full9_order": [
+      "dev",
+      "ino",
+      "mode",
+      "uid",
+      "gid",
+      "nlink",
+      "size",
+      "mtime_ns",
+      "ctime_ns"
+    ],
+    "identity_values": "NEW independent current Root observations, numeric integers; no unissued fixture values",
+    "required_names": [
+      "prlimit",
+      "python",
+      "gpg",
+      "gpgv",
+      "ffi",
+      "supervisor",
+      "verifier",
+      "contract",
+      "bill",
+      "receipts",
+      "raw",
+      "key",
+      "archive",
+      "original_archive",
+      "accepted",
+      "materialized",
+      "caller",
+      "expectations",
+      "plain"
+    ],
+    "schema": "friday.e4.node.ordinary-root-selection-data.a082.v1"
+  },
+  "schema": "friday.sol079.original-obligations-preserved.v1",
+  "original_sources": "Full134 exact bytes HASH ONLY; prior immutable matrices reused as normative context, not replayed or credited as runtime of these new bytes.",
+  "F1_F2_D1_D2": {
+    "required": true,
+    "waiver": false,
+    "execution": "REQUIRED_NOT_RUN",
+    "unchanged_authority_and_actual_producer_decoder_methods": "See current6-connected-checks method joins; changed context requires non-author review."
+  },
+  "unsafe": {
+    "handling": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false,
+    "rendered_copied_reconstructed_decoded_executed": false
+  },
+  "qualification": "REQUIRED_NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

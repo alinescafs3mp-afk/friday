@@ -1,0 +1,47 @@
+--- a/source/A071-SUPERVISOR.py
++++ b/source/A071-SUPERVISOR.py
+@@ -570,15 +570,16 @@
+         except OSError as exc: raise Refused("OUTER_PIDFD:" + str(exc.errno)) from exc
+         need(proc(p) == (parent, birth), "OWNERSHIP_RACE")
+     def dispose(p, rec):
+-        if rec["reaped"] or rec["stop_attempted"]:
++        if rec["reaped"] or rec.get("retirement_consumed"):
++            return
++        if rec["stop_attempted"]:
+             return
+         rec["stop_attempted"] = True
+         try:
+-            # Establish wait ownership before numeric signalling. WNOHANG never
+-            # waits, and a still unreaped direct child cannot recycle its PID.
++            # One wait collects retirement. A reaped owner is not signalled again.
+             done, value = os.waitpid(p, os.WNOHANG)
+             if done:
+-                rec.update(reaped=True, status=value)
++                rec.update(reaped=True, status=value, retirement_consumed=True)
+                 return
+             if stop is not None:
+                 need(stop(p, rec), "OUTER_STOP_UNCONFIRMED")
+@@ -598,7 +599,7 @@
+         try:
+             done, value = os.waitpid(p, os.WNOHANG)
+             if done:
+-                rec.update(reaped=True, status=value)
++                rec.update(reaped=True, status=value, retirement_consumed=True)
+         except ChildProcessError:
+             # No disappeared /proc entry, guessed parent or inner JSON grants
+             # ownership/reap credit. Losing exact wait custody stays sticky.
+@@ -709,9 +710,13 @@
+         "errors": errors,
+         "terminal_completion": reason is None and not uncertain, "uncertainty_sticky": uncertain,
+         "elapsed_sec": now() - started, "stdout_bytes": len(buffers[0]), "stderr_bytes": len(buffers[1]),
++        "stdout": bytes(buffers[0]), "stderr": bytes(buffers[1]),
++        "stdout_sha256": hashlib.sha256(buffers[0]).hexdigest(),
++        "stderr_sha256": hashlib.sha256(buffers[1]).hexdigest(),
+         "inner_terminal_sha256":hashlib.sha256(buffers[0]).hexdigest(),
+         "inner_terminal":terminal if reason is None and not uncertain else None,
+-        "owned": [{"pid": p, "reaped": r["reaped"], "status": r["status"]} for p, r in records.items()]}
++        "owned": [{"pid": p, "reaped": r["reaped"], "status": r["status"],
++                   "retirement_consumed": r.get("retirement_consumed", False)} for p, r in records.items()]}
+ 
+ 
+ def write_terminal(result, fd=1, trace=None, deadline=None, *, deadline_ns=None):

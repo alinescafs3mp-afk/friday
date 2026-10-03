@@ -1,0 +1,16 @@
+{
+  "admitted": [
+    "Four identical prospective producers debit a floor that matches the exact zero-width JSON shape.",
+    "Decode, copy, equal, and both DS67 full-data receivers are unchanged.",
+    "The final exact cap check and the original raw or RLE choice remain.",
+    "Three loader edits are hash or path rebinds, and three JSON edits are current pin fields."
+  ],
+  "not_admitted": [
+    "Float width 1 and extra integer digits undercharge. They do not reject a frame the exact check admits.",
+    "C1 stays CODE_OPEN and C2 stays UNKNOWN_NOT_ZERO.",
+    "This floor is not a factory, RSS, or whole-memory proof.",
+    "Whole Root and GO stay false."
+  ],
+  "schema": "friday.astra.lab915.browser.prospective-complete-wire.nonauthor.run.v1",
+  "whole_root_and_go": false
+}

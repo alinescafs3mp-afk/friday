@@ -1,0 +1,109 @@
+{
+  "schema": "friday.astra.e4.sol075.guard-stop.safe-checkpoint-recovery-audit.v1",
+  "assignment": "ASTRA-E4-A204-LAB887-SCANNER-ACTUAL-ROOT-FACTORY-CALLER-BOTH-FINITE-ENDS-SOL075",
+  "generation": 1,
+  "native": {
+    "at": "2026-10-03T00:46:08.550348+00:00",
+    "native": {
+      "thread_id": "01a0d516-a446-7131-a123-faeea4bb8e8c",
+      "status": {
+        "type": "systemError"
+      },
+      "goal_status": null,
+      "latest_turns": [
+        {
+          "id": "01a0ff1c-c6a8-7cf3-96ee-c0fa1cb940b7",
+          "status": "failed"
+        }
+      ],
+      "queued_ids": [],
+      "queue_has_more": false,
+      "enqueue_is_not_receipt": true
+    },
+    "actual_home": "/home/jericho/.codex",
+    "latest_turn": {
+      "id": "01a0ff1c-c6a8-7cf3-96ee-c0fa1cb940b7",
+      "status": "failed",
+      "error": {
+        "message": "This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. If you’re doing authorized security work that requires more cyber permissive safeguards, apply for Daybreak access via https://platform.openai.com/settings/organization/status-and-access before retrying.",
+        "codexErrorInfo": "cyberPolicy",
+        "additionalDetails": null,
+        "misalignment": null
+      },
+      "startedAt": 1790986471,
+      "completedAt": 1790988186,
+      "durationMs": 1714993
+    },
+    "error_rows": [
+      {
+        "row_id": 30881958,
+        "ts": 1790988186,
+        "reason": "Turn error: This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. If you’re doing authorized security work that requires more cyber permissive safeguards, apply for Daybreak access via https://platform.openai.com/settings/organization/status-and-access before retrying."
+      }
+    ],
+    "bounded_log_window": 1000,
+    "absence_is_not_interval_proof": true,
+    "wake": false
+  },
+  "task": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL075-TASK-20261003.txt",
+    "bytes": 1794,
+    "sha256": "4fe46b9cbd793f9be6e564e38553d18707c8017f8e9d45964ad34372f3560ff2",
+    "identity9_decimal_strings": [
+      "2050",
+      "8528249",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1794",
+      "1790986278334915283",
+      "1790986278403919245"
+    ],
+    "stable9": true
+  },
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL075-INPUT-20261003.json",
+    "bytes": 16855,
+    "sha256": "0b3e5bd116026e73ab68015f9092e51c80bc51cf95b9241b8afb762acf4238c5",
+    "identity9_decimal_strings": [
+      "2050",
+      "8528227",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "16855",
+      "1790986278125903280",
+      "1790986278196907358"
+    ],
+    "stable9": true
+  },
+  "pre_task_compact": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL075-PRE-TASK-COMPACT-20261003.json",
+    "bytes": 1918,
+    "sha256": "bf6a9e9feb0ba5716f66b7281ec54a960c0f26d248277463e4270172e7fbe9ed",
+    "identity9_decimal_strings": [
+      "2050",
+      "8528331",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1918",
+      "1790986393512529374",
+      "1790986393512529374"
+    ],
+    "stable9": true
+  },
+  "expected_result_exists": false,
+  "expected_manifest_exists": false,
+  "native_RESULT_queue_empty": true,
+  "newer_turn_or_CONTROL": false,
+  "exact_event": "ASTRA-SOL075-T1",
+  "both_lifecycle_profiles_generation1": "ACTIVE",
+  "decision": "ONE_SAFE_CHECKPOINT_ONLY_NATIVE_CONTROL; NO_RETRY_DENIED_ACTION_OR_NATIVE_IMPLEMENTATION_OR_REPHRASING_FOR_FILTER",
+  "source_execution": 0,
+  "model_reasoning_tier_provider_guards_locks_changes": 0,
+  "original_goal_full_scope_retained_unfinished": true
+}

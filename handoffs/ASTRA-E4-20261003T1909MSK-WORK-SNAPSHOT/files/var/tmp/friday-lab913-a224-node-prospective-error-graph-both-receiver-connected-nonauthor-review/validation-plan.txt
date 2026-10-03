@@ -1,0 +1,6 @@
+Read the pinned A224 caller, supervisor, verifier, contract, and the two data files as text.
+Hash and size every admitted pin. Do not import, parse, compile, or execute those files.
+Compare the producer body across the three copies and against the Sol079 base.
+Check the base64 debit, the message assignment, both v2 receivers, and the acyclic hash chain.
+Rejoin the unchanged lease and once-publication text. Leave C1, C2, the message factory, image, and runtime open.
+Execution, gates, runtime, image load, and compiler ABI stay NOT_RUN.

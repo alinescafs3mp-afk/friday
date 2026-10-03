@@ -1,0 +1,194 @@
+--- supervisor.py
++++ supervisor.py
+@@ -19,13 +19,13 @@
+ import time
+ 
+ ASSIGNMENT = "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048"
+-PREFIX = "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure"
++PREFIX = "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure"
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+ EXPECTED = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ ARCHIVE_SHA = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+-SOURCE_SHA = "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e"
+-CONTRACT_SHA = "ed4c5043e0c2fbb6022f15b4998dd142cc14eafe3846666f38070f21d27396ff"
++SOURCE_SHA = "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60"
++CONTRACT_SHA = "f4af798566916c32ef504f95865faceffadd5e62e247e3c8e2ce64b4cd74bb7d"
+ ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+ SUP_AS, PARENT_AS, GPG_AS = 33554432, 117440512, 67108864
+ STREAM, OUTPUT = 32768, 65536
+@@ -61,8 +61,8 @@
+ PINS = {
+     "prlimit": ("/usr/bin/prlimit", 27616, "cb28811cb3902773c1a0f3ac0ea554c7a1e232724e9d4cae055ede54b65a7bc4", 65536, True),
+     "python": ("/usr/bin/python3.14", 7477160, "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41", 8388608, True),
+-    "source": (PREFIX + "/verifier.py", 71834, SOURCE_SHA, 262144, False),
+-    "contract": (PREFIX + "/launch-contract.json", 48583, CONTRACT_SHA, 262144, False),
++    "source": (PREFIX + "/verifier.py", 73847, SOURCE_SHA, 262144, False),
++    "contract": (PREFIX + "/launch-contract.json", 48792, CONTRACT_SHA, 262144, False),
+     "gpg": ("/usr/bin/gpg", 1186456, "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754", 2097152, True),
+     "gpgv": ("/usr/bin/gpgv", 302296, "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d", 1048576, True),
+     "bill": ("/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json", 466956, "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2", 1048576, False),
+@@ -94,16 +94,25 @@
+ 
+ 
+ 
+-FD_HISTORY = []
++FD_HISTORY_CAP = 256
++FD_HISTORY_USED = 0
++FD_HISTORY = [None] * FD_HISTORY_CAP
+ FD_GENERATION = 0
+ FD_SIGNALS = set(signal.valid_signals()) - {signal.SIGKILL, signal.SIGSTOP}
++ERROR_OBJECT_CAP = 256
+ ERROR_OBJECTS = []
++
++
++def retain_error_object(exc):
++    if len(ERROR_OBJECTS) >= ERROR_OBJECT_CAP:
++        raise Refusal("prefunded error-object arena exhausted; original exception retained") from exc
++    ERROR_OBJECTS.append(exc)
+ 
+ 
+ def exact_error(exc):
+     # Original native Python objects/tracebacks stay in the same owner lifetime.
+     # Lossless stock value graph includes UnicodeDecodeError's original bytes.
+-    ERROR_OBJECTS.append(exc)
++    retain_error_object(exc)
+     objects, nodes, values, cells = [exc], [], [], []
+     def ref(value):
+         if value is None:
+@@ -111,6 +120,8 @@
+         for i, old in enumerate(objects):
+             if old is value:
+                 return i
++        if len(objects) >= 128:
++            raise Refusal("prefunded exception-node arena exhausted") from exc
+         objects.append(value)
+         return len(objects) - 1
+     def val(value):
+@@ -124,6 +135,8 @@
+                 return {"value_ref": i}
+         require(type(value) in (bytes, bytearray, list, tuple, dict),
+                 "unsupported native error value; original object retained, not proof")
++        if len(values) >= 128:
++            raise Refusal("prefunded error-value arena exhausted") from exc
+         values.append(value)
+         return {"value_ref": len(values) - 1}
+     i = 0
+@@ -131,6 +144,8 @@
+         obj = objects[i]
+         frames, tb = [], obj.__traceback__
+         while tb is not None:
++            if len(frames) >= 128:
++                raise Refusal("prefunded traceback arena exhausted") from exc
+             frames.append({"file": tb.tb_frame.f_code.co_filename,
+                            "function": tb.tb_frame.f_code.co_name,
+                            "line": tb.tb_lineno, "lasti": tb.tb_lasti})
+@@ -158,8 +173,27 @@
+             cell = {"id": i, "kind": "dict", "pairs": [[val(k), val(v)] for k, v in obj.items()]}
+         cells.append(cell)
+         i += 1
++    require(nodes and nodes[0]["id"] == 0, "error-graph root missing")
++    stock = {"type": nodes[0]["type"], "message": nodes[0]["message"]}
+     return {"schema": "friday.sol060.error-graph.v2", "root": 0,
+-            "nodes": nodes, "values": cells, "native_object_reconstruction": "NOT_QUALIFIED"}
++            "nodes": nodes, "values": cells, "stock_cause": stock,
++            "native_object_reconstruction": "NOT_QUALIFIED"}
++
++
++def original_stock_cause(graph):
++    # Recompute the original stock type and message from the retained root.
++    # The graph remains the failure value. A two-key dict is not the receipt.
++    require(type(graph) is dict and graph.get("schema") == "friday.sol060.error-graph.v2"
++            and type(graph.get("root")) is int and type(graph.get("nodes")) is list
++            and type(graph.get("values")) is list and 0 <= graph["root"] < len(graph["nodes"]),
++            "exact error-graph.v2 root required")
++    node = graph["nodes"][graph["root"]]
++    require(type(node) is dict and node.get("id") == graph["root"]
++            and type(node.get("type")) is str and type(node.get("message")) is str,
++            "error-graph root lacks original stock type/message")
++    stock = {"type": node["type"], "message": node["message"]}
++    require(graph.get("stock_cause") == stock, "stock_cause is not the retained root type/message")
++    return stock
+ 
+ 
+ class AllocationFD(int):
+@@ -170,14 +204,17 @@
+ 
+ 
+ def reserve_allocation(where):
+-    global FD_GENERATION
++    global FD_GENERATION, FD_HISTORY_USED
+     FD_GENERATION += 1
+     record = {"generation": FD_GENERATION, "where": where, "number": None,
+               "state": "PLANNED", "attempted_once": False,
+               "acquire_error_object": None, "close_error_object": None,
+               "close_error": None, "token": None}
+-    # History/record exist before native effect. There is no post-close add/set.
+-    FD_HISTORY.append(record)
++    # The slot is taken before the native acquire. Unused arena slots stay None.
++    require(FD_HISTORY_USED < FD_HISTORY_CAP,
++            "prefunded descriptor-history arena exhausted before native acquire")
++    FD_HISTORY[FD_HISTORY_USED] = record
++    FD_HISTORY_USED += 1
+     return record
+ 
+ 
+@@ -186,7 +223,7 @@
+     record["state"] = "RETURNED"
+     require(type(number) is int and number >= 0, "invalid exact returned FD")
+     require(not any(old is not record and old["number"] == number and
+-                old["state"] in ("RETURNED", "RETIRE_UNKNOWN") for old in FD_HISTORY),
++                old["state"] in ("RETURNED", "RETIRE_UNKNOWN") for old in FD_HISTORY[:FD_HISTORY_USED]),
+             "returned FD conflicts with retained allocation; never guess close")
+     token = AllocationFD(record)
+     record["token"] = token
+@@ -269,17 +306,17 @@
+     global STOP
+     first = None
+     # Finite same-owner graph. Do not reclose retired old aliases or reuse ints.
+-    for record in FD_HISTORY:
++    for record in FD_HISTORY[:FD_HISTORY_USED]:
+         if record["state"] == "RETURNED" and not record["attempted_once"]:
+             try:
+                 retire_record(record)
+             except BaseException as exc:
+                 first = first or exc
+-    unresolved = [record for record in FD_HISTORY if record["state"] not in
++    unresolved = [record for record in FD_HISTORY[:FD_HISTORY_USED] if record["state"] not in
+                   ("PLANNED", "CONFIRMED_CLOSED")]
+     R["descriptor_allocation_history"] = [{k: r[k] for k in
+         ("generation", "where", "number", "state", "attempted_once", "close_error")}
+-        for r in FD_HISTORY]
++        for r in FD_HISTORY[:FD_HISTORY_USED]]
+     if unresolved:
+         STOP = True
+     if first is not None:
+@@ -1522,8 +1559,9 @@
+     if mode != "verify-node":
+         expected = ("nonroot exact three-variable startup environment required"
+                     if mode == "startup-env-negative" else "pre-interpreter inherited limit mismatch")
++        cause = original_stock_cause(inner["failure"])
+         require(code == 2 and inner["status"] == "NOT_PROVEN" and inner["calls"] == []
+-                and inner["failure"]["type"] == "Refusal" and inner["failure"]["message"] == expected,
++                and cause == {"type": "Refusal", "message": expected},
+                 "startup negative did not produce exact before-GPG cause")
+         intent = inner["private_home_intent"]
+         require(intent["state"] == "NOT_ATTEMPTED" and intent["path"] is None
+@@ -1535,7 +1573,7 @@
+                 and inner["own_scratch_bytes_final_before_cleanup"] == 0,
+                 "startup control exact no-home/no-GPG intent evidence incomplete")
+         R["inner_evidence_validation"]["intended_cause_validated"] = True
+-        R["startup_control"] = {"mode": mode, "actual_cause": inner["failure"],
++        R["startup_control"] = {"mode": mode, "actual_cause": cause,
+                                 "actual_gpg_calls": 0, "passed": True}
+         return "STARTUP_CONTROL_CAUSE_CONFIRMED"
+     require(code == 0 and inner["status"] == "QUALIFIED_NODE_RAW_PUBLISHER_CHAIN_PROVEN",
+@@ -1934,7 +1972,7 @@
+ except BaseException as exc:
+     qualified = False
+     # Keep original R/raw/cause graph. No shortened/hash-only receipt is proof.
+-    ERROR_OBJECTS.append(exc)
++    retain_error_object(exc)
+     R["publication_failure"] = exact_error(exc)
+     os._exit(3 if STOP else 2)  # full receipt fit CODE_OPEN, never new output cap
+ 

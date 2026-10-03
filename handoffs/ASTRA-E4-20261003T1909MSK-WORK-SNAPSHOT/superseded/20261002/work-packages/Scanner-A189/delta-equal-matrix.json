@@ -1,0 +1,2348 @@
+{
+  "schema": "friday.a189.delta-equal.v1",
+  "changed_count": 16,
+  "equal_count": 36,
+  "rows": [
+    {
+      "file": "controls/catalog.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/controls/catalog.json",
+        "bytes": 12103,
+        "sha256": "a3a2c499df062b6d9c048416dc8c2dbf3aa4638b23bc47cfe5c5c219bfaa63e2",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980065",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12103",
+          "1790935795378776365",
+          "1790935795378776365"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/controls/catalog.json",
+        "bytes": 12103,
+        "sha256": "a3a2c499df062b6d9c048416dc8c2dbf3aa4638b23bc47cfe5c5c219bfaa63e2",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980404",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12103",
+          "1790941728814267372",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "controls/independent-contract.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/controls/independent-contract.json",
+        "bytes": 1484,
+        "sha256": "0c45acead7156172974dbf89d8a7044fe90bc420724638501d86f7f927942ca0",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980066",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1484",
+          "1790935795378870471",
+          "1790935795378870471"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/controls/independent-contract.json",
+        "bytes": 1484,
+        "sha256": "0c45acead7156172974dbf89d8a7044fe90bc420724638501d86f7f927942ca0",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980405",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1484",
+          "1790941728815267430",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "controls/whole-closure.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/controls/whole-closure.json",
+        "bytes": 21559,
+        "sha256": "8208d4bc540dce0c0b7eabbd149d14ddc8686a68af851d8b6af22bad048aeced",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980067",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21559",
+          "1790935795378943175",
+          "1790935795378943175"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/controls/whole-closure.json",
+        "bytes": 21559,
+        "sha256": "8208d4bc540dce0c0b7eabbd149d14ddc8686a68af851d8b6af22bad048aeced",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980406",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21559",
+          "1790941728815639555",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "data/all202-identity-map.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/all202-identity-map.json",
+        "bytes": 298123,
+        "sha256": "ffddb01d39713c2464856b717b7512733e7d2e68da58250cfc3ff599ea552529",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980059",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "298123",
+          "1790935795378232334",
+          "1790935795378232334"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/data/all202-identity-map.json",
+        "bytes": 298123,
+        "sha256": "ffddb01d39713c2464856b717b7512733e7d2e68da58250cfc3ff599ea552529",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980408",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "298123",
+          "1790941728815639555",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "data/c55-admission.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/c55-admission.json",
+        "bytes": 159,
+        "sha256": "c276309c7b4ce03626eca641e2bba42bc79036b5f63247ae0c2787eb6e61d5da",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980060",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "159",
+          "1790935795378444946",
+          "1790935795378444946"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/data/c55-admission.json",
+        "bytes": 159,
+        "sha256": "c276309c7b4ce03626eca641e2bba42bc79036b5f63247ae0c2787eb6e61d5da",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980409",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "159",
+          "1790941728816267487",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "data/c55-expected-output.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/c55-expected-output.json",
+        "bytes": 356,
+        "sha256": "7ba0a58769f20b0c69d20d66f578ceb3d25b047d96e5103cd8c51101427db126",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980061",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "356",
+          "1790935795378515550",
+          "1790935795378515550"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/data/c55-expected-output.json",
+        "bytes": 356,
+        "sha256": "7ba0a58769f20b0c69d20d66f578ceb3d25b047d96e5103cd8c51101427db126",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980410",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "356",
+          "1790941728816624712",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "data/c55-held.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/c55-held.json",
+        "bytes": 63,
+        "sha256": "ff7f06af5898b00d8fb17b129906516807ef744f2595a0c0fa0317a18a78b012",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980062",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "63",
+          "1790935795378585855",
+          "1790935795378585855"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/data/c55-held.json",
+        "bytes": 63,
+        "sha256": "ff7f06af5898b00d8fb17b129906516807ef744f2595a0c0fa0317a18a78b012",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980411",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "63",
+          "1790941728816743119",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "data/c55-index.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/c55-index.json",
+        "bytes": 772,
+        "sha256": "fedcc9aab0857e605f54ea869919a855eebdcab077c035df536fa8882ad9fff0",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980063",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "772",
+          "1790935795378657458",
+          "1790935795378657458"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/data/c55-index.json",
+        "bytes": 772,
+        "sha256": "fedcc9aab0857e605f54ea869919a855eebdcab077c035df536fa8882ad9fff0",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980412",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "772",
+          "1790941728816855025",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "future-scan-plan/plan.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/future-scan-plan/plan.json",
+        "bytes": 16241,
+        "sha256": "083fd2a22e468ab2adcced2a55e33225a6785b1c5dcb0362f139731c28b8f59c",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980071",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16241",
+          "1790935795379263994",
+          "1790935795379263994"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/future-scan-plan/plan.json",
+        "bytes": 16241,
+        "sha256": "083fd2a22e468ab2adcced2a55e33225a6785b1c5dcb0362f139731c28b8f59c",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980414",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16241",
+          "1790941728816855025",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "input-index/index.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/input-index/index.json",
+        "bytes": 238293,
+        "sha256": "41781d9297176e57c5b222a3692c737e8953cae175eec17e2477af9a48a31197",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980069",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "238293",
+          "1790935795379066082",
+          "1790935795379066082"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/input-index/index.json",
+        "bytes": 238293,
+        "sha256": "41781d9297176e57c5b222a3692c737e8953cae175eec17e2477af9a48a31197",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980416",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "238293",
+          "1790941728816855025",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "native/source_owner.c",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/native/source_owner.c",
+        "bytes": 106973,
+        "sha256": "ed128b2cf7319541eded32e1907330452514c3921ccc367e4be6a1960e2a337a",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980042",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "106973",
+          "1790938180135107597",
+          "1790938180135107597"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/native/source_owner.c",
+        "bytes": 111016,
+        "sha256": "3e1f2722141aa31a21187c9f03e4787300ed24682166978b24cf7bd38b325e06",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980418",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "111016",
+          "1790943491567637345",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/archive-expectation.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/archive-expectation.v1.json",
+        "bytes": 989,
+        "sha256": "75ad747bd30f63ce624d10c789c1a27003e7f8ea38dba0b83a958709d2a67427",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980044",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "989",
+          "1790935795377069867",
+          "1790935795377069867"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/archive-expectation.v1.json",
+        "bytes": 989,
+        "sha256": "75ad747bd30f63ce624d10c789c1a27003e7f8ea38dba0b83a958709d2a67427",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980420",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "989",
+          "1790941728819267658",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/broker-material-provenance.v1.keys.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/broker-material-provenance.v1.keys.json",
+        "bytes": 1919,
+        "sha256": "16239396207f90a3ab78158ebdd9abd58db304c3bc3061a081fba18d33489503",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980045",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1919",
+          "1790935795377162773",
+          "1790935795377162773"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/broker-material-provenance.v1.keys.json",
+        "bytes": 1919,
+        "sha256": "16239396207f90a3ab78158ebdd9abd58db304c3bc3061a081fba18d33489503",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980421",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1919",
+          "1790941728819656086",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/broker-snapshot-manifest.v1.keys.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/broker-snapshot-manifest.v1.keys.json",
+        "bytes": 8823,
+        "sha256": "0038a130fc6cfc212180ec82f932f8ddd4d4d25ceeda27dda64713e4cf0755fc",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980046",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8823",
+          "1790935795377203575",
+          "1790935795377203575"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/broker-snapshot-manifest.v1.keys.json",
+        "bytes": 8823,
+        "sha256": "0038a130fc6cfc212180ec82f932f8ddd4d4d25ceeda27dda64713e4cf0755fc",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980422",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8823",
+          "1790941728819804694",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/custody-record.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/custody-record.v1.json",
+        "bytes": 705,
+        "sha256": "4a8d71b72af9ff8fcef74f1de7a29fb20b94087975b347037080a70eedccee16",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980047",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "705",
+          "1790935795377304881",
+          "1790935795377304881"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/custody-record.v1.json",
+        "bytes": 705,
+        "sha256": "4a8d71b72af9ff8fcef74f1de7a29fb20b94087975b347037080a70eedccee16",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980423",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "705",
+          "1790941728820100912",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/deb-member-observation.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/deb-member-observation.v1.json",
+        "bytes": 7833,
+        "sha256": "45924c3191e3197fc94373566bd3d244b2b61d070c580515cbd73989ebf3d0f3",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980048",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7833",
+          "1790935795377381585",
+          "1790935795377381585"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/deb-member-observation.v1.json",
+        "bytes": 7833,
+        "sha256": "45924c3191e3197fc94373566bd3d244b2b61d070c580515cbd73989ebf3d0f3",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980424",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7833",
+          "1790941728820215918",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/future-scan-manifest.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/future-scan-manifest.v1.json",
+        "bytes": 8050,
+        "sha256": "671cbc38574acfd4bc05ac74f7c8f0eec7b95fda6ebea39faecb5477655b9f32",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980049",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8050",
+          "1790935795377506392",
+          "1790935795377506392"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/future-scan-manifest.v1.json",
+        "bytes": 8050,
+        "sha256": "671cbc38574acfd4bc05ac74f7c8f0eec7b95fda6ebea39faecb5477655b9f32",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980425",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8050",
+          "1790941728820335425",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/held-custody.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/held-custody.v1.json",
+        "bytes": 2990,
+        "sha256": "ac77bd4881f968bc58c24198afe0a4eb5befa1d7c0fe2665c2ef5ee7c55ec9b1",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980050",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2990",
+          "1790935795377580797",
+          "1790935795377580797"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/held-custody.v1.json",
+        "bytes": 2990,
+        "sha256": "ac77bd4881f968bc58c24198afe0a4eb5befa1d7c0fe2665c2ef5ee7c55ec9b1",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980426",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2990",
+          "1790941728820496234",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/input-index.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/input-index.v1.json",
+        "bytes": 6332,
+        "sha256": "8eff7af829f21acc44705e580339bc76ce678fca0dc5475e86a1ed35acefa839",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980051",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6332",
+          "1790935795377653301",
+          "1790935795377653301"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/input-index.v1.json",
+        "bytes": 6332,
+        "sha256": "8eff7af829f21acc44705e580339bc76ce678fca0dc5475e86a1ed35acefa839",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980427",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6332",
+          "1790941728820609741",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/member-record.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/member-record.v1.json",
+        "bytes": 17438,
+        "sha256": "a40f2d7feecdd4298065b879c2c73ce49a3f2d081c1be683a1fdd7fe7e976708",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980052",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17438",
+          "1790935795377727605",
+          "1790935795377727605"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/member-record.v1.json",
+        "bytes": 17438,
+        "sha256": "a40f2d7feecdd4298065b879c2c73ce49a3f2d081c1be683a1fdd7fe7e976708",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980428",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17438",
+          "1790941728820732248",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/scan-admission.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/scan-admission.v1.json",
+        "bytes": 7772,
+        "sha256": "88c1e2caa20b29c4fe242510b1d59e956c34e8dfd16b11d5a2756f6dd86b1ac7",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980053",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7772",
+          "1790935795377803409",
+          "1790935795377803409"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/scan-admission.v1.json",
+        "bytes": 7772,
+        "sha256": "88c1e2caa20b29c4fe242510b1d59e956c34e8dfd16b11d5a2756f6dd86b1ac7",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980429",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7772",
+          "1790941728821228876",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/scan-index.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/scan-index.v1.json",
+        "bytes": 966,
+        "sha256": "fee19bd2e81076c01d25479a0144fdfd3f4192c14e66892bd20e9084478a9c85",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980054",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "966",
+          "1790935795377876214",
+          "1790935795377876214"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/scan-index.v1.json",
+        "bytes": 966,
+        "sha256": "fee19bd2e81076c01d25479a0144fdfd3f4192c14e66892bd20e9084478a9c85",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980430",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "966",
+          "1790941728821267773",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/scan-resource.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/scan-resource.v1.json",
+        "bytes": 39747,
+        "sha256": "d70d4914ce82272338b3f3972ed258f651743cb56087567e2d2673e6a6b889e4",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980055",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "39747",
+          "1790935795377947918",
+          "1790935795377947918"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/scan-resource.v1.json",
+        "bytes": 39747,
+        "sha256": "d70d4914ce82272338b3f3972ed258f651743cb56087567e2d2673e6a6b889e4",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980431",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "39747",
+          "1790941728821666201",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/scan-result.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/scan-result.v1.json",
+        "bytes": 11609,
+        "sha256": "d1f40916d2b2e36c077b28888f9c4dd9712bc7a70b2e5c17c2699bbfd84c31cb",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980056",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11609",
+          "1790935795378030322",
+          "1790935795378030322"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/scan-result.v1.json",
+        "bytes": 11609,
+        "sha256": "d1f40916d2b2e36c077b28888f9c4dd9712bc7a70b2e5c17c2699bbfd84c31cb",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980432",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11609",
+          "1790941728821809110",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "schemas/wheel-metadata-observation.v1.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/wheel-metadata-observation.v1.json",
+        "bytes": 17439,
+        "sha256": "5ac922c318c18ab9d3a562bd25c6cac28488a749fbd82b84feaeeaaa421bd875",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980057",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17439",
+          "1790935795378104827",
+          "1790935795378104827"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/wheel-metadata-observation.v1.json",
+        "bytes": 17439,
+        "sha256": "5ac922c318c18ab9d3a562bd25c6cac28488a749fbd82b84feaeeaaa421bd875",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980433",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17439",
+          "1790941728821936517",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/__init__.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/__init__.py",
+        "bytes": 211,
+        "sha256": "d27706191c919459d23e8b27f17066132d4ee7311cd0d9630f75a3c1cb179bda",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980013",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "211",
+          "1790935795374496219",
+          "1790935795374496219"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/__init__.py",
+        "bytes": 211,
+        "sha256": "d27706191c919459d23e8b27f17066132d4ee7311cd0d9630f75a3c1cb179bda",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980435",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "211",
+          "1790941728822267830",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/bounds.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/bounds.py",
+        "bytes": 18197,
+        "sha256": "4b1df743798a5f3b7c53617fb6d62bb5a73d75e848e67f0730550813f019c6b5",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980014",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18197",
+          "1790935795374611926",
+          "1790935795374611926"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/bounds.py",
+        "bytes": 19120,
+        "sha256": "d304b445915461a8f6ea7399cec8ce8861b660e349f45a4017d0fd9b2d9561e1",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980436",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19120",
+          "1790942649050695272",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/broker_map.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/broker_map.py",
+        "bytes": 18753,
+        "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980015",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18753",
+          "1790935795374697731",
+          "1790935795374697731"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/broker_map.py",
+        "bytes": 18753,
+        "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980437",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18753",
+          "1790941728822872371",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/canonical.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/canonical.py",
+        "bytes": 9119,
+        "sha256": "2b59ad703c0649cf108cc27c48147337779aa71269992b4777a72d82125ffb5f",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980016",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9119",
+          "1790935795374775535",
+          "1790935795374775535"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/canonical.py",
+        "bytes": 9474,
+        "sha256": "492af27f62df7609010bcf40ace91153992f747a514437128dbf030baef39050",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980438",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9474",
+          "1790942162191991355",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/causes.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/causes.py",
+        "bytes": 10492,
+        "sha256": "843b97da1b47be3a9f97852d80d4b0c5b5d99da7e46c207d1679a348ad58deae",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980017",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10492",
+          "1790935795374863240",
+          "1790935795374863240"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/causes.py",
+        "bytes": 10859,
+        "sha256": "c56f0a84275cad7b9c923ee8c4f84a92724dd0d9926456a6a8fbf664cae7a703",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980439",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10859",
+          "1790941911218707995",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/compression.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/compression.py",
+        "bytes": 18572,
+        "sha256": "b259dc51e53fa5c8450d9dd86f6b30dac741a29f91231a59e5de294b9afe6c9a",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980018",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18572",
+          "1790935795374915343",
+          "1790935795374915343"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/compression.py",
+        "bytes": 19552,
+        "sha256": "81f845b58a41fd5e733a8e062f94f442718253563ceded26e9491fde72434274",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980440",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19552",
+          "1790942162193991468",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/context.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/context.py",
+        "bytes": 20191,
+        "sha256": "81bb926f1355a44ea845f5ffcf1ae641cac4b05936dc238210f37591753bf6ae",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980019",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "20191",
+          "1790935795375008949",
+          "1790935795375008949"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/context.py",
+        "bytes": 20445,
+        "sha256": "43bbf91da3411a70986fc5e9d8518bc8197901dc74ca771d61fd4103fba12a4b",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980441",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "20445",
+          "1790942162194991526",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/contracts.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/contracts.py",
+        "bytes": 30961,
+        "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980020",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30961",
+          "1790935795375087553",
+          "1790935795375087553"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/contracts.py",
+        "bytes": 30961,
+        "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980442",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30961",
+          "1790941728824240750",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/controls.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/controls.py",
+        "bytes": 9556,
+        "sha256": "36a184d6dcf6b807f1b84c4848bf850a21eb0729817dfef4be5b6a7b3b960a7b",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980021",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9556",
+          "1790935795375172958",
+          "1790935795375172958"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/controls.py",
+        "bytes": 9780,
+        "sha256": "1603b21d0f65c116c3e46e7611e652a8ca2bdd2aa80e273ef212838d72003aef",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980443",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9780",
+          "1790942162196991639",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/custody.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/custody.py",
+        "bytes": 55921,
+        "sha256": "6a6608d422097cd8fd76b283623b735b1a00b197e1244071f0a94d028d1a0270",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980022",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "55921",
+          "1790935795375251662",
+          "1790935795375251662"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/custody.py",
+        "bytes": 56605,
+        "sha256": "cba6ab3149298afe0b50dcdc53187bb0c363cc518f90d95b3c816b37bbd132bc",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980444",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "56605",
+          "1790943347115417528",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/deb_archive.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/deb_archive.py",
+        "bytes": 54731,
+        "sha256": "491df78e90ef4f99b51afc348e623689296eeb53759b416117486b8d703e5f46",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980023",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "54731",
+          "1790935795375343567",
+          "1790935795375343567"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/deb_archive.py",
+        "bytes": 56876,
+        "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980445",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "56876",
+          "1790942162199991810",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/digests.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/digests.py",
+        "bytes": 3621,
+        "sha256": "b1dc18cb1acb587644bb0fb8d58b093c189dea4eccba62f3bee99f2717c266a9",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980024",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3621",
+          "1790935795375483876",
+          "1790935795375483876"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/digests.py",
+        "bytes": 3970,
+        "sha256": "fd588bda6e4edbe2fe751ea69ac147a9b2bbd3271096c00b69af31bb70757b1d",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980446",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3970",
+          "1790942162200991867",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/filename.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/filename.py",
+        "bytes": 1917,
+        "sha256": "12d9730bbacfbcf32896c448d9fbaa84c304b62a7b6d24210f3d3339bd2851f7",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980025",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1917",
+          "1790935795375555880",
+          "1790935795375555880"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/filename.py",
+        "bytes": 1917,
+        "sha256": "12d9730bbacfbcf32896c448d9fbaa84c304b62a7b6d24210f3d3339bd2851f7",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980447",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1917",
+          "1790941728826613786",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/fixtures.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/fixtures.py",
+        "bytes": 1798,
+        "sha256": "baa60bba8f6bbb912663569e478d171f16c808ed6ccf9beb811cdd41c2a90762",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980026",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1798",
+          "1790935795375627984",
+          "1790935795375627984"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/fixtures.py",
+        "bytes": 1798,
+        "sha256": "baa60bba8f6bbb912663569e478d171f16c808ed6ccf9beb811cdd41c2a90762",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980448",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1798",
+          "1790941728826750494",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/guards.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/guards.py",
+        "bytes": 2031,
+        "sha256": "de34c880bd18b78d2e9b691008950809a31c466d581e3f232939b30d10969806",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980027",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2031",
+          "1790935795375700288",
+          "1790935795375700288"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/guards.py",
+        "bytes": 2031,
+        "sha256": "de34c880bd18b78d2e9b691008950809a31c466d581e3f232939b30d10969806",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980449",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2031",
+          "1790941728826884401",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/normalize.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/normalize.py",
+        "bytes": 1458,
+        "sha256": "91053cc6010512819788b5adf11af85286c74ec32f90cbc76721e280cc28a43c",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980028",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1458",
+          "1790935795375771492",
+          "1790935795375771492"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/normalize.py",
+        "bytes": 1458,
+        "sha256": "91053cc6010512819788b5adf11af85286c74ec32f90cbc76721e280cc28a43c",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980450",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1458",
+          "1790941728827037310",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/pins.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/pins.py",
+        "bytes": 4553,
+        "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980029",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4553",
+          "1790935795375843796",
+          "1790935795375843796"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/pins.py",
+        "bytes": 4553,
+        "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980451",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4553",
+          "1790941728827180318",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/public.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/public.py",
+        "bytes": 58489,
+        "sha256": "50d56d2c4c8a7108fc63fa6e12dcffed436f92898a0735aa4088687325f65f94",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980030",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "58489",
+          "1790935795375918901",
+          "1790935795375918901"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/public.py",
+        "bytes": 60149,
+        "sha256": "ac5343b8d0fbb5630432277f07d8a1f1ef8c1529e2d6e20f23de7afea3ad1014",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980452",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "60149",
+          "1790942527410773533",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/raw_relations.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/raw_relations.py",
+        "bytes": 28490,
+        "sha256": "470d3dca0d50088573907758b48f3581137692d0b94d56ddc11af084bb5fdfa4",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980031",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "28490",
+          "1790935795376005706",
+          "1790935795376005706"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/raw_relations.py",
+        "bytes": 28991,
+        "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980453",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "28991",
+          "1790942162204992094",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/schema_validate.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/schema_validate.py",
+        "bytes": 12038,
+        "sha256": "4b29fbe40e26f4145e7549953a369dacfc91370f5bf9155758504416b184474b",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980032",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12038",
+          "1790935795376087510",
+          "1790935795376087510"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/schema_validate.py",
+        "bytes": 12176,
+        "sha256": "57ec66bc4faf68c12576cd34418c7af1a45add88bd0f881f43f7e043401bca15",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980454",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12176",
+          "1790942162205992152",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/semantics.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/semantics.py",
+        "bytes": 3622,
+        "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980033",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3622",
+          "1790935795376163815",
+          "1790935795376163815"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/semantics.py",
+        "bytes": 3622,
+        "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980455",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3622",
+          "1790941728828767110",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "source/zip_wheel.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/zip_wheel.py",
+        "bytes": 61724,
+        "sha256": "932734d4e3f068f958a1598940b6a259d4e908a0777f9b5355fca2ec4e75ee6d",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980034",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "61724",
+          "1790935795376237419",
+          "1790935795376237419"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/zip_wheel.py",
+        "bytes": 63188,
+        "sha256": "12c732f0674edf432461c598f5149d65fbde67211e2366fdce4c12b0987133a8",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980456",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "63188",
+          "1790942162208992322",
+          "1790943768723408446"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "tools/native_owner.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/native_owner.py",
+        "bytes": 90243,
+        "sha256": "c24609bb6ccef3976d1922659596a595e13f3dcfeeb8a55960fded47498239ac",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980036",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "90243",
+          "1790936068576118631",
+          "1790936068576118631"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/native_owner.py",
+        "bytes": 90243,
+        "sha256": "c24609bb6ccef3976d1922659596a595e13f3dcfeeb8a55960fded47498239ac",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980458",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "90243",
+          "1790941728829563456",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "tools/native_support.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/native_support.py",
+        "bytes": 19421,
+        "sha256": "58061c224d8600c23f778a54e95cfae2659b27236db901d52c3eab524c66bb0b",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980037",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19421",
+          "1790938124500723676",
+          "1790938124500723676"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/native_support.py",
+        "bytes": 23613,
+        "sha256": "8025cd70dfd25481ca76c10957d90d9ce5c14dfa3388a8fb74dc2d37698b4b12",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980459",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "23613",
+          "1790943251886998707",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "tools/root_holder.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/root_holder.py",
+        "bytes": 32079,
+        "sha256": "640e8e48dd70089e373b6f49965d713820b9b2d0a7e6540c071105d9b0c2d266",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980038",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "32079",
+          "1790938124504711706",
+          "1790938124504711706"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/root_holder.py",
+        "bytes": 32079,
+        "sha256": "640e8e48dd70089e373b6f49965d713820b9b2d0a7e6540c071105d9b0c2d266",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980460",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "32079",
+          "1790941728831183249",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "tools/state_binding.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/state_binding.py",
+        "bytes": 15608,
+        "sha256": "932882386f0d5999baa3c7fdaee29a724d5e0050c4e3470e9453222986ae1c58",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980039",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15608",
+          "1790935795376699346",
+          "1790935795376699346"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/state_binding.py",
+        "bytes": 15906,
+        "sha256": "99e43760236702ad53c3fed9f7ed6462d937e8a7f9da38848d58e37b71dfd983",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980461",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15906",
+          "1790942216972108529",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": true,
+      "whole_byte_equal": false,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "file": "tools/worker_entry.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/worker_entry.py",
+        "bytes": 5919,
+        "sha256": "112b2fa914daa0e7268945da5818c84b04d8e6240b4f008911331f3574bd8de5",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980040",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5919",
+          "1790935795376776851",
+          "1790935795376776851"
+        ],
+        "stable9": true
+      },
+      "current": {
+        "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/worker_entry.py",
+        "bytes": 5919,
+        "sha256": "112b2fa914daa0e7268945da5818c84b04d8e6240b4f008911331f3574bd8de5",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980462",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5919",
+          "1790941728831863188",
+          "1790943768722408389"
+        ],
+        "stable9": true
+      },
+      "changed": false,
+      "whole_byte_equal": true,
+      "whole_current_bytes_read": true,
+      "acceptance": "AUTHOR_ATTEMPT_UNREVIEWED",
+      "CODE_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "old_acceptance_transferred": false
+}

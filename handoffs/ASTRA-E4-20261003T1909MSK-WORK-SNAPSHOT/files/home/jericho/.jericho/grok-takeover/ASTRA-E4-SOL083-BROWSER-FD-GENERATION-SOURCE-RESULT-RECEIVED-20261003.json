@@ -1,0 +1,322 @@
+{
+  "schema": "friday.astra.sol083.browser.fd-generation.received.v1",
+  "recorded_utc": "2026-10-03T04:22:25Z",
+  "assignment": "ASTRA-E4-A214-BROWSER-FD-GENERATION-CONNECTED-NONAUTHOR-REVIEW-SOL083",
+  "generation": 1,
+  "event": "SOL-SOL083-R1",
+  "exact_queued_id": "01a0fff2-6066-7040-b7de-fe7fb6e13c1f",
+  "envelope": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-RESULT.json",
+    "bytes": 1965,
+    "sha256": "2621499957226e305aba553ff8c53f2283c3aa6671d85f35e1f62affa0eb1939",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532467",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1965",
+      "1791000449312218272",
+      "1791000449365221311"
+    ],
+    "stable9": true
+  },
+  "task": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-TASK-20261003.txt",
+    "bytes": 1736,
+    "sha256": "cda3b3d628a96656eba09da7a25f24bebc05b6c29c8ba06190f3d43778bfee6a",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532212",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1736",
+      "1790999853235053225",
+      "1790999853296056722"
+    ],
+    "stable9": true
+  },
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-INPUT-20261003.json",
+    "bytes": 28150,
+    "sha256": "3db254e03e10670e199989483c898d7db987c006901a79df90f71d57308ef067",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532105",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "28150",
+      "1790999853035041761",
+      "1790999853094045143"
+    ],
+    "stable9": true
+  },
+  "once_compact": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-PRE-TASK-COMPACT-20261003.json",
+    "bytes": 1908,
+    "sha256": "3a56f700b18d277092d3d5bf9118ef314784f5c7532f7c2fe1b9c22681f12988",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532381",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1908",
+      "1790999981217388734",
+      "1790999981217388734"
+    ],
+    "stable9": true
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/manifest.json",
+    "bytes": 6731,
+    "sha256": "d53f604189cdb2e1342c0fe47f48dae411ea0167fb7b09cb9c60b41961c08893",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226964",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "6731",
+      "1791000422264667998",
+      "1791000422315670921"
+    ],
+    "stable9": true
+  },
+  "full_owned_pins": [
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/manifest.json",
+      "bytes": 6731,
+      "sha256": "d53f604189cdb2e1342c0fe47f48dae411ea0167fb7b09cb9c60b41961c08893",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226964",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6731",
+        "1791000422264667998",
+        "1791000422315670921"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/current-source-rejoin.json",
+      "bytes": 115726,
+      "sha256": "43a06d774cf8cf40e1b0728e6c52538c17ec5264fa44c95acca33ec363490795",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226956",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "115726",
+        "1791000313568437929",
+        "1791000313627441311"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/effects-and-costs.json",
+      "bytes": 2608,
+      "sha256": "c8a9bef965a2e91c1f71bbf1fc35df34c286698cd519cd80b758fbeed150ea70",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226959",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2608",
+        "1791000422099658541",
+        "1791000422099658541"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/final-external-snapshot.json",
+      "bytes": 120795,
+      "sha256": "fec96f0b3b14d45e51124aa2bf36beffdc103253c28fb2bbc8dd7b0a8715b7dd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226962",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "120795",
+        "1791000352113647204",
+        "1791000352167650299"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/full-gapless-parts.json",
+      "bytes": 15559,
+      "sha256": "26b7bf2de5b769c9e0d4992684cea5832ff11fe85168d6c8bb7968d68432becf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226955",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15559",
+        "1791000313567437872",
+        "1791000313627441311"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/initial-pin-checks.json",
+      "bytes": 13490,
+      "sha256": "5b83fda4fa87928d62746630c1bf9f3fd490bb10448d3d322cd958edfd0aff78",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226954",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13490",
+        "1791000071776579256",
+        "1791000071825582064"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/literal-context-rejoin.json",
+      "bytes": 10941,
+      "sha256": "d90bf8aa441c48dfa3167d0a2af6b088a14587b4492d582f0499cabeff214d30",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226957",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10941",
+        "1791000313569437987",
+        "1791000313627441311"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/review-matrix.json",
+      "bytes": 8359,
+      "sha256": "c8df3d0fca6a1322a6986d431600ff5ce12310abf0513abc44ea3a7a54e58d71",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226958",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8359",
+        "1791000313569437987",
+        "1791000313627441311"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/pathset.json",
+      "bytes": 435,
+      "sha256": "78e4723349c2b6b214cf2c5179daf6ed0ad2418793a32ff30958a10aa3c9261c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226963",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "435",
+        "1791000352114647261",
+        "1791000352167650299"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/received.json",
+      "bytes": 1198,
+      "sha256": "b3dedda6ab539b769beea21827e2b75cbe16c6ba04771784141c7da4db016940",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226953",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1198",
+        "1791000071775579198",
+        "1791000071825582064"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/result.json",
+      "bytes": 1354,
+      "sha256": "54f3d8dc4af299c97bcd962015d872d9831954dcb9dcf2d91176d336db215104",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226960",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1354",
+        "1791000313570438044",
+        "1791000313627441311"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/REVIEW.txt",
+      "bytes": 2637,
+      "sha256": "88b9934aeaff25dfbe20178de1818fc2bd1c26262520585789436836de96323f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226961",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2637",
+        "1791000313571438101",
+        "1791000313627441311"
+      ],
+      "stable9": true
+    }
+  ],
+  "files": 12,
+  "dirs": 2,
+  "accepted_msk": "2026-10-03T07:00:26+03:00",
+  "completed_msk": "2026-10-03T07:07:29.266148+03:00",
+  "elapsed_seconds": 423.266148,
+  "decision": "CREDIT_SCOPED_E03_FRESH_FD_GENERATION_CONNECTED_CORRECTION_NOT_WHOLE_ACCEPTED",
+  "credit": "Actual fresh retained-readback producer enters existing FDJournal current generation BEFORE fstat/read/close; ordinary errors, uncertain close and late failure rejoined to actual BOTH receivers; exact45 byte insertion/9 current pin updates/full12 parts validated.",
+  "authorship": "Sol different-author Root A214 current 4-file correction. No independent whole acceptance of own predecessor Sol081.",
+  "required_remaining": [
+    "Full native/stock/raw/pre-encode/alias/BOTH outside-end CODE",
+    "Whole inclusive fit UNKNOWN_NOT_ZERO",
+    "Original216/all29/all6/all9/Source19/C01-C08/M01/capsule848/packet96/child32 meaningful controls and final gates NOT_RUN"
+  ],
+  "Source_execution": 0,
+  "whole_accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

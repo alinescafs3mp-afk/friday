@@ -1,0 +1,180 @@
+{
+  "schema": "friday.astra.a204.scanner.original-root-factory.connected-decision.v1",
+  "assignment": "ASTRA-E4-A204-SCANNER-ORIGINAL-ROOT-AUTHORITY-VS-MISSING-FACTORY-IMPLEMENTATION-DECISION",
+  "generation": 1,
+  "owner": "Astra active Lead Architect epoch4",
+  "recorded_utc": "2026-10-03 00:04:39 UTC",
+  "scope": "Existing A192-C1/C2 only. Concrete existing privileged outside native parent/factory/caller/both endpoints; not audit/new service or grant.",
+  "decision": "MISSING_NEW_AUTHORED_ROOT_IMPLEMENTATION_IS_CODE_NOT_AUTOMATIC_OWNER_ONLY_EVIDENCE_PREREQUISITE",
+  "evidence": {
+    "current_lab887_received": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB887-SCANNER-SOURCE-RESULT-RECEIVED-20261003.json",
+      "bytes": 88777,
+      "sha256": "2be2eb18ac9bf910b7307783c1d37067e1a9f8810cd436abd2c1a42fc36d01ba",
+      "identity9_decimal_strings": [
+        "2050",
+        "8527893",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "88777",
+        "1790985550499080814",
+        "1790985550566084669"
+      ],
+      "stable9": true
+    },
+    "current_lab887_manifest": {
+      "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/manifest.json",
+      "bytes": 1307,
+      "sha256": "3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226494",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1307",
+        "1790984733230059915",
+        "1790984733230059915"
+      ],
+      "stable9": true
+    },
+    "current_C": {
+      "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/native/source_owner.c",
+      "bytes": 190300,
+      "sha256": "92a7a8298f4c3390e83b33936755f63e0f608bdbff878f379ddbd9f960fa3493",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226486",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "190300",
+        "1790984733228059800",
+        "1790984733228059800"
+      ],
+      "stable9": true
+    },
+    "current_header": {
+      "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/native/scanner_selected_parent.h",
+      "bytes": 3074,
+      "sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226487",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3074",
+        "1790984733229059858",
+        "1790984733229059858"
+      ],
+      "stable9": true
+    },
+    "original_lead_custody_direction": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A197-SCANNER-EXISTING-ALLOCATOR-PHYSICAL-CUSTODY-DECISION-20261002.json",
+      "bytes": 24643,
+      "sha256": "eb9c3ae40fa532d26fb1f5cf2800a8c1ea4b283275e937b0389b394d0f22c478",
+      "identity9_decimal_strings": [
+        "2050",
+        "8521783",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24643",
+        "1790968743714829893",
+        "1790968743773833276"
+      ],
+      "stable9": true
+    },
+    "original_A159_explicit_code_residual": {
+      "path": "/var/tmp/friday-astra-scanner-a151-a154-sol054-whole17-actual-parent-custody-capsule-source-implementation-a159-g1/SOURCE.md",
+      "bytes": 8245,
+      "sha256": "f6bb3644380f7834f7bd278a19ca113e6061785398d4d49359dc148262790c1e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6448744",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8245",
+        "1790921492591238768",
+        "1790921905504869212"
+      ],
+      "stable9": true
+    },
+    "existing_current_callers": [
+      {
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/root_holder.py",
+        "bytes": 32566,
+        "sha256": "c328debde6b321ca9ae091ad21619bc4747ea96def79aa580aa40c848833b6a6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226284",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "32566",
+          "1790978043582339394",
+          "1790979639975137191"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/native_owner.py",
+        "bytes": 99214,
+        "sha256": "9f79a3225d5936badaa4fb938df0acd0f09698281451ba03df64a2aacedfdd79",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226282",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "99214",
+          "1790979176910498427",
+          "1790979639975137191"
+        ],
+        "stable9": true
+      }
+    ]
+  },
+  "facts": [
+    "Actual LAB887 correctly found no implementation pin for original_materials_factory and no external caller of friday_scanner_selected_parent_entry in the supplied performing package. Preserve that exact absence; do not reconstruct any alleged private original implementation.",
+    "Original A159 SOURCE.md lines80-86 explicitly classifies destruction of the original202/inner Source owner as current CODE, not absent future permission or impossibility of source-only repair. A180 original_mandatory_edges[1-3] and A197 implementation_direction permit new inert authored implementation folded into already existing independently selected outside native parent.",
+    "Header's requirement that a separately selected ORIGINAL issuer implementation be supplied is a guard against Source fabricating authority and a declaration of an unfinished dependency; it does not establish that a preexisting private factory ever existed. No exact ref/hash may be fabricated.",
+    "LAB887's preinit guard-rejoin and NEVER_CREATED changes are author source, not independent acceptance. Whole Source/Root/current image/native ABI/selected grants/resource fit/runtime remain unqualified."
+  ],
+  "contract_distinction": {
+    "implementation": "NEW inert source for the EXISTING trusted Root role may materialize and forward exactly the original selected permit, selection, Root contract and Source launch relation under independently established actual Root authority. Completing this called code is authorized source implementation; it is not recovery of missing private code or a runtime admission.",
+    "authority": "The current unadmitted Source cannot construct/accept authority from its JSON, hashes, booleans, reconstructed permit identity or arbitrary Python callback. Actual independently selected Root-native image/entry, original domain/limits/clock/grants/identity and exclusive slots must still be established by the existing authorized qualification path BEFORE effects. A new public grant/mint endpoint or Source-accessible constructor is forbidden.",
+    "representation": "An internal Root-only representation of an already independently established original authorization is not by itself a broader grant. Its call-site, trusted provenance, exact object identity/lifetime, prospective costs and ordinary-error/final-end semantics must be actual code and independently reviewed. If the original protected authority cannot be represented without expanding a promised boundary, return the exact existing requirement and smallest owner-only choice; do not guess it."
+  },
+  "next_connected_implementation": [
+    "Implement one complete NEW trusted-Root-source path in the same existing privileged native parent, with actual external invocation of friday_scanner_selected_parent_entry; full prebirth Root/Source backing enrollment; original five-argument materials producer; exact already-authorized role/selection/contract/launch provenance; actual Python launch consumer and all authorization methods it calls. No empty callback, future-factory prose, local same-TGID wrapper-as-transfer, second Root process, service, fresh deadline or observer chain.",
+    "Use only original reviewed selected records/state/caps and actual image-bound native/stock aliases. Never fake a missing private artifact or claim Source JSON/field equality makes an issuer. New Root code and its dependencies are inert until non-author Source acceptance plus fresh actual Root image/ABI/grants/resource/clock qualification.",
+    "Close both actual finite outside endpoints: normal completion, preinit/partial construction, no task created, launched/unfinished Source and Root families, ordinary recording/projection/cleanup errors and original minimum/hard end. Preheld original storage/ownership cannot be replaced by process exit, typed status, counts, hashes or a returned capsule. All late errors invalidate terminal acceptance.",
+    "Package full current52/extra performing Root code/actual caller-factory-receiver joins and prospective original cost/custody/ABI relations together. Retain all original202,52/28/14schema/61refs/all17/all6/cases/control/caps/Source16/Root actualB+220/global4/holder13500416 and finite original clocks. No cap transfer/increase, oracle or case cut; whole unknown fit stays UNKNOWN_NOT_ZERO.",
+    "Before requesting whole Source review, statically join actual producer/consumer/types/material tuple/method signatures and full init/error/terminal/resource paths. Deliver source plus meaningful required positives/negatives and bounded own text/hash checks; no supplied Source import/AST/compiler/preprocess/eval/exec/tests/native/Root/archive/network/install/live/model/gates."
+  ],
+  "unresolved": "Actual performing NEW Root producer/caller/final BOTH-body custody implementation remains CODE_OPEN. This decision closes only the false requirement to locate an unproved preexisting private factory; it closes no source, authority, execution or release root.",
+  "effects": "Immutable lead decision text/JSON and trusted bounded Source literal/metadata read only. No Source effects, original checkout/index/config or settings writes.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "historical_unsafe": {
+    "handling": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

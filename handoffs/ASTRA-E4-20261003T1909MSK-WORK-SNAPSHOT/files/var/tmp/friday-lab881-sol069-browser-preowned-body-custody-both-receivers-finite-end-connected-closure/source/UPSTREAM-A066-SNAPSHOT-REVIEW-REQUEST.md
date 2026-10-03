@@ -1,0 +1,11 @@
+# Independent whole review input: A066
+
+Do not load or execute this SOURCE_INCOMPLETE package. Review the manifest-pinned complete original source and derivative, all fixed contracts, exact216+8 expectation map, native build/ABI wiring and partial54/63 DATA corpus. The source author does not grant acceptance. Missing genuine current root/image/approval is not by itself a source defect.
+
+Actual changes needing review: fr_fixture_wait consumes the direct-child wait in native code and sends the exact REAP packet; enable_fixture_forks.waitpid uses that producer. Caller-supplied status through fr_fixture_reap is refused. Actual wait status remains durable while the record stays UNKNOWN until full real-parent UID0/GID0/no-rights/exact-field REAP_ACK. Failed intent ACK, signal, native fixture close or finite timeout cannot yield REAPED; poisoned fixture generations cannot create again. Nested fixture callers cannot impersonate the existing fixed coordinator. No reset/waiver/privileged STOP service is added; FR_STOP remains reserved while existing owned stop->REAP_ACK remains the implemented path.
+
+The54 source-only DATA builders include37 pin/seal,9 OS-field,8 index-metadata cases. Source guards require exact pin-only or seal-only prerequisites before the same public native call. No seals, capsule, protected runtime view or approval is created here. Nine runtime-image constructors and full independently admitted same-public positive/negative handoff remain absent.
+
+All216 old obligations are preserved byte-for-byte in the bill, with original source immutable as UPSTREAM-A061-CONTROLS.py; they are not operational alternative tests. New A066-CONTROLS.py explicitly refuses historical execution. Full per-ID native owned producer integration and whole registry/session/UIDGID/role/deadline/SCM_RIGHTS/pidfd/generation/barrier/abort/reap/unknown independent callers remain absent. These are source blockers, not a missing-current-authority excuse.
+
+Check every changed native record transition, four-argument C/header/ctypes ABI, exact source/build links, role and generation ownership, resource accounting and existing five benign HTTP state/byte/hash oracles. No test/compile/import/AST/native/kernel/root/control observation exists. Actual raw RAM and implicit IO are unknown, not zero. Do not transfer old execution evidence to these new bytes.

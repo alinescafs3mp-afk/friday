@@ -1,0 +1,56 @@
+{
+  "schema": "friday.a191.finite-review-costs.v1",
+  "assignment": "ASTRA-E4-SOL062-NODE-WHOLE6-ALL35-ALL6-ALL3-INDEPENDENT-SOURCE-REVIEW-A191",
+  "generation": 1,
+  "accepted_msk": "2026-10-02T15:18:30+03:00",
+  "semantic_review_checkpoint_msk": "2026-10-02T15:36:57+03:00",
+  "elapsed_seconds_at_semantic_checkpoint": 1107,
+  "completed_msk_and_total_elapsed": "Authoritative final seal/completion in protected RESULT, not an invented earlier end.",
+  "limits": {
+    "wall_seconds": 6600,
+    "seal_reserve_seconds": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 16777216,
+    "local_parallelism": 4,
+    "model_children": 0,
+    "network": 0,
+    "retries": 0
+  },
+  "read_ledger": {
+    "initial_full166_content_bytes": 79723098,
+    "final_full166_plus_exact_original_review_input_seal_content_bytes": 79906754,
+    "known_fullcontent_subtotal": 159629852,
+    "other_inert_semantic_JSON_text_and_ownseal_charge_conservative_allowance": 67108864,
+    "conservative_total_charged_bytes": 226738716,
+    "below_cap": true,
+    "actual_other_content_exact_counter": "UNKNOWN_NOT_ZERO; conservative allowance not observed physical IO",
+    "archive_bytes": "Full inert SHA reads twice only; no archive parsing/extraction/Node execution"
+  },
+  "CPU_RAM_IO": {
+    "trusted_stock_hash_read_operations": "NONZERO",
+    "review_shell_reader_and_hash_CPU": "NONZERO_NOT_EXACTLY_AGGREGATED",
+    "review_RSS_and_maxRSS": "UNKNOWN_NOT_ZERO_NOT_PROVEN; bounded chunk readers only",
+    "implicit_disk_or_pagecache_IO": "UNKNOWN_NOT_ZERO",
+    "source_runtime_CPU_RAM_IO": "NOT_RUN_UNKNOWN_NOT_ZERO"
+  },
+  "models": {
+    "input_including_cached": "UNKNOWN_NOT_ZERO",
+    "output_including_reasoning": "UNKNOWN_NOT_ZERO",
+    "cached_input_subset_of_input": true,
+    "reasoning_subset_of_output": true,
+    "child_models": 0,
+    "new_headless_root_models": 0
+  },
+  "effects": {
+    "output": "own new private JSON/TEXT only",
+    "source_import_AST_compile_eval_exec_tests": false,
+    "native_Root_GPG_Node_archiveparse": false,
+    "network_UI_live_gates": false,
+    "Source_Git_index_config_guard_model_lock_writes": false,
+    "supplied_helpers_executed": false,
+    "children": false,
+    "poll": false
+  },
+  "independent_assignment_termination": "One finite RESULT; no other work/child/goal/wait."
+}

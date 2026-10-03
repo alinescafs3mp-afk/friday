@@ -1,0 +1,24 @@
+{
+  "current134_members": 134,
+  "current134_nested_pins": 670,
+  "jobs": [
+    "admission-signature",
+    "original-actor",
+    "node-version",
+    "python-version",
+    "loader-list",
+    "browser-version"
+  ],
+  "mailbox_slots": 12,
+  "pattern": "even slot mutable payload and metadata; odd slot immutable store and late metadata",
+  "schema": "friday.lab918.current-partitions.v1",
+  "source49": 49,
+  "stages_at_prepare": [
+    8,
+    14,
+    19,
+    24,
+    29,
+    34
+  ]
+}

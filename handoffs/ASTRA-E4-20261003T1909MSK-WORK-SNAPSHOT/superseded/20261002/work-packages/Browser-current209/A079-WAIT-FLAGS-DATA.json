@@ -1,0 +1,9 @@
+{
+  "schema": "friday.a079.ordinary-owned-native-input.v1",
+  "case": "wait_flags_DATA",
+  "workers": [
+    {"payload": "ordinary-owned-a079/0\n", "exit": 17},
+    {"payload": "ordinary-owned-a079/1\n", "exit": 18},
+    {"payload": "ordinary-owned-a079/2\n", "exit": 19}
+  ]
+}

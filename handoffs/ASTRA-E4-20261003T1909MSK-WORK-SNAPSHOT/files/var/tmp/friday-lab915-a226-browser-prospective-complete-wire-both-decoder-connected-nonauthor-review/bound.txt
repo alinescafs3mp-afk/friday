@@ -1,0 +1,5 @@
+LAB-915 independent text review of the A226 prospective full-wire lower bound and both unchanged decoders.
+The four producers match. The floor matches the exact JSON shape and does not reject a fitting complete frame.
+Float width and extra integer digits undercharge. The exact cap check remains.
+C1 stays open. C2 stays unknown and is not zero. Whole Root and GO stay false.
+The source was read and was not executed or installed.

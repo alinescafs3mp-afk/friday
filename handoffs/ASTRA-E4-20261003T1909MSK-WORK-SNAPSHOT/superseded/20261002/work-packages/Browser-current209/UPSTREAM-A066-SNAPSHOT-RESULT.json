@@ -1,0 +1,189 @@
+{
+  "schema": "friday.a066.terminal-source-package.v1",
+  "assignment": "ASTRA-E4-BROWSER-FULL-NATIVE-CONTROL-SOURCE-CLOSURE-A066",
+  "generation": 1,
+  "owner_scope": "goal",
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "terminal": true,
+  "source_ready": false,
+  "source_complete": false,
+  "accepted": false,
+  "ready_for_exec": false,
+  "current_GO": false,
+  "package": "/var/tmp/friday-astra-browser-full-native-control-a066-g1",
+  "accepted_MSK": "2026-10-01T13:45:47+03:00",
+  "substantive_completed_MSK": "2026-10-01T14:36:32+03:00",
+  "substantive_elapsed_seconds": 3045,
+  "all_three_A061_source_causes_closed": false,
+  "changed_actual_source": [
+    "Native fr_fixture_wait(sock,pid,flags,status*) consumes only native owned direct-child table entries/current fixed coordinator; actual kernel wait status and full REAP_ACK precede return.",
+    "CONTRACT native_bridge4-arg C/header/ctypes API and enable_fixture_forks.waitpid actual producer wired; caller-status fr_fixture_reap retained ABI refuses EPERM.",
+    "fr_own_wait stores actual wait status with UNKNOWN until exact real-parent PID/UID0/GID0/no-SCM_RIGHTS/full-field REAP_ACK; cap/send/recv/ACK failure cannot leave REAPED.",
+    "Direct wait fallback without confirmed registry ACK cannot return reaped success. Failed owned signals leave UNKNOWN. Fixture transaction/wait/close/deadline uncertainty poisons creation generation with no reset API; nested caller rejected before new clone.",
+    "Same public full driver requires fresh absent target before effects and exact source pin-only XOR or seal-only7 data prerequisites; approved executable bytes remain unchanged.",
+    "54 inert DATA constructor bodies written for37 source pin/seal,9 OS fields,8 index metadata; these do not create FDs/seals/capsules/root/image/authority or constitute complete controls.",
+    "All216 exact expectations and8 A051 additions preserved; historical unsafe source retained as immutable text-only UPSTREAM snapshot. New mode1 wrapper explicitly refuses historical execution, no operational substitute or alternative root service."
+  ],
+  "source_remaining": [
+    {
+      "id": "GUARD_DATA_CORPUS",
+      "precise_cause": "Nine runtime-image DATA constructor bodies are absent (cache_format, cache_string, cache_resolution, ELF_format, ELF_dependency, ELF_loader, loader_execute_mode, import_zip, preload). All63 still lack the complete independently expected, prerequisite-valid positive-first fresh protected-view/sealed descriptor/capsule fixture handoff. The54 bare DATA requests are partial helper source, not same-public whole controls.",
+      "source_symbols": [
+        "A066-FULL-CONTROLS.py:guard_data_request/held_inputs/run_pair/_run_held"
+      ],
+      "current_missing_root_alone_is_source_defect": false
+    },
+    {
+      "id": "AUTHORITATIVE_NATIVE_REGISTRY_FULL_CONTROLS",
+      "precise_cause": "Actual production registry/owned wait/ACK guards improved, but complete independently expected same-public session/actual PID-UID-GID/role/sequence/deadline/SCM_RIGHTS/PID-pidfd/owner-child generations/barrier/abort/reap/unknown-cleanup positive+negative callers and exact byte/state/resource oracles remain absent. No native fixture service was invented and guards cannot substitute for these controls.",
+      "source_symbols": [
+        "A066-OWNED.c:fr_fixture_wait/fr_own_wait/fr_own_stop/fr_fixture_fork/abort_creation",
+        "A066-CONTRACT.py:enable_fixture_forks/native_bridge",
+        "A066-BOOTSTRAP.c:registry/run"
+      ]
+    },
+    {
+      "id": "ALL216_NESTED_OWNERSHIP_INTEGRATION",
+      "precise_cause": "All216 exact inherited source obligations retain their expected consumer/cause/stage/state/count/hash/effect contracts. Complete per-ID safe owned-fork producer integration against the fixed authoritative coordinator, including nested supervisor callsites, remains absent. Historical unsafe constructors stay inert; A066-CONTROLS.controls refuses their execution. A label/count/Python seam cannot grant whole integration credit.",
+      "source_symbols": [
+        "UPSTREAM-A061-CONTROLS.py:controls/whole/supervisor_controls/registration_controls",
+        "A066-CONTROLS.py:controls",
+        "A066-CONTROL-COVERAGE.json:inherited"
+      ]
+    }
+  ],
+  "coverage": {
+    "inherited216": 216,
+    "A051_additions8": 8,
+    "new_source_pin19": 19,
+    "new_source_seal18": 18,
+    "new_OS9": 9,
+    "new_image17": 17,
+    "new_guards63": 63,
+    "partial_DATA_bodies54": 54,
+    "missing_runtime_DATA9": 9,
+    "complete_new_guard_controls": 0,
+    "all216_native_integration": false,
+    "all_observations": "NOT_RUN; counts are declaration accounting only",
+    "five_exact_benign_HTTP_oracles": [
+      "http404",
+      "certificate",
+      "protocol",
+      "truncated",
+      "short_write"
+    ],
+    "full_same_public_positive": "Original actual full mode4 caller/oracle retained, NOT_RUN",
+    "runtime117_image111": "Same held manifest->protected image->loader/import mapping preserved, NOT_RUN"
+  },
+  "evidence_inputs": {
+    "A066_contract_SHA256": "b7909d2b2f5a3b924765b4a9f13112936389729fda88d990fc0a17559d0a2f5e",
+    "A061_result_SHA256": "120d88735ec22316a21122175ae17217b431b374ffa58fc653420c1a80db6a71",
+    "A061_manifest_SHA256": "3a91f7d1e73f140a68805cf52a6159b29e74a186856289ee67b9d96ca5defcd2",
+    "A051_result_SHA256": "4d7be3cb7c665404bec337d98b2c5ce0cf15bd0291259c90e195507fdc150e72",
+    "A046_result_SHA256": "b24da632338f9136f812b0441c8187da42dcb95572981089d7cc2db65a2f4356",
+    "A066_bill_SHA256": "a5ad77e70d1a2d540ce2bf18f75da0af760383900a716563ffe1232c5bf36fa1",
+    "upstream_exact23plus_manifest_copies": 24,
+    "original23plus_manifest_copied_SHA_rechecked_match": true,
+    "canonical_fixed_contracts": [
+      "CONTRACT-A037.md",
+      "CONTRACT-A039.md",
+      "CONTRACT-A042.md",
+      "CONTRACT-A046.md",
+      "CONTRACT-A051.md",
+      "CONTRACT-A066.md"
+    ]
+  },
+  "static_verification": {
+    "actual_C_header_ctypes_four_arg_fixture_wait_source_binding": true,
+    "fixture_reap_not_used_for_caller_status": true,
+    "bill_pin_in_executor": true,
+    "control_map216_exact_inert_JSON_equality": true,
+    "whole_original_sources_copied_as_text": true,
+    "semantic_review": "Selected needed native/control/consumer whole files and caller fragments only; no source-self whole independent review or acceptance",
+    "whole_independent_final_review": "REQUIRED_NOT_PERFORMED",
+    "native_build": "NOT_RUN",
+    "API_runtime": "NOT_PROVEN"
+  },
+  "frozen_snapshot": {
+    "candidate": "cecd28a92ac4fd4e34c4d3813d0c598debe09436",
+    "tree": "e7e86c7796a3db6571ffea715e666247f8876d63",
+    "original_GET": "207_ABORTED_NOT_210_COMPLETE",
+    "retained": "316files13dirs_QUALIFIED_ONLY",
+    "current_browser3": "NOT_RUN",
+    "future_new_target_created": false,
+    "original_body_reads": 0,
+    "original_product_Git_reads_or_effects": 0
+  },
+  "preserved_future_limits": {
+    "body_bytes_max": 956301312,
+    "connect_timeout_sec": 15,
+    "directories_max": 3,
+    "disk_bytes_max": 2147483648,
+    "header_bytes_max": 65536,
+    "network_gets_max": 3,
+    "regular_files_max": 6,
+    "request_timeout_sec": 300,
+    "reserve_sec": 60,
+    "retries": 0,
+    "rss_bytes_max": 268435456,
+    "wall_sec": 1200,
+    "workers_global_max": 4
+  },
+  "preserved_native_limits": {
+    "outer_memory": 67108864,
+    "inner_memory": 201326592,
+    "aggregate_raw_RSS": 268435456,
+    "coordinator_AS": 50331648,
+    "worker_AS_each": 50331648,
+    "inner_processes_max": 4,
+    "workers": 3,
+    "GET": 3,
+    "copy": 0,
+    "files": 6,
+    "dirs": 3,
+    "work": 1140,
+    "hard": 1200,
+    "reserve": 60,
+    "historical_raw_RSS_KiB": 366080,
+    "RSS_rule": "Startup/import/nested overhead and inherited historical raw peak retained; no subtraction/reset/waiver",
+    "policy": "Original CPU/affinity/CA/hostname/HTTPS200/0redirect/proxy/cookie/auth/retry and all byte/header/body/disk/request/connect thresholds preserved"
+  },
+  "limits": {
+    "assignment_wall_seconds": 4200,
+    "seal_reserve_seconds": 300,
+    "read_limit_bytes": 67108864,
+    "explicit_read_conservative_reconstructed_upper_bytes": 17825792,
+    "ledger": "READ-LEDGER.tsv",
+    "read_meter": "Conservative bounded path/call reconstruction incl repeated/truncated scans and final seal reserve; not actual physical IO",
+    "RAM_contract_bytes": 4294967296,
+    "actual_RAM_peak": "UNKNOWN_NOT_ZERO",
+    "implicit_IO": "UNKNOWN_NOT_ZERO",
+    "package_output_cap": 16777216,
+    "local_workers_max": 2,
+    "child_models": 0,
+    "child_tree_closed": true,
+    "configured_models_reasoning_tier_provider_guards": "UNCHANGED"
+  },
+  "actual_effects": {
+    "source_apply_patch": true,
+    "own_private_source_artifact_only": true,
+    "compile": 0,
+    "AST_compile": 0,
+    "source_import_load": 0,
+    "source_exec": 0,
+    "tests": 0,
+    "generated_native": 0,
+    "network": 0,
+    "GET": 0,
+    "root_kernel_probes": 0,
+    "cgroup_namespace_mount": 0,
+    "archive_body_read": 0,
+    "product_Git": 0,
+    "peer_queue_lab_settings": 0,
+    "authority_writer_reset_waiver": 0,
+    "operational_unsafe_payloads_or_probes": 0
+  },
+  "safety": "No source loading or operational negative execution; historical unsafe source text remains inert. No foreign PID adoption/signal, no arbitrary privileged root service, no current root/OS/image approval fabricated.",
+  "handoff": "Only precise incomplete source result. Independent whole review and a subsequent coherent source closure are required before any build/import/native/control/preflight/GET authorization.",
+  "seal": "MANIFEST.json enumerates every regular package member except itself with exact bytes/SHA/mode/nlink/UID/GID; external terminal registry adds manifest SHA and completed MSK/elapsed after final integrity verification."
+}

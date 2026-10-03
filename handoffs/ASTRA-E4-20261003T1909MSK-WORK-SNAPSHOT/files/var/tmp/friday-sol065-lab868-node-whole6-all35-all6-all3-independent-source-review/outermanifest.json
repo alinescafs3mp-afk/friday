@@ -1,0 +1,515 @@
+{
+  "schema": "friday.sol065.private-SHA9-seal.v1",
+  "assignment": "ASTRA-E4-LAB868-NODE-WHOLE6-ALL35-ALL6-ALL3-INDEPENDENT-SOURCE-REVIEW-SOL065",
+  "generation": 1,
+  "root": "/var/tmp/friday-sol065-lab868-node-whole6-all35-all6-all3-independent-source-review",
+  "root_mode": "0700",
+  "uid": 1000,
+  "gid": 1000,
+  "files": [
+    {
+      "path": "REPORT.md",
+      "bytes": 4597,
+      "sha256": "eda98654b19c91596165fb22d1bd4f873ddd9399d3ed8c1607ee6ab0996e43ff",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980536",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4597",
+        "1790956190515075608",
+        "1790956190562078298"
+      ]
+    },
+    {
+      "path": "authentication.json",
+      "bytes": 106936,
+      "sha256": "a29dd477e95657ffa8c1fc806cc51c9a8cb5008be4f6f0ceee5853289ed6c461",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980517",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "106936",
+        "1790955294325320253",
+        "1790955294325320253"
+      ]
+    },
+    {
+      "path": "author-private-seal.json",
+      "bytes": 7932,
+      "sha256": "e3575b28f4cc9f2e26c188af7c3ca8f7438dc96a02e218da0106cd5db0748d8b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980529",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7932",
+        "1790955680588180321",
+        "1790955680588180321"
+      ]
+    },
+    {
+      "path": "caller.py.diff.txt",
+      "bytes": 14552,
+      "sha256": "26b29a3cce835335e7177df594ec7ead233f3c72730ac4211d531abcace614da",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980518",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14552",
+        "1790955294329915817",
+        "1790955294329915817"
+      ]
+    },
+    {
+      "path": "connected-matrix-costs.json",
+      "bytes": 189,
+      "sha256": "0fedc0c01c24b6df08a500bb05deb1b9f50051d8813049d088c3bddcae00697f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980539",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "189",
+        "1790956336557244334",
+        "1790956336557244334"
+      ]
+    },
+    {
+      "path": "connected-matrix.py",
+      "bytes": 11577,
+      "sha256": "bf8f4a1de449ee61ba2b185a6c0a037f66272002d4845530406381dd32af5f12",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980537",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11577",
+        "1790956336399426214",
+        "1790956336446428905"
+      ]
+    },
+    {
+      "path": "current19-byte-cost-joins.json",
+      "bytes": 13373,
+      "sha256": "bc211e4c8b56824c346498b9ad96174d0261fb173c67323e213d95fb6984451e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980530",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13373",
+        "1790955680588883061",
+        "1790955680588883061"
+      ]
+    },
+    {
+      "path": "dag.json",
+      "bytes": 7755,
+      "sha256": "7cf996cc4f0b4773a0aedf563bf4ac9a7ff6c90181b9d39f4e9086d93bc946d7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980542",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7755",
+        "1790956785079906190",
+        "1790956785079906190"
+      ]
+    },
+    {
+      "path": "expectations.json.diff.txt",
+      "bytes": 2423,
+      "sha256": "56e250112628e31016a4e13800c0d729e8086ed8cd2bf6fc92db7908a8fc8f1c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980522",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2423",
+        "1790955294334337871",
+        "1790955294334337871"
+      ]
+    },
+    {
+      "path": "final-validation.json",
+      "bytes": 5007,
+      "sha256": "df4d584a0ed3dfd9cf9c694347726686f463e8f06db12d4e8eb163e8653da351",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980541",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5007",
+        "1790956785079745681",
+        "1790956785079745681"
+      ]
+    },
+    {
+      "path": "findings.json",
+      "bytes": 14929,
+      "sha256": "cc36db49994b8d4b905fba716f59b7ebacaf5a5391b86a26fe7aa17f25d70d84",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980535",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14929",
+        "1790956190514075551",
+        "1790956190562078298"
+      ]
+    },
+    {
+      "path": "intake-costs.json",
+      "bytes": 173,
+      "sha256": "2fd9af8af522c21438eb8adf65f2bc702373102caa14818987c33d89f13875ff",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980526",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "173",
+        "1790955294334966008",
+        "1790955294334966008"
+      ]
+    },
+    {
+      "path": "intake.py",
+      "bytes": 4639,
+      "sha256": "252d234ae225f30424e452db0f06a6c6da6c5931731d174bc261a3205840458a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980516",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4639",
+        "1790955294103768364",
+        "1790955294147770881"
+      ]
+    },
+    {
+      "path": "joins-rest.py",
+      "bytes": 7083,
+      "sha256": "c0f4a938cd4429ca4f00257cae3e6631738676691ab5fa09642f65abdfe9fe9b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980531",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7083",
+        "1790955770720046010",
+        "1790955770773049045"
+      ]
+    },
+    {
+      "path": "joins.py",
+      "bytes": 14737,
+      "sha256": "4beaffac36a64ca48bd0ccd320371e15cda847528efccdf9983489de99ab96d6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980527",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14737",
+        "1790955680411876649",
+        "1790955680462879568"
+      ]
+    },
+    {
+      "path": "launch-contract.json.diff.txt",
+      "bytes": 5057,
+      "sha256": "e2381aa5e3e0c4a6ed533673a06fdeffa87cef6f8a92a8ba132baa2bc7f44c7b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980521",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5057",
+        "1790955294333916747",
+        "1790955294333916747"
+      ]
+    },
+    {
+      "path": "metadata-continuation-costs.json",
+      "bytes": 516,
+      "sha256": "6a354fc70c6b5246346d5e61d834e72f2b1f46ba98fdad68fa287c59f3b1619e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980534",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "516",
+        "1790955770889334269",
+        "1790955770889334269"
+      ]
+    },
+    {
+      "path": "ordinary-surplus.txt.diff.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980523",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "0",
+        "1790955294334594786",
+        "1790955294334594786"
+      ]
+    },
+    {
+      "path": "original-data-and-literal-DAG.json",
+      "bytes": 5815,
+      "sha256": "9e60708145084a3406b14183a45302572a0ccbc9f5cc53aacd8b0a51d2714f61",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980532",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5815",
+        "1790955770883036107",
+        "1790955770883036107"
+      ]
+    },
+    {
+      "path": "original35-current-producer-consumer-joins.json",
+      "bytes": 143477,
+      "sha256": "6ae3fd7299ecbda2e2edf79c252104c8881b9981009728937eb457f8535903fd",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980533",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "143477",
+        "1790955770888055628",
+        "1790955770888055628"
+      ]
+    },
+    {
+      "path": "received.json",
+      "bytes": 2780,
+      "sha256": "e44db5082464a6455257110511ca579a407595e27716f3a65ef12fa829a35f51",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980525",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2780",
+        "1790955294334877202",
+        "1790955294334877202"
+      ]
+    },
+    {
+      "path": "resource-ledger.json",
+      "bytes": 1274,
+      "sha256": "6e90002eda261fec1f66839000ca93ba33de32ad8b3982c1c2ebb7ae7975164f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980543",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1274",
+        "1790956785080300313",
+        "1790956785080300313"
+      ]
+    },
+    {
+      "path": "seal.py",
+      "bytes": 18615,
+      "sha256": "29e205e92e18d22314f4a2a7e1cdfef2699c59b6ef12344d7d10e10c72331b3e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980540",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18615",
+        "1790956784979092496",
+        "1790956784979092496"
+      ]
+    },
+    {
+      "path": "supervisor.py.diff.txt",
+      "bytes": 11637,
+      "sha256": "973392552d93fca51aead5fb3bd6b39be65e0ee91a95e6516e37800446ec9afc",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980519",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11637",
+        "1790955294331588814",
+        "1790955294331588814"
+      ]
+    },
+    {
+      "path": "terminal.json",
+      "bytes": 1049,
+      "sha256": "ad83796e5637a98be73bb57002135cb1fd8310a82bc8ce638af1a2efdaeb7066",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980544",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1049",
+        "1790956785080482823",
+        "1790956785080482823"
+      ]
+    },
+    {
+      "path": "verifier.py.diff.txt",
+      "bytes": 9990,
+      "sha256": "7dc3b65839432da000f392ce51d2479d9443034dc8ba1d783f7b87e76342ced3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980520",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9990",
+        "1790955294333144503",
+        "1790955294333144503"
+      ]
+    },
+    {
+      "path": "whole-connected-matrix.json",
+      "bytes": 96910,
+      "sha256": "649d8a5ef94f1f17422d7c2eff40d14d6db90a2aca4d3f95afef0fbef72cefcf",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980538",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "96910",
+        "1790956336555435144",
+        "1790956336555435144"
+      ]
+    },
+    {
+      "path": "whole-method-byte-index.json",
+      "bytes": 147799,
+      "sha256": "f753221f0ffae9f53b29d68acfb1095b52ae3e12296a6d91cd7fcc0e95413227",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980528",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "147799",
+        "1790955680583886495",
+        "1790955680583886495"
+      ]
+    },
+    {
+      "path": "whole6-byte-comparison.json",
+      "bytes": 7533,
+      "sha256": "533f4e214a4904a8702e707ae338d9979e38a8c6ff2196b33ec74ae57e4df0f6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980524",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7533",
+        "1790955294334778597",
+        "1790955294334778597"
+      ]
+    }
+  ],
+  "exact_pathset_including_manifest": [
+    "REPORT.md",
+    "authentication.json",
+    "author-private-seal.json",
+    "caller.py.diff.txt",
+    "connected-matrix-costs.json",
+    "connected-matrix.py",
+    "current19-byte-cost-joins.json",
+    "dag.json",
+    "expectations.json.diff.txt",
+    "final-validation.json",
+    "findings.json",
+    "intake-costs.json",
+    "intake.py",
+    "joins-rest.py",
+    "joins.py",
+    "launch-contract.json.diff.txt",
+    "metadata-continuation-costs.json",
+    "ordinary-surplus.txt.diff.txt",
+    "original-data-and-literal-DAG.json",
+    "original35-current-producer-consumer-joins.json",
+    "outermanifest.json",
+    "received.json",
+    "resource-ledger.json",
+    "seal.py",
+    "supervisor.py.diff.txt",
+    "terminal.json",
+    "verifier.py.diff.txt",
+    "whole-connected-matrix.json",
+    "whole-method-byte-index.json",
+    "whole6-byte-comparison.json"
+  ],
+  "directories": [
+    "."
+  ],
+  "self_exclusion": "Only outermanifest.json; its full SHA9 is in the protected external RESULT",
+  "DAG": "dag.json",
+  "cycle": false,
+  "Root_authority": false,
+  "review_decision": "REJECT_CURRENT_SOURCE_CLOSURE_CODE_OPEN"
+}

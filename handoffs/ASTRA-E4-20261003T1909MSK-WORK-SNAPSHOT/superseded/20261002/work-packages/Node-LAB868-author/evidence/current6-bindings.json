@@ -1,0 +1,49 @@
+{
+  "changed": [
+    "caller.py",
+    "supervisor.py",
+    "verifier.py",
+    "launch-contract.json",
+    "expectations.json"
+  ],
+  "changed_count": 5,
+  "equal": [
+    "ordinary-surplus.txt"
+  ],
+  "equal_count": 1,
+  "external_current19_paths_unchanged": true,
+  "files": {
+    "caller.py": {
+      "bytes": 147863,
+      "predecessor_sha256": "a4c4e9772f3b218e3d2402e2a9a81302f69bf3ccfdd66941aca8adab6697edf6",
+      "sha256": "7a065f3aead7f0a7c075b5b42e2d108b5e75f79e5a1823b9c216439afa560282"
+    },
+    "expectations.json": {
+      "bytes": 11517,
+      "predecessor_sha256": "7bf7a8f30abcb5a0af4e1b3e1b5f74f53228e0f979eaa18b453ddfc96cdc3ece",
+      "sha256": "4b3e79de733e10de1cfe9d07fb9bf850eaed9ecc75430b58ff817a25dee88816"
+    },
+    "launch-contract.json": {
+      "bytes": 49780,
+      "predecessor_sha256": "04fe265d1136155f5d5786fbaa0ed852ae35e1eff3d970346d37d890cb71beb3",
+      "sha256": "54cdce4dbc50854fc6b6604f50409c3d178c6aa856aaf668e1df39b530eb91ad"
+    },
+    "ordinary-surplus.txt": {
+      "bytes": 158,
+      "predecessor_sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    "supervisor.py": {
+      "bytes": 115874,
+      "predecessor_sha256": "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452",
+      "sha256": "516ce2cabcf140fd4a097a5b47a13f866aaa15d14c50060ddb4fbbb00c581d1f"
+    },
+    "verifier.py": {
+      "bytes": 87992,
+      "predecessor_sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+      "sha256": "75b58eb3269062e365faef39e8df5ae76968c9b8ffd7a3c5f98aceb0001da89a"
+    }
+  },
+  "package": "/var/tmp/friday-lab868-sol062-a191-node-whole6-all35-all6-all3-connected-source-closure",
+  "schema": "friday.grok.lab868.current6-bindings.v1"
+}

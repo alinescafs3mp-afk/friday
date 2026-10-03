@@ -1,0 +1,133 @@
+# SOL062: private prospective cells are not public receipts or summaries.
+# Fixed existing256 slots. Width/stock exhaustion/whole fit still need proof.
+ERROR_OBJECT_CAP = 256
+ERROR_OBJECTS = [None] * ERROR_OBJECT_CAP
+ERROR_TRACEBACKS = [None] * ERROR_OBJECT_CAP
+ERROR_PROJECTED = [None] * ERROR_OBJECT_CAP
+ERROR_MARKERS = [{"$private_pending_error": i} for i in range(ERROR_OBJECT_CAP)]
+ERROR_USED = 0
+
+
+def retain_error_object(exc):
+    global ERROR_USED
+    for i in range(ERROR_USED):
+        if ERROR_OBJECTS[i] is exc:
+            return i
+    if ERROR_USED >= ERROR_OBJECT_CAP:
+        raise Refusal("original fixed error-owner capacity exhausted before publication") from exc
+    i = ERROR_USED
+    # Raw first fault and its caught traceback precede every projection.
+    ERROR_OBJECTS[i] = exc
+    ERROR_TRACEBACKS[i] = exc.__traceback__
+    ERROR_USED = i + 1
+    return i
+
+
+def deferred_error(exc):
+    # Return an already prefunded marker; NO str/base64/JSON/trace walk here.
+    # An exhausted original stock factory is CODE_OPEN, never a clipped proof.
+    return ERROR_MARKERS[retain_error_object(exc)]
+
+
+def publish_errors(record):
+    # Called at a publication boundary, not inside mandatory raw/close loops.
+    # Every public failure remains a COMPLETE v2 graph after replacement.
+    # Identity, not attacker-shaped JSON, selects our private marker.
+    seen = []
+    def walk(value):
+        for i in range(ERROR_USED):
+            if value is ERROR_MARKERS[i]:
+                if ERROR_PROJECTED[i] is None:
+                    ERROR_PROJECTED[i] = exact_error(ERROR_OBJECTS[i])
+                return ERROR_PROJECTED[i]
+        if type(value) not in (dict, list):
+            return value
+        if any(value is old for old in seen):
+            return value
+        seen.append(value)
+        if type(value) is dict:
+            for key in value:
+                value[key] = walk(value[key])
+        else:
+            for i in range(len(value)):
+                value[i] = walk(value[i])
+        return value
+    return walk(record)
+
+
+def validate_stock_error_graph(graph):
+    # Both receivers check ALL full fields/references, not only copied cause.
+    # This validates shape/full reversible stock bytes, NOT native semantics.
+    require(type(graph) is dict and set(graph) == {"schema", "root", "nodes", "values",
+            "stock_cause", "native_object_reconstruction"}
+            and graph["schema"] == "friday.sol060.error-graph.v2"
+            and graph["native_object_reconstruction"] == "NOT_QUALIFIED",
+            "complete original v2 error envelope required")
+    nodes, values, root = graph["nodes"], graph["values"], graph["root"]
+    require(type(nodes) is list and 0 < len(nodes) <= 128 and type(values) is list
+            and len(values) <= 128 and type(root) is int and 0 <= root < len(nodes),
+            "full v2 arenas/root malformed")
+    def error_ref(index, nullable=True):
+        require((nullable and index is None) or
+                (type(index) is int and 0 <= index < len(nodes)), "full error reference outside arena")
+    def value_ref(cell):
+        require(type(cell) is dict and len(cell) == 1, "full typed error value required")
+        if "literal" in cell:
+            require(type(cell["literal"]) in (type(None), bool, int, str), "stock literal type changed")
+        elif "float_hex" in cell:
+            require(type(cell["float_hex"]) is str and
+                    float.fromhex(cell["float_hex"]).hex() == cell["float_hex"], "exact stock float hex")
+        elif "error_ref" in cell:
+            error_ref(cell["error_ref"], False)
+        else:
+            require(set(cell) == {"value_ref"} and type(cell["value_ref"]) is int
+                    and 0 <= cell["value_ref"] < len(values), "full value reference outside arena")
+    for i, node in enumerate(nodes):
+        require(type(node) is dict and set(node) == {"id", "module", "type", "message", "args",
+                "state", "errno", "filename", "filename2", "notes", "traceback", "cause", "context",
+                "suppress_context", "group"} and type(node["id"]) is int and node["id"] == i,
+                "full v2 node fields/identity malformed")
+        require(all(type(node[k]) is str for k in ("module", "type", "message")) and
+                type(node["suppress_context"]) is bool, "original stock cause fields missing")
+        for k in ("args", "state", "errno", "filename", "filename2", "notes"):
+            value_ref(node[k])
+        error_ref(node["cause"]); error_ref(node["context"])
+        group = node["group"]
+        require(group is None or type(group) is list, "stock exception-group presence")
+        if group is not None:
+            for member in group:
+                error_ref(member, False)
+        frames = node["traceback"]
+        require(type(frames) is list and len(frames) <= 128, "complete traceback arena")
+        for frame in frames:
+            require(type(frame) is dict and set(frame) == {"file", "function", "line", "lasti"}
+                    and type(frame["file"]) is str and type(frame["function"]) is str
+                    and type(frame["line"]) is int and type(frame["lasti"]) is int,
+                    "complete stock frame coordinates")
+    for i, cell in enumerate(values):
+        require(type(cell) is dict and type(cell.get("id")) is int and cell["id"] == i,
+                "full typed value identity")
+        kind = cell.get("kind")
+        if kind in ("bytes", "bytearray"):
+            require(set(cell) == {"id", "kind", "bytes", "sha256", "base64"}
+                    and type(cell["bytes"]) is int and cell["bytes"] >= 0
+                    and type(cell["base64"]) is str and type(cell["sha256"]) is str,
+                    "complete stock byte preimage fields")
+            raw = base64.b64decode(cell["base64"], validate=True)
+            require(len(raw) == cell["bytes"] and hashlib.sha256(raw).hexdigest() == cell["sha256"]
+                    and base64.b64encode(raw).decode("ascii") == cell["base64"],
+                    "full stock byte preimage/count/SHA not lossless")
+        elif kind in ("list", "tuple"):
+            require(set(cell) == {"id", "kind", "items"} and type(cell["items"]) is list,
+                    "complete original typed sequence")
+            for item in cell["items"]:
+                value_ref(item)
+        else:
+            require(kind == "dict" and set(cell) == {"id", "kind", "pairs"}
+                    and type(cell["pairs"]) is list, "complete typed dict")
+            for pair in cell["pairs"]:
+                require(type(pair) is list and len(pair) == 2, "complete original dict pair")
+                value_ref(pair[0]); value_ref(pair[1])
+    stock = {"type": nodes[root]["type"], "message": nodes[root]["message"]}
+    require(graph["stock_cause"] == stock, "stock cause must join actual full graph root")
+    return stock

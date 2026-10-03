@@ -1,0 +1,12 @@
+{
+  "acyclic_chain": "Verifier bytes bind the contract. The supervisor stores the verifier and contract digests and does not store its own digest. The caller stores the supervisor digest.",
+  "both_receivers": "decode_channel_frame rehydrates the frame and calls validate_received_error_graphs. That walk calls validate_stock_error_graph on every v2 object. Caller, supervisor, and verifier each carry that decoder.",
+  "c1": "CODE_OPEN",
+  "c2": "UNKNOWN_NOT_ZERO",
+  "data_files": "expectations.json and ordinary-surplus.txt match the Sol079 bytes. That equality is not whole acceptance.",
+  "e01_e02": "E01 lease and dup2 text and E02 once-publication text match the base outside the new producer. The prior scoped credit is rejoined on that unchanged text.",
+  "lower_bound": "reserve_lower_bound refuses a non-integer, negative, or over-available debit before the corresponding builder. The exact seal remains canonical JSON length, the v2 validator, and charge_graph.",
+  "private_none": "The None message is local builder state. Publication commits a frame only after project_owned_error returns through seal_stock_graph. A projection failure returns no frame and does not encode again.",
+  "schema": "friday.astra.lab913.node.prospective-errorgraph.connected-nonauthor.run.v1",
+  "source_execution": 0
+}

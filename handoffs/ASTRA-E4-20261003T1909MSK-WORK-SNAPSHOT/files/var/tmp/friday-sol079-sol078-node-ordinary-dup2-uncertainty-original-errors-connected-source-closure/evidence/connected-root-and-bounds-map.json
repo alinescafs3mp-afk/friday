@@ -1,0 +1,465 @@
+{
+  "schema": "friday.sol079.actual-ordinary-routes-and-bounds.v1",
+  "authored_scope": "Current6 SAFE Python text and its exact bindings only; no native body/grant/observer/role/compiler implementation.",
+  "sites": [
+    {
+      "file": "caller.py",
+      "method": "retain_outside_failure",
+      "lines": [
+        643,
+        653
+      ],
+      "sha256": "a3b28aefc6e56a2df0e2e31022f3d23efa252185a551bb8d0a8022dcc66409b2"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "retain_outside_failure",
+      "lines": [
+        300,
+        310
+      ],
+      "sha256": "a3b28aefc6e56a2df0e2e31022f3d23efa252185a551bb8d0a8022dcc66409b2"
+    },
+    {
+      "file": "verifier.py",
+      "method": "retain_outside_failure",
+      "lines": [
+        355,
+        365
+      ],
+      "sha256": "a3b28aefc6e56a2df0e2e31022f3d23efa252185a551bb8d0a8022dcc66409b2"
+    },
+    {
+      "file": "caller.py",
+      "method": "publish_outside_failures",
+      "lines": [
+        656,
+        663
+      ],
+      "sha256": "e538fc933390a0316acca07eae4ae46028802383eb618ea064405d8d9cb83840"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "publish_outside_failures",
+      "lines": [
+        313,
+        320
+      ],
+      "sha256": "e538fc933390a0316acca07eae4ae46028802383eb618ea064405d8d9cb83840"
+    },
+    {
+      "file": "verifier.py",
+      "method": "publish_outside_failures",
+      "lines": [
+        368,
+        375
+      ],
+      "sha256": "e538fc933390a0316acca07eae4ae46028802383eb618ea064405d8d9cb83840"
+    },
+    {
+      "file": "caller.py",
+      "method": "outside_body_fault",
+      "lines": [
+        666,
+        669
+      ],
+      "sha256": "3ca769f14b6f9086144e3685671c94278cb31811b767b6d0313b6e17853eb2bc"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "outside_body_fault",
+      "lines": [
+        323,
+        326
+      ],
+      "sha256": "3ca769f14b6f9086144e3685671c94278cb31811b767b6d0313b6e17853eb2bc"
+    },
+    {
+      "file": "verifier.py",
+      "method": "outside_body_fault",
+      "lines": [
+        378,
+        381
+      ],
+      "sha256": "3ca769f14b6f9086144e3685671c94278cb31811b767b6d0313b6e17853eb2bc"
+    },
+    {
+      "file": "caller.py",
+      "method": "outside_body_number",
+      "lines": [
+        672,
+        699
+      ],
+      "sha256": "7a076e11ebb8769d324154719fe2c9b893210a4cb8ed72e29f125678a6018140"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "outside_body_number",
+      "lines": [
+        329,
+        356
+      ],
+      "sha256": "7a076e11ebb8769d324154719fe2c9b893210a4cb8ed72e29f125678a6018140"
+    },
+    {
+      "file": "verifier.py",
+      "method": "outside_body_number",
+      "lines": [
+        384,
+        411
+      ],
+      "sha256": "7a076e11ebb8769d324154719fe2c9b893210a4cb8ed72e29f125678a6018140"
+    },
+    {
+      "file": "caller.py",
+      "method": "outside_relation_bytes",
+      "lines": [
+        703,
+        723
+      ],
+      "sha256": "69c7822d29ebf8bdb8c7d11387445d68fab7d777db932cbded31a2682dea4259"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "outside_relation_bytes",
+      "lines": [
+        360,
+        380
+      ],
+      "sha256": "69c7822d29ebf8bdb8c7d11387445d68fab7d777db932cbded31a2682dea4259"
+    },
+    {
+      "file": "verifier.py",
+      "method": "outside_relation_bytes",
+      "lines": [
+        415,
+        435
+      ],
+      "sha256": "69c7822d29ebf8bdb8c7d11387445d68fab7d777db932cbded31a2682dea4259"
+    },
+    {
+      "file": "caller.py",
+      "method": "open_caller_outside_body",
+      "lines": [
+        726,
+        753
+      ],
+      "sha256": "aee7d28161c36d4b517125a49f38010e868ff83781948ccd8392336d92585994"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "open_caller_outside_body",
+      "lines": [
+        383,
+        410
+      ],
+      "sha256": "aee7d28161c36d4b517125a49f38010e868ff83781948ccd8392336d92585994"
+    },
+    {
+      "file": "verifier.py",
+      "method": "open_caller_outside_body",
+      "lines": [
+        438,
+        465
+      ],
+      "sha256": "aee7d28161c36d4b517125a49f38010e868ff83781948ccd8392336d92585994"
+    },
+    {
+      "file": "caller.py",
+      "method": "adopt_outside_body",
+      "lines": [
+        756,
+        774
+      ],
+      "sha256": "27235fc9475c7067d21ec5e82798598be92b6a1962a20f5391d0851030c213c6"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "adopt_outside_body",
+      "lines": [
+        413,
+        431
+      ],
+      "sha256": "27235fc9475c7067d21ec5e82798598be92b6a1962a20f5391d0851030c213c6"
+    },
+    {
+      "file": "verifier.py",
+      "method": "adopt_outside_body",
+      "lines": [
+        468,
+        486
+      ],
+      "sha256": "27235fc9475c7067d21ec5e82798598be92b6a1962a20f5391d0851030c213c6"
+    },
+    {
+      "file": "caller.py",
+      "method": "commit_outside_body",
+      "lines": [
+        777,
+        834
+      ],
+      "sha256": "02dafd83346cd5320ebe00b030091ea9e17ed7e5ce6fc1f85c225b45649fe437"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "commit_outside_body",
+      "lines": [
+        434,
+        491
+      ],
+      "sha256": "02dafd83346cd5320ebe00b030091ea9e17ed7e5ce6fc1f85c225b45649fe437"
+    },
+    {
+      "file": "verifier.py",
+      "method": "commit_outside_body",
+      "lines": [
+        489,
+        546
+      ],
+      "sha256": "02dafd83346cd5320ebe00b030091ea9e17ed7e5ce6fc1f85c225b45649fe437"
+    },
+    {
+      "file": "caller.py",
+      "method": "seal_outside_body",
+      "lines": [
+        844,
+        860
+      ],
+      "sha256": "717332777a220cd39dab751187421ac29d4ac4b9256d85c8f926289be7f23428"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "seal_outside_body",
+      "lines": [
+        501,
+        517
+      ],
+      "sha256": "717332777a220cd39dab751187421ac29d4ac4b9256d85c8f926289be7f23428"
+    },
+    {
+      "file": "verifier.py",
+      "method": "seal_outside_body",
+      "lines": [
+        556,
+        572
+      ],
+      "sha256": "717332777a220cd39dab751187421ac29d4ac4b9256d85c8f926289be7f23428"
+    },
+    {
+      "file": "caller.py",
+      "method": "consume_outside_body",
+      "lines": [
+        863,
+        885
+      ],
+      "sha256": "f1ebfbbd8cb8b799d6a0e88be6309581e2e86db8a4e9f0b72a7e8bc0f8cef348"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "consume_outside_body",
+      "lines": [
+        520,
+        542
+      ],
+      "sha256": "f1ebfbbd8cb8b799d6a0e88be6309581e2e86db8a4e9f0b72a7e8bc0f8cef348"
+    },
+    {
+      "file": "verifier.py",
+      "method": "consume_outside_body",
+      "lines": [
+        575,
+        597
+      ],
+      "sha256": "f1ebfbbd8cb8b799d6a0e88be6309581e2e86db8a4e9f0b72a7e8bc0f8cef348"
+    },
+    {
+      "file": "caller.py",
+      "method": "finish_outside_end",
+      "lines": [
+        888,
+        956
+      ],
+      "sha256": "f4c2f9ff36816eb97c4960541375478e5cd59fe3421d955f9234aa7487f6c07e"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "finish_outside_end",
+      "lines": [
+        545,
+        613
+      ],
+      "sha256": "f4c2f9ff36816eb97c4960541375478e5cd59fe3421d955f9234aa7487f6c07e"
+    },
+    {
+      "file": "verifier.py",
+      "method": "finish_outside_end",
+      "lines": [
+        600,
+        668
+      ],
+      "sha256": "f4c2f9ff36816eb97c4960541375478e5cd59fe3421d955f9234aa7487f6c07e"
+    },
+    {
+      "file": "caller.py",
+      "method": "snapshot_owned_originals",
+      "lines": [
+        1088,
+        1122
+      ],
+      "sha256": "aa7b8810b9fdac10a6c365546bf8f776576219905e1a98d45660d6224c4add62"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "snapshot_owned_originals",
+      "lines": [
+        739,
+        773
+      ],
+      "sha256": "aa7b8810b9fdac10a6c365546bf8f776576219905e1a98d45660d6224c4add62"
+    },
+    {
+      "file": "verifier.py",
+      "method": "snapshot_owned_originals",
+      "lines": [
+        793,
+        827
+      ],
+      "sha256": "aa7b8810b9fdac10a6c365546bf8f776576219905e1a98d45660d6224c4add62"
+    },
+    {
+      "file": "caller.py",
+      "method": "publish_preowned_then_frame",
+      "lines": [
+        1149,
+        1185
+      ],
+      "sha256": "8faf79169bca5bda55cff7a92dbc7c042271ddb0a8c431cad9545cd0e8ab4e76"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "publish_preowned_then_frame",
+      "lines": [
+        800,
+        836
+      ],
+      "sha256": "8faf79169bca5bda55cff7a92dbc7c042271ddb0a8c431cad9545cd0e8ab4e76"
+    },
+    {
+      "file": "verifier.py",
+      "method": "publish_preowned_then_frame",
+      "lines": [
+        854,
+        890
+      ],
+      "sha256": "8faf79169bca5bda55cff7a92dbc7c042271ddb0a8c431cad9545cd0e8ab4e76"
+    }
+  ],
+  "actual_routes": [
+    {
+      "actor": "caller",
+      "route": "original main/plan/entry_fd0..3 -> open_caller_outside_body -> existing allocate_owned(os.dup2) -> preown/ACQUIRE_UNKNOWN/known RETURNED/publish/OWN+history -> close_final exact body predicate -> original seal/consume -> finish_outside_end -> one publish_preowned_then_frame -> both existing fd1 receiver kinds -> unchanged _exit"
+    },
+    {
+      "actor": "supervisor",
+      "route": "original run/adopt -> check_inner/decode_channel_frame/validate_received_error_graphs/full v2 -> original finish_allocations -> commit (original primary+unlock secondary) -> refuse flags first -> finish_outside_end -> ONE publication on normal OR ordinary refusal -> original pipe/regular receiver -> actual qualified/exit"
+    },
+    {
+      "actor": "verifier",
+      "route": "original main/adopt -> original GPG6/control/cleanup -> finish_allocations -> commit (primary+unlock secondary) -> actual verified/status false on error -> finish_outside_end -> ONE publication -> original pipe/regular receiver -> actual verified/exit"
+    }
+  ],
+  "original_signals_and_clock": {
+    "allocate_owned_literal_equal": true,
+    "mask": "Existing short MASK over original native dup2 + typed publication only. No new mask/window/rearm or extended suppression.",
+    "partial_returns": "Native exception or allocation/publication exception retains exact original in prospective allocation record; still-unknown effect stays ACQUIRE_UNKNOWN. Wrapper failure after known return is RETURNED. Pending alarm/unmask before OUTSIDE_BODY alias assignment still leaves exact OWN/history. Initial mask failure before operation may remain PLANNED only because no dup2 was called.",
+    "cleanup": "No guessed bare8 close, no unknown acquisition closure/reclaim. Outside hold predicate uses actual typed held/alias or exact returned role/where record. Existing sticky close and simultaneous256 exact confirmed slot reclamation unchanged. Native ends NOT_RETIRED, not a transfer/absence assertion.",
+    "remaining_bound": "Stock/mask/native call worst duration and an active current timer are REQUIRED_NOT_RUN/UNKNOWN_NOT_ZERO. Existing literal timer_still_enforcing=True is not measurement and not credited."
+  },
+  "first_fault_bounds": {
+    "cells_per_actor_instance": 8,
+    "raw_reference_positions": 16,
+    "phases": [
+      "acquire",
+      "adopt",
+      "commit",
+      "unlock",
+      "seal",
+      "consume",
+      "end",
+      "publication"
+    ],
+    "proof": "Actual acquire/adopt occur once per main; sticky fault prevents further native commit/seal/consume after their first failure; unlock is one finally for that commit; one final end; one ordered publication. First error object + caught TB precede strings/deferred/renderer. New unexpected repetition never overwrites earlier cell, original is explicit cause of a refusal; no replay.",
+    "aliases": "Exact BaseException pointer retains original args/native attributes/cause/context/group/state aliases; separate caught traceback pointer remains primary. This is LOCAL Python ownership, not full original stock/native/private body or outside physical receiver.",
+    "secondary": "Independent unlock/end/publication cells never replace commit or original prefix/encoding failure slots. Partial native append/late frame remains unresolved body state, never retried.",
+    "representation": "Only reached phase rows published (1..8), full existing v2 graph required at both real recursive decoders. Beyond/reason-only marker cannot qualify the outside relation. Existing PO880/FR875 grammar and complete raw reservations unchanged.",
+    "positive": "No new outside errors field on error-free path; no blanket false on ordinary success. Both receivers keep original caps/schema/roundtrip, all original six meaningful scenarios required.",
+    "local_costs": "Preallocated dict+8 pairs/strong exception+TB refs, up to8 rows, up to8 additional O phase rendered blocks; possible duplicate original journal bodies, graph projections/JSON/copies/decoder work are explicitly NOT free. Full allocation/raw/graph fit is UNKNOWN_NOT_ZERO, no cap raised.",
+    "descriptor_predicate_upper_work": "At most two existing bounded live history scans per predicate; caller history<=256 / child history<=256. Slices, lookups, iterates and lifetime cleanup costs not zero; no whole-fit claim.",
+    "original_error_journal": 256,
+    "original_emergency_cells": 108,
+    "original_outside_append_cap": 32768,
+    "whole_factory_multiplicity": "C2 CODE_OPEN: no acceptance of all future/private factory shapes, graph capacity, complete aggregate error/raw/native/copy costs."
+  },
+  "meaningful_obligations": [
+    {
+      "id": "P1",
+      "kind": "positive",
+      "required": true,
+      "waiver": false,
+      "execution": "REQUIRED_NOT_RUN",
+      "scope": "All original6/all35/all3/GPG6/F1F2D1D2/current19, complete original byte evidence and real negative cause predicates, both pipe/regular producer-receiver paths."
+    },
+    {
+      "id": "P2",
+      "kind": "positive",
+      "required": true,
+      "waiver": false,
+      "execution": "REQUIRED_NOT_RUN",
+      "scope": "Normal dup2 exact prospective lease, known returned typed8, original live-slot reclamation; record-locked append plus original once-final-frame without new deadline/cap."
+    },
+    {
+      "id": "N1",
+      "kind": "negative",
+      "required": true,
+      "waiver": false,
+      "execution": "REQUIRED_NOT_RUN",
+      "scope": "Original synchronous dup2 failure/unknown effect, wrapper/fstat publication failure, original pending alarm at native return/publish/unmask, primary+unmask secondary; no PLANNED fiction after possible effect, no guessed close."
+    },
+    {
+      "id": "N2",
+      "kind": "negative",
+      "required": true,
+      "waiver": false,
+      "execution": "REQUIRED_NOT_RUN",
+      "scope": "Original terminal lock/read/render/partial-write exception plus independently reached unlock exception; both exact exception objects/TBs/cause/context before diagnostic, both actual consuming paths false-before-frame."
+    },
+    {
+      "id": "N3",
+      "kind": "negative",
+      "required": true,
+      "waiver": false,
+      "execution": "REQUIRED_NOT_RUN",
+      "scope": "End fstat/alias fault after prior append fault; seal/consume error, marker divergence/extent/cap; actual qualified/verified false, original primary still present, NOT_RETIRED."
+    },
+    {
+      "id": "N4",
+      "kind": "negative",
+      "required": true,
+      "waiver": false,
+      "execution": "REQUIRED_NOT_RUN",
+      "scope": "Malformed/duplicate/unknown/missing phase, private/beyond/reason-only graph, graph alias/raw/count/hash/frame/schema/pin drift at both real decoders; no acceptance from a label."
+    },
+    {
+      "id": "N5",
+      "kind": "negative",
+      "required": true,
+      "waiver": false,
+      "execution": "REQUIRED_NOT_RUN",
+      "scope": "Prefix/encoding and reached secondary publication/late transport error; exact first owner survives, no second encode or guessed tail; original timer/whole resources/cleanup/native ends still required."
+    }
+  ],
+  "no_test_generator": true,
+  "no_source_parser_AST_or_execution": true,
+  "gates": "NOT_RUN",
+  "independent_acceptance": "REQUIRED_NOT_RUN"
+}

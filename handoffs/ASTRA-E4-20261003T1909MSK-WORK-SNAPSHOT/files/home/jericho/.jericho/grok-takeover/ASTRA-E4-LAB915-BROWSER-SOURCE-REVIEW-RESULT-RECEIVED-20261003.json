@@ -1,0 +1,557 @@
+{
+  "schema": "friday.astra.lab915.result.received.v1",
+  "recorded_utc": "2026-10-03 13:53:06 UTC",
+  "assignment": "ASTRA-E4-A226-BROWSER-PROSPECTIVE-COMPLETE-WIRE-BOTH-DECODERS-NONAUTHOR-REVIEW-LAB-915",
+  "generation": 1,
+  "job_id": "job_a02c540f6d0048dd93c6ab710e9b570f",
+  "result_message_id": "msg_5699a6ddc4c841ca97af645d62a5d49f",
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB915-INPUT-20261003.json",
+    "bytes": 25291,
+    "sha256": "47583e6812f00f4e86084a4119c550e0ef9ae5ca5a4911f51b3a59eb5fb43f07",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534174",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "25291",
+      "1791022472159749659",
+      "1791022472216752929"
+    ],
+    "stable9": true
+  },
+  "run": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB915-RUN-20261003.json",
+    "bytes": 4751,
+    "sha256": "6cd59a125ea7d520732e0541af2e2882680ec9d7f03cde23eca14fa8bf663009",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534175",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "4751",
+      "1791022505176643695",
+      "1791022505236647137"
+    ],
+    "stable9": true
+  },
+  "official_transport": {
+    "manifest": {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/manifest.json",
+      "bytes": 1191,
+      "sha256": "ab0bdedc4f4b15176ce6ae63cca63d6dd0ef2291d006659cef3dca979a27c840",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371752",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1191",
+        "1791023279930084352",
+        "1791023279930084352"
+      ],
+      "stable9": true
+    },
+    "payload": {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/payload.json",
+      "bytes": 99,
+      "sha256": "95ebd5c159935f18b1e63c00a58af51cb4e8ba3648002a19c5061cfb96dfbdb8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371753",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "99",
+        "1791023279930084352",
+        "1791023279930084352"
+      ],
+      "stable9": true
+    },
+    "payload_value": {
+      "sha256": "ab0bdedc4f4b15176ce6ae63cca63d6dd0ef2291d006659cef3dca979a27c840",
+      "size": 1191
+    },
+    "job_state": "DONE",
+    "executor_ack": {
+      "claimed_at": "2026-10-03T10:15:05.477411Z",
+      "delivery_id": "del_5e1351fc56794b478248306beef10365",
+      "executor_ack": true,
+      "executor_ack_at": "2026-10-03T10:15:21.774401Z",
+      "instance_id": "inst_172422d9b66c41ed842072313428cb36",
+      "session_id": "01a0d5fd-0b0a-7191-b5ed-b423082558ae",
+      "source": "tui-monitor",
+      "waiting_current": false
+    }
+  },
+  "physical_pins": [
+    {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/manifest.json",
+      "bytes": 1191,
+      "sha256": "ab0bdedc4f4b15176ce6ae63cca63d6dd0ef2291d006659cef3dca979a27c840",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371752",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1191",
+        "1791023279930084352",
+        "1791023279930084352"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/bound.json",
+      "bytes": 785,
+      "sha256": "6e141a57b0ef7572549a6c4578b0f20f17664776ab57fe358d6627dd95f5b3b3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371745",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "785",
+        "1791023279929084295",
+        "1791023279929084295"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/bound.txt",
+      "bytes": 431,
+      "sha256": "b151a42a3a695933622bc3e91636d119be467308985794d65fcda3c2b6c985eb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371746",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "431",
+        "1791023279929084295",
+        "1791023279929084295"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/pathset.json",
+      "bytes": 993,
+      "sha256": "b902051d57ede95b84692e4c08edfad2ce79503bf28e763b1458aa1f3634871a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371751",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "993",
+        "1791023279929084295",
+        "1791023279929084295"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/pin-checks.json",
+      "bytes": 1005950,
+      "sha256": "67971832d4eb9b6bdfd0c06b27baf7db3bebd26f1996912622ab7f093ba1a1d6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371747",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1005950",
+        "1791023279929084295",
+        "1791023279929084295"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/relation.json",
+      "bytes": 641,
+      "sha256": "b01d87562d700a18cd9af40975e9f608538acb44899ac748a887d8d22b36ce7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371748",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "641",
+        "1791023279929084295",
+        "1791023279929084295"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/result.json",
+      "bytes": 11008,
+      "sha256": "20ac6f08635f86335d0fb51eb5af54aba82f7461d2d5ad9b46d6d25a73efb6f8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371750",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11008",
+        "1791023279929084295",
+        "1791023279929084295"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/validation-plan.txt",
+      "bytes": 777,
+      "sha256": "9a818e45b450f924368857445348d5d400bff1d894571a0c3fe1c1527045ba3a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371749",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "777",
+        "1791023279929084295",
+        "1791023279929084295"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/payload.json",
+      "bytes": 99,
+      "sha256": "95ebd5c159935f18b1e63c00a58af51cb4e8ba3648002a19c5061cfb96dfbdb8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371753",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "99",
+        "1791023279930084352",
+        "1791023279930084352"
+      ],
+      "stable9": true
+    }
+  ],
+  "external_validation": {
+    "unique": 339,
+    "read_bytes": 10531964,
+    "all_full_SHA_and_held_named9": true,
+    "artifact": {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/pin-checks.json",
+      "bytes": 1005950,
+      "sha256": "67971832d4eb9b6bdfd0c06b27baf7db3bebd26f1996912622ab7f093ba1a1d6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371747",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1005950",
+        "1791023279929084295",
+        "1791023279929084295"
+      ],
+      "stable9": true
+    },
+    "historical9_inequalities_not_current_drift": 9,
+    "no_new_historical_current_credit": true
+  },
+  "result": {
+    "pin": {
+      "path": "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/result.json",
+      "bytes": 11008,
+      "sha256": "20ac6f08635f86335d0fb51eb5af54aba82f7461d2d5ad9b46d6d25a73efb6f8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371750",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11008",
+        "1791023279929084295",
+        "1791023279929084295"
+      ],
+      "stable9": true
+    },
+    "value": {
+      "GO": false,
+      "Root_admission": false,
+      "SourceReady": false,
+      "accepted": false,
+      "assignment": "ASTRA-E4-A226-BROWSER-PROSPECTIVE-COMPLETE-WIRE-BOTH-DECODERS-NONAUTHOR-REVIEW-LAB-915",
+      "author_self_acceptance_used": false,
+      "author_text_used_as_credit": false,
+      "c1": "CODE_OPEN",
+      "c2": "UNKNOWN_NOT_ZERO",
+      "callers": {
+        "public_alias": "the public both-receiver join calls sol069_equal",
+        "public_decode": "a067_full_DATA_decode sends DS69 to sol069_decode at STREAM_CAP 1048576 and keeps the DS67 decoder",
+        "supervisor_decode": "full_DATA_decode sends DS69 to sol069_decode and keeps the DS67 decoder",
+        "supervisor_encode": "full_DATA_encode passes PIPE_CAP 1048576",
+        "worker_decode": "sol069_events decodes with cap 131068",
+        "worker_encode": "G1 emit encodes with a201_encode_cap(131068) and still requires the prefixed body at or below 131072"
+      },
+      "classification": "NONAUTHOR_TEXT_REVIEW",
+      "compiler_ABI": "NOT_RUN",
+      "costs": {
+        "completed_msk": "2026-10-03T13:27:59.819033+03:00",
+        "cumulative": 12659398,
+        "elapsed_s": 758.044632,
+        "memory_hash": 1021875,
+        "physical": 10604640,
+        "proc": 1972,
+        "proc_is_subset_of_physical": true,
+        "proc_read_bytes_counter": 2043904,
+        "seal_elapsed_s": 0.173414,
+        "sealed_tree": 1021875,
+        "transport": 1032883,
+        "vmrss_kib": 39080
+      },
+      "credits": [
+        {
+          "decision": "CREDIT_FOUR_IDENTICAL_PRODUCERS",
+          "invariant": "The same runs and encode text is present in the codec, the supervisor, the public driver, and G1.",
+          "path": "source/A069-DATA-CODEC.py, source/A071-SUPERVISOR.py, source/A087-PUBLIC-DRIVER.py, source/A025-G1.py",
+          "validation": "Extracted runs and encode bodies are byte-identical, and replacing them leaves each file equal to its previous text."
+        },
+        {
+          "decision": "CREDIT_UNCHANGED_BOTH_DECODERS",
+          "invariant": "The DS69 decoder, copy, and equal are unchanged, and the DS67 decoder in both full-data receivers is outside this diff.",
+          "path": "sol069_decode, sol069_copy, sol069_equal, full_DATA_decode, a067_full_DATA_decode",
+          "validation": "Those functions match each file's previous text. The public both-receiver join still calls sol069_equal."
+        },
+        {
+          "decision": "CREDIT_FLOOR_DOES_NOT_REJECT_FITTING_FRAME",
+          "invariant": "The necessary floor is at most the exact JSON spelling of a complete original frame.",
+          "path": "sol069_encode lower, node map, descriptor reserve, digits_floor",
+          "validation": "Empty header 45, null frame 63, nodes 23/25/29/26, descriptor 112, reference 7, and pair 20 match. Integer overcharge gap is 0."
+        },
+        {
+          "decision": "CREDIT_FINAL_EXACT_CAP_AND_ORIGINAL_CHOICE",
+          "invariant": "The final complete-frame check and the original raw or RLE choice remain.",
+          "path": "sol069_encode final check and sol069_runs",
+          "validation": "The cap check still sums the prefix, header, and stored bodies. An abandoned last run is not allocated. Empty input still returns an empty RLE body."
+        },
+        {
+          "decision": "CREDIT_GRAPH_DEBIT_BEFORE_APPEND",
+          "invariant": "A growing graph cell is debited before the node, identity entry, item comma, or pair is appended.",
+          "path": "sol069_encode visit and body",
+          "validation": "The node reserve precedes nodes.append. Pair structure is reserved before the pair is stored. The run scratch is bounded by the expanded check and is not an unbounded cell."
+        },
+        {
+          "decision": "CREDIT_WRAPPERS_AND_CURRENT_PINS_ONLY",
+          "invariant": "Three loaders rebind hash or path literals, and three JSON files update active current pins only.",
+          "path": "A071-EXECUTOR.py, A071-WORKER.py, A025-G1-R4.py, ABI mapping, build recipe, connected contract",
+          "validation": "Wrapper line diffs are the G1 hash, the R4 hash, and the owned G1 path. JSON leaf changes are bytes, path, hash, or decimal lists. Pruned historical sections match."
+        },
+        {
+          "decision": "CREDIT_TEN_REPLACEMENTS_AND_PRIOR_CONTEXT",
+          "invariant": "The seven current209 replacements and three aux3 replacements match disk, and E01 through E04 are not rewritten.",
+          "path": "evidence/current-source-join.json and A071-EXECUTOR.py fresh acquisition",
+          "validation": "All ten after hashes and sizes match, mode 0600, nlink 1. No performing file contains its own hash. The mention graph has no cycle. Executor still has one journal acquisition."
+        }
+      ],
+      "decision": "WIRE_FLOOR_MATCHES_EXACT_JSON_AND_DOES_NOT_REJECT_FITTING_FRAME_UNDERCHARGE_AND_C2_STAY_OPEN",
+      "delivery_id": "del_5e1351fc56794b478248306beef10365",
+      "floors": {
+        "bytearray_node": 29,
+        "bytes_node": 25,
+        "descriptor_raw": 112,
+        "descriptor_rle": 112,
+        "dict_node": 26,
+        "empty_header_without_root": 45,
+        "false": 5,
+        "integer_overcharge_samples": 0,
+        "integer_worst_overcharge": 0,
+        "list_node": 26,
+        "neg_zero_float": 4,
+        "none": 4,
+        "null_head": 55,
+        "pair": 20,
+        "reference": 7,
+        "scalar_null": 10,
+        "str_node": 23,
+        "true": 4,
+        "zero_float": 3
+      },
+      "gates": "NOT_RUN",
+      "generation": 1,
+      "image": "NOT_RUN",
+      "implementation_complete": false,
+      "implementation_submitted": false,
+      "input_bytes": 25291,
+      "input_sha256": "47583e6812f00f4e86084a4119c550e0ef9ae5ca5a4911f51b3a59eb5fb43f07",
+      "job_id": "job_a02c540f6d0048dd93c6ab710e9b570f",
+      "joined": "PROSPECTIVE_WIRE_FLOOR_SCOPED_NOT_WHOLE_ACCEPTED",
+      "json_changed_leaves": {
+        "A071-ABI-MAPPING.json": 146,
+        "A071-BUILD-RECIPE.json": 146,
+        "A118-CONNECTED-CONTRACT.json": 205
+      },
+      "kind": "browser-prospective-complete-wire-both-decoders-connected-nonauthor-review",
+      "nested_historical_pin_mismatches": [],
+      "output_cap_bytes": 16777216,
+      "output_names": [
+        "bound.json",
+        "bound.txt",
+        "manifest.json",
+        "pathset.json",
+        "payload.json",
+        "pin-checks.json",
+        "relation.json",
+        "result.json",
+        "validation-plan.txt"
+      ],
+      "passport_consulted": true,
+      "passport_recorded_pids_used": false,
+      "pins_declared": 1225,
+      "pins_friday_mode_ok": 1200,
+      "pins_hash_mismatch": 0,
+      "pins_matched": 339,
+      "pre_seal_heartbeat": "2026-10-03T10:27:58.742208Z pid=793654 epoch=15",
+      "qualification": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+      "qualification_required": true,
+      "qualification_waiver": false,
+      "read_cap_bytes": 268435456,
+      "replacements": [
+        "aux3:A025-G1-R4.py",
+        "aux3:A025-G1.py",
+        "aux3:A069-DATA-CODEC.py",
+        "current209:A071-ABI-MAPPING.json",
+        "current209:A071-BUILD-RECIPE.json",
+        "current209:A071-EXECUTOR.py",
+        "current209:A071-SUPERVISOR.py",
+        "current209:A071-WORKER.py",
+        "current209:A087-PUBLIC-DRIVER.py",
+        "current209:A118-CONNECTED-CONTRACT.json"
+      ],
+      "residuals": [
+        "Float width is the literal 1. Stock JSON spells 0.0 as three characters and -0.0 as four, so the floor undercharges.",
+        "Extra digits of the expanded total, a body index, and descriptor integers undercharge. The final exact check still sees them.",
+        "sol069_runs builds its scratch before reserve of the stored length. The scratch stops once five more bytes would reach the raw length, after the expanded bound.",
+        "That bound is not a factory, allocator, RSS, or whole-memory qualification.",
+        "C1 native, stock, raw, pre-encode, error, full alias, and both outside ends stay CODE_OPEN.",
+        "Factory, allocator, decoder, formatter, and CPU conversion overlap stay UNKNOWN_NOT_ZERO.",
+        "Image, compiler ABI, resources, provider, grants, clocks, source admission, root admission, and gates stay NOT_RUN.",
+        "A physical bound can pass the expanded cap into encode. The worker receipt check still requires the prefixed body at or below 131072. This was not executed.",
+        "The recipe still names the stock caller header. That header was not reviewed.",
+        "Unknown cost stays unknown and is not zero. Author declarations are not this proof."
+      ],
+      "review": "Independent text review of the A226 prospective full-wire lower bound copied into four sources and joined to both unchanged decoders. The four runs and encode bodies match. Decode, copy, and equal match each file's own previous text. The DS67 decoder inside the supervisor and public full-data paths is outside this diff. The floor starts at 53, the 8-byte frame prefix plus a 45-byte empty header without the root expression. The null frame measures 55 header bytes and 63 frame bytes, and the floor debits 63. Node spellings 23, 25, 29, and 26 and the zero-width descriptor 112 match the exact JSON shape. The integer digit floor does not exceed decimal length on widths 1 through 4095 bits. Float width is fixed at 1, so 0.0 and -0.0 undercharge. Extra integer digits undercharge. The final exact frame check remains, so this floor does not reject a complete frame that check would admit. Graph nodes, identity entries, item commas, and pairs are debited before they are appended. The run scratch and the UTF-8 encode sit before the stored-byte debit and stay inside the original expanded bound of 16 * 1048576. Three loaders only rebind the G1 and R4 hash or the owned G1 path. Three JSON files change only current pin bytes, path, hash, and decimal lists. Sections outside those current pin blocks match. The ten current209 and aux3 replacements match the files on disk, and no performing file contains its own hash. E01 through E04 text is outside this diff. The fresh descriptor acquisition remains one call, and the old direct open is absent. C1 stays open. C2, including factory, allocator, decoder, formatter, and CPU overlap, stays unknown and is not zero. Image, compiler ABI, grants, resources, clocks, and gates stay not run. Whole Root and GO stay false. The source was read and was not executed or installed. Author prose was not used as credit.",
+      "reviewer": "existing visible Grok Lab nonauthor",
+      "run_message_id": "msg_80fd58154e954b67bcebfa33681aa883",
+      "runtime": "NOT_RUN",
+      "schema": "friday.astra.lab915.browser.prospective-complete-wire.nonauthor.run.v1",
+      "self_hash_cycle": false,
+      "sol091_opened": false,
+      "source_execution": 0,
+      "source_proof": false,
+      "stamp_inequality_declarations": 269,
+      "stamp_inequality_is_not_host_drift": true,
+      "stamp_inequality_unique": 62,
+      "task_done": false,
+      "task_done_scope": true,
+      "tripwires": [
+        "four_runs_and_encode_identical",
+        "decode_copy_equal_unchanged",
+        "both_full_data_decoders_outside_hunks",
+        "floor_53_header_45_prefix_8",
+        "nodes_23_25_29_26_descriptor_112",
+        "integer_floor_no_overcharge",
+        "float_width_undercharge_recorded",
+        "exact_cap_and_raw_rle_choice",
+        "graph_debit_before_append",
+        "wrappers_hash_or_path_only",
+        "json_current_pin_fields_only",
+        "ten_replacements_match",
+        "no_self_hash_cycle",
+        "e01_e04_text_outside_diff"
+      ],
+      "unique_paths": 339,
+      "verdict": "FOUR_CODEC_BODIES_MATCH_UNCHANGED_BOTH_DECODERS_FLOOR_DOES_NOT_REJECT_FITTING_FRAME",
+      "whole_accepted": false
+    }
+  },
+  "decision": "ACCEPT_SEVEN_SCOPED_NONAUTHOR_BROWSER_SOURCE_CREDITS_NOT_WHOLE_C1_C2_OR_RUNTIME_ACCEPTANCE",
+  "source_credits": [
+    {
+      "decision": "CREDIT_FOUR_IDENTICAL_PRODUCERS",
+      "invariant": "The same runs and encode text is present in the codec, the supervisor, the public driver, and G1.",
+      "path": "source/A069-DATA-CODEC.py, source/A071-SUPERVISOR.py, source/A087-PUBLIC-DRIVER.py, source/A025-G1.py",
+      "validation": "Extracted runs and encode bodies are byte-identical, and replacing them leaves each file equal to its previous text."
+    },
+    {
+      "decision": "CREDIT_UNCHANGED_BOTH_DECODERS",
+      "invariant": "The DS69 decoder, copy, and equal are unchanged, and the DS67 decoder in both full-data receivers is outside this diff.",
+      "path": "sol069_decode, sol069_copy, sol069_equal, full_DATA_decode, a067_full_DATA_decode",
+      "validation": "Those functions match each file's previous text. The public both-receiver join still calls sol069_equal."
+    },
+    {
+      "decision": "CREDIT_FLOOR_DOES_NOT_REJECT_FITTING_FRAME",
+      "invariant": "The necessary floor is at most the exact JSON spelling of a complete original frame.",
+      "path": "sol069_encode lower, node map, descriptor reserve, digits_floor",
+      "validation": "Empty header 45, null frame 63, nodes 23/25/29/26, descriptor 112, reference 7, and pair 20 match. Integer overcharge gap is 0."
+    },
+    {
+      "decision": "CREDIT_FINAL_EXACT_CAP_AND_ORIGINAL_CHOICE",
+      "invariant": "The final complete-frame check and the original raw or RLE choice remain.",
+      "path": "sol069_encode final check and sol069_runs",
+      "validation": "The cap check still sums the prefix, header, and stored bodies. An abandoned last run is not allocated. Empty input still returns an empty RLE body."
+    },
+    {
+      "decision": "CREDIT_GRAPH_DEBIT_BEFORE_APPEND",
+      "invariant": "A growing graph cell is debited before the node, identity entry, item comma, or pair is appended.",
+      "path": "sol069_encode visit and body",
+      "validation": "The node reserve precedes nodes.append. Pair structure is reserved before the pair is stored. The run scratch is bounded by the expanded check and is not an unbounded cell."
+    },
+    {
+      "decision": "CREDIT_WRAPPERS_AND_CURRENT_PINS_ONLY",
+      "invariant": "Three loaders rebind hash or path literals, and three JSON files update active current pins only.",
+      "path": "A071-EXECUTOR.py, A071-WORKER.py, A025-G1-R4.py, ABI mapping, build recipe, connected contract",
+      "validation": "Wrapper line diffs are the G1 hash, the R4 hash, and the owned G1 path. JSON leaf changes are bytes, path, hash, or decimal lists. Pruned historical sections match."
+    },
+    {
+      "decision": "CREDIT_TEN_REPLACEMENTS_AND_PRIOR_CONTEXT",
+      "invariant": "The seven current209 replacements and three aux3 replacements match disk, and E01 through E04 are not rewritten.",
+      "path": "evidence/current-source-join.json and A071-EXECUTOR.py fresh acquisition",
+      "validation": "All ten after hashes and sizes match, mode 0600, nlink 1. No performing file contains its own hash. The mention graph has no cycle. Executor still has one journal acquisition."
+    }
+  ],
+  "still_open": [
+    "Float width is the literal 1. Stock JSON spells 0.0 as three characters and -0.0 as four, so the floor undercharges.",
+    "Extra digits of the expanded total, a body index, and descriptor integers undercharge. The final exact check still sees them.",
+    "sol069_runs builds its scratch before reserve of the stored length. The scratch stops once five more bytes would reach the raw length, after the expanded bound.",
+    "That bound is not a factory, allocator, RSS, or whole-memory qualification.",
+    "C1 native, stock, raw, pre-encode, error, full alias, and both outside ends stay CODE_OPEN.",
+    "Factory, allocator, decoder, formatter, and CPU conversion overlap stay UNKNOWN_NOT_ZERO.",
+    "Image, compiler ABI, resources, provider, grants, clocks, source admission, root admission, and gates stay NOT_RUN.",
+    "A physical bound can pass the expanded cap into encode. The worker receipt check still requires the prefixed body at or below 131072. This was not executed.",
+    "The recipe still names the stock caller header. That header was not reviewed.",
+    "Unknown cost stays unknown and is not zero. Author declarations are not this proof."
+  ],
+  "no_whole_root_closed": true,
+  "no_release_execution_layer_complete": true,
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

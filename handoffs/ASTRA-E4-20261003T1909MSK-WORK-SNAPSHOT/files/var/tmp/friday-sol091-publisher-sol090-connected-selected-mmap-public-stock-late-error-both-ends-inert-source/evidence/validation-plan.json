@@ -1,0 +1,242 @@
+{
+  "schema": "friday.sol091.required-whole-validation.v1",
+  "status": "ALL_REQUIRED_NOT_RUN",
+  "prior_exact_required_plan": {
+    "schema": "friday.sol090.required-validation-plan.v1",
+    "status": "REQUIRED_NOT_RUN",
+    "Source_execution": 0,
+    "author_proposal_not_independent_acceptance": true,
+    "immutable_original_obligations": {
+      "path": "/var/tmp/friday-sol087-publisher-c04-early-prefix-both-end-connected-inert-source/evidence/original-obligations.json",
+      "name": "evidence/original-obligations.json",
+      "bytes": 38970,
+      "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227343",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "38970",
+        "1791009967869915199",
+        "1791010210919863117"
+      ],
+      "stable9": true
+    },
+    "original_cases_all69_all15_schema20_F0_F11_two_positives_full58_full22_ABI128": "ALL_REQUIRED_UNCHANGED_NO_EXECUTION_CREDIT",
+    "additional_safe_abstract_controls": [
+      "before native context/debit/allocation/module registration; pre-observer and pre-OutputStore ctor error preserves original roots",
+      "partial StockChannel/StockChildJournal ctor and bind, invalid argv/endpoint; full before-admission supplier or explicit unconfirmed",
+      "exact v6 STARTED/ERROR/COMPLETE import attempts; true flag/foreign/unwalked cannot represent body or admission",
+      "normal v3 full physical reader + history join on actor and native endpoints; legacy v2 and exact 8-field failure/3-root positives remain",
+      "partial adopt, stdio dup error, sandbox/exec error, broken ordinary wire, full body >metadata capacity with exact original 80M body bound",
+      "same actual packet identity after strict reader; owner/pid/digest/body/header drift and unreferenced spans refuse before ACK",
+      "metadata separate original fd so no displacement of normal fullbody and no reduction of original payload cap",
+      "late ACK failure must retain actual late error and prevent child loss/unqualified os._exit",
+      "unsealed/partial actual file raw read retains original fd/row/body aliases before accepted transfer; no seal retry",
+      "Source bank transfer/close before owner_closed; both delivery/prefix settlement must retain Root's original custody",
+      "close EINTR/unknown/post-close allocation error retains actual scalar outcome and must never close same slot twice",
+      "post-v2-seal errors cannot be credited to old immutable document; actual final reader validates full root/bank/error bytes",
+      "selected mmap/stock/private state unsupported must be honest incomplete, never complete=True or missing-image-only excuse",
+      "exact existing native module/ctx/current qualification identity; fake capsule/Source-created grant/shadow parent operations refuse",
+      "complete original C2 full cost multiplicity, copy/FD/map overlap, worst-case body and finite end clocks before live"
+    ],
+    "unsafe": {
+      "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false,
+      "operational_payloads_authored": false
+    },
+    "gates": {
+      "independent_whole_source_review": "REQUIRED_NOT_RUN",
+      "compiled_ABI": "NOT_RUN",
+      "current_Root_enrollment": "NOT_RUN",
+      "original_stock_image_provider_resources_clocks": "NOT_RUN",
+      "runtime": "NOT_RUN",
+      "baseline": "NOT_RUN",
+      "r5": "RED_UNCHANGED",
+      "r6": "ABSENT_UNCHANGED",
+      "live": "NOT_RUN",
+      "full_final_gate": "NOT_RUN"
+    },
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false
+  },
+  "original_obligations": "evidence/original-obligations.json",
+  "additional_safe_abstract_controls": [
+    {
+      "id": "SOL091-SAFE-ABSTRACT-01",
+      "scenario": "before-Source debit/module allocation failure: exact triple/callable/args held, no fabricated prefix end",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-02",
+      "scenario": "actual Source-free prefix reader/end independent of fallible module, not late owner",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-03",
+      "scenario": "exact own mmap birth/current row/backing9 before effects; reused/mismatched backing refused",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-04",
+      "scenario": "unregistered mmap/foreign capsule cannot be selected owned",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-05",
+      "scenario": "full raw mmap position/physical9/equal-valued distinct alias drift",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-06",
+      "scenario": "self-writing primary/meta mapping refused without overwrite or cap reduction",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-07",
+      "scenario": "actual reachable raw sum vs one original 80M bank/original pools; no implicit waiver",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-08",
+      "scenario": "prescribed PUBLIC stock pin/name/namespace never full native state",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-09",
+      "scenario": "v5/v6 compatible; v7-only nodes rejected under older schema",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-10",
+      "scenario": "both actor/native ordinary+final validate full nested raw/history body before loss",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-11",
+      "scenario": "late body/meta cell preowned before fork; uncertain primary serialization/write/flush never retried",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-12",
+      "scenario": "late supplier/ACK error prevents child end even after an earlier accepted cut",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-13",
+      "scenario": "exact eight-field late wire+three roots; receiver accounting stored separately",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-14",
+      "scenario": "original allocation subledger before copies; no commit(allocation), grow or refund",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-15",
+      "scenario": "original G/A/B and deadline only; no new gate/clock",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-16",
+      "scenario": "mapping.close distinct from fd close; failed transfer/close retains original mapping",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-17",
+      "scenario": "after-doc write/fsync/last-close triple+rc/errno owned before allocation",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-18",
+      "scenario": "Source-made/nonoriginal fd_rows cannot authorize arbitrary native close",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-19",
+      "scenario": "actual original final row/fd/credit; unknown/EINTR close no retry",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-20",
+      "scenario": "actual Source-bank/owner-close/Source-retirement/v2/full receipt/native end order",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-21",
+      "scenario": "post-close/result allocation failure not patched into old document/flag end",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    },
+    {
+      "id": "SOL091-SAFE-ABSTRACT-22",
+      "scenario": "prepaid total mapped/source/native/error/destructor overlap and C2 unknown not zero",
+      "required": true,
+      "status": "NOT_RUN",
+      "unsafe_payload": false
+    }
+  ],
+  "Root_H2_literal_unchanged": true,
+  "H2_old_scoped_credit_not_new_Source_qualification": true,
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  },
+  "gates": {
+    "Source": "REQUIRED_NOT_RUN",
+    "Root": "REQUIRED_NOT_RUN",
+    "ABI_provider_images": "REQUIRED_NOT_RUN",
+    "C1_C2": "REQUIRED_NOT_PROVEN",
+    "both_positive_negative_finite_ends": "REQUIRED_NOT_RUN"
+  },
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

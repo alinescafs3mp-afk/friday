@@ -1,0 +1,118 @@
+{
+  "GO": false,
+  "Root_Image": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "assignment": "ASTRA-E4-A172-NODE-WHOLE6-ALL35-ERROR-RAW-ONCECLOSE-SOURCE-CLOSURE-LAB-863",
+  "changed_count": 5,
+  "code_open": [
+    "UNCONFIRMED_CLOSE_IS_NOT_SUCCESS: a failed os.close stays sticky and is not a retired-success.",
+    "PARTIAL_STREAM_IS_NOT_COMPLETE: a short, capped, or undecodable capture stays partial and cannot qualify.",
+    "OVERSIZE_PUBLIC_RECEIPT_KEEPS_STREAM_HASH: when the verifier whole receipt does not fit, the small refusal keeps stream count, sha256, partial and encoding, not a second raw copy.",
+    "LAB861_FOUR_GAPS_PENDING: readonly home, agent, trustdb and common.conf remain a Root qualification gap, not a Source pass.",
+    "NOT_RUN: no Source execution, Root image, compiler, runtime, or gates."
+  ],
+  "compiler_ELF_ABI": "NOT_RUN",
+  "completed_msk": "2026-10-02T12:18:47.353555+03:00",
+  "costs": {
+    "cgroup_memory_current": "2570788864",
+    "cumulative_bytes": 9949745,
+    "implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "meminfo_present": true,
+    "memory_hash_bytes": 4057661,
+    "physical_read_bytes": 5124601,
+    "proc_read_bytes": 0,
+    "proc_write_bytes": 798720,
+    "transport_write_bytes": 767483,
+    "vm_rss_kib": "21944",
+    "whole_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+  },
+  "delivery_id": "del_42e387afe697448887e46b0b65d13118",
+  "elapsed_seconds": 603.998324,
+  "equal_count": 1,
+  "expectations_bytes": 9128,
+  "full19_bytes": 72386093,
+  "gates": "NOT_RUN",
+  "hash_subsets_offset": 5233787,
+  "historical_manifest": {
+    "bytes": 20937,
+    "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/manifest.json",
+    "sha256": "1e136aa16b4e6b1e011d22390960ed09da60332e9293c545d28c0845371a96a5"
+  },
+  "historical_pathset": {
+    "bytes": 1672,
+    "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/exact-pathset.json",
+    "sha256": "4775544d97b879101456db8634e9b6f56e0fe359f96a3fadc9f6f5e552a7fa20"
+  },
+  "historical_raw_not_copied": [
+    {
+      "bytes": 20463,
+      "copied": false,
+      "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/all6-all3-result.json",
+      "sha256": "5f42889c607d9eae90fb8b22a38945c08d4284326cb9c9335685773247b647db"
+    },
+    {
+      "bytes": 8748,
+      "copied": false,
+      "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/continuation-LAB861-DATA.json",
+      "sha256": "4c1867bc713dacdffa8144d1d7113940596bb97d5a28231b7c25b945db05bd8a"
+    },
+    {
+      "bytes": 36024,
+      "copied": false,
+      "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/evidence/native-summary.json",
+      "sha256": "bb608865fabf424805329e7511175d68e69e46c35b065fc5422afb8ef377d851"
+    },
+    {
+      "bytes": 191279,
+      "copied": false,
+      "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/evidence/source-stdout.native",
+      "sha256": "b2fc3685c24bbb6545fb8f81461c37d26ff7846e131eaeaa6a86148303a1571f"
+    }
+  ],
+  "input_bytes": 78301,
+  "input_sha256": "00d2b19c52972de1503beeb393eeb233459e8840b61616e2f1770713a0c2cc7e",
+  "job_id": "job_88ffaff9ee9d40418163b808efece432",
+  "pins_verified": 99,
+  "preservation": {
+    "copied_members": 16,
+    "keyless_first_two_only": true,
+    "no_keyring_occurrences_in_verifier": 2,
+    "original_caps_refreshed": false,
+    "unsafe": "ABSTRACT_REQUIRED_NOT_RUN"
+  },
+  "run_message_id": "msg_7e3abe31aa9c4bb196cf74905bd56f86",
+  "runtime": "NOT_RUN",
+  "schema": "friday.grok.lab863.node-whole6-all35-error-raw-onceclose-source-closure.v1",
+  "sizes": {
+    "caller": {
+      "bytes": 116904,
+      "sha256": "d739a7e3705c5f76563fdf1a0dfff5bd90490689037b5eb6e187086c5d4d1236"
+    },
+    "contract": {
+      "bytes": 48250,
+      "sha256": "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418"
+    },
+    "supervisor": {
+      "bytes": 89782,
+      "sha256": "bcd0fb9f0c5d68468aa896b4a6f9a36f5e32a5d62dc11c6c3bc3787cfa128d10"
+    },
+    "verifier": {
+      "bytes": 62097,
+      "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9"
+    }
+  },
+  "source_execution": 0,
+  "verdict": "ERROR_RAW_ONCECLOSE_RETIREMENT_AUTHORED_NOT_RUN",
+  "whole6_changed": [
+    "caller.py",
+    "expectations.json",
+    "launch-contract.json",
+    "supervisor.py",
+    "verifier.py"
+  ],
+  "whole6_equal": [
+    "ordinary-surplus.txt"
+  ]
+}

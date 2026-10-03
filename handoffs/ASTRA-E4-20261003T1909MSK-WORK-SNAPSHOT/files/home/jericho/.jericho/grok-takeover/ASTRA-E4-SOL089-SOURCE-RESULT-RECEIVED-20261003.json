@@ -1,0 +1,4998 @@
+{
+  "schema": "friday.astra.sol089.actual-source-result.received.v1",
+  "assignment": "ASTRA-E4-SENDER-STOCK-PYTHON-OPERAND-ORIGIN-BODY-ALIAS-CONNECTED-SOURCE-SOL089",
+  "generation": 1,
+  "received_msk": "2026-10-03T11:25:00+03:00",
+  "result": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-RESULT.json",
+    "bytes": 1836,
+    "sha256": "b7dea7c2879fb718f665b0e2e30b20667316e389e2b8c9974abdadade904a7b5",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533875",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1836",
+      "1791015686993595052",
+      "1791015686993595052"
+    ],
+    "stable9": true
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/manifest.json",
+    "bytes": 15935,
+    "sha256": "2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371559",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "15935",
+      "1791015537697035266",
+      "1791015537757038706"
+    ],
+    "stable9": true
+  },
+  "task": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-TASK-20261003.txt",
+    "bytes": 1901,
+    "sha256": "32c478c0c8589ff0c8d3c220099e39d31de74030d54d1725a4ffc11198586031",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533748",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1901",
+      "1791013488848625233",
+      "1791013488902628323"
+    ],
+    "stable9": true
+  },
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-INPUT-20261003.json",
+    "bytes": 10548,
+    "sha256": "d12c2331c1b7b59494c86f42f8195cd1255bc0622e47ee4500ad2bff3d4b23d4",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533726",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "10548",
+      "1791013245984729456",
+      "1791013246031732145"
+    ],
+    "stable9": true
+  },
+  "physical": {
+    "pins": [
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/manifest.json",
+        "bytes": 15935,
+        "sha256": "2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371559",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15935",
+          "1791015537697035266",
+          "1791015537757038706"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CASE_TABLE.json",
+        "bytes": 11600,
+        "sha256": "40b8e912f21cd2c69592cc30c71da38c26ba6668077027c69449855b5e1c498b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371548",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11600",
+          "1791015101935051257",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CONNECTED_LITERAL_WINDOWS.json",
+        "bytes": 70327,
+        "sha256": "375f9b8e6b36c9d7cf699cacd9a44da77c8e4eac36fbca61f8df3de3a772c8c0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371553",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "70327",
+          "1791015196090449577",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CONNECTED_RELATION.json",
+        "bytes": 3179,
+        "sha256": "f2636ff94098f8043ce88eec8783ccf0833620d8c391a92ae27e1ff582ba610f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371554",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3179",
+          "1791015285316565280",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CURRENT96_SOURCE54_DEPENDENCIES.json",
+        "bytes": 102468,
+        "sha256": "6e9628dcf6bd91dd45a26821fde7a5ac4b7f76ba2c5bb8ea6e2cb445f5926b32",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371546",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "102468",
+          "1791015101870047531",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/DATA_INTEGRITY.json",
+        "bytes": 3324,
+        "sha256": "c95897bd5b7b0cfdc010fc5e47b318916215778ebc0ee6a904b2aaa15fb478fe",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371556",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3324",
+          "1791015477043557771",
+          "1791015477043557771"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/EXTERNAL_PINS.json",
+        "bytes": 52570,
+        "sha256": "53aacca37dc71d38c0d0ad0fc7c6f4c3211f5204b5ecdba8963fe548710a0e63",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371545",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "52570",
+          "1791015101834045466",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/INTERFACE_AND_ORIGIN_CONTRACT.json",
+        "bytes": 15246,
+        "sha256": "85ffeabf3f1afe0df6e69aa50476fa51ef3f87cd6df442241c607f833a93b30b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371547",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15246",
+          "1791015101911049882",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/PRESERVATION_AND_RESIDUALS.json",
+        "bytes": 9343,
+        "sha256": "603f9e3fdc5b470ad22c9ddd4d04174d7a02e044b3f611aaf44a16ccfcd687d1",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371549",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9343",
+          "1791015101956052462",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/README.txt",
+        "bytes": 3421,
+        "sha256": "cfa894670727635168f37bc0ddbe462636b2771042b19c8f7be05b3e2f4d4ef5",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371555",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3421",
+          "1791015285351567287",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/SOURCE_LITERAL_PARTS.json",
+        "bytes": 633501,
+        "sha256": "d9a8dd8102daf20fb3fce2d2226dbdfd5da486b34fffa1bc00f49573b0efaaf8",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371552",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "633501",
+          "1791015196029446080",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/UTILITY_NOTES.json",
+        "bytes": 1044,
+        "sha256": "fb325f051949f301eea1682cc8312b9111bfd2e4186518322be3d99f597a90d9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371551",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1044",
+          "1791015102002055099",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/VALIDATION_PLAN.json",
+        "bytes": 1660,
+        "sha256": "a62d3a6534902bf739ee81e8740eea489f9ce758763c82b25173ee19de871226",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371550",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1660",
+          "1791015101983054010",
+          "1791015285409570612"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/completion.json",
+        "bytes": 1253,
+        "sha256": "cf2a4d3a9897d2b76939842f83a87bac6aa9e0232cf878210e2be3a4db5bbb45",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371557",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1253",
+          "1791015477208567231",
+          "1791015477258570098"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/received.json",
+        "bytes": 1488,
+        "sha256": "85249002f02de27700aff4901171ead156eed71dc1f7bb4a37d5d7ddd278ff8c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371512",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1488",
+          "1791013555117416889",
+          "1791013555170419922"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/caller.py",
+        "bytes": 60201,
+        "sha256": "58f79d594cfef987f0b30b298cc23c3cb962d4733ca7b1d01825b91b4d3b7da9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371526",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "60201",
+          "1791014965571232956",
+          "1791014965571232956"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/controller.py",
+        "bytes": 30313,
+        "sha256": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371532",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30313",
+          "1791014290125514530",
+          "1791014290311525192"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/native_grammar.py",
+        "bytes": 38131,
+        "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371531",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "38131",
+          "1791014290102513211",
+          "1791014290311525192"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/ordinary_root_consumers.py",
+        "bytes": 102053,
+        "sha256": "96c6b6a368d8b00aae07c761d96610a0254131bff0f01ab66550adc908022244",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371527",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "102053",
+          "1791014965433225044",
+          "1791014965433225044"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/receipt_physical.py",
+        "bytes": 1963,
+        "sha256": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371533",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1963",
+          "1791014290252521810",
+          "1791014290311525192"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/root_native_launcher.py",
+        "bytes": 116415,
+        "sha256": "e68f9de758ccd98b55f9663eb82cfe2283c7de65612e8eb0f7cad58bac7bae92",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371528",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "116415",
+          "1791014290014508167",
+          "1791014290311525192"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/sender_operand_codec.py",
+        "bytes": 31023,
+        "sha256": "389575b32c9627e057d098b7a2f1efa66e646ba41c61ef73519f6afe05a3e650",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371525",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "31023",
+          "1791014779193548867",
+          "1791014779193548867"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+        "bytes": 127594,
+        "sha256": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371530",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "127594",
+          "1791014290074511606",
+          "1791014290311525192"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py",
+        "bytes": 65443,
+        "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371529",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "65443",
+          "1791014290043509829",
+          "1791014290311525192"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/pathset.json",
+        "bytes": 950,
+        "sha256": "e192d4d268c6943393f6469cbe524697a046726bd8b74f7c0e41af8b0b649b55",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371558",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "950",
+          "1791015477418579272",
+          "1791015477481582884"
+        ],
+        "stable9": true
+      }
+    ],
+    "files": [
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CASE_TABLE.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CONNECTED_LITERAL_WINDOWS.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CONNECTED_RELATION.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CURRENT96_SOURCE54_DEPENDENCIES.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/DATA_INTEGRITY.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/EXTERNAL_PINS.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/INTERFACE_AND_ORIGIN_CONTRACT.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/PRESERVATION_AND_RESIDUALS.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/README.txt",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/SOURCE_LITERAL_PARTS.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/UTILITY_NOTES.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/VALIDATION_PLAN.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/completion.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/manifest.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/pathset.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/received.json",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/caller.py",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/controller.py",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/native_grammar.py",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/ordinary_root_consumers.py",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/receipt_physical.py",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/root_native_launcher.py",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/sender_operand_codec.py",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py"
+    ],
+    "dirs": [
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source",
+      "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source"
+    ],
+    "selected": {
+      "CONNECTED_RELATION.json": {
+        "schema": "friday.sol089.actual-producer-to-both-ends-source-relation.v1",
+        "edges": [
+          [
+            "Caller._prepare_runtime",
+            "Caller._load_operands",
+            "full held/named SHA9+read debit of actual owned codec before selector use"
+          ],
+          [
+            "Caller._ObservedSelector.__init__",
+            "OperandOwner.birth",
+            "actual selected cls.__new__ result/error, actual body before original __init__"
+          ],
+          [
+            "OperandOwner.capture",
+            "Producer.value/note",
+            "actual full dictionary/scalar/container/stock member body and stable strongly held IDs; no fileno"
+          ],
+          [
+            "Caller.FullEventJournal.call",
+            "FrozenArguments",
+            "immutable actual begin operand snapshot before effect; completed note keeps original arguments"
+          ],
+          [
+            "Caller.FullEventJournal.call",
+            "selector.body.after",
+            "genuine post/partial/error cut joined to actual Source sequence"
+          ],
+          [
+            "RootNativeLauncher.setup",
+            "HeldLedger.bind_operand_stock",
+            "existing held source pin graph/capacity/adoption; bind actual stock module and codec before child"
+          ],
+          [
+            "HeldLedger.rows_from_held",
+            "RootChronology",
+            "actual full Root-held arrival order, birth ingest and one complete same-effect post cut"
+          ],
+          [
+            "RootChronology",
+            "OperandRegistry.fork/allocate",
+            "only true prior origins for same pid; own qualified Python allocation, not expected args"
+          ],
+          [
+            "ObservedMethodReplay.restore",
+            "OperandRegistry shared namespace",
+            "actual before-state scalars/containers/facade/raw/data aliases rejoined"
+          ],
+          [
+            "ObservedMethodReplay.call",
+            "unchanged same_typed",
+            "actual validated correspondence precedes original exact matcher, no relaxed types"
+          ],
+          [
+            "ObservedMethodReplay.call",
+            "OperandRegistry.decode/member",
+            "genuine captured after/result body with true SelectorKey/data aliases; no native ctor"
+          ],
+          [
+            "ObservedMethodReplay.run/after",
+            "original ordinary return/error/final state",
+            "existing first-error/success and all reached effects mandatory"
+          ],
+          [
+            "_ObservedSelector.__exit__",
+            "original one-close / both outside ends",
+            "one-close retained; complete native/helper/Root custody remains CODE"
+          ],
+          [
+            "original Source and Root dual ends",
+            "whole prospective capacity",
+            "caps not raised; data/aliases/read/CPU/native both-end cost UNKNOWN"
+          ]
+        ],
+        "negative_qualification": "No edge constitutes current execution, acceptance, full native/raw/error body, actual outside end or whole capacity proof.",
+        "known_gaps": [
+          "E02_NATIVE_RAW_ERROR_C1",
+          "BOTH_OUTSIDE_FINITE_ENDS",
+          "C2_WHOLE_COST",
+          "IMAGE_ABI_AND_NONAUTHOR_REVIEW"
+        ],
+        "Source_execution": 0,
+        "compiler_AST": "NOT_RUN",
+        "compiler_ABI": "NOT_RUN",
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false,
+        "runtime": "NOT_RUN",
+        "gates": "NOT_RUN",
+        "independent_changed_dependency_review": "REQUIRED_NOT_RUN",
+        "unsafe": {
+          "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+          "required": true,
+          "waiver": false
+        }
+      },
+      "EXTERNAL_PINS.json": {
+        "schema": "friday.sol089.external.exact-pins.v1",
+        "pins": [
+          {
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A220-CONNECTED-SENDER-SOURCE-AUTHORITY-B09-ORIGIN-DECISION-20261003.json",
+            "bytes": 5084,
+            "sha256": "8bdf56714a825eea983e9d186db10708cf6f5ec011665e8a4def7597ec1b9e27",
+            "identity9_decimal_strings": [
+              "2050",
+              "8533572",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "5084",
+              "1791013180111960457",
+              "1791013180158963147"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/caller.py",
+            "bytes": 65491,
+            "sha256": "ff6fd365165a3e94971aabb546d051e1c7cbd313273a1b8917aab0ab1bdb43cc",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225618",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "65491",
+              "1790956169964899288",
+              "1790956169964899288"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/source/ordinary_root_consumers.py",
+            "bytes": 93844,
+            "sha256": "814db7af6a4183f5e7ff1f389ffea65a0ef5a02e4e21faa048350d3cca8d6e81",
+            "identity9_decimal_strings": [
+              "2050",
+              "4226873",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "93844",
+              "1790996661665123584",
+              "1790996661665123584"
+            ]
+          },
+          {
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A215-SENDER-ACTUAL-SELECTOR-SUPPLIER-CONNECTED-DECISION-20261003.json",
+            "bytes": 6137,
+            "sha256": "5445ae61ee8f972b3ae0261f45d00af70fdf24f83573f3a55a6b9900ed3e7b8a",
+            "identity9_decimal_strings": [
+              "2050",
+              "8532468",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "6137",
+              "1791000797379193038",
+              "1791000797427195797"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/manifest/manifest.json",
+            "bytes": 1214,
+            "sha256": "3640d1973ef956cadbad7efa11ae91343f132631931beb9e21494eb188b1aac9",
+            "identity9_decimal_strings": [
+              "2050",
+              "4226879",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1214",
+              "1790996661665123584",
+              "1790996661665123584"
+            ]
+          },
+          {
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL082-SENDER-CONNECTED-SOURCE-RESULT-RECEIVED-20261003.json",
+            "bytes": 10338,
+            "sha256": "7d6ece71682eeeedd5139069632cd67c25ec65a72831d59957287415f6b59115",
+            "identity9_decimal_strings": [
+              "2050",
+              "8532103",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "10338",
+              "1790999804739273610",
+              "1790999804821278311"
+            ]
+          },
+          {
+            "path": "/usr/lib/python3.14/selectors.py",
+            "bytes": 19457,
+            "sha256": "4b8a60cfbb619d080f87dffe1578372e56e8c0ac826f043224a154cf7b77606d",
+            "identity9_decimal_strings": [
+              "2050",
+              "7604505",
+              "33188",
+              "0",
+              "0",
+              "1",
+              "19457",
+              "1787222518000000000",
+              "1789010692739996393"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/manifest/manifest.json",
+            "bytes": 7280,
+            "sha256": "fd00045ff696d9c2e19782ec14bdbf7d24dcb78ec245ec2189c67869fbb30404",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225642",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "7280",
+              "1790956169985900491",
+              "1790956169985900491"
+            ]
+          },
+          {
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL061-INPUT-20261002.json",
+            "bytes": 77393,
+            "sha256": "46f42cb7815efda6f88bad90b428de081c5d08ef10960a6d0f7ec9a5ec90010a",
+            "identity9_decimal_strings": [
+              "2050",
+              "8533604",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77393",
+              "1790936235619702887",
+              "1790936235693707133"
+            ]
+          },
+          {
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL059-INPUT-20261002.json",
+            "bytes": 112673,
+            "sha256": "e65087d9f517357af913ef934d8807113a7a12de18d4d9e5b4f96f70ca13f9ce",
+            "identity9_decimal_strings": [
+              "2050",
+              "8533508",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "112673",
+              "1790930308389919633",
+              "1790930308447922953"
+            ]
+          },
+          {
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL056-INPUT-20261002.json",
+            "bytes": 17521,
+            "sha256": "7bcca525493ca9f8b87fcc4183165ba5902bc9d97a612ad40817b4771ad1b925",
+            "identity9_decimal_strings": [
+              "2050",
+              "8532876",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "17521",
+              "1790922427468744112",
+              "1790922427541748292"
+            ]
+          },
+          {
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB906-SENDER-SAFE-SOURCE-REFUSAL-RESULT-RECEIVED-20261003.json",
+            "bytes": 19903,
+            "sha256": "4da8cb67519ec6f6f8234eab85f7ea49b6eb931bcd0523542044cc21ee2715a6",
+            "identity9_decimal_strings": [
+              "2050",
+              "8533432",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "19903",
+              "1791011064678845631",
+              "1791011064742849301"
+            ]
+          },
+          {
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB905-SENDER-STOCK-FENCE-DECISION-RESULT-RECEIVED-20261003.json",
+            "bytes": 16712,
+            "sha256": "9921d41352b6d057751b9787c23979b79650636c8ab14644de928f87f85ce39c",
+            "identity9_decimal_strings": [
+              "2050",
+              "8533413",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "16712",
+              "1791010407398138431",
+              "1791010407453141588"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/README.txt",
+            "bytes": 2784,
+            "sha256": "1c1dda6ad07c0570c7ab050cad98d062d96ad43fb313a33d445e4ba7ee693fa1",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225336",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "2784",
+              "1790938372748136833",
+              "1790938372748136833"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/RESIDUAL.txt",
+            "bytes": 7799,
+            "sha256": "00eccc0fc64e364d38a425fa1785cf7d2a14a1ea6548cfe0fa66549707a6911d",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225337",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "7799",
+              "1790938372749136891",
+              "1790938372749136891"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/README.contract.md",
+            "bytes": 8936,
+            "sha256": "7a6f9736ccad60983f1b27d377873431ef17ac20bf258cbc8d795f9c286a6170",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225339",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "8936",
+              "1790936827110631932",
+              "1790936827110631932"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/download-only-provenance.v1.json",
+            "bytes": 406,
+            "sha256": "5e3cee8f577ab81df7152e331fe7790c0fade27f4ee09c4e452d7cfbdc2a227e",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225341",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "406",
+              "1790936827110631932",
+              "1790936827110631932"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/live-one-attempt.v1.json",
+            "bytes": 516,
+            "sha256": "d805e38f99482bd430280f7605f9af0e1ac69017493b2402a429b91389f28049",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225342",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "516",
+              "1790936827111631989",
+              "1790936827111631989"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/private-source-preparation.v1.json",
+            "bytes": 368,
+            "sha256": "bd08daf3e720ff54bfc93fa0509230dcb96dda8d2206dd76af851db8dc6b3a5b",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225343",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "368",
+              "1790936827112632046",
+              "1790936827112632046"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/revoke-remove.v1.json",
+            "bytes": 459,
+            "sha256": "0eb6bc5e2cd8ddf66ad150a030c111852bb29198087c60ad1f81a5b2476764c6",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225344",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "459",
+              "1790936827114283291",
+              "1790936827114283291"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/root-install.v1.json",
+            "bytes": 593,
+            "sha256": "c298d52846b89373eb8930b1fc7225ffaa8307f7fba0c85b31ba471bf48e6bc0",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225345",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "593",
+              "1790936827114928328",
+              "1790936827114928328"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/fixtures/coordination/finalize_reports.py",
+            "bytes": 7077,
+            "sha256": "abd305b3985096fafa7e6ab5299ae1a49cdd94edd188e4acd3cde8594d28d68b",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225348",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "7077",
+              "1790936827114928328",
+              "1790936827114928328"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/affected-check-plan.v1.json",
+            "bytes": 9912,
+            "sha256": "4555a0cd305d799abe32d9243af9f20264c75db361bc44f31188b266a68f653f",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225350",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "9912",
+              "1790936827115632218",
+              "1790936827115632218"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/attempt-runtime.v1.md",
+            "bytes": 4227,
+            "sha256": "0544f43e28eaebc9cb481ea86951218dacc246b0752d202247ad8fffceee0a0a",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225351",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "4227",
+              "1790938092538541328",
+              "1790938092538541328"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/consumed-attempt.v1.md",
+            "bytes": 1783,
+            "sha256": "ba17e96bc2101232439d4e94b8dec3e852907b4d2cacd6c63f4ca00e08316ea7",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225352",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1783",
+              "1790936827117956502",
+              "1790936827117956502"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/control-inventory.v1.json",
+            "bytes": 4139478,
+            "sha256": "e7255f04bc4fa806960fcca79b6b37b67202417170ed59c3b9101863e3e91224",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225353",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "4139478",
+              "1790936827118714046",
+              "1790936827118714046"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/inherited-evidence-pins.v1.json",
+            "bytes": 17092,
+            "sha256": "22a2b9e35f00115a9d5e4b854504544b48df863d83edfaf40ac158ddc5abb8e4",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225354",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "17092",
+              "1790936827120632504",
+              "1790936827120632504"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/install-grant.v1.md",
+            "bytes": 5235,
+            "sha256": "9a4f1eaa41f8c2ce9f31bc28cbdaf8cd1468a6a3561853861bac3b90466557d9",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225355",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "5235",
+              "1790936827121632562",
+              "1790936827121632562"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/install-journal.v1.md",
+            "bytes": 6965,
+            "sha256": "6d1a0aa7e77598fec73b4c594a712a679026d16313a5cd78dd0f1d8c839c476a",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225356",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "6965",
+              "1790936827122632619",
+              "1790936827122632619"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/installed-authority.v1.md",
+            "bytes": 2175,
+            "sha256": "a4b8666e141c5376aba230c8df01c9b59f9b3eb8a58c34d3277e612a34d7002a",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225357",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "2175",
+              "1790936827123632676",
+              "1790936827123632676"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/live-grant.v1.md",
+            "bytes": 1811,
+            "sha256": "4203704d06e50d19ecf2eadd41cdbf143a85c9ddd02d0ef6701b3d6999d3e792",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225358",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1811",
+              "1790936827124632733",
+              "1790936827124632733"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/material-provenance.v1.md",
+            "bytes": 2771,
+            "sha256": "9b1b072b51669e53d675455af8c7fb60cd8d8b9fcc38b05c2a366e0071488170",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225359",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "2771",
+              "1790936827125632791",
+              "1790936827125632791"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/package-index.v1.md",
+            "bytes": 1683,
+            "sha256": "324c00248959483497c1f905951c303043d764b214168b94a367bb8c82bc7904",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225360",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1683",
+              "1790936827126632848",
+              "1790936827126632848"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/run-context.v1.md",
+            "bytes": 6494,
+            "sha256": "4c9ce9e7ae4eb467286cb0ccef921a87d9e7b436698564bd9dc8715ec2cf763a",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225361",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "6494",
+              "1790936827127632905",
+              "1790936827127632905"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/snapshot-manifest.v1.md",
+            "bytes": 3097,
+            "sha256": "976a28d2364d58738593007746716d744febb0c5c335da80791be00a194b9313",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225362",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "3097",
+              "1790936827128632963",
+              "1790936827128632963"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/terminal-evidence.v1.md",
+            "bytes": 6903,
+            "sha256": "ddc74ba41279d9067c5196514cf64c656ef581e7ffc919ac5dc5bfe2f2319ea0",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225363",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "6903",
+              "1790936827130200307",
+              "1790936827130200307"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/archive.py",
+            "bytes": 19305,
+            "sha256": "2822df686a34ae2af042e04720600d1b6e5aecac023aa242878e62aaec1db1cf",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225365",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "19305",
+              "1790936827130200307",
+              "1790936827130200307"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/assemble.py",
+            "bytes": 5879,
+            "sha256": "48a1ee891a42bf99ec365de40d7db956c3239ccf993b1786dca7db29861836c8",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225366",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "5879",
+              "1790936827130633077",
+              "1790936827130633077"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/broker_bootstrap.py",
+            "bytes": 29243,
+            "sha256": "c2c0e5bc9933321cb876201ee617aed05f071a71d373c2e0db5ce0498e4f7057",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225367",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "29243",
+              "1790936827131633134",
+              "1790936827131633134"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/broker_runtime.py",
+            "bytes": 34872,
+            "sha256": "225f8443684ad884f25088bb94cd1d3e02765a41a440d2e5840298595a4788aa",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225368",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "34872",
+              "1790936827133352688",
+              "1790936827133352688"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/canonical.py",
+            "bytes": 7703,
+            "sha256": "94c4a2dbb31991bdd942a6baf366f19d286c3aa052c3031fd827f01c9340596b",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225369",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "7703",
+              "1790936827134081530",
+              "1790936827134081530"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/custody_linux.py",
+            "bytes": 51535,
+            "sha256": "01713b1a5b0e38d0e33d45b23c4cfc5d449fb1bfcba48f0c87b42d57315b78e7",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225370",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "51535",
+              "1790936827134868576",
+              "1790936827134868576"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/install.py",
+            "bytes": 85227,
+            "sha256": "9bccaedf309d7fc1f0eeb9de5a3856a83e6236f431a060ef037936c60c2bb9d2",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225371",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "85227",
+              "1790936827135629819",
+              "1790936827135629819"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/install_bootstrap.py",
+            "bytes": 40651,
+            "sha256": "a8a488c43287dd8c990dc2fd4a16d6285afcd0d2fec34a19448228e8fb1d48fb",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225372",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "40651",
+              "1790936827135633363",
+              "1790936827135633363"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/ledger.py",
+            "bytes": 8224,
+            "sha256": "0d37911c174e323d1e68ac046da0e03d7558bb46f0426a2ce25f15ef34d957f1",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225373",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "8224",
+              "1790936827136633420",
+              "1790936827136633420"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/manifest.py",
+            "bytes": 24342,
+            "sha256": "12a666597c02e77ed42e5f799d3b909ea3fb90378d749a36d71520c1c5ae52f5",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225374",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "24342",
+              "1790936827138347875",
+              "1790936827138347875"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/pinned_fs.py",
+            "bytes": 36129,
+            "sha256": "da0d681df4cf1eb69851c183fa23061b2f928743be7b785b16859f5ff8747bcc",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225375",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "36129",
+              "1790936827139304231",
+              "1790936827139304231"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/provenance.py",
+            "bytes": 23701,
+            "sha256": "2f4614a31fca46a27604680bf6d5b08ba8b9b3bdd9061a0ea9fcefef867721e4",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225376",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "23701",
+              "1790936827140076275",
+              "1790936827140076275"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/recover.py",
+            "bytes": 905,
+            "sha256": "a4a419493f9b546926051c7f98a51bb0f1f824d95c1a5f907e4bf2ccd1031b4a",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225377",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "905",
+              "1790936827140776816",
+              "1790936827140776816"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/uninstall.py",
+            "bytes": 11133,
+            "sha256": "e124b9dbbb32716a521185bb53c6a7d834e0e2c416efb4cea80abb53cc98d366",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225378",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "11133",
+              "1790936827141816175",
+              "1790936827141816175"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/templates/friday-quality-gate.sudoers.in",
+            "bytes": 160,
+            "sha256": "c750a01854e0905fef54b28871008b37447d08a4c63bebdac1633be4d5f875cd",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225380",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "160",
+              "1790936827141816175",
+              "1790936827141816175"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/admission_custodian.py",
+            "bytes": 9574,
+            "sha256": "bd83161d5d2b75aeedb50b6d1b887f9f78ef169eb5d9ab66ead370b0789d6864",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225382",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "9574",
+              "1790936827142633764",
+              "1790936827142633764"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/close_package.py",
+            "bytes": 43302,
+            "sha256": "e975a65d3e85d48af334d4598dcb672f3a0b7ea146d269353d37847b28ccaea9",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225383",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "43302",
+              "1790936827143633821",
+              "1790936827143633821"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/execute_pair.py",
+            "bytes": 25268,
+            "sha256": "9c51275d386cbc7c13b5300603a54f051779c5c6ef4b7a055847120b2d8c1cb3",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225384",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "25268",
+              "1790936827145265173",
+              "1790936827145265173"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/harness_selfcheck.py",
+            "bytes": 47038,
+            "sha256": "20cf1bf2d232a8093306c720cc1c75e3adbc9e3dd67fc159960f26482f5a4295",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225385",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "47038",
+              "1790936827145937712",
+              "1790936827145937712"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/install_controls.py",
+            "bytes": 21530,
+            "sha256": "542e5f8580a1eaeb7d7b5991fbeb67d2a855372075325ea13e42da866d9c450e",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225386",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "21530",
+              "1790936827146692856",
+              "1790936827146692856"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/receipt_contract.py",
+            "bytes": 117673,
+            "sha256": "cf56e896e3c4f8444158b98aadbf95167bbc0a0611470171a04a43ff2513e570",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225387",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "117673",
+              "1790937669652022409",
+              "1790937669652022409"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/run_tests.py",
+            "bytes": 30194,
+            "sha256": "835e63251186fb0f27a891af14d97d15486f00817aedb52e752b93056fdd8f47",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225388",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "30194",
+              "1790936827148151640",
+              "1790936827148151640"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/support.py",
+            "bytes": 9623,
+            "sha256": "286d38accc22fafd92c8bf5a2c60849c14f31c96ab62047f3266038dddf0c151",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225389",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "9623",
+              "1790936827148862181",
+              "1790936827148862181"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_archive.py",
+            "bytes": 25422,
+            "sha256": "ed4996cb5dc3865b231702ee81b7751260b6d428b1af4b9a680fde410d318546",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225390",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "25422",
+              "1790936827149615524",
+              "1790936827149615524"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_broker.py",
+            "bytes": 45495,
+            "sha256": "39f6f12ef1b2f49ea0a115139de47035477e79df8291d4c110de5e832cb88c4a",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225391",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "45495",
+              "1790936827149634165",
+              "1790936827149634165"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_canonical.py",
+            "bytes": 10495,
+            "sha256": "173717c84586c05c6b943d9d29b6aa52faa82f6279341cee27f54a33746c3125",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225392",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "10495",
+              "1790936827150634222",
+              "1790936827150634222"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_custody.py",
+            "bytes": 54731,
+            "sha256": "ad256871e5299bbf7b28c5dbb89f9cbc8e596b0eff865457796aef90cce2cc52",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225393",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "54731",
+              "1790936827152240475",
+              "1790936827152240475"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_effect_bills.py",
+            "bytes": 4158,
+            "sha256": "513caa87e90749cd686a1a3c32edbf9704ea65c78dc1e26bcd351f22d47a420c",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225394",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "4158",
+              "1790936827153150927",
+              "1790936827153150927"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_install_recovery.py",
+            "bytes": 79615,
+            "sha256": "b9d7a634f1e63b077cbfcf561e3e081e169579f702c871a48b6b6ba394c49673",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225395",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "79615",
+              "1790936827154038778",
+              "1790936827154038778"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_ledger.py",
+            "bytes": 8721,
+            "sha256": "9e09199ab34217859416b25a451dd659fe873cf3d9f2f01e59e09b3ba1c85766",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225396",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "8721",
+              "1790936827155092839",
+              "1790936827155092839"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_manifest.py",
+            "bytes": 47844,
+            "sha256": "1202130c8f44bc4288cb3df77f70fce0a4e5f0be4f1b71bf62b01a8ca1cd21bc",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225397",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "47844",
+              "1790936827156009392",
+              "1790936827156009392"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_provenance.py",
+            "bytes": 27508,
+            "sha256": "699c6da03710b9360009a46e2b06acdc9a9ce047994de2bc5d9dfbfc40958e99",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225398",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "27508",
+              "1790936827156826839",
+              "1790936827156826839"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_uninstall.py",
+            "bytes": 33094,
+            "sha256": "15681dd81c69082c4c8536e69dfe86eb0019efd62487c3ed804e247f23b38511",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225399",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "33094",
+              "1790936827157810395",
+              "1790936827157810395"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/all32-current-matrix.json",
+            "bytes": 236701,
+            "sha256": "db7f0f11fdd5d91329ddc369edbf818e75aa41b6a5592d19417fab7dabdca2c4",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225400",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "236701",
+              "1790936827157810395",
+              "1790936827157810395"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/author-final-code-read-ledger.json",
+            "bytes": 68368,
+            "sha256": "93b45e5b385016641075c9c4e95380497cab541f275986de7ee0ff95c6b149e7",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225401",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "68368",
+              "1790936827158634681",
+              "1790936827158634681"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/closure-matrix.json",
+            "bytes": 43714,
+            "sha256": "eaca035ff85e31f7b8d23009d1ff77c76a9d29e0108c6542e9758fa626ebb870",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225402",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "43714",
+              "1790936827159634738",
+              "1790936827159634738"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/consumer-interface-matrix.json",
+            "bytes": 6018,
+            "sha256": "115cce432b948de9258fe5e37534c42dea5c07c32d5c421d7c31ff2d4363e27b",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225403",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "6018",
+              "1790936827160634795",
+              "1790936827160634795"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/cost-resource-custody-matrix.json",
+            "bytes": 1741,
+            "sha256": "0f1a58d9cfea2402c97c67118449791ac63568c6c2b351801baa0e8e41859361",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225404",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1741",
+              "1790936827161634852",
+              "1790936827161634852"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/effectful-method-body-correspondence.json",
+            "bytes": 17177,
+            "sha256": "8149c7932c4871c8dfad5810807513a5cd251d54a9b6a4376d03dedf81890b3b",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225405",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "17177",
+              "1790936827162634909",
+              "1790936827162634909"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/frozen132-pure16-current.json",
+            "bytes": 25868,
+            "sha256": "8593ec452209cb78eba9b387b5bea9899c2c046a9ed91d588e21f515da70dab0",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225406",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "25868",
+              "1790936827163634967",
+              "1790936827163634967"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/full-byte-delta.json",
+            "bytes": 116603,
+            "sha256": "8b494b943c43b922eedc513d60d674687204c8aaa9e19145f5f18b54ec85a969",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225407",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "116603",
+              "1790936827165232322",
+              "1790936827165232322"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/index/full-source.json",
+            "bytes": 40776,
+            "sha256": "7e3c4bc1f24e7655dfd1f18798d77cc744fe6874081695aa652b6a0885d1a2db",
+            "identity9_decimal_strings": [
+              "2050",
+              "4885334",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "40776",
+              "1790938092557093095",
+              "1790938092557093095"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-contracts/all32-contract-bindings.json",
+            "bytes": 569581,
+            "sha256": "81969f87e502a8f7fa56044830276bafe1af5c955e99d22b74014407d0c80142",
+            "identity9_decimal_strings": [
+              "2050",
+              "5010469",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "569581",
+              "1790936827165635081",
+              "1790936827165635081"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-contracts/ordered-predicate-table.json",
+            "bytes": 92081,
+            "sha256": "f9a500ea7dfbfa106c352abd4e115d287eca450cf6ae9e42830e13352b621cc7",
+            "identity9_decimal_strings": [
+              "2050",
+              "5010470",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "92081",
+              "1790936827167635196",
+              "1790936827167635196"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/REVIEW.md",
+            "bytes": 12267,
+            "sha256": "cfc9f2734d89992d5e94a6eddca37b9f368d1a98efedd5241df9f349b58ba65b",
+            "identity9_decimal_strings": [
+              "2050",
+              "5135285",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "12267",
+              "1790936827168635252",
+              "1790936827168635252"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/all32-classifications.json",
+            "bytes": 128219,
+            "sha256": "6ace31cec79affecd52db0711c6b9d1e9d51562230886b89fec8cab3c0110cdb",
+            "identity9_decimal_strings": [
+              "2050",
+              "5135286",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "128219",
+              "1790936827169635310",
+              "1790936827169635310"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/consumer-graph.json",
+            "bytes": 10563,
+            "sha256": "ca92b5d78bee63dfce8fd3b7be7eb5d5f4ad3720b64f259ea280440f3a1da09d",
+            "identity9_decimal_strings": [
+              "2050",
+              "5135287",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "10563",
+              "1790936827170635368",
+              "1790936827170635368"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/control-obligation-counts.json",
+            "bytes": 3851,
+            "sha256": "550683083ac2fa1837334a68227685523338714d41f6499e3b44f1fe8f5aa727",
+            "identity9_decimal_strings": [
+              "2050",
+              "5135288",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "3851",
+              "1790936827171635425",
+              "1790936827171635425"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/evidence-matrix.json",
+            "bytes": 47539,
+            "sha256": "7fc8b3ae05e9f71721eaa5e3f84ab363d9946a15891890df32838040273eddb5",
+            "identity9_decimal_strings": [
+              "2050",
+              "5135289",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "47539",
+              "1790936827173103775",
+              "1790936827173103775"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/ordered-predicate-review.json",
+            "bytes": 77053,
+            "sha256": "721a957e345cc981b8d0e3437eed65086b32d8074d2f523566f7a764314e6008",
+            "identity9_decimal_strings": [
+              "2050",
+              "5135290",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77053",
+              "1790936827173950024",
+              "1790936827173950024"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/original32-causal-obligations.json",
+            "bytes": 113358,
+            "sha256": "c4d7c67e34206fd783e46eea010fb5e0fcad07efa9b8802b77be967c7a73bbf5",
+            "identity9_decimal_strings": [
+              "2050",
+              "5135291",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "113358",
+              "1790936827174722768",
+              "1790936827174722768"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/resource-review.json",
+            "bytes": 35947,
+            "sha256": "dc9aea4f3cbaf54931b9a31e84b7f6f68586eb456521c28da5f819ceaebb732a",
+            "identity9_decimal_strings": [
+              "2050",
+              "5135292",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "35947",
+              "1790936827175570917",
+              "1790936827175570917"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/whole54-classifications.json",
+            "bytes": 121122,
+            "sha256": "6726efbbe109096e6e241b42afe151cd5cb78857e031bf9d145086ab13084b92",
+            "identity9_decimal_strings": [
+              "2050",
+              "5135293",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "121122",
+              "1790936827176270057",
+              "1790936827176270057"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/method-body-read-ledger.json",
+            "bytes": 2023,
+            "sha256": "a099132e3a54a5c7509b96596a0c847cd43f12c190a5ebfa7581b7c2cf5f0e1a",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225410",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "2023",
+              "1790936827177635768",
+              "1790936827177635768"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/original-input-current9.json",
+            "bytes": 57476,
+            "sha256": "1418b938657e1953d1635b6a45c3d27b93d606cb6df12525e1a195a2b6d9065d",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225411",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "57476",
+              "1790936827178635825",
+              "1790936827178635825"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/package-read-ledger.json",
+            "bytes": 35403,
+            "sha256": "7be354bc1eabe09a86553572c9283c1ef2bb8188d9a41531dc683906332d30b3",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225412",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "35403",
+              "1790936827179635883",
+              "1790936827179635883"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/performing-body-read-ledger.json",
+            "bytes": 2050,
+            "sha256": "1125333af7bf952d3626daa2e2fb2f1b8c262f282ce407d25d4b01235d252718",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225413",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "2050",
+              "1790936827181282246",
+              "1790936827181282246"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/prior-residual.txt",
+            "bytes": 7489,
+            "sha256": "42a5270db7cf985fc08d78879b758f5105087cc6fc8923452fb1947fa1e6abbd",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225414",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "7489",
+              "1790936827182144696",
+              "1790936827182144696"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/manifest.json",
+            "bytes": 51455,
+            "sha256": "3708e7fc59378ac6b50c57efe69ffc24c9a553673a8ecaf590f018c2543eae01",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225408",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "51455",
+              "1790936827176270057",
+              "1790936827176270057"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/metadata.py",
+            "bytes": 26581,
+            "sha256": "ccf645fe5417618d7085c0474700411ae65f7ececfbdc7bcf7731c03b376c354",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225409",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "26581",
+              "1790936827176635711",
+              "1790936827176635711"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/original-terminal.json",
+            "bytes": 1959,
+            "sha256": "bae06e11a0793a534c79974b35d789004d1dacabc057ea188440a9a26abaeed7",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225335",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1959",
+              "1790936827107631760",
+              "1790936827107631760"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/received.json",
+            "bytes": 136500,
+            "sha256": "ac03de1bed04e8d934c61ec972634cc41a15c846f549fb22712b01631ba87dcd",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225415",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "136500",
+              "1790936827182144696",
+              "1790936827182144696"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/seal.json",
+            "bytes": 43972,
+            "sha256": "af9b19ab12d4c18350f4f98968c575837a60cf1ab04e043aa237df11cfc9c943",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225416",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "43972",
+              "1790936827182636055",
+              "1790936827182636055"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/seal_metadata.py",
+            "bytes": 11877,
+            "sha256": "a7f310f179147615ada4398bf717829765cecb81d47e2e57878df046ea50fe9b",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225417",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "11877",
+              "1790936827183636112",
+              "1790936827183636112"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/source-changes.patch",
+            "bytes": 144462,
+            "sha256": "10812f17453225e3ca80c7d78af5983eceaff6f3221ac42160925cc30a314c85",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225418",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "144462",
+              "1790936827184636169",
+              "1790936827184636169"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/controller.py",
+            "bytes": 30313,
+            "sha256": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225619",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "30313",
+              "1790956169966899404",
+              "1790956169966899404"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/native_grammar.py",
+            "bytes": 38131,
+            "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225620",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "38131",
+              "1790956169967899461",
+              "1790956169967899461"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/ordinary_root_consumers.py",
+            "bytes": 91473,
+            "sha256": "27e0f17855fe4945a52aeee9da29829e290406271d3ff9f1c16e7f08a546fafc",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225621",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "91473",
+              "1790956169968899518",
+              "1790956169968899518"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/root_native_launcher.py",
+            "bytes": 115169,
+            "sha256": "567fd7b16329ddb8987413b986ae5086b733367d8b5dccec62c3d2875b8eeff6",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225623",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "115169",
+              "1790956169970899632",
+              "1790956169970899632"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/source_grammar.py",
+            "bytes": 127594,
+            "sha256": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225624",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "127594",
+              "1790956169971899690",
+              "1790956169971899690"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/staged_sender.py",
+            "bytes": 65443,
+            "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225634",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "65443",
+              "1790956169972899747",
+              "1790956169972899747"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/whole54-current-matrix.json",
+            "bytes": 115612,
+            "sha256": "7cada6798430cf24edb834610124ffc55c6e28f857a15883c4d3e4a953b10ac9",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225419",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "115612",
+              "1790936827191835053",
+              "1790936827191835053"
+            ]
+          },
+          {
+            "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/receipt_physical.py",
+            "bytes": 1963,
+            "sha256": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17",
+            "identity9_decimal_strings": [
+              "2050",
+              "4225622",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1963",
+              "1790956169969899575",
+              "1790956169969899575"
+            ]
+          },
+          {
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-PRE-TASK-COMPACT-20261003.json",
+            "sha256": "533494553bbd0be6adaf2b8ae3f48199fbeb552da145ce7026718419e7c70d2b",
+            "bytes": 1917,
+            "identity9_decimal_strings": [
+              "2050",
+              "8533703",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1917",
+              "1791013187314372553",
+              "1791013187314372553"
+            ]
+          }
+        ],
+        "all_current_full_SHA9_verified": true,
+        "copy_is_not_admission": true
+      },
+      "INTERFACE_AND_ORIGIN_CONTRACT.json": {
+        "schema": "friday.sol089.actual-stock-python-body-and-origin.v1",
+        "authority": "A220 permits Source schema/producer/receiver changes; no decoder-whitelist permission report",
+        "actual_changed_and_equal": [
+          {
+            "logical_name": "source/caller.py",
+            "selected": {
+              "name": "source/caller.py",
+              "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/caller.py",
+              "bytes": 60201,
+              "sha256": "58f79d594cfef987f0b30b298cc23c3cb962d4733ca7b1d01825b91b4d3b7da9",
+              "identity9_decimal_strings": [
+                "2050",
+                "4371526",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "60201",
+                "1791014965571232956",
+                "1791014965571232956"
+              ],
+              "mode": "600",
+              "uid": 1000,
+              "gid": 1000,
+              "nlink": 1,
+              "stable9": true
+            },
+            "predecessor": {
+              "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/caller.py",
+              "sha256": "ff6fd365165a3e94971aabb546d051e1c7cbd313273a1b8917aab0ab1bdb43cc",
+              "bytes": 65491,
+              "identity9_decimal_strings": [
+                "2050",
+                "4225618",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "65491",
+                "1790956169964899288",
+                "1790956169964899288"
+              ]
+            },
+            "disposition": "OWNED_CHANGED_SOURCE"
+          },
+          {
+            "logical_name": "source/controller.py",
+            "selected": {
+              "name": "source/controller.py",
+              "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/controller.py",
+              "bytes": 30313,
+              "sha256": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9",
+              "identity9_decimal_strings": [
+                "2050",
+                "4371532",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "30313",
+                "1791014290125514530",
+                "1791014290311525192"
+              ],
+              "mode": "600",
+              "uid": 1000,
+              "gid": 1000,
+              "nlink": 1,
+              "stable9": true
+            },
+            "predecessor": {
+              "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/controller.py",
+              "sha256": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9",
+              "bytes": 30313,
+              "identity9_decimal_strings": [
+                "2050",
+                "4225619",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "30313",
+                "1790956169966899404",
+                "1790956169966899404"
+              ]
+            },
+            "disposition": "OWNED_EXACT_EQUAL_DEPENDENCY"
+          },
+          {
+            "logical_name": "source/native_grammar.py",
+            "selected": {
+              "name": "source/native_grammar.py",
+              "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/native_grammar.py",
+              "bytes": 38131,
+              "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853",
+              "identity9_decimal_strings": [
+                "2050",
+                "4371531",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "38131",
+                "1791014290102513211",
+                "1791014290311525192"
+              ],
+              "mode": "600",
+              "uid": 1000,
+              "gid": 1000,
+              "nlink": 1,
+              "stable9": true
+            },
+            "predecessor": {
+              "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/native_grammar.py",
+              "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853",
+              "bytes": 38131,
+              "identity9_decimal_strings": [
+                "2050",
+                "4225620",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "38131",
+                "1790956169967899461",
+                "1790956169967899461"
+              ]
+            },
+            "disposition": "OWNED_EXACT_EQUAL_DEPENDENCY"
+          },
+          {
+            "logical_name": "source/ordinary_root_consumers.py",
+            "selected": {
+              "name": "source/ordinary_root_consumers.py",
+              "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/ordinary_root_consumers.py",
+              "bytes": 102053,
+              "sha256": "96c6b6a368d8b00aae07c761d96610a0254131bff0f01ab66550adc908022244",
+              "identity9_decimal_strings": [
+                "2050",
+                "4371527",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "102053",
+                "1791014965433225044",
+                "1791014965433225044"
+              ],
+              "mode": "600",
+              "uid": 1000,
+              "gid": 1000,
+              "nlink": 1,
+              "stable9": true
+            },
+            "predecessor": {
+              "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/source/ordinary_root_consumers.py",
+              "sha256": "814db7af6a4183f5e7ff1f389ffea65a0ef5a02e4e21faa048350d3cca8d6e81",
+              "bytes": 93844,
+              "identity9_decimal_strings": [
+                "2050",
+                "4226873",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "93844",
+                "1790996661665123584",
+                "1790996661665123584"
+              ]
+            },
+            "disposition": "OWNED_CHANGED_SOURCE"
+          },
+          {
+            "logical_name": "source/receipt_physical.py",
+            "selected": {
+              "name": "source/receipt_physical.py",
+              "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/receipt_physical.py",
+              "bytes": 1963,
+              "sha256": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17",
+              "identity9_decimal_strings": [
+                "2050",
+                "4371533",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "1963",
+                "1791014290252521810",
+                "1791014290311525192"
+              ],
+              "mode": "600",
+              "uid": 1000,
+              "gid": 1000,
+              "nlink": 1,
+              "stable9": true
+            },
+            "predecessor": {
+              "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/receipt_physical.py",
+              "sha256": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17",
+              "bytes": 1963,
+              "identity9_decimal_strings": [
+                "2050",
+                "4225622",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "1963",
+                "1790956169969899575",
+                "1790956169969899575"
+              ]
+            },
+            "disposition": "OWNED_EXACT_EQUAL_DEPENDENCY"
+          },
+          {
+            "logical_name": "source/root_native_launcher.py",
+            "selected": {
+              "name": "source/root_native_launcher.py",
+              "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/root_native_launcher.py",
+              "bytes": 116415,
+              "sha256": "e68f9de758ccd98b55f9663eb82cfe2283c7de65612e8eb0f7cad58bac7bae92",
+              "identity9_decimal_strings": [
+                "2050",
+                "4371528",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "116415",
+                "1791014290014508167",
+                "1791014290311525192"
+              ],
+              "mode": "600",
+              "uid": 1000,
+              "gid": 1000,
+              "nlink": 1,
+              "stable9": true
+            },
+            "predecessor": {
+              "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/root_native_launcher.py",
+              "sha256": "567fd7b16329ddb8987413b986ae5086b733367d8b5dccec62c3d2875b8eeff6",
+              "bytes": 115169,
+              "identity9_decimal_strings": [
+                "2050",
+                "4225623",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "115169",
+                "1790956169970899632",
+                "1790956169970899632"
+              ]
+            },
+            "disposition": "OWNED_CHANGED_SOURCE"
+          },
+          {
+            "logical_name": "source/sender_operand_codec.py",
+            "selected": {
+              "name": "source/sender_operand_codec.py",
+              "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/sender_operand_codec.py",
+              "bytes": 31023,
+              "sha256": "389575b32c9627e057d098b7a2f1efa66e646ba41c61ef73519f6afe05a3e650",
+              "identity9_decimal_strings": [
+                "2050",
+                "4371525",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "31023",
+                "1791014779193548867",
+                "1791014779193548867"
+              ],
+              "mode": "600",
+              "uid": 1000,
+              "gid": 1000,
+              "nlink": 1,
+              "stable9": true
+            },
+            "predecessor": null,
+            "disposition": "NEW_ACTUAL_CALLED_CODE_DEPENDENCY"
+          },
+          {
+            "logical_name": "source/source_grammar.py",
+            "selected": {
+              "name": "source/source_grammar.py",
+              "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+              "bytes": 127594,
+              "sha256": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a",
+              "identity9_decimal_strings": [
+                "2050",
+                "4371530",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "127594",
+                "1791014290074511606",
+                "1791014290311525192"
+              ],
+              "mode": "600",
+              "uid": 1000,
+              "gid": 1000,
+              "nlink": 1,
+              "stable9": true
+            },
+            "predecessor": {
+              "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/source_grammar.py",
+              "sha256": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a",
+              "bytes": 127594,
+              "identity9_decimal_strings": [
+                "2050",
+                "4225624",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "127594",
+                "1790956169971899690",
+                "1790956169971899690"
+              ]
+            },
+            "disposition": "OWNED_EXACT_EQUAL_DEPENDENCY"
+          },
+          {
+            "logical_name": "source/staged_sender.py",
+            "selected": {
+              "name": "source/staged_sender.py",
+              "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py",
+              "bytes": 65443,
+              "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f",
+              "identity9_decimal_strings": [
+                "2050",
+                "4371529",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "65443",
+                "1791014290043509829",
+                "1791014290311525192"
+              ],
+              "mode": "600",
+              "uid": 1000,
+              "gid": 1000,
+              "nlink": 1,
+              "stable9": true
+            },
+            "predecessor": {
+              "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/staged_sender.py",
+              "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f",
+              "bytes": 65443,
+              "identity9_decimal_strings": [
+                "2050",
+                "4225634",
+                "33152",
+                "1000",
+                "1000",
+                "1",
+                "65443",
+                "1790956169972899747",
+                "1790956169972899747"
+              ]
+            },
+            "disposition": "OWNED_EXACT_EQUAL_DEPENDENCY"
+          }
+        ],
+        "graph_schema": "friday.sol089.stock-python-body-alias.v1",
+        "graph_exact_keys": [
+          "type",
+          "schema",
+          "origin",
+          "root",
+          "nodes",
+          "complete_python_body"
+        ],
+        "origin_exact_keys": [
+          "pid",
+          "ordinal",
+          "operation",
+          "owner",
+          "object"
+        ],
+        "node_exact_keys": [
+          "id",
+          "kind",
+          "class",
+          "body"
+        ],
+        "qualified_body_kinds": [
+          "stock-python",
+          "selector-key",
+          "dict",
+          "list",
+          "tuple",
+          "set",
+          "frozenset",
+          "bytearray",
+          "int",
+          "str",
+          "float",
+          "bytes"
+        ],
+        "primitive_singletons": [
+          "None",
+          "bool"
+        ],
+        "actual_class_binding": [
+          "actual selected class object",
+          "actual full MRO/metaclass/layout descriptor",
+          "whole independently held stock module/helper bytes",
+          "future full image and ABI qualification STILL REQUIRED"
+        ],
+        "member_exact_keys": [
+          "type",
+          "graph",
+          "member"
+        ],
+        "member_transport": "full parent body/origin/aliases plus actual SelectorKey node; not a selector_key FD-tag projection",
+        "method_graph_schema": "friday.sol089.method-state-graph.v2",
+        "method_legacy_schema_readable": "friday.sol056.method-state-graph.v1",
+        "snapshots": [
+          "Original selected cls.__new__(cls) returns/errors in Caller. No new native constructor is performed by readonly receiver.",
+          "Successful allocator origin is registered strongly, before original __init__, then selector.allocate actual event carries full preinit dictionary and aliases.",
+          "FrozenArguments captures genuine actual begin arguments BEFORE __init__; the completed effect retains that actual snapshot instead of encoding later mutated self.",
+          "Complete selector.body.after joins its actual prior Source sequence, preserves partial/error/success state. Native field without full body raises explicit CODE, never a synthetic success.",
+          "Actual Root HeldLedger holds whole original event bytes, stock/codec sources before birth, and binds one registry under original pins/roles.",
+          "RootChronology retains full held origin/post cuts; per-method registry forks only earlier real births for this pid.",
+          "Readonly caller selects its own qualified class/owner, performs pure object.__new__, binds its genuine empty allocation body to earlier independently held birth BEFORE exact same_typed arguments.",
+          "Full scalar/container/stock bodies share the Source identity namespace with method-state, preserving SelectorKey.data and facade/raw references.",
+          "Qualified observed post-state is reconstructed without selector.__init__/fileno/native replay; strict matcher and original method success/error obligations remain."
+        ],
+        "limits": "Original caller/sender65536/native262144/SourceAS64MiBCPU300/Sender32MiB/shared16MiB/whole8GiB/canonical4/original dual ends/retry0; no capacity grant, event truncation, Source waiver or service",
+        "empty_preinit": "Only actual complete __dict__ from actual qualified object.__new__, with full dict node and original birth; no fabricated empty body for any later state",
+        "body_boundary": "Python instance dictionaries and allowed full typed graph bodies only. Native/C/private header/heap/kernel/error-memory/BOTH outside retirement are not represented or accepted by this graph.",
+        "residual_native": "NativeBodyUnavailable is an exact current body supplier CODE gap. It stops encoding and keeps actual raw owner/damage; no opaque/FD/class/hash promotion or ordinary positive claim.",
+        "Source_execution": 0,
+        "compiler_AST": "NOT_RUN",
+        "compiler_ABI": "NOT_RUN",
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false,
+        "runtime": "NOT_RUN",
+        "gates": "NOT_RUN",
+        "independent_changed_dependency_review": "REQUIRED_NOT_RUN",
+        "unsafe": {
+          "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+          "required": true,
+          "waiver": false
+        }
+      },
+      "PRESERVATION_AND_RESIDUALS.json": {
+        "schema": "friday.sol089.scoped-credit-and-required-open.v1",
+        "original_literal_checks": {
+          "same_typed_literal_unchanged": true,
+          "strict_effect_matcher_literal_unchanged": true,
+          "pure16_source_grammar_equal": true,
+          "pure16_staged_sender_equal": true,
+          "controller_equal": true,
+          "native_grammar_equal": true,
+          "receipt_physical_equal": true,
+          "source_error_function_literal_equal": true,
+          "restore_error_method_literal_equal": true,
+          "original_actor_producer_body_moved_literal_equal": true,
+          "original_actor_attach_to_eof_moved_literal_equal": true,
+          "original_effect_matcher_not_replaced": true,
+          "Source_execution": 0,
+          "compiler_AST": 0
+        },
+        "predicate_ids": [
+          "sender.predicate.exact.1",
+          "sender.predicate.control_types.1",
+          "sender.predicate.control_types.2",
+          "sender.predicate.object_wire.pairs.1",
+          "sender.predicate.object_wire.1",
+          "sender.predicate.object_wire.2",
+          "sender.predicate.object_wire.3",
+          "sender.predicate.source_map.1",
+          "sender.predicate.source_map.2",
+          "sender.predicate.namespace_shape.1",
+          "sender.predicate.namespace_shape.2",
+          "sender.predicate.body_shape.1",
+          "sender.predicate.custody_shape.1",
+          "sender.predicate.custody_shape.2",
+          "sender.predicate.context_shape.1",
+          "sender.predicate.context_shape.2",
+          "sender.predicate.context_shape.3",
+          "sender.predicate.context_shape.4",
+          "sender.predicate.context_shape.5",
+          "sender.predicate.context_shape.6",
+          "sender.predicate.context_shape.7",
+          "sender.predicate.context_shape.8",
+          "sender.predicate.expectation_shape.1",
+          "sender.predicate.expectation_shape.2",
+          "sender.predicate.expectation_shape.3",
+          "sender.predicate.validate_stage1.1",
+          "sender.predicate.validate_stage1.2",
+          "sender.predicate.validate_stage1.3",
+          "sender.predicate.validate_stage1.4",
+          "sender.predicate.validate_stage1.5",
+          "sender.predicate.validate_stage1.6",
+          "sender.predicate.validate_stage1.7",
+          "sender.predicate.validate_stage1.8",
+          "sender.predicate.validate_stage1.9",
+          "sender.predicate.validate_init.1",
+          "sender.predicate.validate_init.2",
+          "sender.predicate.validate_claim.1",
+          "sender.predicate.validate_claim.2",
+          "sender.predicate.validate_claim.3",
+          "sender.predicate.validate_claim.4",
+          "sender.predicate.check_held_observation.1",
+          "sender.predicate.check_held_observation.2",
+          "sender.predicate.check_held_observation.3",
+          "sender.predicate.check_held_observation.4",
+          "sender.predicate.check_held_observation.5",
+          "sender.predicate.validate_stage2.1",
+          "sender.predicate.validate_stage2.2",
+          "sender.predicate.validate_stage2.3",
+          "sender.predicate.validate_stage2.4",
+          "sender.predicate.validate_stage2.5",
+          "sender.predicate.validate_stage2.6",
+          "sender.predicate.validate_stage2.7",
+          "sender.predicate.validate_stage2.8",
+          "sender.predicate.Clock.__init__.1",
+          "sender.predicate.Clock.now.1",
+          "sender.predicate.Named.__init__.1",
+          "sender.predicate.Named.__init__.2",
+          "sender.predicate.Named.check.1",
+          "sender.predicate.Named.check.2",
+          "sender.predicate.Named.check.3",
+          "sender.predicate.Directory.__init__.1",
+          "sender.predicate.Directory.check.1",
+          "sender.predicate.Generation.proc_read.1",
+          "sender.predicate.Generation.stat.1",
+          "sender.predicate.Generation.check.1",
+          "sender.predicate.Generation.check.2",
+          "sender.predicate.Generation.check.3",
+          "sender.predicate.Generation.children.1",
+          "sender.predicate.Generation.children.2",
+          "sender.predicate.Generation.children.3",
+          "sender.predicate.Generation.children.4",
+          "sender.predicate.OwnScope.__init__.1",
+          "sender.predicate.OwnScope.__init__.2",
+          "sender.predicate.OwnScope.__init__.3",
+          "sender.predicate.OwnScope.proc_read.1",
+          "sender.predicate.OwnScope.single_thread.1",
+          "sender.predicate.OwnScope.runtime_check.1",
+          "sender.predicate.OwnScope.runtime_check.2",
+          "sender.predicate.OwnScope.check.1",
+          "sender.predicate.OwnScope.children.1",
+          "sender.predicate.OwnScope.terminal.1",
+          "sender.predicate.OwnScope.terminal.2",
+          "sender.predicate.Held.__init__.1",
+          "sender.predicate.Held.flags.1",
+          "sender.predicate.Held.check.1",
+          "sender.predicate.Held.check.2",
+          "sender.predicate.Held.check.3",
+          "sender.predicate.Held.check.4",
+          "sender.predicate.Held.check.5",
+          "sender.predicate.IO.terminal.1",
+          "sender.predicate.IO.terminal.2",
+          "sender.predicate.IO.terminal.3",
+          "sender.predicate.IO.terminal.4",
+          "sender.predicate.IO.terminal.5",
+          "sender.predicate.IO.pump.1",
+          "sender.predicate.IO.write.1",
+          "sender.predicate.IO.write.2",
+          "sender.predicate.IO.write.3",
+          "sender.predicate.IO.line.1",
+          "sender.predicate.IO.line.2",
+          "sender.predicate.validate_report.1",
+          "sender.predicate.validate_report.2",
+          "sender.predicate.validate_report.3",
+          "sender.predicate.validate_report.4",
+          "sender.predicate.validate_report.5",
+          "sender.predicate.validate_report.6",
+          "sender.predicate.validate_report.7",
+          "sender.predicate.Session.fd_guard.1",
+          "sender.predicate.Session.fd_guard.2",
+          "sender.predicate.Session.fd_guard.3",
+          "sender.predicate.Session.fd_guard.4",
+          "sender.predicate.Session.prepare_inputs.1",
+          "sender.predicate.Session.prepare_inputs.2",
+          "sender.predicate.Session.prepare_inputs.3",
+          "sender.predicate.Session.prepare_inputs.4",
+          "sender.predicate.Session.prepare_inputs.5",
+          "sender.predicate.Session.sample_tree.1",
+          "sender.predicate.Session.sample_tree.2",
+          "sender.predicate.Session.spawn.1",
+          "sender.predicate.Session.spawn.2",
+          "sender.predicate.Session.prepare_custody.1",
+          "sender.predicate.Session.prepare_custody.2",
+          "sender.predicate.Session.preauth.1",
+          "sender.predicate.Session.preauth.2",
+          "sender.predicate.Session.final_namespace.1",
+          "sender.predicate.Session.cleanup.1",
+          "sender.predicate.perform_staged_send.1",
+          "sender.predicate.perform_staged_send.2",
+          "sender.predicate.perform_staged_send.3",
+          "sender.predicate.perform_staged_send.4",
+          "sender.predicate.perform_staged_send.5",
+          "sender.predicate.perform_staged_send.6"
+        ],
+        "predicate_count": 132,
+        "pure_count": 16,
+        "original_class_body_obligations": 12,
+        "ordered_effectful_obligations": 72,
+        "existing_scoped_credits": [
+          "SOL082 independent filename-before-str method-error restoration, with separate effect-error restore function unchanged",
+          "R02/M01 and context-valid prior scoped R03/R05 credits; no new execution or inherited whole credit",
+          "Existing context-manager and one-close behavior, plus exact primary error and partial state obligations"
+        ],
+        "Source_only_implemented": [
+          "actual stock-Python allocation origin, complete dictionary/body/aliases, strongly held IDs",
+          "pre-__init__ argument encoding no longer calls fileno or represents raw as a descriptor",
+          "actual performing capture/FrozenArguments and typed body/member receiver",
+          "actual readonly allocator and independent registry correspondence before unchanged same_typed",
+          "full method facade/raw state and scalar/container alias namespace",
+          "actual called Root bind/held-image registry and legacy/new schema reader"
+        ],
+        "exact_remaining": [
+          {
+            "id": "E02_NATIVE_RAW_ERROR_C1",
+            "status": "CODE",
+            "reason": "After a native-backed initializer, genuine Python dictionary includes native fields without an admitted full body supplier. Graph refuses NativeBodyUnavailable; no native/private operation attempted. Partial raw owner and first/secondary damage are retained locally; independent complete native/error custody not supplied."
+          },
+          {
+            "id": "BOTH_OUTSIDE_FINITE_ENDS",
+            "status": "CODE",
+            "reason": "Original Python one-close path is not native tool/helper birth/end, all original raw/FD storage and final outside receiver retirement proof. Existing Root tail/grant/finite-end obligations remain unchanged."
+          },
+          {
+            "id": "C2_WHOLE_COST",
+            "status": "UNKNOWN_NOT_ZERO",
+            "reason": "New graph/string/bytes/container allocation, strong retention, clone/replay, framing/full hex, loader/stock implicit IO, physical data/input alias correspondence and all previous baseline costs are not whole bounded proof."
+          },
+          {
+            "id": "WHOLE_E01_RUNTIME",
+            "status": "NOT_CLOSED_NOT_RUN",
+            "reason": "Pre-init Python implementation is conditional Source text, not admitted current whole native selector functionality. No ordinary positive or negative was executed."
+          },
+          {
+            "id": "IMAGE_ABI_AND_NONAUTHOR_REVIEW",
+            "status": "REQUIRED_NOT_RUN",
+            "reason": "Lexical observed selectors text is not current selected class or qualified ABI/image. Full changed connected dependency review must be by a different author before admission/execution."
+          }
+        ],
+        "Source_execution": 0,
+        "compiler_AST": "NOT_RUN",
+        "compiler_ABI": "NOT_RUN",
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false,
+        "runtime": "NOT_RUN",
+        "gates": "NOT_RUN",
+        "independent_changed_dependency_review": "REQUIRED_NOT_RUN",
+        "unsafe": {
+          "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+          "required": true,
+          "waiver": false
+        }
+      },
+      "VALIDATION_PLAN.json": {
+        "schema": "friday.sol089.finite-future-validation.v1",
+        "now_permitted_and_done": [
+          "metadata JSON/exact pin/full byte and literal checks only",
+          "NEW inert Source authored via apply_patch",
+          "exact original obligations and costs retained"
+        ],
+        "future_required": [
+          "Independent non-author full review of all3 changed Source files, whole new codec and all actual dependencies/equal complement; no SourceReady on author claims",
+          "Exact stock image/MRO/metaclass/__new__/lookup/layout/member constructor/allocator/ABI qualification under original stock fence and original resources",
+          "Full legal native/raw/error body and two outside finite-end supplier closure, no denied Scanner C/native retry or private expansion",
+          "Prospective whole Source implicit read/RAM/CPU/physical frame and full graph/strong alias retention cost proof inside original caps",
+          "Original real isolated positive/error/cleanup and all meaningful negative controls, typed schemas and original full gates on final exact artifact only"
+        ],
+        "disallowed_now": [
+          "AST",
+          "Source imports",
+          "compiler",
+          "exec/tests",
+          "constructors/probes",
+          "native/C/private heap",
+          "keys/signing",
+          "network/live/models",
+          "frozen/production/helpers/guard edits"
+        ],
+        "Source_execution": 0,
+        "compiler_AST": "NOT_RUN",
+        "compiler_ABI": "NOT_RUN",
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false,
+        "runtime": "NOT_RUN",
+        "gates": "NOT_RUN",
+        "independent_changed_dependency_review": "REQUIRED_NOT_RUN",
+        "unsafe": {
+          "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+          "required": true,
+          "waiver": false
+        }
+      }
+    }
+  },
+  "external_full_SHA9": {
+    "declarations": 110,
+    "unique": 110,
+    "read_bytes": 8589314,
+    "pins": [
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A220-CONNECTED-SENDER-SOURCE-AUTHORITY-B09-ORIGIN-DECISION-20261003.json",
+        "bytes": 5084,
+        "sha256": "8bdf56714a825eea983e9d186db10708cf6f5ec011665e8a4def7597ec1b9e27",
+        "identity9_decimal_strings": [
+          "2050",
+          "8533572",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5084",
+          "1791013180111960457",
+          "1791013180158963147"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/caller.py",
+        "bytes": 65491,
+        "sha256": "ff6fd365165a3e94971aabb546d051e1c7cbd313273a1b8917aab0ab1bdb43cc",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225618",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "65491",
+          "1790956169964899288",
+          "1790956169964899288"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/source/ordinary_root_consumers.py",
+        "bytes": 93844,
+        "sha256": "814db7af6a4183f5e7ff1f389ffea65a0ef5a02e4e21faa048350d3cca8d6e81",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226873",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "93844",
+          "1790996661665123584",
+          "1790996661665123584"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A215-SENDER-ACTUAL-SELECTOR-SUPPLIER-CONNECTED-DECISION-20261003.json",
+        "bytes": 6137,
+        "sha256": "5445ae61ee8f972b3ae0261f45d00af70fdf24f83573f3a55a6b9900ed3e7b8a",
+        "identity9_decimal_strings": [
+          "2050",
+          "8532468",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6137",
+          "1791000797379193038",
+          "1791000797427195797"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/manifest/manifest.json",
+        "bytes": 1214,
+        "sha256": "3640d1973ef956cadbad7efa11ae91343f132631931beb9e21494eb188b1aac9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226879",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1214",
+          "1790996661665123584",
+          "1790996661665123584"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL082-SENDER-CONNECTED-SOURCE-RESULT-RECEIVED-20261003.json",
+        "bytes": 10338,
+        "sha256": "7d6ece71682eeeedd5139069632cd67c25ec65a72831d59957287415f6b59115",
+        "identity9_decimal_strings": [
+          "2050",
+          "8532103",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10338",
+          "1790999804739273610",
+          "1790999804821278311"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/usr/lib/python3.14/selectors.py",
+        "bytes": 19457,
+        "sha256": "4b8a60cfbb619d080f87dffe1578372e56e8c0ac826f043224a154cf7b77606d",
+        "identity9_decimal_strings": [
+          "2050",
+          "7604505",
+          "33188",
+          "0",
+          "0",
+          "1",
+          "19457",
+          "1787222518000000000",
+          "1789010692739996393"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/manifest/manifest.json",
+        "bytes": 7280,
+        "sha256": "fd00045ff696d9c2e19782ec14bdbf7d24dcb78ec245ec2189c67869fbb30404",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225642",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7280",
+          "1790956169985900491",
+          "1790956169985900491"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL061-INPUT-20261002.json",
+        "bytes": 77393,
+        "sha256": "46f42cb7815efda6f88bad90b428de081c5d08ef10960a6d0f7ec9a5ec90010a",
+        "identity9_decimal_strings": [
+          "2050",
+          "8533604",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "77393",
+          "1790936235619702887",
+          "1790936235693707133"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL059-INPUT-20261002.json",
+        "bytes": 112673,
+        "sha256": "e65087d9f517357af913ef934d8807113a7a12de18d4d9e5b4f96f70ca13f9ce",
+        "identity9_decimal_strings": [
+          "2050",
+          "8533508",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "112673",
+          "1790930308389919633",
+          "1790930308447922953"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL056-INPUT-20261002.json",
+        "bytes": 17521,
+        "sha256": "7bcca525493ca9f8b87fcc4183165ba5902bc9d97a612ad40817b4771ad1b925",
+        "identity9_decimal_strings": [
+          "2050",
+          "8532876",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17521",
+          "1790922427468744112",
+          "1790922427541748292"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB906-SENDER-SAFE-SOURCE-REFUSAL-RESULT-RECEIVED-20261003.json",
+        "bytes": 19903,
+        "sha256": "4da8cb67519ec6f6f8234eab85f7ea49b6eb931bcd0523542044cc21ee2715a6",
+        "identity9_decimal_strings": [
+          "2050",
+          "8533432",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19903",
+          "1791011064678845631",
+          "1791011064742849301"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB905-SENDER-STOCK-FENCE-DECISION-RESULT-RECEIVED-20261003.json",
+        "bytes": 16712,
+        "sha256": "9921d41352b6d057751b9787c23979b79650636c8ab14644de928f87f85ce39c",
+        "identity9_decimal_strings": [
+          "2050",
+          "8533413",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16712",
+          "1791010407398138431",
+          "1791010407453141588"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/README.txt",
+        "bytes": 2784,
+        "sha256": "1c1dda6ad07c0570c7ab050cad98d062d96ad43fb313a33d445e4ba7ee693fa1",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225336",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2784",
+          "1790938372748136833",
+          "1790938372748136833"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/RESIDUAL.txt",
+        "bytes": 7799,
+        "sha256": "00eccc0fc64e364d38a425fa1785cf7d2a14a1ea6548cfe0fa66549707a6911d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225337",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7799",
+          "1790938372749136891",
+          "1790938372749136891"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/README.contract.md",
+        "bytes": 8936,
+        "sha256": "7a6f9736ccad60983f1b27d377873431ef17ac20bf258cbc8d795f9c286a6170",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225339",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8936",
+          "1790936827110631932",
+          "1790936827110631932"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/download-only-provenance.v1.json",
+        "bytes": 406,
+        "sha256": "5e3cee8f577ab81df7152e331fe7790c0fade27f4ee09c4e452d7cfbdc2a227e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225341",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "406",
+          "1790936827110631932",
+          "1790936827110631932"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/live-one-attempt.v1.json",
+        "bytes": 516,
+        "sha256": "d805e38f99482bd430280f7605f9af0e1ac69017493b2402a429b91389f28049",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225342",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "516",
+          "1790936827111631989",
+          "1790936827111631989"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/private-source-preparation.v1.json",
+        "bytes": 368,
+        "sha256": "bd08daf3e720ff54bfc93fa0509230dcb96dda8d2206dd76af851db8dc6b3a5b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225343",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "368",
+          "1790936827112632046",
+          "1790936827112632046"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/revoke-remove.v1.json",
+        "bytes": 459,
+        "sha256": "0eb6bc5e2cd8ddf66ad150a030c111852bb29198087c60ad1f81a5b2476764c6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225344",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "459",
+          "1790936827114283291",
+          "1790936827114283291"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/root-install.v1.json",
+        "bytes": 593,
+        "sha256": "c298d52846b89373eb8930b1fc7225ffaa8307f7fba0c85b31ba471bf48e6bc0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225345",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "593",
+          "1790936827114928328",
+          "1790936827114928328"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/fixtures/coordination/finalize_reports.py",
+        "bytes": 7077,
+        "sha256": "abd305b3985096fafa7e6ab5299ae1a49cdd94edd188e4acd3cde8594d28d68b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225348",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7077",
+          "1790936827114928328",
+          "1790936827114928328"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/affected-check-plan.v1.json",
+        "bytes": 9912,
+        "sha256": "4555a0cd305d799abe32d9243af9f20264c75db361bc44f31188b266a68f653f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225350",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9912",
+          "1790936827115632218",
+          "1790936827115632218"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/attempt-runtime.v1.md",
+        "bytes": 4227,
+        "sha256": "0544f43e28eaebc9cb481ea86951218dacc246b0752d202247ad8fffceee0a0a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225351",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4227",
+          "1790938092538541328",
+          "1790938092538541328"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/consumed-attempt.v1.md",
+        "bytes": 1783,
+        "sha256": "ba17e96bc2101232439d4e94b8dec3e852907b4d2cacd6c63f4ca00e08316ea7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225352",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1783",
+          "1790936827117956502",
+          "1790936827117956502"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/control-inventory.v1.json",
+        "bytes": 4139478,
+        "sha256": "e7255f04bc4fa806960fcca79b6b37b67202417170ed59c3b9101863e3e91224",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225353",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4139478",
+          "1790936827118714046",
+          "1790936827118714046"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/inherited-evidence-pins.v1.json",
+        "bytes": 17092,
+        "sha256": "22a2b9e35f00115a9d5e4b854504544b48df863d83edfaf40ac158ddc5abb8e4",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225354",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17092",
+          "1790936827120632504",
+          "1790936827120632504"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/install-grant.v1.md",
+        "bytes": 5235,
+        "sha256": "9a4f1eaa41f8c2ce9f31bc28cbdaf8cd1468a6a3561853861bac3b90466557d9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225355",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5235",
+          "1790936827121632562",
+          "1790936827121632562"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/install-journal.v1.md",
+        "bytes": 6965,
+        "sha256": "6d1a0aa7e77598fec73b4c594a712a679026d16313a5cd78dd0f1d8c839c476a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225356",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6965",
+          "1790936827122632619",
+          "1790936827122632619"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/installed-authority.v1.md",
+        "bytes": 2175,
+        "sha256": "a4b8666e141c5376aba230c8df01c9b59f9b3eb8a58c34d3277e612a34d7002a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225357",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2175",
+          "1790936827123632676",
+          "1790936827123632676"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/live-grant.v1.md",
+        "bytes": 1811,
+        "sha256": "4203704d06e50d19ecf2eadd41cdbf143a85c9ddd02d0ef6701b3d6999d3e792",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225358",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1811",
+          "1790936827124632733",
+          "1790936827124632733"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/material-provenance.v1.md",
+        "bytes": 2771,
+        "sha256": "9b1b072b51669e53d675455af8c7fb60cd8d8b9fcc38b05c2a366e0071488170",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225359",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2771",
+          "1790936827125632791",
+          "1790936827125632791"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/package-index.v1.md",
+        "bytes": 1683,
+        "sha256": "324c00248959483497c1f905951c303043d764b214168b94a367bb8c82bc7904",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225360",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1683",
+          "1790936827126632848",
+          "1790936827126632848"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/run-context.v1.md",
+        "bytes": 6494,
+        "sha256": "4c9ce9e7ae4eb467286cb0ccef921a87d9e7b436698564bd9dc8715ec2cf763a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225361",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6494",
+          "1790936827127632905",
+          "1790936827127632905"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/snapshot-manifest.v1.md",
+        "bytes": 3097,
+        "sha256": "976a28d2364d58738593007746716d744febb0c5c335da80791be00a194b9313",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225362",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3097",
+          "1790936827128632963",
+          "1790936827128632963"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/terminal-evidence.v1.md",
+        "bytes": 6903,
+        "sha256": "ddc74ba41279d9067c5196514cf64c656ef581e7ffc919ac5dc5bfe2f2319ea0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225363",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6903",
+          "1790936827130200307",
+          "1790936827130200307"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/archive.py",
+        "bytes": 19305,
+        "sha256": "2822df686a34ae2af042e04720600d1b6e5aecac023aa242878e62aaec1db1cf",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225365",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19305",
+          "1790936827130200307",
+          "1790936827130200307"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/assemble.py",
+        "bytes": 5879,
+        "sha256": "48a1ee891a42bf99ec365de40d7db956c3239ccf993b1786dca7db29861836c8",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225366",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5879",
+          "1790936827130633077",
+          "1790936827130633077"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/broker_bootstrap.py",
+        "bytes": 29243,
+        "sha256": "c2c0e5bc9933321cb876201ee617aed05f071a71d373c2e0db5ce0498e4f7057",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225367",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29243",
+          "1790936827131633134",
+          "1790936827131633134"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/broker_runtime.py",
+        "bytes": 34872,
+        "sha256": "225f8443684ad884f25088bb94cd1d3e02765a41a440d2e5840298595a4788aa",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225368",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "34872",
+          "1790936827133352688",
+          "1790936827133352688"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/canonical.py",
+        "bytes": 7703,
+        "sha256": "94c4a2dbb31991bdd942a6baf366f19d286c3aa052c3031fd827f01c9340596b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225369",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7703",
+          "1790936827134081530",
+          "1790936827134081530"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/custody_linux.py",
+        "bytes": 51535,
+        "sha256": "01713b1a5b0e38d0e33d45b23c4cfc5d449fb1bfcba48f0c87b42d57315b78e7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225370",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51535",
+          "1790936827134868576",
+          "1790936827134868576"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/install.py",
+        "bytes": 85227,
+        "sha256": "9bccaedf309d7fc1f0eeb9de5a3856a83e6236f431a060ef037936c60c2bb9d2",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225371",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "85227",
+          "1790936827135629819",
+          "1790936827135629819"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/install_bootstrap.py",
+        "bytes": 40651,
+        "sha256": "a8a488c43287dd8c990dc2fd4a16d6285afcd0d2fec34a19448228e8fb1d48fb",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225372",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "40651",
+          "1790936827135633363",
+          "1790936827135633363"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/ledger.py",
+        "bytes": 8224,
+        "sha256": "0d37911c174e323d1e68ac046da0e03d7558bb46f0426a2ce25f15ef34d957f1",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225373",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8224",
+          "1790936827136633420",
+          "1790936827136633420"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/manifest.py",
+        "bytes": 24342,
+        "sha256": "12a666597c02e77ed42e5f799d3b909ea3fb90378d749a36d71520c1c5ae52f5",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225374",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24342",
+          "1790936827138347875",
+          "1790936827138347875"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/pinned_fs.py",
+        "bytes": 36129,
+        "sha256": "da0d681df4cf1eb69851c183fa23061b2f928743be7b785b16859f5ff8747bcc",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225375",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "36129",
+          "1790936827139304231",
+          "1790936827139304231"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/provenance.py",
+        "bytes": 23701,
+        "sha256": "2f4614a31fca46a27604680bf6d5b08ba8b9b3bdd9061a0ea9fcefef867721e4",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225376",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "23701",
+          "1790936827140076275",
+          "1790936827140076275"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/recover.py",
+        "bytes": 905,
+        "sha256": "a4a419493f9b546926051c7f98a51bb0f1f824d95c1a5f907e4bf2ccd1031b4a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225377",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "905",
+          "1790936827140776816",
+          "1790936827140776816"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/uninstall.py",
+        "bytes": 11133,
+        "sha256": "e124b9dbbb32716a521185bb53c6a7d834e0e2c416efb4cea80abb53cc98d366",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225378",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11133",
+          "1790936827141816175",
+          "1790936827141816175"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/templates/friday-quality-gate.sudoers.in",
+        "bytes": 160,
+        "sha256": "c750a01854e0905fef54b28871008b37447d08a4c63bebdac1633be4d5f875cd",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225380",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "160",
+          "1790936827141816175",
+          "1790936827141816175"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/admission_custodian.py",
+        "bytes": 9574,
+        "sha256": "bd83161d5d2b75aeedb50b6d1b887f9f78ef169eb5d9ab66ead370b0789d6864",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225382",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9574",
+          "1790936827142633764",
+          "1790936827142633764"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/close_package.py",
+        "bytes": 43302,
+        "sha256": "e975a65d3e85d48af334d4598dcb672f3a0b7ea146d269353d37847b28ccaea9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225383",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "43302",
+          "1790936827143633821",
+          "1790936827143633821"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/execute_pair.py",
+        "bytes": 25268,
+        "sha256": "9c51275d386cbc7c13b5300603a54f051779c5c6ef4b7a055847120b2d8c1cb3",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225384",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25268",
+          "1790936827145265173",
+          "1790936827145265173"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/harness_selfcheck.py",
+        "bytes": 47038,
+        "sha256": "20cf1bf2d232a8093306c720cc1c75e3adbc9e3dd67fc159960f26482f5a4295",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225385",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "47038",
+          "1790936827145937712",
+          "1790936827145937712"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/install_controls.py",
+        "bytes": 21530,
+        "sha256": "542e5f8580a1eaeb7d7b5991fbeb67d2a855372075325ea13e42da866d9c450e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225386",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21530",
+          "1790936827146692856",
+          "1790936827146692856"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/receipt_contract.py",
+        "bytes": 117673,
+        "sha256": "cf56e896e3c4f8444158b98aadbf95167bbc0a0611470171a04a43ff2513e570",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225387",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "117673",
+          "1790937669652022409",
+          "1790937669652022409"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/run_tests.py",
+        "bytes": 30194,
+        "sha256": "835e63251186fb0f27a891af14d97d15486f00817aedb52e752b93056fdd8f47",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225388",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30194",
+          "1790936827148151640",
+          "1790936827148151640"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/support.py",
+        "bytes": 9623,
+        "sha256": "286d38accc22fafd92c8bf5a2c60849c14f31c96ab62047f3266038dddf0c151",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225389",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9623",
+          "1790936827148862181",
+          "1790936827148862181"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_archive.py",
+        "bytes": 25422,
+        "sha256": "ed4996cb5dc3865b231702ee81b7751260b6d428b1af4b9a680fde410d318546",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225390",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25422",
+          "1790936827149615524",
+          "1790936827149615524"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_broker.py",
+        "bytes": 45495,
+        "sha256": "39f6f12ef1b2f49ea0a115139de47035477e79df8291d4c110de5e832cb88c4a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225391",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "45495",
+          "1790936827149634165",
+          "1790936827149634165"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_canonical.py",
+        "bytes": 10495,
+        "sha256": "173717c84586c05c6b943d9d29b6aa52faa82f6279341cee27f54a33746c3125",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225392",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10495",
+          "1790936827150634222",
+          "1790936827150634222"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_custody.py",
+        "bytes": 54731,
+        "sha256": "ad256871e5299bbf7b28c5dbb89f9cbc8e596b0eff865457796aef90cce2cc52",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225393",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "54731",
+          "1790936827152240475",
+          "1790936827152240475"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_effect_bills.py",
+        "bytes": 4158,
+        "sha256": "513caa87e90749cd686a1a3c32edbf9704ea65c78dc1e26bcd351f22d47a420c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225394",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4158",
+          "1790936827153150927",
+          "1790936827153150927"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_install_recovery.py",
+        "bytes": 79615,
+        "sha256": "b9d7a634f1e63b077cbfcf561e3e081e169579f702c871a48b6b6ba394c49673",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225395",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "79615",
+          "1790936827154038778",
+          "1790936827154038778"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_ledger.py",
+        "bytes": 8721,
+        "sha256": "9e09199ab34217859416b25a451dd659fe873cf3d9f2f01e59e09b3ba1c85766",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225396",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8721",
+          "1790936827155092839",
+          "1790936827155092839"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_manifest.py",
+        "bytes": 47844,
+        "sha256": "1202130c8f44bc4288cb3df77f70fce0a4e5f0be4f1b71bf62b01a8ca1cd21bc",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225397",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "47844",
+          "1790936827156009392",
+          "1790936827156009392"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_provenance.py",
+        "bytes": 27508,
+        "sha256": "699c6da03710b9360009a46e2b06acdc9a9ce047994de2bc5d9dfbfc40958e99",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225398",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27508",
+          "1790936827156826839",
+          "1790936827156826839"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_uninstall.py",
+        "bytes": 33094,
+        "sha256": "15681dd81c69082c4c8536e69dfe86eb0019efd62487c3ed804e247f23b38511",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225399",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "33094",
+          "1790936827157810395",
+          "1790936827157810395"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/all32-current-matrix.json",
+        "bytes": 236701,
+        "sha256": "db7f0f11fdd5d91329ddc369edbf818e75aa41b6a5592d19417fab7dabdca2c4",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225400",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "236701",
+          "1790936827157810395",
+          "1790936827157810395"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/author-final-code-read-ledger.json",
+        "bytes": 68368,
+        "sha256": "93b45e5b385016641075c9c4e95380497cab541f275986de7ee0ff95c6b149e7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225401",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "68368",
+          "1790936827158634681",
+          "1790936827158634681"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/closure-matrix.json",
+        "bytes": 43714,
+        "sha256": "eaca035ff85e31f7b8d23009d1ff77c76a9d29e0108c6542e9758fa626ebb870",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225402",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "43714",
+          "1790936827159634738",
+          "1790936827159634738"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/consumer-interface-matrix.json",
+        "bytes": 6018,
+        "sha256": "115cce432b948de9258fe5e37534c42dea5c07c32d5c421d7c31ff2d4363e27b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225403",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6018",
+          "1790936827160634795",
+          "1790936827160634795"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/cost-resource-custody-matrix.json",
+        "bytes": 1741,
+        "sha256": "0f1a58d9cfea2402c97c67118449791ac63568c6c2b351801baa0e8e41859361",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225404",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1741",
+          "1790936827161634852",
+          "1790936827161634852"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/effectful-method-body-correspondence.json",
+        "bytes": 17177,
+        "sha256": "8149c7932c4871c8dfad5810807513a5cd251d54a9b6a4376d03dedf81890b3b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225405",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17177",
+          "1790936827162634909",
+          "1790936827162634909"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/frozen132-pure16-current.json",
+        "bytes": 25868,
+        "sha256": "8593ec452209cb78eba9b387b5bea9899c2c046a9ed91d588e21f515da70dab0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225406",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25868",
+          "1790936827163634967",
+          "1790936827163634967"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/full-byte-delta.json",
+        "bytes": 116603,
+        "sha256": "8b494b943c43b922eedc513d60d674687204c8aaa9e19145f5f18b54ec85a969",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225407",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "116603",
+          "1790936827165232322",
+          "1790936827165232322"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/index/full-source.json",
+        "bytes": 40776,
+        "sha256": "7e3c4bc1f24e7655dfd1f18798d77cc744fe6874081695aa652b6a0885d1a2db",
+        "identity9_decimal_strings": [
+          "2050",
+          "4885334",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "40776",
+          "1790938092557093095",
+          "1790938092557093095"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-contracts/all32-contract-bindings.json",
+        "bytes": 569581,
+        "sha256": "81969f87e502a8f7fa56044830276bafe1af5c955e99d22b74014407d0c80142",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010469",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "569581",
+          "1790936827165635081",
+          "1790936827165635081"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-contracts/ordered-predicate-table.json",
+        "bytes": 92081,
+        "sha256": "f9a500ea7dfbfa106c352abd4e115d287eca450cf6ae9e42830e13352b621cc7",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010470",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "92081",
+          "1790936827167635196",
+          "1790936827167635196"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/REVIEW.md",
+        "bytes": 12267,
+        "sha256": "cfc9f2734d89992d5e94a6eddca37b9f368d1a98efedd5241df9f349b58ba65b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135285",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12267",
+          "1790936827168635252",
+          "1790936827168635252"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/all32-classifications.json",
+        "bytes": 128219,
+        "sha256": "6ace31cec79affecd52db0711c6b9d1e9d51562230886b89fec8cab3c0110cdb",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135286",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "128219",
+          "1790936827169635310",
+          "1790936827169635310"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/consumer-graph.json",
+        "bytes": 10563,
+        "sha256": "ca92b5d78bee63dfce8fd3b7be7eb5d5f4ad3720b64f259ea280440f3a1da09d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135287",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10563",
+          "1790936827170635368",
+          "1790936827170635368"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/control-obligation-counts.json",
+        "bytes": 3851,
+        "sha256": "550683083ac2fa1837334a68227685523338714d41f6499e3b44f1fe8f5aa727",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135288",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3851",
+          "1790936827171635425",
+          "1790936827171635425"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/evidence-matrix.json",
+        "bytes": 47539,
+        "sha256": "7fc8b3ae05e9f71721eaa5e3f84ab363d9946a15891890df32838040273eddb5",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135289",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "47539",
+          "1790936827173103775",
+          "1790936827173103775"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/ordered-predicate-review.json",
+        "bytes": 77053,
+        "sha256": "721a957e345cc981b8d0e3437eed65086b32d8074d2f523566f7a764314e6008",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135290",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "77053",
+          "1790936827173950024",
+          "1790936827173950024"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/original32-causal-obligations.json",
+        "bytes": 113358,
+        "sha256": "c4d7c67e34206fd783e46eea010fb5e0fcad07efa9b8802b77be967c7a73bbf5",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135291",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "113358",
+          "1790936827174722768",
+          "1790936827174722768"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/resource-review.json",
+        "bytes": 35947,
+        "sha256": "dc9aea4f3cbaf54931b9a31e84b7f6f68586eb456521c28da5f819ceaebb732a",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135292",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "35947",
+          "1790936827175570917",
+          "1790936827175570917"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/whole54-classifications.json",
+        "bytes": 121122,
+        "sha256": "6726efbbe109096e6e241b42afe151cd5cb78857e031bf9d145086ab13084b92",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135293",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "121122",
+          "1790936827176270057",
+          "1790936827176270057"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/method-body-read-ledger.json",
+        "bytes": 2023,
+        "sha256": "a099132e3a54a5c7509b96596a0c847cd43f12c190a5ebfa7581b7c2cf5f0e1a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225410",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2023",
+          "1790936827177635768",
+          "1790936827177635768"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/original-input-current9.json",
+        "bytes": 57476,
+        "sha256": "1418b938657e1953d1635b6a45c3d27b93d606cb6df12525e1a195a2b6d9065d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225411",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "57476",
+          "1790936827178635825",
+          "1790936827178635825"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/package-read-ledger.json",
+        "bytes": 35403,
+        "sha256": "7be354bc1eabe09a86553572c9283c1ef2bb8188d9a41531dc683906332d30b3",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225412",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "35403",
+          "1790936827179635883",
+          "1790936827179635883"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/performing-body-read-ledger.json",
+        "bytes": 2050,
+        "sha256": "1125333af7bf952d3626daa2e2fb2f1b8c262f282ce407d25d4b01235d252718",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225413",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2050",
+          "1790936827181282246",
+          "1790936827181282246"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/prior-residual.txt",
+        "bytes": 7489,
+        "sha256": "42a5270db7cf985fc08d78879b758f5105087cc6fc8923452fb1947fa1e6abbd",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225414",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7489",
+          "1790936827182144696",
+          "1790936827182144696"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/manifest.json",
+        "bytes": 51455,
+        "sha256": "3708e7fc59378ac6b50c57efe69ffc24c9a553673a8ecaf590f018c2543eae01",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225408",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51455",
+          "1790936827176270057",
+          "1790936827176270057"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/metadata.py",
+        "bytes": 26581,
+        "sha256": "ccf645fe5417618d7085c0474700411ae65f7ececfbdc7bcf7731c03b376c354",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225409",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "26581",
+          "1790936827176635711",
+          "1790936827176635711"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/original-terminal.json",
+        "bytes": 1959,
+        "sha256": "bae06e11a0793a534c79974b35d789004d1dacabc057ea188440a9a26abaeed7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225335",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1959",
+          "1790936827107631760",
+          "1790936827107631760"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/received.json",
+        "bytes": 136500,
+        "sha256": "ac03de1bed04e8d934c61ec972634cc41a15c846f549fb22712b01631ba87dcd",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225415",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "136500",
+          "1790936827182144696",
+          "1790936827182144696"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/seal.json",
+        "bytes": 43972,
+        "sha256": "af9b19ab12d4c18350f4f98968c575837a60cf1ab04e043aa237df11cfc9c943",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225416",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "43972",
+          "1790936827182636055",
+          "1790936827182636055"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/seal_metadata.py",
+        "bytes": 11877,
+        "sha256": "a7f310f179147615ada4398bf717829765cecb81d47e2e57878df046ea50fe9b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225417",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11877",
+          "1790936827183636112",
+          "1790936827183636112"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/source-changes.patch",
+        "bytes": 144462,
+        "sha256": "10812f17453225e3ca80c7d78af5983eceaff6f3221ac42160925cc30a314c85",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225418",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "144462",
+          "1790936827184636169",
+          "1790936827184636169"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/controller.py",
+        "bytes": 30313,
+        "sha256": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225619",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30313",
+          "1790956169966899404",
+          "1790956169966899404"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/native_grammar.py",
+        "bytes": 38131,
+        "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225620",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "38131",
+          "1790956169967899461",
+          "1790956169967899461"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/ordinary_root_consumers.py",
+        "bytes": 91473,
+        "sha256": "27e0f17855fe4945a52aeee9da29829e290406271d3ff9f1c16e7f08a546fafc",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225621",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "91473",
+          "1790956169968899518",
+          "1790956169968899518"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/root_native_launcher.py",
+        "bytes": 115169,
+        "sha256": "567fd7b16329ddb8987413b986ae5086b733367d8b5dccec62c3d2875b8eeff6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225623",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "115169",
+          "1790956169970899632",
+          "1790956169970899632"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/source_grammar.py",
+        "bytes": 127594,
+        "sha256": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225624",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "127594",
+          "1790956169971899690",
+          "1790956169971899690"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/staged_sender.py",
+        "bytes": 65443,
+        "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225634",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "65443",
+          "1790956169972899747",
+          "1790956169972899747"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/whole54-current-matrix.json",
+        "bytes": 115612,
+        "sha256": "7cada6798430cf24edb834610124ffc55c6e28f857a15883c4d3e4a953b10ac9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225419",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "115612",
+          "1790936827191835053",
+          "1790936827191835053"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/receipt_physical.py",
+        "bytes": 1963,
+        "sha256": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225622",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1963",
+          "1790956169969899575",
+          "1790956169969899575"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-PRE-TASK-COMPACT-20261003.json",
+        "bytes": 1917,
+        "sha256": "533494553bbd0be6adaf2b8ae3f48199fbeb552da145ce7026718419e7c70d2b",
+        "identity9_decimal_strings": [
+          "2050",
+          "8533703",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1917",
+          "1791013187314372553",
+          "1791013187314372553"
+        ],
+        "stable9": true
+      }
+    ]
+  },
+  "disposition": "FINITE_SOURCE_PACKAGE_RECEIVED_INDEPENDENT_CHANGED_CONNECTED_REVIEW_PENDING",
+  "implementation_complete": false,
+  "independent_source_acceptance": false,
+  "whole_native_E01_closed": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "Source_execution": 0,
+  "native_queue": {
+    "queued_id": "01a100da-99a3-7472-9cf5-81155d998864",
+    "event": "SOL-SOL089-R1",
+    "sha256": "b7dea7c2879fb718f665b0e2e30b20667316e389e2b8c9974abdadade904a7b5"
+  },
+  "next": "Existing Grok different-author review of actual changed stock-Python operand origin/body/alias/replay/strict matcher call graph. Preserve native/raw/error C1, both native ends and whole C2 until independently established.",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

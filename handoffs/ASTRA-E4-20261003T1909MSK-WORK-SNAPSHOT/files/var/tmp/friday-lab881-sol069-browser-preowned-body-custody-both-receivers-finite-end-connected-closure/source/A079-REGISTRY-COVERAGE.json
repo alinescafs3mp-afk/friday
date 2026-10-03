@@ -1,0 +1,34 @@
+{
+  "schema": "friday.a079.authoritative-native-caller-source-coverage.v1",
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "scope": "AUTHORITATIVE_NATIVE_REGISTRY_FULL_CONTROLS",
+  "public_route": "Root externally admitted native110 --held-a061 -> actual native clone coordinator -> native fr_session_start -> ordinary held119/102 mode1 caller -> private native clone/registry/wait/stop/close",
+  "source_delta": [
+    {"id":"session_fixed_origin", "implementation":"OWNED.fr_session_start/cap_get/session_socket/ack plus CONTRACT.startup", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"ABSENT"},
+    {"id":"actual_PID_UID_GID", "implementation":"SO_PEERCRED and actual SCM_CREDENTIALS fixed-origin C checks; actual ordinary child proc UID/GID", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"ABSENT"},
+    {"id":"role_sequence", "implementation":"private monotonic native session and Root registry expected next_sequence; unchanged96B wire", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"ABSENT"},
+    {"id":"deadline", "implementation":"private work/hard capsule; Root pending deadline; caller expiry poisons native generation", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"ABSENT"},
+    {"id":"SCM_RIGHTS_count_type_close", "implementation":"preserved COMMON.fr_recv exact credential/right count and Root actual pidfd association", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"ABSENT"},
+    {"id":"owned_PID_pidfd_generation", "implementation":"actual clone-return private storage, saved native pidfd stat, actual parent/birth before signal", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"ABSENT"},
+    {"id":"origin_birth", "implementation":"native captured owner/origin birth plus actual ongoing proc and same socket inode", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"ABSENT"},
+    {"id":"READY_REGISTER_ACK_barrier", "implementation":"preserved native0xa5 barrier before ordinary child caller can run; fixed bytes then own gate", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"ABSENT"},
+    {"id":"ABORT_ACK", "implementation":"native next sequence and actual pre-clone error; saved clone errno before Python parent hook", "ordinary_positive":"REAL_CREATION_FAILURE_PUBLIC_PAIR_ABSENT", "complete_isolated_negative":"ABSENT"},
+    {"id":"wait4_REAP_ACK", "implementation":"private native kernel status before ACK; public UNKNOWN until exact full ACK; Root borrowed status gets no kernel credit", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"CALLER_STATUS_DATA_ONLY; actual invalid/lost REAP_ACK controls ABSENT"},
+    {"id":"owned_stop_and_close", "implementation":"fr_own_stop/local_cleanup/fr_own_release and NativeOwner release_handle", "ordinary_positive":"PRIVATE_FLOW_WRITTEN_NOT_RUN", "complete_isolated_negative":"actual signal/close failure controls ABSENT"},
+    {"id":"unknown_cleanup_generation_poison", "implementation":"exact native table cleanup remains possible in UNKNOWN without public wait credit or generation reset", "ordinary_positive":"WRITTEN_NOT_RUN", "complete_isolated_negative":"wait_flags_DATA/caller_status_DATA WRITTEN_NOT_RUN; remaining full protocol causes ABSENT"}
+  ],
+  "precise_remaining": {
+    "id":"AUTHORITATIVE_NATIVE_REGISTRY_FULL_CONTROLS",
+    "cause":"Complete independently expected same-public ordinary session/actual wrong-origin PID-UID-GID/role-sequence/deadline/SCM_RIGHTS-count-type-close/owned pidfd-generation/READY timing/real creation failure ABORT_ACK/invalid-lost REAP_ACK/signal-close refusal pairs are still absent. The newly written full ordinary positive plus two API DATA pairs cannot fulfill this whole cause.",
+    "symbols":["A071-BOOTSTRAP.c:registry/run/stop_known/reap_owned","A071-OWNED.c:fr_session_start/ack/abort_creation/fr_own_*/fr_fixture_*","A071-CONTROLS.py:controls_native","A079-NATIVE-PUBLIC-DRIVER.py:run_positive_first/oracle"],
+    "current_Root_absence_is_not_source_cause":true,
+    "new_privileged_Root_service_added":false
+  },
+  "separate_unresolved":"ALL216_NESTED_OWNERSHIP_INTEGRATION; exact original216+8 retained, historical unsafe bodies inert NOT_RUN, fixed coordinator restriction still rejects nested callers",
+  "preserved_coverage_file":"A071-CONTROL-COVERAGE.json",
+  "actual_observed_controls":0,
+  "source_ready":false,
+  "independent_accepted":false,
+  "F10_waiver":false,
+  "whole_browser_credit":false
+}

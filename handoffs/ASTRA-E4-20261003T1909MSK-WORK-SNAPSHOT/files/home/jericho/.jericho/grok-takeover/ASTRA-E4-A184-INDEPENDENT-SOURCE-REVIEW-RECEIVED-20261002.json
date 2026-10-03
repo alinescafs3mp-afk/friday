@@ -1,0 +1,253 @@
+{
+  "schema": "friday.e4.a184.Root-independent-whole-source-review-received.v1",
+  "assignment": "ASTRA-E4-LAB865-NODE-WHOLE6-ALL35-ALL6-STOCK-CAUSE-BOUND-INDEPENDENT-SOURCE-REVIEW-A184",
+  "generation": 1,
+  "received_msk": "2026-10-02T14:29:33.586016+03:00",
+  "decision": "ACCEPT_INDEPENDENT_REVIEW_NOT_SOURCE",
+  "verdict": "REJECT_CURRENT_SOURCE_CLOSURE",
+  "artifact_pins": [
+    {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-LAB865-NODE-WHOLE6-ALL35-ALL6-STOCK-CAUSE-BOUND-INDEPENDENT-SOURCE-REVIEW-A184-G1-RESULT.json",
+      "bytes": 8033,
+      "sha256": "d86a2ea0076f285146cd942dfb0e0d814f6d941981108717bf0b3af843c501b1",
+      "identity9_decimal_strings": [
+        "2050",
+        "9177344",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8033",
+        "1790940089389428544",
+        "1790940089443431635"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/manifest.json",
+      "bytes": 4178,
+      "sha256": "92ef1279248b7929ff7799550030f56d8b363a04a461a8325069952f587191b3",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980265",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4178",
+        "1790939983874388986",
+        "1790939983927392020"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/pathset.json",
+      "bytes": 3332,
+      "sha256": "59ea8974d4a92e8db60b19fd76e073a1500ed9deec2808ff9cb21455138bfd01",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980264",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3332",
+        "1790939983683378053",
+        "1790939983736381087"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/authentication.json",
+      "bytes": 85808,
+      "sha256": "6323379bca5fbd6da801a67d8ce9c721a195f7b46db472abdcc238e839383042",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980106",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "85808",
+        "1790938960082768267",
+        "1790938966921159840"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/delta-cost-DAG.json",
+      "bytes": 10017,
+      "sha256": "763468234d9e1337a810120ff3d87ad5aac85e77bc1498b8d68d325fc53d7d1d",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980137",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10017",
+        "1790939537105809241",
+        "1790939929127255324"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/method-all35.json",
+      "bytes": 110613,
+      "sha256": "e45d60d51f52585a85eecf2f65b805cb377acba184853e46c263219bb0bd9b0b",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980142",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "110613",
+        "1790939536973801682",
+        "1790939929127255324"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/whole-matrices.json",
+      "bytes": 16912,
+      "sha256": "ec0102508f1fdd0284526abe4e5cc0b1b5965f00999e37be31795b6eacc75440",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980149",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16912",
+        "1790939929077252462",
+        "1790939929127255324"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/review.txt",
+      "bytes": 15540,
+      "sha256": "cccf3888c7055541b5dabba9e7a3aa3925428be5b0ffb1cb6f9374cd63d82f7f",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980138",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15540",
+        "1790939380304830646",
+        "1790939929127255324"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/source-final-recheck.json",
+      "bytes": 99263,
+      "sha256": "38bdc6482ec9da36881f09dd26370331fddb830f21a6fa7f4dba39cc8ad311a8",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980153",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "99263",
+        "1790939831794683452",
+        "1790939929128255381"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/costs.json",
+      "bytes": 1453,
+      "sha256": "ad379a177a463bf1309b4a7d68d7e8f0ae8c2565c80f774f6d1041bddd031eec",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980155",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1453",
+        "1790939831917690495",
+        "1790939929128255381"
+      ],
+      "stable9": true
+    }
+  ],
+  "full10_SHA9_private_exact_pathset_DAG": true,
+  "current_Source71_exact_current9_unchanged": true,
+  "coverage": {
+    "performing_bodies": 6,
+    "method_sections": 230,
+    "original35": 35,
+    "all6": 6,
+    "all3": 3,
+    "F1": true,
+    "F2": true,
+    "D1": true,
+    "D2": true,
+    "actual19": 19
+  },
+  "genuine_new_repairs": [
+    "all three graph.v2 stock_cause producers and recomputed exact-root consumers close A182 E01 for both startup and both supervisor-entry control oracles",
+    "one caller close-failure graph reused; duplicate projection removed",
+    "finite prospective history256 and error256/node-value-frame128 guards authored, without claiming complete stock bounds"
+  ],
+  "credits": [
+    "exact returned FD ownership and both pipe endpoints before wrappers; generation/retire-before-close; no numeric stale-close cache or native retry",
+    "preowned raw primary/secondary/rc/reap records; count/SHA/EOF/identity/charge validation; reversible full-byte same-object raw codec",
+    "all3 typed resources/keyless first2 versus explicit-ring other4/narrow terminal-proc relation",
+    "D1 CPU20/wall30/dynamic quota<=21845; original all6 case/oracle/resource roles"
+  ],
+  "current_CODE": [
+    {
+      "id": "E01",
+      "kind": "CONDITIONAL_STOCK_PREFIX_CLOSURE_GAP",
+      "finding": "fallible secondary projection can interrupt finite later raw/known-owner work and primary rethrow"
+    },
+    {
+      "id": "E02",
+      "kind": "REQUIRED_CHANGED_FORMAT_BOUND_NOT_CLOSED",
+      "finding": "complete original-stock graph/history/default/alias/raw/error widths/counts/copies and original32768/65536/2097152 producer fit not proved by new finite guards"
+    },
+    {
+      "id": "E03",
+      "kind": "REQUIRED_ORIGINAL_FULLRAW_AND_TERMINAL_DELIVERY_GAP",
+      "finding": "honest partial/unread raw and failed full publication lack admitted original other-side durable delivery; private native owners end at exit"
+    }
+  ],
+  "evidence_defect": {
+    "id": "E04",
+    "kind": "STALE_PRIOR_PERFORMING_BYTE_LEDGER_AND_HISTORICAL_DELTA",
+    "finding": "author current19 plan and result arithmetic are SOL060 totals; author whole6 base64 is internally valid LAB863->SOL060, not LAB865; direct current bytes authenticate independently",
+    "runtime_dynamic_plan_uses_current_sizes": true
+  },
+  "new19": {
+    "full19": 72427019,
+    "supervisor_subset": 7798174,
+    "verifier_subset": 7770245,
+    "hash_subsets": 93522314,
+    "fixed_nonrunning": 247476072,
+    "running": 20959384,
+    "sum": 268435456,
+    "cap": 268435456,
+    "copied_old_fixed247403149_running21032307_accepted_current": false,
+    "aggregate_resource_fit": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+  },
+  "original_fence": "original exact qualified stock roots/suppliers; full supported stock error/raw/causes/context/alias/absence and exact original native ownership/delivery, not universal custom native/C-heap/frame-local reconstruction",
+  "future_only": [
+    "new genuine finite Root scope/clock/admission and exact current numeric19-int9 DATA",
+    "current Source/image/loader/ENV3/namespace/cache/alias/stock factory facts",
+    "Linux same-held terminal-proc owner transition",
+    "LAB861 four actual readonly-home/keyring/trustdb-lock/agent/common.conf behaviors",
+    "original all6 native fullraw/rc/reap/resources/cleanup"
+  ],
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

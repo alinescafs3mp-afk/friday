@@ -1,0 +1,52 @@
+{
+  "excludes_payload": true,
+  "excludes_self": true,
+  "files": [
+    {
+      "bytes": 6104,
+      "name": "analysis.json",
+      "sha256": "d57921c9aeb6544a7c801ff37593ff56e23e6f9b751db9823009f1ae068ff7a6"
+    },
+    {
+      "bytes": 525,
+      "name": "bound.json",
+      "sha256": "63aed27b6151282278c0e56e7b15a0558f8dd714c9a32ae04738b6e7982cf576"
+    },
+    {
+      "bytes": 325,
+      "name": "bound.txt",
+      "sha256": "bf019d3d6a51408d80c5a87d3e23dba7b98c8290170250428fe69f3bf8022c8f"
+    },
+    {
+      "bytes": 1083,
+      "name": "current-partitions.json",
+      "sha256": "425e6754ca345610652c597b66b731468bebec650d3682ade4b7fdd580476b83"
+    },
+    {
+      "bytes": 1261,
+      "name": "pathset.json",
+      "sha256": "93ae16d47ff92e78bbe09c6b276b0db9bc3d9f0804cc7eaf1bfe211d5f35b4ef"
+    },
+    {
+      "bytes": 406179,
+      "name": "pin-checks.json",
+      "sha256": "14cdc054cc69b3ee714605fdeb74969f9e586feb6f76add9bcc4da9d4e72742e"
+    },
+    {
+      "bytes": 873,
+      "name": "relation.json",
+      "sha256": "7b36fab401478983f4a565589e62c72b01886d0253a4c93b205e5aac5e3b2522"
+    },
+    {
+      "bytes": 2539,
+      "name": "result.json",
+      "sha256": "b395c0cfe5fd9e4ef1fe8dde85d02738d1bf45c9fd62c3a75faf8d794fdfb497"
+    },
+    {
+      "bytes": 398,
+      "name": "validation-plan.txt",
+      "sha256": "7dc5a9b3e72d400225142a852d2e09e5d5bea4fbe97efa7b2b62f7185b93f165"
+    }
+  ],
+  "schema": "friday.lab917.sol092.n2.manifest.v1"
+}

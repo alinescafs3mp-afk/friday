@@ -1,0 +1,58 @@
+{
+  "schema": "friday.sol091.qualification-and-costs.v1",
+  "resources": {
+    "deadline_sec": 4200,
+    "seal_sec": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 33554432,
+    "local": 4,
+    "children": 0,
+    "network": 0,
+    "retry": 0,
+    "friday": 0
+  },
+  "deadline": {
+    "accepted_msk": "2026-10-03T12:45:07+03:00",
+    "source_frozen_utc": "2026-10-03 10:13:33 UTC",
+    "Source_freeze_before_600_sec_seal_reserve": true
+  },
+  "known_primary_pin_reads": 18124123,
+  "pinned_final_reverify": {
+    "count": 240,
+    "full_SHA9": true,
+    "old_source_exact_dirs_pathset": true
+  },
+  "other_io": "Additional trusted text/stat/hash materialization/partitions/seal/admin JSON reads occurred; complete implicit aggregate IO not measured; NOT ZERO.",
+  "author_peak_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+  "Source_execution": 0,
+  "native_Source_execution": 0,
+  "new_children": 0,
+  "network": 0,
+  "Source_contracts": {
+    "body_cap": 80000000,
+    "metadata_cap": 2000000,
+    "whole_output_cap": 33554432,
+    "whole_read_cap": 40960000000,
+    "whole_RAM_cap": 8589934592,
+    "FD_slots": 128,
+    "workers": 4,
+    "wall": 4200,
+    "original_clock_and_gates": true
+  },
+  "known_source_lifetime_deltas": [
+    "Explicit original-caller run storage must be preowned and zero initialized before selected debit/module/Source effects; ABI/name/enrollment/current original image admission remains independent REQUIRED_NOT_RUN.",
+    "Original-credit mmap subledger cumulatively accounts mapping+full cut/validation copies before materialization; no allocation keyword to Reservation.commit, no grow/refund. Body binding/prospective subtracts simultaneous selected value allocation.",
+    "Separate original late body/meta banks add actual FD/maps/raw/canonical/error lifetime before fork. Native borrowed child state never calls inherited Root meter.",
+    "Existing maximum-remaining primary-bank layout can consume total output before required late/meta/bundle work when output-limited; full prospective cohort bound remains CODE, not accepted.",
+    "Native banks/read copies/error snapshots/last scalar close state/final result/destruction overlap must be included in same original pools. Known debit floor != complete total graph/RSS/IO bound."
+  ],
+  "native_ABI_images_Source44_current134_dependency_qualification": "REQUIRED_NOT_RUN",
+  "C1": "REQUIRED_NOT_RUN",
+  "C2": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+  "gates": "REQUIRED_NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "known_read_accounting": "Pinned pass1 excludes INPUT; final pass includes INPUT. Other utility/document/source read passes not aggregated; unknown implicit IO is not zero."
+}

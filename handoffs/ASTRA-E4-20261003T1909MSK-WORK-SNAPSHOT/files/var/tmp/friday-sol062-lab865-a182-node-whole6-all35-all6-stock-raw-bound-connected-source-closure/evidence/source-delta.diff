@@ -1,0 +1,2114 @@
+--- LAB865/caller.py
++++ SOL062/caller.py
+@@ -22,15 +22,15 @@
+ import time
+ 
+ # Future package path only. This source does not create that directory.
+-PACKAGE = "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure"
++PACKAGE = "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure"
+ SOURCE = PACKAGE
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+ PRIMARY = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ ARCHIVE = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+-VHASH = "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60"
+-CHASH = "f4af798566916c32ef504f95865faceffadd5e62e247e3c8e2ce64b4cd74bb7d"
+-SHASH = "49b507fbc2a4b99791908e92213979056ebaa1da4ddfe733c9eab86738e79d5c"
++VHASH = "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6"
++CHASH = "04fe265d1136155f5d5786fbaa0ed852ae35e1eff3d970346d37d890cb71beb3"
++SHASH = "d6c7a53434a50064e66db1c540df1129a384b1a138219924087a1f2432d03452"
+ ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+ AS_OUTER = 134217728
+ READ_CAP, PUBLIC_CAP = 268435456, 2097152
+@@ -47,9 +47,9 @@
+     "gpg": ("/usr/bin/gpg", 1186456, "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754", 0, 0o755),
+     "gpgv": ("/usr/bin/gpgv", 302296, "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d", 0, 0o755),
+     "ffi": ("/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0", 64184, "1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa", 0, 0o644),
+-    "supervisor": (SOURCE + "/supervisor.py", 101776, SHASH, 1000, 0o600),
+-    "verifier": (SOURCE + "/verifier.py", 73847, VHASH, 1000, 0o600),
+-    "contract": (SOURCE + "/launch-contract.json", 48792, CHASH, 1000, 0o600),
++    "supervisor": (SOURCE + "/supervisor.py", 111330, SHASH, 1000, 0o600),
++    "verifier": (SOURCE + "/verifier.py", 83369, VHASH, 1000, 0o600),
++    "contract": (SOURCE + "/launch-contract.json", 49539, CHASH, 1000, 0o600),
+     "bill": ("/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json", 466956, "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2", 1000, 0o600),
+     "receipts": (BASE + "/transport-receipts.ndjson", 400979, "180c44ad4439a96f89335a62e35a5668327a228ce164d1f31b503b867b05fe9b", 1000, 0o600),
+     "raw": (BASE + "/metadata/node/SHASUMS256.txt.asc", 4696, "cfcf12eb3146d641be185d08ca018166b98495b1d8e5f7f94ab77f9965b651d2", 1000, 0o600),
+@@ -182,6 +182,7 @@
+ PUBLIC_STREAM_RESERVE = sum(PUBLIC_CASE_PAYLOAD_BOUNDS)
+ PUBLICATION_SOURCE_CONTRACT = {
+     "schema": "friday.sol060.lossless-raw-preimage-publication.v1",
++    "bound_scope": "ARITHMETIC_PARTITION_ONLY_NOT_NEW_STOCK_FACTORY_WIDTH_OR_FULL_DELIVERY_PROOF",
+     "fixed_metadata_bound_bytes": PUBLIC_FIXED_RESERVE,
+     "case_payload_bound_bytes": list(PUBLIC_CASE_PAYLOAD_BOUNDS),
+     "all_case_payload_bound_bytes": PUBLIC_STREAM_RESERVE,
+@@ -202,7 +203,7 @@
+ LAUNCH_OWNERS = []
+ SELECTED = None
+ SELECT_META = None
+-R = {"schema": "friday.e4.node.ordinary-stock-outer.sol060.v1", "status": "NOT_PROVEN",
++R = {"schema": "friday.e4.node.ordinary-stock-outer.sol062.v1", "status": "NOT_PROVEN",
+      "qualified_node_only": False, "GO": False, "gate_release_credit": False,
+      "Root_image_proven": False, "RAM_IO_proven": False,
+      "execution_authority": "External genuine Root native tool only; selection is ordinary DATA",
+@@ -461,101 +462,241 @@
+     return [s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid]
+ 
+ 
++# SOL062: private prospective cells are not public receipts or summaries.
++# Fixed existing256 slots. Width/stock exhaustion/whole fit still need proof.
+ ERROR_OBJECT_CAP = 256
+-ERROR_OBJECTS = []
++ERROR_OBJECTS = [None] * ERROR_OBJECT_CAP
++ERROR_TRACEBACKS = [None] * ERROR_OBJECT_CAP
++ERROR_PROJECTED = [None] * ERROR_OBJECT_CAP
++ERROR_MARKERS = [{"$private_pending_error": i} for i in range(ERROR_OBJECT_CAP)]
++ERROR_USED = 0
+ 
+ 
+ def retain_error_object(exc):
+-    if len(ERROR_OBJECTS) >= ERROR_OBJECT_CAP:
+-        raise Refusal("prefunded error-object arena exhausted; original exception retained") from exc
+-    ERROR_OBJECTS.append(exc)
++    global ERROR_USED
++    for i in range(ERROR_USED):
++        if ERROR_OBJECTS[i] is exc:
++            return i
++    if ERROR_USED >= ERROR_OBJECT_CAP:
++        raise Refusal("original fixed error-owner capacity exhausted before publication") from exc
++    i = ERROR_USED
++    # Raw first fault and its caught traceback precede every projection.
++    ERROR_OBJECTS[i] = exc
++    ERROR_TRACEBACKS[i] = exc.__traceback__
++    ERROR_USED = i + 1
++    return i
++
++
++def deferred_error(exc):
++    # Return an already prefunded marker; NO str/base64/JSON/trace walk here.
++    # An exhausted original stock factory is CODE_OPEN, never a clipped proof.
++    return ERROR_MARKERS[retain_error_object(exc)]
++
++
++def publish_errors(record):
++    # Called at a publication boundary, not inside mandatory raw/close loops.
++    # Every public failure remains a COMPLETE v2 graph after replacement.
++    # Identity, not attacker-shaped JSON, selects our private marker.
++    seen = []
++    def walk(value):
++        for i in range(ERROR_USED):
++            if value is ERROR_MARKERS[i]:
++                if ERROR_PROJECTED[i] is None:
++                    ERROR_PROJECTED[i] = exact_error(ERROR_OBJECTS[i])
++                return ERROR_PROJECTED[i]
++        if type(value) not in (dict, list):
++            return value
++        if any(value is old for old in seen):
++            return value
++        seen.append(value)
++        if type(value) is dict:
++            for key in value:
++                value[key] = walk(value[key])
++        else:
++            for i in range(len(value)):
++                value[i] = walk(value[i])
++        return value
++    return walk(record)
++
++
++def validate_stock_error_graph(graph):
++    # Both receivers check ALL full fields/references, not only copied cause.
++    # This validates shape/full reversible stock bytes, NOT native semantics.
++    require(type(graph) is dict and set(graph) == {"schema", "root", "nodes", "values",
++            "stock_cause", "native_object_reconstruction"}
++            and graph["schema"] == "friday.sol060.error-graph.v2"
++            and graph["native_object_reconstruction"] == "NOT_QUALIFIED",
++            "complete original v2 error envelope required")
++    nodes, values, root = graph["nodes"], graph["values"], graph["root"]
++    require(type(nodes) is list and 0 < len(nodes) <= 128 and type(values) is list
++            and len(values) <= 128 and type(root) is int and 0 <= root < len(nodes),
++            "full v2 arenas/root malformed")
++    def error_ref(index, nullable=True):
++        require((nullable and index is None) or
++                (type(index) is int and 0 <= index < len(nodes)), "full error reference outside arena")
++    def value_ref(cell):
++        require(type(cell) is dict and len(cell) == 1, "full typed error value required")
++        if "literal" in cell:
++            require(type(cell["literal"]) in (type(None), bool, int, str), "stock literal type changed")
++        elif "float_hex" in cell:
++            require(type(cell["float_hex"]) is str and
++                    float.fromhex(cell["float_hex"]).hex() == cell["float_hex"], "exact stock float hex")
++        elif "error_ref" in cell:
++            error_ref(cell["error_ref"], False)
++        else:
++            require(set(cell) == {"value_ref"} and type(cell["value_ref"]) is int
++                    and 0 <= cell["value_ref"] < len(values), "full value reference outside arena")
++    for i, node in enumerate(nodes):
++        require(type(node) is dict and set(node) == {"id", "module", "type", "message", "args",
++                "state", "errno", "filename", "filename2", "notes", "native_field_presence", "traceback", "cause", "context",
++                "suppress_context", "group"} and type(node["id"]) is int and node["id"] == i,
++                "full v2 node fields/identity malformed")
++        require(all(type(node[k]) is str for k in ("module", "type", "message")) and
++                type(node["suppress_context"]) is bool, "original stock cause fields missing")
++        for k in ("args", "state", "errno", "filename", "filename2", "notes"):
++            value_ref(node[k])
++        presence = node["native_field_presence"]
++        require(type(presence) is dict and set(presence) == {"errno", "filename", "filename2", "__notes__"}
++                and all(type(v) is bool for v in presence.values()), "original native absence is not explicit null")
++        for key, present in presence.items():
++            field = "notes" if key == "__notes__" else key
++            require(present or node[field] == {"literal": None}, "absent stock native field has invented value")
++        error_ref(node["cause"]); error_ref(node["context"])
++        group = node["group"]
++        require(group is None or type(group) is list, "stock exception-group presence")
++        if group is not None:
++            for member in group:
++                error_ref(member, False)
++        frames = node["traceback"]
++        require(type(frames) is list and len(frames) <= 128, "complete traceback arena")
++        for frame in frames:
++            require(type(frame) is dict and set(frame) == {"file", "function", "line", "lasti"}
++                    and type(frame["file"]) is str and type(frame["function"]) is str
++                    and type(frame["line"]) is int and type(frame["lasti"]) is int,
++                    "complete stock frame coordinates")
++    for i, cell in enumerate(values):
++        require(type(cell) is dict and type(cell.get("id")) is int and cell["id"] == i,
++                "full typed value identity")
++        kind = cell.get("kind")
++        if kind in ("bytes", "bytearray"):
++            require(set(cell) == {"id", "kind", "bytes", "sha256", "base64"}
++                    and type(cell["bytes"]) is int and cell["bytes"] >= 0
++                    and type(cell["base64"]) is str and type(cell["sha256"]) is str,
++                    "complete stock byte preimage fields")
++            raw = base64.b64decode(cell["base64"], validate=True)
++            require(len(raw) == cell["bytes"] and hashlib.sha256(raw).hexdigest() == cell["sha256"]
++                    and base64.b64encode(raw).decode("ascii") == cell["base64"],
++                    "full stock byte preimage/count/SHA not lossless")
++        elif kind in ("list", "tuple"):
++            require(set(cell) == {"id", "kind", "items"} and type(cell["items"]) is list,
++                    "complete original typed sequence")
++            for item in cell["items"]:
++                value_ref(item)
++        else:
++            require(kind == "dict" and set(cell) == {"id", "kind", "pairs"}
++                    and type(cell["pairs"]) is list, "complete typed dict")
++            for pair in cell["pairs"]:
++                require(type(pair) is list and len(pair) == 2, "complete original dict pair")
++                value_ref(pair[0]); value_ref(pair[1])
++    stock = {"type": nodes[root]["type"], "message": nodes[root]["message"]}
++    require(graph["stock_cause"] == stock, "stock cause must join actual full graph root")
++    return stock
+ 
+ 
+ def exact_error(exc):
+-    # Original native Python objects/tracebacks stay in the same owner lifetime.
+-    # Lossless stock value graph includes UnicodeDecodeError's original bytes.
+-    retain_error_object(exc)
++    # Projection occurs only after the private journal owns the native cause.
++    root_slot = retain_error_object(exc)
+     objects, nodes, values, cells = [exc], [], [], []
+     def ref(value):
+         if value is None:
+             return None
++        require(isinstance(value, BaseException), "stock exception reference type")
+         for i, old in enumerate(objects):
+             if old is value:
+                 return i
+-        if len(objects) >= 128:
+-            raise Refusal("prefunded exception-node arena exhausted") from exc
++        require(len(objects) < 128, "original exception-node capacity exhausted")
+         objects.append(value)
+         return len(objects) - 1
+     def val(value):
++        if isinstance(value, BaseException):
++            return {"error_ref": ref(value)}
+         if type(value) in (type(None), bool, int, str):
+             return {"literal": value}
+         if type(value) is float:
+-            # Exact binary floating value, no JSON NaN or lossy decimal inference.
+             return {"float_hex": value.hex()}
+         for i, old in enumerate(values):
+             if old is value:
+                 return {"value_ref": i}
+         require(type(value) in (bytes, bytearray, list, tuple, dict),
+-                "unsupported native error value; original object retained, not proof")
+-        if len(values) >= 128:
+-            raise Refusal("prefunded error-value arena exhausted") from exc
++                "unsupported stock error value; original object remains owned")
++        require(len(values) < 128, "original error-value capacity exhausted")
+         values.append(value)
+         return {"value_ref": len(values) - 1}
+-    i = 0
+-    while i < len(objects):
+-        obj = objects[i]
+-        frames, tb = [], obj.__traceback__
+-        while tb is not None:
+-            if len(frames) >= 128:
+-                raise Refusal("prefunded traceback arena exhausted") from exc
+-            frames.append({"file": tb.tb_frame.f_code.co_filename,
+-                           "function": tb.tb_frame.f_code.co_name,
+-                           "line": tb.tb_lineno, "lasti": tb.tb_lasti})
+-            tb = tb.tb_next
+-        nodes.append({"id": i, "module": type(obj).__module__,
+-            "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
+-            "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
+-            "filename": val(getattr(obj, "filename", None)),
+-            "filename2": val(getattr(obj, "filename2", None)),
+-            "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
+-            "cause": ref(obj.__cause__), "context": ref(obj.__context__),
+-            "suppress_context": obj.__suppress_context__,
+-            "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
+-        i += 1
+-    i = 0
+-    while i < len(values):
+-        obj = values[i]
+-        if type(obj) in (bytes, bytearray):
+-            cell = {"id": i, "kind": type(obj).__name__,
+-                    "bytes": len(obj), "sha256": hashlib.sha256(obj).hexdigest(),
+-                    "base64": base64.b64encode(obj).decode("ascii")}
+-        elif type(obj) in (list, tuple):
+-            cell = {"id": i, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
+-        else:
+-            cell = {"id": i, "kind": "dict", "pairs": [[val(k), val(v)] for k, v in obj.items()]}
+-        cells.append(cell)
+-        i += 1
+-    require(nodes and nodes[0]["id"] == 0, "error-graph root missing")
+-    stock = {"type": nodes[0]["type"], "message": nodes[0]["message"]}
+-    return {"schema": "friday.sol060.error-graph.v2", "root": 0,
+-            "nodes": nodes, "values": cells, "stock_cause": stock,
+-            "native_object_reconstruction": "NOT_QUALIFIED"}
++    error_index = value_index = 0
++    # Args/state/notes can reveal error aliases AFTER the first error frontier.
++    # Both frontiers drain to a fixed point; no referenced late node is omitted.
++    while error_index < len(objects) or value_index < len(values):
++        while error_index < len(objects):
++            obj = objects[error_index]
++            frames = []
++            tb = obj.__traceback__
++            for slot in range(ERROR_USED):
++                if ERROR_OBJECTS[slot] is obj:
++                    tb = ERROR_TRACEBACKS[slot]
++                    break
++            while tb is not None:
++                require(len(frames) < 128, "original traceback capacity exhausted")
++                frames.append({"file": tb.tb_frame.f_code.co_filename,
++                               "function": tb.tb_frame.f_code.co_name,
++                               "line": tb.tb_lineno, "lasti": tb.tb_lasti})
++                tb = tb.tb_next
++            nodes.append({"id": error_index, "module": type(obj).__module__,
++                "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
++                "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
++                "filename": val(getattr(obj, "filename", None)),
++                "filename2": val(getattr(obj, "filename2", None)),
++                "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
++                "native_field_presence": {k: hasattr(obj, k) for k in ("errno", "filename", "filename2", "__notes__")},
++                "cause": ref(obj.__cause__), "context": ref(obj.__context__),
++                "suppress_context": obj.__suppress_context__,
++                "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
++            error_index += 1
++        while value_index < len(values):
++            obj = values[value_index]
++            if type(obj) in (bytes, bytearray):
++                cell = {"id": value_index, "kind": type(obj).__name__, "bytes": len(obj),
++                        "sha256": hashlib.sha256(obj).hexdigest(),
++                        "base64": base64.b64encode(obj).decode("ascii")}
++            elif type(obj) in (list, tuple):
++                cell = {"id": value_index, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
++            else:
++                cell = {"id": value_index, "kind": "dict", "pairs": [[val(k), val(v)] for k,v in obj.items()]}
++            cells.append(cell)
++            value_index += 1
++    graph = {"schema": "friday.sol060.error-graph.v2", "root": 0,
++             "nodes": nodes, "values": cells,
++             "stock_cause": {"type": nodes[0]["type"], "message": nodes[0]["message"]},
++             "native_object_reconstruction": "NOT_QUALIFIED"}
++    validate_stock_error_graph(graph)
++    return graph
++
++
++def validate_received_error_graphs(record):
++    # Whole decoded receipt is bounded by its unchanged original channel cap.
++    if type(record) is dict:
++        require("$private_pending_error" not in record, "private error owner is not durable public evidence")
++        if record.get("schema") == "friday.sol060.error-graph.v2":
++            validate_stock_error_graph(record)
++            return
++        for child in record.values():
++            validate_received_error_graphs(child)
++    elif type(record) is list:
++        for child in record:
++            validate_received_error_graphs(child)
+ 
+ 
+ def original_stock_cause(graph):
+-    # Recompute the original stock type and message from the retained root.
+-    # The graph remains the failure value. A two-key dict is not the receipt.
+-    require(type(graph) is dict and graph.get("schema") == "friday.sol060.error-graph.v2"
+-            and type(graph.get("root")) is int and type(graph.get("nodes")) is list
+-            and type(graph.get("values")) is list and 0 <= graph["root"] < len(graph["nodes"]),
+-            "exact error-graph.v2 root required")
+-    node = graph["nodes"][graph["root"]]
+-    require(type(node) is dict and node.get("id") == graph["root"]
+-            and type(node.get("type")) is str and type(node.get("message")) is str,
+-            "error-graph root lacks original stock type/message")
+-    stock = {"type": node["type"], "message": node["message"]}
+-    require(graph.get("stock_cause") == stock, "stock_cause is not the retained root type/message")
+-    return stock
++    return validate_stock_error_graph(graph)
+ 
+ 
+ FD_ALLOCATION_CAP = 256
+@@ -622,6 +763,7 @@
+         return publish_fd(record, number)
+     except BaseException as exc:
+         record["error_object"] = exc
++        record["error"] = deferred_error(exc)
+         raise
+     finally:
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+@@ -643,6 +785,7 @@
+     except BaseException as exc:
+         for record in records:
+             record["error_object"] = exc
++            record["error"] = deferred_error(exc)
+         raise
+     finally:
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+@@ -710,14 +853,10 @@
+         # cause a second close on a potentially already reused numeric slot.
+         fd.close_failed = True
+         STOP = True
+-        graph = exact_error(exc)
+         if record is not None:
+             record["error_object"] = exc
+-            record["error"] = graph
+-        require(len(FD_CLOSE_FAILURES) < 256, "bounded closure failure evidence exceeded")
+-        FD_CLOSE_FAILURES.append({"fd": int(fd), "lease_generation": fd.lease_generation,
+-            "role": fd.role, "type": type(exc).__name__, "errno": getattr(exc, "errno", None),
+-            "error": graph})
++        # Error/public graphs are derived from the retained history only AFTER
++        # the finite final known-owner firstclose pass. Do not replace this cause.
+         raise
+     FD_CLOSE_SUCCESSES += 1
+     if record is not None:
+@@ -1456,14 +1595,14 @@
+                             signal_held(child, signal.SIGKILL)
+             except BaseException as exc:
+                 STOP = True
+-                problems.append({"stage": "freeze_or_descendants", "error": exact_error(exc)})
++                problems.append({"stage": "freeze_or_descendants", "error": deferred_error(exc)})
+             # A descendant observation failure does not skip stopping the known
+             # direct parent; actual adoptees are then reconciled independently.
+             try:
+                 stop_record(record, end)
+             except BaseException as exc:
+                 STOP = True
+-                problems.append({"stage": "exact_parent_stop_reap", "error": exact_error(exc)})
++                problems.append({"stage": "exact_parent_stop_reap", "error": deferred_error(exc)})
+         # Only actually enumerated direct adopted generations are waited. An
+         # already reaped descendant is never given an invented wait4 usage.
+         rounds = 0
+@@ -1528,6 +1667,7 @@
+             for child in item:
+                 finite(child)
+     finite(value)
++    validate_received_error_graphs(value)
+     return value
+ 
+ 
+@@ -1616,34 +1756,61 @@
+     bucket = "transport_" + str(CASE_INDEX)
+     while True:
+         due(end)
+-        progress = False
++        progress, first, first_tb = False, None, None
+         for item in pipes:
++            if item.get("read_error_object") is not None:
++                if first is None:
++                    first = item["read_error_object"]
++                    first_tb = first.__traceback__
++                continue  # NEVER re-read a failed/uncommitted physical prefix
+             if item["eof"] or item.get("overflow"):
+                 continue
+-            while True:
+-                request = min(4096, item["cap"] + 1 - len(item["data"]))
+-                admit_request(bucket, request)
++            try:
++                require(item.get("pending_chunk") is None,
++                        "uncommitted returned pipe chunk must not be overwritten")
++                while True:
++                    request = min(4096, item["cap"] + 1 - len(item["data"]))
++                    admit_request(bucket, request)
++                    try:
++                        require_lease(item["fd"])
++                        item["pending_chunk"] = os.read(item["fd"], request)
++                        data = item["pending_chunk"]
++                    except BlockingIOError:
++                        break  # ordinary readiness, not retry of a rejected effect
++                    charge_returned(bucket, request, len(data))
++                    saved = signal.pthread_sigmask(signal.SIG_BLOCK, MASK)
++                    try:
++                        item["data"].extend(data)
++                        item["pending_chunk"] = None
++                    finally:
++                        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
++                    if not data:
++                        item["eof"] = True
++                        break
++                    if len(item["data"]) > item["cap"]:
++                        item["overflow"] = True
++                    require(not item.get("overflow"),
++                            "finite pipe output cap exceeded; complete returned overflow byte retained")
++                    progress = True
++            except BaseException as exc:
++                item["read_error_object"] = exc
++                if first is None:
++                    first, first_tb = exc, exc.__traceback__
++                item["read_error"] = deferred_error(exc)
++                # Attempt the other independently owned channel BEFORE encoding.
++        for item in pipes:
++            if item["eof"] or item.get("overflow") or item.get("read_error_object") is not None:
+                 try:
+-                    require_lease(item["fd"])
+-                    item["pending_chunk"] = os.read(item["fd"], request)
+-                    data = item["pending_chunk"]
+-                except BlockingIOError:
+-                    break
+-                charge_returned(bucket, request, len(data))
+-                item["data"].extend(data)
+-                item["pending_chunk"] = None
+-                if not data:
+-                    item["eof"] = True
+                     capture_pipe(item, evidence)
+-                    break
+-                if len(item["data"]) > item["cap"]:
+-                    item["overflow"] = True
+-                    capture_pipe(item, evidence)
+-                # The full mutable raw buffer is already retained in pipes.
+-                # Snapshot on EOF/overflow and the launch finally, avoiding
+-                # quadratic re-encoding when valid reads are fragmented.
+-                require(not item.get("overflow"), "finite pipe output cap exceeded; complete returned overflow byte retained")
+-                progress = True
++                    if item.get("read_error") is not None:
++                        evidence[item["label"] + "_read_error"] = item["read_error"]
++                except BaseException as exc:
++                    item["capture_error_object"] = exc
++                    if first is None:
++                        first, first_tb = exc, exc.__traceback__
++                    evidence[item["label"] + "_capture_error"] = deferred_error(exc)
++        if first is not None:
++            raise first.with_traceback(first_tb)
+         if all(item["eof"] or item.get("overflow") for item in pipes):
+             require(not any(item.get("overflow") for item in pipes),
+                     "finite pipe output cap exceeded; stream EOF not claimed")
+@@ -1734,7 +1901,8 @@
+             pair = allocate_pipe("launch-pipe:" + label)
+             pipe_pairs.append(pair)
+             pipes.append({"fd": pair[0], "label": label, "cap": cap, "data": bytearray(),
+-                          "pending_chunk": None, "eof": False})
++                          "pending_chunk": None, "eof": False, "read_error_object": None,
++                          "read_error": None, "capture_error_object": None})
+         null = allocate_owned(os.open, "launch-null", "null",
+             os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=component("/dev"))
+         ns = os.fstat(null)
+@@ -1886,17 +2054,17 @@
+         # admitted remaining bytes/EOF before their descriptors are closed.
+         STOP = True
+         launch_owner["primary"], launch_owner["primary_tb"] = primary_exc, primary_exc.__traceback__
+-        receipt["launch_firstfault"] = exact_error(primary_exc)
++        receipt["launch_firstfault"] = deferred_error(primary_exc)
+         PROC_PHASE = "close"
+         if not CLEANUP_ATTEMPTED:
+             try:
+                 settle_owned()
+             except BaseException as exc:
+-                receipt["cleanup_failure"] = exact_error(exc)
++                receipt["cleanup_failure"] = deferred_error(exc)
+         try:
+             drain_pipes(pipes, receipt, DEADLINE - 15000000000, complete=True)
+         except BaseException as exc:
+-            receipt["closure_transport_failure"] = exact_error(exc)
++            receipt["closure_transport_failure"] = deferred_error(exc)
+         raise
+     finally:
+         # Complete data remain in the case record even if parsing, wait4,
+@@ -1908,8 +2076,8 @@
+             except BaseException as exc:
+                 STOP = True
+                 launch_owner["capture_errors"][index] = exc
+-                receipt[item["label"] + "_capture_error"] = exact_error(exc)
+                 first_capture_error = first_capture_error or exc
++                receipt[item["label"] + "_capture_error"] = deferred_error(exc)
+         receipt["transport_complete"] = bool(pipes) and all(x["eof"] and not x.get("overflow")
+                 and x.get("pending_chunk") is None for x in pipes) and first_capture_error is None
+         receipt["exit_code"] = record["evidence"]["exit_code"]
+@@ -1927,7 +2095,7 @@
+         except BaseException as exc:
+             STOP = True
+             launch_owner["close_error"] = exc
+-            receipt["launch_close_secondary_error"] = exact_error(exc)
++            receipt["launch_close_secondary_error"] = deferred_error(exc)
+         if launch_owner["primary"] is None:
+             if first_capture_error is not None:
+                 raise first_capture_error
+@@ -2064,7 +2232,7 @@
+     if type(outer.get("inner_complete_evidence")) is dict:
+         receipt["full_verifier_receipt"] = outer["inner_complete_evidence"]
+     require(receipt["stderr_text"] == "" and receipt["exit_code"] == 0 and
+-            outer["schema"] == "friday.e4.node.actual-supervisor.sol060.v1" and
++            outer["schema"] == "friday.e4.node.actual-supervisor.sol062.v1" and
+             outer["assignment"] == "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048"
+             and type(outer["generation"]) is int and outer["generation"] == 1 and
+             outer["qualified"] is True and outer["mode"] == case,
+@@ -2075,7 +2243,7 @@
+     inner = outer["inner_complete_evidence"]
+     receipt["full_verifier_receipt"] = inner
+     validate_fullraw_layers(outer, inner)
+-    require(inner["schema"] == "friday.e4.node.bounded-verifier.sol060.v1" and
++    require(inner["schema"] == "friday.e4.node.bounded-verifier.sol062.v1" and
+             inner["assignment"] == outer["assignment"] and inner["generation"] == 1,
+             "complete current verifier receipt required")
+     require(outer["actual_launch"]["argv"][11:] == inner["reviewed_invocation"]["argv"] and
+@@ -2182,7 +2350,7 @@
+         outer = strict_json(receipt["stdout_text"].encode("ascii"), True)
+         receipt["full_supervisor_receipt"] = outer
+         require(receipt["exit_code"] == 2 and receipt["stderr_text"] == "" and
+-                outer["schema"] == "friday.e4.node.actual-supervisor.sol060.v1" and
++                outer["schema"] == "friday.e4.node.actual-supervisor.sol062.v1" and
+                 original_stock_cause(outer["failure"]) == {"type": "Refusal", "message": "unknown bootstrap inherited descriptor"} and
+                 outer["status"] == "NOT_PROVEN" and outer["qualified"] is False and
+                 outer["fork_state"] == "NOT_ATTEMPTED" and outer["process_history"] == [] and
+@@ -2275,6 +2443,7 @@
+ 
+ 
+ def public_partition_bytes():
++    publish_errors(R)
+     # This is a byte partition, NOT a shortened output or a placeholder copy.
+     # Container punctuation and each key/colon belong to metadata. Only the six
+     # explicitly named whole case payload VALUES belong to that case's cell.
+@@ -2335,7 +2504,7 @@
+                 settle_owned()
+             except BaseException as exc:
+                 STOP = True
+-                problems.append({"stage": "known_own_cleanup", "error": exact_error(exc)})
++                problems.append({"stage": "known_own_cleanup", "error": deferred_error(exc)})
+         elif R.get("owned_cleanup_complete") is not True:
+             STOP = True
+             problems.append({"stage": "known_own_cleanup", "type": "Refusal",
+@@ -2353,7 +2522,7 @@
+                     prepare_proc_retirement(record)
+         except BaseException as exc:
+             STOP = True
+-            problems.append({"stage": "terminal_own_observation", "error": exact_error(exc)})
++            problems.append({"stage": "terminal_own_observation", "error": deferred_error(exc)})
+         try:
+             require(SELECT_META is not None and set(HELD) == set(FIXED) | set(LOCAL),
+                     "full nineteen held inputs unavailable; partial custody cannot qualify")
+@@ -2361,13 +2530,13 @@
+             R["terminal_full_nineteen_SHA_confirmed"] = True
+         except BaseException as exc:
+             STOP = True
+-            problems.append({"stage": "terminal_full_custody", "error": exact_error(exc)})
++            problems.append({"stage": "terminal_full_custody", "error": deferred_error(exc)})
+         try:
+             sample_outer("terminal")
+             R["terminal_current_memory_observed"] = True
+         except BaseException as exc:
+             STOP = True
+-            problems.append({"stage": "terminal_current_resources", "error": exact_error(exc)})
++            problems.append({"stage": "terminal_current_resources", "error": deferred_error(exc)})
+         R["terminal_once"] = {"attempted": True, "problems": problems,
+                               "cleanup_attempted_once": CLEANUP_ATTEMPTED,
+                               "complete": not problems and R.get("owned_cleanup_complete") is True}
+@@ -2417,7 +2586,7 @@
+     take_budget("expectations_body", HELD["expectations"]["size"] + 1)
+     data = read_at(HELD["expectations"]["fd"], HELD["expectations"]["size"] + 1, 0)
+     expectations = strict_json(data, data.endswith(b"\n"))
+-    require(expectations["schema"] == "friday.e4.node.ordinary-case-expectations.sol060.v1" and
++    require(expectations["schema"] == "friday.e4.node.ordinary-case-expectations.sol062.v1" and
+             expectations["case_order"] == list(CASES) and expectations["authority"] == "NONE_ORDINARY_DATA",
+             "current complete ordinary case DATA required")
+     require(expectations.get("lifetime_memory_source_contract") == LIFETIME_MEMORY_CONTRACT,
+@@ -2458,7 +2627,7 @@
+             validate_canonical(case, receipt) if index < 3 else validate_entry(case, receipt)
+             qualified_case = True
+         except BaseException as exc:
+-            receipt["failure"] = exact_error(exc)
++            receipt["failure"] = deferred_error(exc)
+             if ("read budget unavailable" in str(exc) or
+                     "read capacity unavailable" in str(exc) or
+                     str(exc) == "outer cumulative read ceiling exceeded"):
+@@ -2476,7 +2645,7 @@
+                     settle_owned()
+                 except BaseException as cleanup_exc:
+                     globals()["STOP"] = True
+-                    receipt["cleanup_failure"] = exact_error(cleanup_exc)
++                    receipt["cleanup_failure"] = deferred_error(cleanup_exc)
+             # A stopped/incomplete supervisor is not a product-only red result.
+             if receipt.get("full_supervisor_receipt", {}).get("status") == "STOP_UNCONFIRMED":
+                 globals()["STOP"] = True
+@@ -2489,7 +2658,7 @@
+         except BaseException as exc:
+             globals()["STOP"] = True
+             qualified_case = False
+-            receipt["completion_resource_failure"] = exact_error(exc)
++            receipt["completion_resource_failure"] = deferred_error(exc)
+         if qualified_case and not STOP:
+             receipt["status"] = "CAUSE_CONFIRMED" if case != "verify-node" else "QUALIFIED_NODE_PUBLISHER_CHAIN_ONLY"
+     finish_terminal()
+@@ -2500,25 +2669,26 @@
+ 
+ def close_final():
+     global FD_CLOSE_ATTEMPTS, FD_CLOSE_SUCCESSES
+-    closed = []
++    # Physical phase: no str/graph/public-list construction inside firstclose.
++    # Fixed original allocation256 plus the separate independently held DATA3.
++    closed_slots = [None] * (FD_ALLOCATION_CAP + 1)
++    closed_used = 0
+     for fd in sorted(list(OWN.values()), key=int, reverse=True):
+         try:
+             close_owned(fd)
+-            closed.append(fd)
++            closed_slots[closed_used] = fd
++            closed_used += 1
+         except BaseException as exc:
+-            R.setdefault("descriptor_closure_errors", []).append({"fd": int(fd),
+-                "lease_generation":fd.lease_generation,"errno":getattr(exc,"errno",None),
+-                "type":type(exc).__name__, "error": exact_error(exc)})
++            if fd.allocation_record is not None:
++                fd.allocation_record["error_object"] = exc
+             globals()["STOP"] = True
+-    # A failed wrapper/map/fstat must not erase an already returned allocation.
+-    # These never-published records are exact original native returns, not guessed
+-    # integer slots and not admitted input/proc leases with relaxed identity.
++            # Later independent leases are still closed ONCE.
+     for record in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]:
+         lease = record["lease"]
+         if record["state"] != "RETURNED" or record["attempted"]:
+             continue
+         if lease is not None and OWN.get(int(lease)) is lease:
+-            continue  # previous identity refusal is sticky; not a retry bypass
++            continue  # identity refusal cannot be bypassed by a naked integer
+         saved = signal.pthread_sigmask(signal.SIG_BLOCK, MASK)
+         try:
+             record["attempted"], record["state"] = True, "RETIRE_UNKNOWN"
+@@ -2530,15 +2700,9 @@
+             FD_CLOSE_SUCCESSES += 1
+         except BaseException as exc:
+             record["error_object"] = exc
+-            record["error"] = exact_error(exc)
+-            FD_CLOSE_FAILURES.append({"fd": record["number"], "role": record["role"],
+-                                      "unpublished_returned_allocation": True,
+-                                      "error": record["error"]})
+             globals()["STOP"] = True
+         finally:
+             signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+-    # fd3 is a caller-selected ordinary input. It is known and accepted above,
+-    # and may be closed only if its identity was actually registered.
+     if SELECT_META is not None:
+         try:
+             require(full9(os.fstat(3)) == SELECT_META, "known selected DATA identity changed before closure")
+@@ -2546,27 +2710,51 @@
+             SELECT_CLOSE["attempted"], SELECT_CLOSE["state"] = True, "RETIRE_UNKNOWN"
+             os.close(3)
+             SELECT_CLOSE["state"] = "CONFIRMED_CLOSED"
+-            closed.append(3)
++            closed_slots[closed_used] = 3
++            closed_used += 1
+         except BaseException as exc:
+             SELECT_CLOSE["error_object"] = exc
+-            R["selected_DATA_closure_failure"] = exact_error(exc)
+             globals()["STOP"] = True
++    # Publication phase: raw native owners remain if any copy/arena fails.
++    closure_errors = []
++    for record in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]:
++        exc = record["error_object"]
++        if exc is None:
++            continue
++        record["error"] = deferred_error(exc)
++        if record["state"] == "RETIRE_UNKNOWN":
++            lease = record["lease"]
++            row = {"fd": record["number"], "role": record["role"],
++                   "type": type(exc).__name__, "errno": getattr(exc, "errno", None),
++                   "error": record["error"]}
++            if lease is not None:
++                row["lease_generation"] = lease.lease_generation
++            else:
++                row["unpublished_returned_allocation"] = True
++            closure_errors.append(row)
++    FD_CLOSE_FAILURES[:] = closure_errors
++    if closure_errors:
++        R["descriptor_closure_errors"] = closure_errors
++    if SELECT_CLOSE["error_object"] is not None:
++        R["selected_DATA_closure_failure"] = deferred_error(SELECT_CLOSE["error_object"])
++    closed = closed_slots[:closed_used]
+     R["known_owned_fds_closed"] = closed
+-    R["selected_DATA_onceclose"] = {"attempted": SELECT_CLOSE["attempted"],
+-                                    "state": SELECT_CLOSE["state"]}
+-    R["fd_lease_closure"] = {"allocations":FD_LEASE_GENERATION,
+-        "close_attempts":FD_CLOSE_ATTEMPTS,"successful_closes":FD_CLOSE_SUCCESSES,
+-        "unconfirmed_closes":list(FD_CLOSE_FAILURES),"remaining_leases":len(OWN),
+-        "retired_alias_never_closes_new_slot_lease":True,
+-        "tracked_pidfd_procfd_retained_through_terminal":True,
+-        "pidfd_poll_calls":PIDFD_POLL_CALLS,"lease_check_calls":LEASE_CHECK_CALLS,
+-        "clock_calls":CLOCK_CALLS,"natural_ending_attempts":NATURAL_EXIT_ATTEMPTS,
+-        "implicit_IO":"UNKNOWN_NOT_ZERO"}
++    R["selected_DATA_onceclose"] = {"attempted": SELECT_CLOSE["attempted"], "state": SELECT_CLOSE["state"]}
++    R["fd_lease_closure"] = {"allocations": FD_LEASE_GENERATION,
++        "close_attempts": FD_CLOSE_ATTEMPTS, "successful_closes": FD_CLOSE_SUCCESSES,
++        "unconfirmed_closes": list(FD_CLOSE_FAILURES), "remaining_leases": len(OWN),
++        "retired_alias_never_closes_new_slot_lease": True,
++        "tracked_pidfd_procfd_retained_through_terminal": True,
++        "pidfd_poll_calls": PIDFD_POLL_CALLS, "lease_check_calls": LEASE_CHECK_CALLS,
++        "clock_calls": CLOCK_CALLS, "natural_ending_attempts": NATURAL_EXIT_ATTEMPTS,
++        "implicit_IO": "UNKNOWN_NOT_ZERO"}
+     R["all_known_owned_fds_closed"] = (len(OWN) == 0 and not FD_CLOSE_FAILURES
+         and SELECT_META is not None and 3 in closed
+-        and all(r["state"] in ("PLANNED", "CONFIRMED_CLOSED") for r in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]))
++        and all(r["state"] in ("PLANNED", "CONFIRMED_CLOSED")
++                for r in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]))
+     R["descriptor_allocation_history"] = [{k:r[k] for k in
+-        ("role", "number", "state", "attempted", "error")} for r in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]]
++        ("role", "number", "state", "attempted", "error")}
++        for r in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]]
+ 
+ 
+ def encode_complete():
+@@ -2607,7 +2795,7 @@
+     try:
+         main()
+     except BaseException as exc:
+-        R["failure"] = exact_error(exc)
++        R["failure"] = deferred_error(exc)
+         R["qualified_node_only"] = False
+     finally:
+         if DEADLINE > 0:
+@@ -2615,7 +2803,7 @@
+                 finish_terminal()
+             except BaseException as exc:
+                 STOP = True
+-                R["terminal_failure"] = exact_error(exc)
++                R["terminal_failure"] = deferred_error(exc)
+         close_final()
+     R["explicit_reads"]["outer_actual_content_bytes"] = READS
+     R["explicit_reads"]["own_child_bootstrap_upper_debit_bytes"] = CHILD_READ_RESERVE
+--- LAB865/supervisor.py
++++ SOL062/supervisor.py
+@@ -19,13 +19,13 @@
+ import time
+ 
+ ASSIGNMENT = "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048"
+-PREFIX = "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure"
++PREFIX = "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure"
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+ EXPECTED = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ ARCHIVE_SHA = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+-SOURCE_SHA = "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60"
+-CONTRACT_SHA = "f4af798566916c32ef504f95865faceffadd5e62e247e3c8e2ce64b4cd74bb7d"
++SOURCE_SHA = "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6"
++CONTRACT_SHA = "04fe265d1136155f5d5786fbaa0ed852ae35e1eff3d970346d37d890cb71beb3"
+ ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+ SUP_AS, PARENT_AS, GPG_AS = 33554432, 117440512, 67108864
+ STREAM, OUTPUT = 32768, 65536
+@@ -49,7 +49,7 @@
+ HOME = {"state": "NOT_PLANNED", "name": None, "parent_identity": None,
+         "prelaunch_absent": None, "postexit_absent": None}
+ STOP = False
+-R = {"schema": "friday.e4.node.actual-supervisor.sol060.v1", "assignment": ASSIGNMENT,
++R = {"schema": "friday.e4.node.actual-supervisor.sol062.v1", "assignment": ASSIGNMENT,
+      "generation": 1, "status": "NOT_PROVEN", "scope": "exact Node publisher byte chain only",
+      "qualified_trust": "Independently admitted installed bootstrap/verifier Python, stdlib/libc, prlimit, GPG/gpgv, loaders/libraries, Linux/proc/pidfd/subreaper and unprivileged exclusive host assumptions; source and receipts do not establish that trust.",
+      "custody": {}, "resources": {},
+@@ -61,8 +61,8 @@
+ PINS = {
+     "prlimit": ("/usr/bin/prlimit", 27616, "cb28811cb3902773c1a0f3ac0ea554c7a1e232724e9d4cae055ede54b65a7bc4", 65536, True),
+     "python": ("/usr/bin/python3.14", 7477160, "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41", 8388608, True),
+-    "source": (PREFIX + "/verifier.py", 73847, SOURCE_SHA, 262144, False),
+-    "contract": (PREFIX + "/launch-contract.json", 48792, CONTRACT_SHA, 262144, False),
++    "source": (PREFIX + "/verifier.py", 83369, SOURCE_SHA, 262144, False),
++    "contract": (PREFIX + "/launch-contract.json", 49539, CONTRACT_SHA, 262144, False),
+     "gpg": ("/usr/bin/gpg", 1186456, "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754", 2097152, True),
+     "gpgv": ("/usr/bin/gpgv", 302296, "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d", 1048576, True),
+     "bill": ("/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json", 466956, "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2", 1048576, False),
+@@ -99,101 +99,241 @@
+ FD_HISTORY = [None] * FD_HISTORY_CAP
+ FD_GENERATION = 0
+ FD_SIGNALS = set(signal.valid_signals()) - {signal.SIGKILL, signal.SIGSTOP}
++# SOL062: private prospective cells are not public receipts or summaries.
++# Fixed existing256 slots. Width/stock exhaustion/whole fit still need proof.
+ ERROR_OBJECT_CAP = 256
+-ERROR_OBJECTS = []
++ERROR_OBJECTS = [None] * ERROR_OBJECT_CAP
++ERROR_TRACEBACKS = [None] * ERROR_OBJECT_CAP
++ERROR_PROJECTED = [None] * ERROR_OBJECT_CAP
++ERROR_MARKERS = [{"$private_pending_error": i} for i in range(ERROR_OBJECT_CAP)]
++ERROR_USED = 0
+ 
+ 
+ def retain_error_object(exc):
+-    if len(ERROR_OBJECTS) >= ERROR_OBJECT_CAP:
+-        raise Refusal("prefunded error-object arena exhausted; original exception retained") from exc
+-    ERROR_OBJECTS.append(exc)
++    global ERROR_USED
++    for i in range(ERROR_USED):
++        if ERROR_OBJECTS[i] is exc:
++            return i
++    if ERROR_USED >= ERROR_OBJECT_CAP:
++        raise Refusal("original fixed error-owner capacity exhausted before publication") from exc
++    i = ERROR_USED
++    # Raw first fault and its caught traceback precede every projection.
++    ERROR_OBJECTS[i] = exc
++    ERROR_TRACEBACKS[i] = exc.__traceback__
++    ERROR_USED = i + 1
++    return i
++
++
++def deferred_error(exc):
++    # Return an already prefunded marker; NO str/base64/JSON/trace walk here.
++    # An exhausted original stock factory is CODE_OPEN, never a clipped proof.
++    return ERROR_MARKERS[retain_error_object(exc)]
++
++
++def publish_errors(record):
++    # Called at a publication boundary, not inside mandatory raw/close loops.
++    # Every public failure remains a COMPLETE v2 graph after replacement.
++    # Identity, not attacker-shaped JSON, selects our private marker.
++    seen = []
++    def walk(value):
++        for i in range(ERROR_USED):
++            if value is ERROR_MARKERS[i]:
++                if ERROR_PROJECTED[i] is None:
++                    ERROR_PROJECTED[i] = exact_error(ERROR_OBJECTS[i])
++                return ERROR_PROJECTED[i]
++        if type(value) not in (dict, list):
++            return value
++        if any(value is old for old in seen):
++            return value
++        seen.append(value)
++        if type(value) is dict:
++            for key in value:
++                value[key] = walk(value[key])
++        else:
++            for i in range(len(value)):
++                value[i] = walk(value[i])
++        return value
++    return walk(record)
++
++
++def validate_stock_error_graph(graph):
++    # Both receivers check ALL full fields/references, not only copied cause.
++    # This validates shape/full reversible stock bytes, NOT native semantics.
++    require(type(graph) is dict and set(graph) == {"schema", "root", "nodes", "values",
++            "stock_cause", "native_object_reconstruction"}
++            and graph["schema"] == "friday.sol060.error-graph.v2"
++            and graph["native_object_reconstruction"] == "NOT_QUALIFIED",
++            "complete original v2 error envelope required")
++    nodes, values, root = graph["nodes"], graph["values"], graph["root"]
++    require(type(nodes) is list and 0 < len(nodes) <= 128 and type(values) is list
++            and len(values) <= 128 and type(root) is int and 0 <= root < len(nodes),
++            "full v2 arenas/root malformed")
++    def error_ref(index, nullable=True):
++        require((nullable and index is None) or
++                (type(index) is int and 0 <= index < len(nodes)), "full error reference outside arena")
++    def value_ref(cell):
++        require(type(cell) is dict and len(cell) == 1, "full typed error value required")
++        if "literal" in cell:
++            require(type(cell["literal"]) in (type(None), bool, int, str), "stock literal type changed")
++        elif "float_hex" in cell:
++            require(type(cell["float_hex"]) is str and
++                    float.fromhex(cell["float_hex"]).hex() == cell["float_hex"], "exact stock float hex")
++        elif "error_ref" in cell:
++            error_ref(cell["error_ref"], False)
++        else:
++            require(set(cell) == {"value_ref"} and type(cell["value_ref"]) is int
++                    and 0 <= cell["value_ref"] < len(values), "full value reference outside arena")
++    for i, node in enumerate(nodes):
++        require(type(node) is dict and set(node) == {"id", "module", "type", "message", "args",
++                "state", "errno", "filename", "filename2", "notes", "native_field_presence", "traceback", "cause", "context",
++                "suppress_context", "group"} and type(node["id"]) is int and node["id"] == i,
++                "full v2 node fields/identity malformed")
++        require(all(type(node[k]) is str for k in ("module", "type", "message")) and
++                type(node["suppress_context"]) is bool, "original stock cause fields missing")
++        for k in ("args", "state", "errno", "filename", "filename2", "notes"):
++            value_ref(node[k])
++        presence = node["native_field_presence"]
++        require(type(presence) is dict and set(presence) == {"errno", "filename", "filename2", "__notes__"}
++                and all(type(v) is bool for v in presence.values()), "original native absence is not explicit null")
++        for key, present in presence.items():
++            field = "notes" if key == "__notes__" else key
++            require(present or node[field] == {"literal": None}, "absent stock native field has invented value")
++        error_ref(node["cause"]); error_ref(node["context"])
++        group = node["group"]
++        require(group is None or type(group) is list, "stock exception-group presence")
++        if group is not None:
++            for member in group:
++                error_ref(member, False)
++        frames = node["traceback"]
++        require(type(frames) is list and len(frames) <= 128, "complete traceback arena")
++        for frame in frames:
++            require(type(frame) is dict and set(frame) == {"file", "function", "line", "lasti"}
++                    and type(frame["file"]) is str and type(frame["function"]) is str
++                    and type(frame["line"]) is int and type(frame["lasti"]) is int,
++                    "complete stock frame coordinates")
++    for i, cell in enumerate(values):
++        require(type(cell) is dict and type(cell.get("id")) is int and cell["id"] == i,
++                "full typed value identity")
++        kind = cell.get("kind")
++        if kind in ("bytes", "bytearray"):
++            require(set(cell) == {"id", "kind", "bytes", "sha256", "base64"}
++                    and type(cell["bytes"]) is int and cell["bytes"] >= 0
++                    and type(cell["base64"]) is str and type(cell["sha256"]) is str,
++                    "complete stock byte preimage fields")
++            raw = base64.b64decode(cell["base64"], validate=True)
++            require(len(raw) == cell["bytes"] and hashlib.sha256(raw).hexdigest() == cell["sha256"]
++                    and base64.b64encode(raw).decode("ascii") == cell["base64"],
++                    "full stock byte preimage/count/SHA not lossless")
++        elif kind in ("list", "tuple"):
++            require(set(cell) == {"id", "kind", "items"} and type(cell["items"]) is list,
++                    "complete original typed sequence")
++            for item in cell["items"]:
++                value_ref(item)
++        else:
++            require(kind == "dict" and set(cell) == {"id", "kind", "pairs"}
++                    and type(cell["pairs"]) is list, "complete typed dict")
++            for pair in cell["pairs"]:
++                require(type(pair) is list and len(pair) == 2, "complete original dict pair")
++                value_ref(pair[0]); value_ref(pair[1])
++    stock = {"type": nodes[root]["type"], "message": nodes[root]["message"]}
++    require(graph["stock_cause"] == stock, "stock cause must join actual full graph root")
++    return stock
+ 
+ 
+ def exact_error(exc):
+-    # Original native Python objects/tracebacks stay in the same owner lifetime.
+-    # Lossless stock value graph includes UnicodeDecodeError's original bytes.
+-    retain_error_object(exc)
++    # Projection occurs only after the private journal owns the native cause.
++    root_slot = retain_error_object(exc)
+     objects, nodes, values, cells = [exc], [], [], []
+     def ref(value):
+         if value is None:
+             return None
++        require(isinstance(value, BaseException), "stock exception reference type")
+         for i, old in enumerate(objects):
+             if old is value:
+                 return i
+-        if len(objects) >= 128:
+-            raise Refusal("prefunded exception-node arena exhausted") from exc
++        require(len(objects) < 128, "original exception-node capacity exhausted")
+         objects.append(value)
+         return len(objects) - 1
+     def val(value):
++        if isinstance(value, BaseException):
++            return {"error_ref": ref(value)}
+         if type(value) in (type(None), bool, int, str):
+             return {"literal": value}
+         if type(value) is float:
+-            # Exact binary floating value, no JSON NaN or lossy decimal inference.
+             return {"float_hex": value.hex()}
+         for i, old in enumerate(values):
+             if old is value:
+                 return {"value_ref": i}
+         require(type(value) in (bytes, bytearray, list, tuple, dict),
+-                "unsupported native error value; original object retained, not proof")
+-        if len(values) >= 128:
+-            raise Refusal("prefunded error-value arena exhausted") from exc
++                "unsupported stock error value; original object remains owned")
++        require(len(values) < 128, "original error-value capacity exhausted")
+         values.append(value)
+         return {"value_ref": len(values) - 1}
+-    i = 0
+-    while i < len(objects):
+-        obj = objects[i]
+-        frames, tb = [], obj.__traceback__
+-        while tb is not None:
+-            if len(frames) >= 128:
+-                raise Refusal("prefunded traceback arena exhausted") from exc
+-            frames.append({"file": tb.tb_frame.f_code.co_filename,
+-                           "function": tb.tb_frame.f_code.co_name,
+-                           "line": tb.tb_lineno, "lasti": tb.tb_lasti})
+-            tb = tb.tb_next
+-        nodes.append({"id": i, "module": type(obj).__module__,
+-            "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
+-            "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
+-            "filename": val(getattr(obj, "filename", None)),
+-            "filename2": val(getattr(obj, "filename2", None)),
+-            "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
+-            "cause": ref(obj.__cause__), "context": ref(obj.__context__),
+-            "suppress_context": obj.__suppress_context__,
+-            "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
+-        i += 1
+-    i = 0
+-    while i < len(values):
+-        obj = values[i]
+-        if type(obj) in (bytes, bytearray):
+-            cell = {"id": i, "kind": type(obj).__name__,
+-                    "bytes": len(obj), "sha256": hashlib.sha256(obj).hexdigest(),
+-                    "base64": base64.b64encode(obj).decode("ascii")}
+-        elif type(obj) in (list, tuple):
+-            cell = {"id": i, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
+-        else:
+-            cell = {"id": i, "kind": "dict", "pairs": [[val(k), val(v)] for k, v in obj.items()]}
+-        cells.append(cell)
+-        i += 1
+-    require(nodes and nodes[0]["id"] == 0, "error-graph root missing")
+-    stock = {"type": nodes[0]["type"], "message": nodes[0]["message"]}
+-    return {"schema": "friday.sol060.error-graph.v2", "root": 0,
+-            "nodes": nodes, "values": cells, "stock_cause": stock,
+-            "native_object_reconstruction": "NOT_QUALIFIED"}
++    error_index = value_index = 0
++    # Args/state/notes can reveal error aliases AFTER the first error frontier.
++    # Both frontiers drain to a fixed point; no referenced late node is omitted.
++    while error_index < len(objects) or value_index < len(values):
++        while error_index < len(objects):
++            obj = objects[error_index]
++            frames = []
++            tb = obj.__traceback__
++            for slot in range(ERROR_USED):
++                if ERROR_OBJECTS[slot] is obj:
++                    tb = ERROR_TRACEBACKS[slot]
++                    break
++            while tb is not None:
++                require(len(frames) < 128, "original traceback capacity exhausted")
++                frames.append({"file": tb.tb_frame.f_code.co_filename,
++                               "function": tb.tb_frame.f_code.co_name,
++                               "line": tb.tb_lineno, "lasti": tb.tb_lasti})
++                tb = tb.tb_next
++            nodes.append({"id": error_index, "module": type(obj).__module__,
++                "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
++                "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
++                "filename": val(getattr(obj, "filename", None)),
++                "filename2": val(getattr(obj, "filename2", None)),
++                "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
++                "native_field_presence": {k: hasattr(obj, k) for k in ("errno", "filename", "filename2", "__notes__")},
++                "cause": ref(obj.__cause__), "context": ref(obj.__context__),
++                "suppress_context": obj.__suppress_context__,
++                "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
++            error_index += 1
++        while value_index < len(values):
++            obj = values[value_index]
++            if type(obj) in (bytes, bytearray):
++                cell = {"id": value_index, "kind": type(obj).__name__, "bytes": len(obj),
++                        "sha256": hashlib.sha256(obj).hexdigest(),
++                        "base64": base64.b64encode(obj).decode("ascii")}
++            elif type(obj) in (list, tuple):
++                cell = {"id": value_index, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
++            else:
++                cell = {"id": value_index, "kind": "dict", "pairs": [[val(k), val(v)] for k,v in obj.items()]}
++            cells.append(cell)
++            value_index += 1
++    graph = {"schema": "friday.sol060.error-graph.v2", "root": 0,
++             "nodes": nodes, "values": cells,
++             "stock_cause": {"type": nodes[0]["type"], "message": nodes[0]["message"]},
++             "native_object_reconstruction": "NOT_QUALIFIED"}
++    validate_stock_error_graph(graph)
++    return graph
++
++
++def validate_received_error_graphs(record):
++    # Whole decoded receipt is bounded by its unchanged original channel cap.
++    if type(record) is dict:
++        require("$private_pending_error" not in record, "private error owner is not durable public evidence")
++        if record.get("schema") == "friday.sol060.error-graph.v2":
++            validate_stock_error_graph(record)
++            return
++        for child in record.values():
++            validate_received_error_graphs(child)
++    elif type(record) is list:
++        for child in record:
++            validate_received_error_graphs(child)
+ 
+ 
+ def original_stock_cause(graph):
+-    # Recompute the original stock type and message from the retained root.
+-    # The graph remains the failure value. A two-key dict is not the receipt.
+-    require(type(graph) is dict and graph.get("schema") == "friday.sol060.error-graph.v2"
+-            and type(graph.get("root")) is int and type(graph.get("nodes")) is list
+-            and type(graph.get("values")) is list and 0 <= graph["root"] < len(graph["nodes"]),
+-            "exact error-graph.v2 root required")
+-    node = graph["nodes"][graph["root"]]
+-    require(type(node) is dict and node.get("id") == graph["root"]
+-            and type(node.get("type")) is str and type(node.get("message")) is str,
+-            "error-graph root lacks original stock type/message")
+-    stock = {"type": node["type"], "message": node["message"]}
+-    require(graph.get("stock_cause") == stock, "stock_cause is not the retained root type/message")
+-    return stock
++    return validate_stock_error_graph(graph)
+ 
+ 
+ class AllocationFD(int):
+@@ -208,7 +348,7 @@
+     FD_GENERATION += 1
+     record = {"generation": FD_GENERATION, "where": where, "number": None,
+               "state": "PLANNED", "attempted_once": False,
+-              "acquire_error_object": None, "close_error_object": None,
++              "acquire_error_object": None, "acquire_error": None, "close_error_object": None,
+               "close_error": None, "token": None}
+     # The slot is taken before the native acquire. Unused arena slots stay None.
+     require(FD_HISTORY_USED < FD_HISTORY_CAP,
+@@ -239,6 +379,7 @@
+         return publish_allocation(record, number)
+     except BaseException as exc:
+         record["acquire_error_object"] = exc
++        record["acquire_error"] = deferred_error(exc)
+         raise
+     finally:
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+@@ -261,6 +402,7 @@
+     except BaseException as exc:
+         for record in records:
+             record["acquire_error_object"] = exc
++            record["acquire_error"] = deferred_error(exc)
+         raise
+     finally:
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+@@ -286,7 +428,6 @@
+     except BaseException as exc:
+         STOP = True
+         record["close_error_object"] = exc  # stored before fallible projection
+-        record["close_error"] = exact_error(exc)
+         raise
+     record["state"] = "CONFIRMED_CLOSED"
+ 
+@@ -312,10 +453,14 @@
+                 retire_record(record)
+             except BaseException as exc:
+                 first = first or exc
++    # All known physical firstcloses have been attempted before public references.
++    for record in FD_HISTORY[:FD_HISTORY_USED]:
++        if record["close_error_object"] is not None:
++            record["close_error"] = deferred_error(record["close_error_object"])
+     unresolved = [record for record in FD_HISTORY[:FD_HISTORY_USED] if record["state"] not in
+                   ("PLANNED", "CONFIRMED_CLOSED")]
+     R["descriptor_allocation_history"] = [{k: r[k] for k in
+-        ("generation", "where", "number", "state", "attempted_once", "close_error")}
++        ("generation", "where", "number", "state", "attempted_once", "acquire_error", "close_error")}
+         for r in FD_HISTORY[:FD_HISTORY_USED]]
+     if unresolved:
+         STOP = True
+@@ -791,9 +936,14 @@
+             item["pending_chunk"] = os.pread(item["fd"], min(4096, size - item["offset"]), item["offset"])
+             chunk = item["pending_chunk"]
+             require(bool(chunk), "short owned transport")
+-            item["data"].extend(chunk)
+-            item["offset"] += len(chunk)
+-            item["pending_chunk"] = None
++            next_offset = item["offset"] + len(chunk)
++            saved = signal.pthread_sigmask(signal.SIG_BLOCK, REGISTRATION_SIGNALS)
++            try:
++                item["data"].extend(chunk)
++                item["offset"] = next_offset
++                item["pending_chunk"] = None
++            finally:
++                signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+         require(sum(len(x["data"]) for x in TRANSPORT) <= OUTPUT, "aggregate transport cap")
+     R["output"] = {item["label"]: transport_projection(item) for item in TRANSPORT}
+ 
+@@ -858,44 +1008,69 @@
+     # A complete drain is left untouched. A short prefix is partial, not success.
+     total = sum(len(item["data"]) for item in TRANSPORT)
+     for item in TRANSPORT:
+-        if item.get("fd") is None:
++        # Never overwrite an uncommitted returned chunk or retry a failed read.
++        if item.get("pending_chunk") is not None or item.get("retain_error_object") is not None:
++            item["partial"] = True
+             continue
+         try:
+-            size = os.fstat(item["fd"]).st_size
+-        except BaseException as exc:
+-            item["partial"] = True
+-            item["retain_error_object"] = exc
+-            item["retain_error"] = exact_error(exc)
+-            size = None
+-        item["produced_bytes"] = size
+-        if size is None:
+-            continue
+-        while item["offset"] < size and len(item["data"]) < STREAM and total < OUTPUT:
+-            room = min(4096, STREAM - len(item["data"]), OUTPUT - total, size - item["offset"])
+-            if room <= 0:
+-                break
++            if item.get("fd") is None:
++                continue
+             try:
+-                item["pending_chunk"] = os.pread(item["fd"], room, item["offset"])
+-                chunk = item["pending_chunk"]
++                size = os.fstat(item["fd"]).st_size
+             except BaseException as exc:
+                 item["partial"] = True
+                 item["retain_error_object"] = exc
+-                item["retain_error"] = exact_error(exc)
+-                break
+-            if not chunk:
++                item["retain_error"] = deferred_error(exc)
++                size = None
++            item["produced_bytes"] = size
++            if size is None:
++                continue
++            while item["offset"] < size and len(item["data"]) < STREAM and total < OUTPUT:
++                room = min(4096, STREAM - len(item["data"]), OUTPUT - total, size - item["offset"])
++                if room <= 0:
++                    break
++                try:
++                    item["pending_chunk"] = os.pread(item["fd"], room, item["offset"])
++                    chunk = item["pending_chunk"]
++                except BaseException as exc:
++                    item["partial"] = True
++                    item["retain_error_object"] = exc
++                    item["retain_error"] = deferred_error(exc)
++                    break
++                if not chunk:
++                    item["partial"] = True
++                    item["retain_error"] = "short transport"
++                    break
++                next_offset = item["offset"] + len(chunk)
++                saved = signal.pthread_sigmask(signal.SIG_BLOCK, REGISTRATION_SIGNALS)
++                try:
++                    item["data"].extend(chunk)
++                    item["offset"] = next_offset
++                    item["pending_chunk"] = None
++                finally:
++                    signal.pthread_sigmask(signal.SIG_SETMASK, saved)
++                total += len(chunk)
++            if item["offset"] < size:
+                 item["partial"] = True
+-                item["retain_error"] = "short transport"
+-                break
+-            item["data"].extend(chunk)
+-            item["offset"] += len(chunk)
+-            item["pending_chunk"] = None
+-            total += len(chunk)
+-        if item["offset"] < size:
++            elif item.get("pending_chunk") is None and item.get("retain_error") is None:
++                # Completion is about the settled exact producer AND full stable FD.
++                item["partial"] = not (CHILD is not None and CHILD["reaped"])
++        except BaseException as exc:
++            item["retain_error_object"] = exc
+             item["partial"] = True
+-        elif item.get("pending_chunk") is None and item.get("retain_error") is None:
+-            # Completion is about the settled exact producer AND full stable FD.
+-            item["partial"] = not (CHILD is not None and CHILD["reaped"])
+-        R["output"][item["label"]] = transport_projection(item)
++            item["retain_error"] = deferred_error(exc)
++            # The next independent cell is still attempted before any FD close.
++    first_projection = None
++    for item in TRANSPORT:
++        try:
++            R["output"][item["label"]] = transport_projection(item)
++        except BaseException as exc:
++            item["retain_error_object"] = exc
++            item["partial"] = True
++            item["retain_error"] = deferred_error(exc)
++            first_projection = first_projection or exc
++    if first_projection is not None:
++        raise first_projection
+ 
+ 
+ def register_parent(origin):
+@@ -1180,7 +1355,7 @@
+     STOP = True
+     R.setdefault("owned_cleanup_problems", []).append(str(why))
+     if original is not None:
+-        R.setdefault("owned_cleanup_original_errors", []).append(exact_error(original))
++        R.setdefault("owned_cleanup_original_errors", []).append(deferred_error(original))
+ 
+ 
+ def terminate_owned():
+@@ -1367,11 +1542,12 @@
+             for child in item:
+                 finite(child)
+     finite(value)
++    validate_received_error_graphs(value)
+     return value
+ 
+ 
+ def validate_common_inner(inner, mode):
+-    require(inner["schema"] == "friday.e4.node.bounded-verifier.sol060.v1"
++    require(inner["schema"] == "friday.e4.node.bounded-verifier.sol062.v1"
+             and type(inner["generation"]) is int and inner["generation"] == 1,
+             "complete current inner schema/generation required")
+     require(not any(key in inner for key in (
+@@ -1846,6 +2022,7 @@
+ 
+ 
+ def encode(record):
++    publish_errors(record)
+     if record is R:
+         for item in TRANSPORT:
+             require(restore_transport_raw(record, record["output"][item["label"]]) == bytes(item["data"]),
+@@ -1881,7 +2058,7 @@
+     R["status"] = outcome
+     qualified = True
+ except BaseException as exc:
+-    R["failure"] = exact_error(exc)
++    R["failure"] = deferred_error(exc)
+ finally:
+     # Every failure takes the same finite exact-owned shutdown and custody path.
+     for action, field in ((terminate_owned, "cleanup_failure"),
+@@ -1892,14 +2069,14 @@
+         except BaseException as exc:
+             qualified = False
+             STOP = True
+-            R[field] = exact_error(exc)
++            R[field] = deferred_error(exc)
+     if CHILD is not None and CHILD["reaped"] and len(TRANSPORT) == 2:
+         try:
+             capture_inner_evidence()
+         except BaseException as exc:
+             qualified = False
+             R["inner_evidence_capture_failure"] = {
+-                "error": exact_error(exc)}
++                "error": deferred_error(exc)}
+     try:
+         retain_produced_transport()
+         for item in TRANSPORT:
+@@ -1945,14 +2122,14 @@
+     except BaseException as exc:
+         qualified = False
+         STOP = True
+-        R["descriptor_cleanup_failure"] = exact_error(exc)
++        R["descriptor_cleanup_failure"] = deferred_error(exc)
+ 
+ try:
+     finish_allocations()
+ except BaseException as exc:
+     STOP = True
+     qualified = False
+-    R["allocation_cleanup_failure"] = exact_error(exc)
++    R["allocation_cleanup_failure"] = deferred_error(exc)
+ 
+ try:
+     due(0)
+@@ -1973,7 +2150,7 @@
+     qualified = False
+     # Keep original R/raw/cause graph. No shortened/hash-only receipt is proof.
+     retain_error_object(exc)
+-    R["publication_failure"] = exact_error(exc)
++    R["publication_failure"] = deferred_error(exc)
+     os._exit(3 if STOP else 2)  # full receipt fit CODE_OPEN, never new output cap
+ 
+ try:
+--- LAB865/verifier.py
++++ SOL062/verifier.py
+@@ -90,7 +90,7 @@
+ VERIFIER_RUNTIME = None
+ 
+ ASSIGNMENT = "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048"
+-PREFIX = "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure"
++PREFIX = "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure"
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ EXPECTED = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+@@ -118,7 +118,7 @@
+ TOTAL_OUTPUT = 0
+ OUTPUT_UNKNOWN = False
+ CALL_OWNERS = []
+-R = {"schema": "friday.e4.node.bounded-verifier.sol060.v1",
++R = {"schema": "friday.e4.node.bounded-verifier.sol062.v1",
+      "assignment": ASSIGNMENT, "generation": 1, "status": "NOT_PROVEN",
+      "calls": [], "custody": {}, "resources": {}, "cleanup": {},
+      "resource_schema": "friday.e4.node.verifier-resources.a172.v1",
+@@ -154,101 +154,241 @@
+ FD_HISTORY = [None] * FD_HISTORY_CAP
+ FD_GENERATION = 0
+ FD_SIGNALS = set(signal.valid_signals()) - {signal.SIGKILL, signal.SIGSTOP}
++# SOL062: private prospective cells are not public receipts or summaries.
++# Fixed existing256 slots. Width/stock exhaustion/whole fit still need proof.
+ ERROR_OBJECT_CAP = 256
+-ERROR_OBJECTS = []
++ERROR_OBJECTS = [None] * ERROR_OBJECT_CAP
++ERROR_TRACEBACKS = [None] * ERROR_OBJECT_CAP
++ERROR_PROJECTED = [None] * ERROR_OBJECT_CAP
++ERROR_MARKERS = [{"$private_pending_error": i} for i in range(ERROR_OBJECT_CAP)]
++ERROR_USED = 0
+ 
+ 
+ def retain_error_object(exc):
+-    if len(ERROR_OBJECTS) >= ERROR_OBJECT_CAP:
+-        raise Refusal("prefunded error-object arena exhausted; original exception retained") from exc
+-    ERROR_OBJECTS.append(exc)
++    global ERROR_USED
++    for i in range(ERROR_USED):
++        if ERROR_OBJECTS[i] is exc:
++            return i
++    if ERROR_USED >= ERROR_OBJECT_CAP:
++        raise Refusal("original fixed error-owner capacity exhausted before publication") from exc
++    i = ERROR_USED
++    # Raw first fault and its caught traceback precede every projection.
++    ERROR_OBJECTS[i] = exc
++    ERROR_TRACEBACKS[i] = exc.__traceback__
++    ERROR_USED = i + 1
++    return i
++
++
++def deferred_error(exc):
++    # Return an already prefunded marker; NO str/base64/JSON/trace walk here.
++    # An exhausted original stock factory is CODE_OPEN, never a clipped proof.
++    return ERROR_MARKERS[retain_error_object(exc)]
++
++
++def publish_errors(record):
++    # Called at a publication boundary, not inside mandatory raw/close loops.
++    # Every public failure remains a COMPLETE v2 graph after replacement.
++    # Identity, not attacker-shaped JSON, selects our private marker.
++    seen = []
++    def walk(value):
++        for i in range(ERROR_USED):
++            if value is ERROR_MARKERS[i]:
++                if ERROR_PROJECTED[i] is None:
++                    ERROR_PROJECTED[i] = exact_error(ERROR_OBJECTS[i])
++                return ERROR_PROJECTED[i]
++        if type(value) not in (dict, list):
++            return value
++        if any(value is old for old in seen):
++            return value
++        seen.append(value)
++        if type(value) is dict:
++            for key in value:
++                value[key] = walk(value[key])
++        else:
++            for i in range(len(value)):
++                value[i] = walk(value[i])
++        return value
++    return walk(record)
++
++
++def validate_stock_error_graph(graph):
++    # Both receivers check ALL full fields/references, not only copied cause.
++    # This validates shape/full reversible stock bytes, NOT native semantics.
++    require(type(graph) is dict and set(graph) == {"schema", "root", "nodes", "values",
++            "stock_cause", "native_object_reconstruction"}
++            and graph["schema"] == "friday.sol060.error-graph.v2"
++            and graph["native_object_reconstruction"] == "NOT_QUALIFIED",
++            "complete original v2 error envelope required")
++    nodes, values, root = graph["nodes"], graph["values"], graph["root"]
++    require(type(nodes) is list and 0 < len(nodes) <= 128 and type(values) is list
++            and len(values) <= 128 and type(root) is int and 0 <= root < len(nodes),
++            "full v2 arenas/root malformed")
++    def error_ref(index, nullable=True):
++        require((nullable and index is None) or
++                (type(index) is int and 0 <= index < len(nodes)), "full error reference outside arena")
++    def value_ref(cell):
++        require(type(cell) is dict and len(cell) == 1, "full typed error value required")
++        if "literal" in cell:
++            require(type(cell["literal"]) in (type(None), bool, int, str), "stock literal type changed")
++        elif "float_hex" in cell:
++            require(type(cell["float_hex"]) is str and
++                    float.fromhex(cell["float_hex"]).hex() == cell["float_hex"], "exact stock float hex")
++        elif "error_ref" in cell:
++            error_ref(cell["error_ref"], False)
++        else:
++            require(set(cell) == {"value_ref"} and type(cell["value_ref"]) is int
++                    and 0 <= cell["value_ref"] < len(values), "full value reference outside arena")
++    for i, node in enumerate(nodes):
++        require(type(node) is dict and set(node) == {"id", "module", "type", "message", "args",
++                "state", "errno", "filename", "filename2", "notes", "native_field_presence", "traceback", "cause", "context",
++                "suppress_context", "group"} and type(node["id"]) is int and node["id"] == i,
++                "full v2 node fields/identity malformed")
++        require(all(type(node[k]) is str for k in ("module", "type", "message")) and
++                type(node["suppress_context"]) is bool, "original stock cause fields missing")
++        for k in ("args", "state", "errno", "filename", "filename2", "notes"):
++            value_ref(node[k])
++        presence = node["native_field_presence"]
++        require(type(presence) is dict and set(presence) == {"errno", "filename", "filename2", "__notes__"}
++                and all(type(v) is bool for v in presence.values()), "original native absence is not explicit null")
++        for key, present in presence.items():
++            field = "notes" if key == "__notes__" else key
++            require(present or node[field] == {"literal": None}, "absent stock native field has invented value")
++        error_ref(node["cause"]); error_ref(node["context"])
++        group = node["group"]
++        require(group is None or type(group) is list, "stock exception-group presence")
++        if group is not None:
++            for member in group:
++                error_ref(member, False)
++        frames = node["traceback"]
++        require(type(frames) is list and len(frames) <= 128, "complete traceback arena")
++        for frame in frames:
++            require(type(frame) is dict and set(frame) == {"file", "function", "line", "lasti"}
++                    and type(frame["file"]) is str and type(frame["function"]) is str
++                    and type(frame["line"]) is int and type(frame["lasti"]) is int,
++                    "complete stock frame coordinates")
++    for i, cell in enumerate(values):
++        require(type(cell) is dict and type(cell.get("id")) is int and cell["id"] == i,
++                "full typed value identity")
++        kind = cell.get("kind")
++        if kind in ("bytes", "bytearray"):
++            require(set(cell) == {"id", "kind", "bytes", "sha256", "base64"}
++                    and type(cell["bytes"]) is int and cell["bytes"] >= 0
++                    and type(cell["base64"]) is str and type(cell["sha256"]) is str,
++                    "complete stock byte preimage fields")
++            raw = base64.b64decode(cell["base64"], validate=True)
++            require(len(raw) == cell["bytes"] and hashlib.sha256(raw).hexdigest() == cell["sha256"]
++                    and base64.b64encode(raw).decode("ascii") == cell["base64"],
++                    "full stock byte preimage/count/SHA not lossless")
++        elif kind in ("list", "tuple"):
++            require(set(cell) == {"id", "kind", "items"} and type(cell["items"]) is list,
++                    "complete original typed sequence")
++            for item in cell["items"]:
++                value_ref(item)
++        else:
++            require(kind == "dict" and set(cell) == {"id", "kind", "pairs"}
++                    and type(cell["pairs"]) is list, "complete typed dict")
++            for pair in cell["pairs"]:
++                require(type(pair) is list and len(pair) == 2, "complete original dict pair")
++                value_ref(pair[0]); value_ref(pair[1])
++    stock = {"type": nodes[root]["type"], "message": nodes[root]["message"]}
++    require(graph["stock_cause"] == stock, "stock cause must join actual full graph root")
++    return stock
+ 
+ 
+ def exact_error(exc):
+-    # Original native Python objects/tracebacks stay in the same owner lifetime.
+-    # Lossless stock value graph includes UnicodeDecodeError's original bytes.
+-    retain_error_object(exc)
++    # Projection occurs only after the private journal owns the native cause.
++    root_slot = retain_error_object(exc)
+     objects, nodes, values, cells = [exc], [], [], []
+     def ref(value):
+         if value is None:
+             return None
++        require(isinstance(value, BaseException), "stock exception reference type")
+         for i, old in enumerate(objects):
+             if old is value:
+                 return i
+-        if len(objects) >= 128:
+-            raise Refusal("prefunded exception-node arena exhausted") from exc
++        require(len(objects) < 128, "original exception-node capacity exhausted")
+         objects.append(value)
+         return len(objects) - 1
+     def val(value):
++        if isinstance(value, BaseException):
++            return {"error_ref": ref(value)}
+         if type(value) in (type(None), bool, int, str):
+             return {"literal": value}
+         if type(value) is float:
+-            # Exact binary floating value, no JSON NaN or lossy decimal inference.
+             return {"float_hex": value.hex()}
+         for i, old in enumerate(values):
+             if old is value:
+                 return {"value_ref": i}
+         require(type(value) in (bytes, bytearray, list, tuple, dict),
+-                "unsupported native error value; original object retained, not proof")
+-        if len(values) >= 128:
+-            raise Refusal("prefunded error-value arena exhausted") from exc
++                "unsupported stock error value; original object remains owned")
++        require(len(values) < 128, "original error-value capacity exhausted")
+         values.append(value)
+         return {"value_ref": len(values) - 1}
+-    i = 0
+-    while i < len(objects):
+-        obj = objects[i]
+-        frames, tb = [], obj.__traceback__
+-        while tb is not None:
+-            if len(frames) >= 128:
+-                raise Refusal("prefunded traceback arena exhausted") from exc
+-            frames.append({"file": tb.tb_frame.f_code.co_filename,
+-                           "function": tb.tb_frame.f_code.co_name,
+-                           "line": tb.tb_lineno, "lasti": tb.tb_lasti})
+-            tb = tb.tb_next
+-        nodes.append({"id": i, "module": type(obj).__module__,
+-            "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
+-            "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
+-            "filename": val(getattr(obj, "filename", None)),
+-            "filename2": val(getattr(obj, "filename2", None)),
+-            "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
+-            "cause": ref(obj.__cause__), "context": ref(obj.__context__),
+-            "suppress_context": obj.__suppress_context__,
+-            "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
+-        i += 1
+-    i = 0
+-    while i < len(values):
+-        obj = values[i]
+-        if type(obj) in (bytes, bytearray):
+-            cell = {"id": i, "kind": type(obj).__name__,
+-                    "bytes": len(obj), "sha256": hashlib.sha256(obj).hexdigest(),
+-                    "base64": base64.b64encode(obj).decode("ascii")}
+-        elif type(obj) in (list, tuple):
+-            cell = {"id": i, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
+-        else:
+-            cell = {"id": i, "kind": "dict", "pairs": [[val(k), val(v)] for k, v in obj.items()]}
+-        cells.append(cell)
+-        i += 1
+-    require(nodes and nodes[0]["id"] == 0, "error-graph root missing")
+-    stock = {"type": nodes[0]["type"], "message": nodes[0]["message"]}
+-    return {"schema": "friday.sol060.error-graph.v2", "root": 0,
+-            "nodes": nodes, "values": cells, "stock_cause": stock,
+-            "native_object_reconstruction": "NOT_QUALIFIED"}
++    error_index = value_index = 0
++    # Args/state/notes can reveal error aliases AFTER the first error frontier.
++    # Both frontiers drain to a fixed point; no referenced late node is omitted.
++    while error_index < len(objects) or value_index < len(values):
++        while error_index < len(objects):
++            obj = objects[error_index]
++            frames = []
++            tb = obj.__traceback__
++            for slot in range(ERROR_USED):
++                if ERROR_OBJECTS[slot] is obj:
++                    tb = ERROR_TRACEBACKS[slot]
++                    break
++            while tb is not None:
++                require(len(frames) < 128, "original traceback capacity exhausted")
++                frames.append({"file": tb.tb_frame.f_code.co_filename,
++                               "function": tb.tb_frame.f_code.co_name,
++                               "line": tb.tb_lineno, "lasti": tb.tb_lasti})
++                tb = tb.tb_next
++            nodes.append({"id": error_index, "module": type(obj).__module__,
++                "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
++                "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
++                "filename": val(getattr(obj, "filename", None)),
++                "filename2": val(getattr(obj, "filename2", None)),
++                "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
++                "native_field_presence": {k: hasattr(obj, k) for k in ("errno", "filename", "filename2", "__notes__")},
++                "cause": ref(obj.__cause__), "context": ref(obj.__context__),
++                "suppress_context": obj.__suppress_context__,
++                "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
++            error_index += 1
++        while value_index < len(values):
++            obj = values[value_index]
++            if type(obj) in (bytes, bytearray):
++                cell = {"id": value_index, "kind": type(obj).__name__, "bytes": len(obj),
++                        "sha256": hashlib.sha256(obj).hexdigest(),
++                        "base64": base64.b64encode(obj).decode("ascii")}
++            elif type(obj) in (list, tuple):
++                cell = {"id": value_index, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
++            else:
++                cell = {"id": value_index, "kind": "dict", "pairs": [[val(k), val(v)] for k,v in obj.items()]}
++            cells.append(cell)
++            value_index += 1
++    graph = {"schema": "friday.sol060.error-graph.v2", "root": 0,
++             "nodes": nodes, "values": cells,
++             "stock_cause": {"type": nodes[0]["type"], "message": nodes[0]["message"]},
++             "native_object_reconstruction": "NOT_QUALIFIED"}
++    validate_stock_error_graph(graph)
++    return graph
++
++
++def validate_received_error_graphs(record):
++    # Whole decoded receipt is bounded by its unchanged original channel cap.
++    if type(record) is dict:
++        require("$private_pending_error" not in record, "private error owner is not durable public evidence")
++        if record.get("schema") == "friday.sol060.error-graph.v2":
++            validate_stock_error_graph(record)
++            return
++        for child in record.values():
++            validate_received_error_graphs(child)
++    elif type(record) is list:
++        for child in record:
++            validate_received_error_graphs(child)
+ 
+ 
+ def original_stock_cause(graph):
+-    # Recompute the original stock type and message from the retained root.
+-    # The graph remains the failure value. A two-key dict is not the receipt.
+-    require(type(graph) is dict and graph.get("schema") == "friday.sol060.error-graph.v2"
+-            and type(graph.get("root")) is int and type(graph.get("nodes")) is list
+-            and type(graph.get("values")) is list and 0 <= graph["root"] < len(graph["nodes"]),
+-            "exact error-graph.v2 root required")
+-    node = graph["nodes"][graph["root"]]
+-    require(type(node) is dict and node.get("id") == graph["root"]
+-            and type(node.get("type")) is str and type(node.get("message")) is str,
+-            "error-graph root lacks original stock type/message")
+-    stock = {"type": node["type"], "message": node["message"]}
+-    require(graph.get("stock_cause") == stock, "stock_cause is not the retained root type/message")
+-    return stock
++    return validate_stock_error_graph(graph)
+ 
+ 
+ class AllocationFD(int):
+@@ -263,7 +403,7 @@
+     FD_GENERATION += 1
+     record = {"generation": FD_GENERATION, "where": where, "number": None,
+               "state": "PLANNED", "attempted_once": False,
+-              "acquire_error_object": None, "close_error_object": None,
++              "acquire_error_object": None, "acquire_error": None, "close_error_object": None,
+               "close_error": None, "token": None}
+     # The slot is taken before the native acquire. Unused arena slots stay None.
+     require(FD_HISTORY_USED < FD_HISTORY_CAP,
+@@ -294,6 +434,7 @@
+         return publish_allocation(record, number)
+     except BaseException as exc:
+         record["acquire_error_object"] = exc
++        record["acquire_error"] = deferred_error(exc)
+         raise
+     finally:
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+@@ -316,6 +457,7 @@
+     except BaseException as exc:
+         for record in records:
+             record["acquire_error_object"] = exc
++            record["acquire_error"] = deferred_error(exc)
+         raise
+     finally:
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+@@ -341,7 +483,6 @@
+     except BaseException as exc:
+         STOP = True
+         record["close_error_object"] = exc  # stored before fallible projection
+-        record["close_error"] = exact_error(exc)
+         raise
+     record["state"] = "CONFIRMED_CLOSED"
+ 
+@@ -367,10 +508,14 @@
+                 retire_record(record)
+             except BaseException as exc:
+                 first = first or exc
++    # All known physical firstcloses have been attempted before public references.
++    for record in FD_HISTORY[:FD_HISTORY_USED]:
++        if record["close_error_object"] is not None:
++            record["close_error"] = deferred_error(record["close_error_object"])
+     unresolved = [record for record in FD_HISTORY[:FD_HISTORY_USED] if record["state"] not in
+                   ("PLANNED", "CONFIRMED_CLOSED")]
+     R["descriptor_allocation_history"] = [{k: r[k] for k in
+-        ("generation", "where", "number", "state", "attempted_once", "close_error")}
++        ("generation", "where", "number", "state", "attempted_once", "acquire_error", "close_error")}
+         for r in FD_HISTORY[:FD_HISTORY_USED]]
+     if unresolved:
+         STOP = True
+@@ -650,9 +795,16 @@
+             owner["pending"] = os.pread(cell["fd"], amount, pos)
+             _charge_content(len(owner["pending"]))
+             require(bool(owner["pending"]), "short produced output read")
+-            owner["parts"].append(owner["pending"])
+-            pos += len(owner["pending"])
+-            owner["pending"] = None
++            # Compute allocating arithmetic BEFORE commit. Mask only the exact
++            # append/offset/pending commit, not reads, deadlines or whole cleanup.
++            next_pos = pos + len(owner["pending"])
++            saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
++            try:
++                owner["parts"].append(owner["pending"])
++                pos = next_pos
++                owner["pending"] = None
++            finally:
++                signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+         _read_room(1)
+         owner["tail"] = os.pread(cell["fd"], 1, pos)
+         _charge_content(len(owner["tail"]))
+@@ -662,7 +814,7 @@
+         cell["partial"] = False
+     except BaseException as exc:
+         owner["capture_error_object"] = exc  # native object held before projection
+-        cell["capture_error"] = exact_error(exc)
++        cell["capture_error"] = deferred_error(exc)
+         OUTPUT_UNKNOWN = OUTPUT_UNKNOWN or cell["produced_bytes"] is None or not settled
+     # Every successful/partial returned chunk remains owned even if join/encode fails.
+     parts = owner["parts"] + ([owner["pending"]] if owner["pending"] is not None else [])
+@@ -684,7 +836,7 @@
+                 cell["raw_base64"], cell["encoding"] = base64.b64encode(data).decode("ascii"), "base64"
+         except UnicodeError as exc:
+             owner["decode_error_object"] = exc
+-            cell["decode_error"] = exact_error(exc)
++            cell["decode_error"] = deferred_error(exc)
+             cell["raw_base64"], cell["encoding"] = base64.b64encode(data).decode("ascii"), "base64"
+ 
+ 
+@@ -780,7 +932,18 @@
+     stream_cells = [raw_cell(name) for name in ("stdout", "stderr", "status")]
+     write_cells = [raw_cell("written", fd) for fd in writable]
+     streams = [None, None, None]
+-    secondary_objects = []
++    # One reap + every raw cell + every stream close + every public-cell copy.
++    cells = stream_cells + write_cells
++    secondary_capacity = 2 + 2 * len(cells) + len(streams)
++    secondary_objects = [None] * secondary_capacity
++    secondary_public = [None] * secondary_capacity
++    secondary_used = 0
++    def note_secondary(exc):
++        nonlocal secondary_used
++        # Store native object first, before the private marker/public copy.
++        require(secondary_used < secondary_capacity, "finite call secondary slot overflow")
++        secondary_objects[secondary_used] = exc
++        secondary_used += 1
+     item = {"label": label, "rc": None, "reaped": False, "pid": None,
+             "spawn_state": "NOT_ATTEMPTED", "failure": None,
+             "secondary_errors": [], "capture_complete": False,
+@@ -794,7 +957,7 @@
+     # Nonserialized exact objects are owned by a separate same-lifetime graph.
+     owner = {"record": item, "streams": stream_cells, "written": write_cells,
+              "primary": None, "primary_tb": None, "secondary": secondary_objects,
+-             "popen": None}
++             "popen": None, "secondary_used": 0, "publication_error": None}
+     CALL_OWNERS.append(owner)
+     try:
+         due()
+@@ -854,45 +1017,59 @@
+     except BaseException as exc:
+         primary, primary_tb = exc, exc.__traceback__
+         owner["primary"], owner["primary_tb"] = primary, primary_tb
+-        item["failure"] = exact_error(exc)
+     finally:
+         if p is not None and not item["reaped"]:
+             try:
+                 reap(p)
+                 item["rc"], item["reaped"] = p.returncode, True
+             except BaseException as exc:
+-                secondary_objects.append(exc)
+-                item["secondary_errors"].append(exact_error(exc))
++                note_secondary(exc)
+         elif item["spawn_state"] == "NOT_ATTEMPTED":
+             item["reaped"] = True  # no creation attempt, not a fabricated child rc
+-        item["elapsed_seconds"] = (time.monotonic_ns() - start) / 1e9
+         # EVERY prefix captures ALL existing buffers before ANY stream firstclose.
+-        for cell in stream_cells + write_cells:
++        for cell in cells:
+             try:
+                 if cell["fd"] is not None:
+                     retain_cell(cell, quota if quota is not None else 0,
+                                 item["reaped"], written=cell["name"] == "written")
+             except BaseException as exc:
+-                secondary_objects.append(exc)
+-                item["secondary_errors"].append(exact_error(exc))
+-        for name, cell in zip(("stdout", "stderr", "status"), stream_cells):
+-            item[name] = published_cell(cell)
+-        item["written_data"] = [published_cell(cell) for cell in write_cells]
+-        cells = stream_cells + write_cells
+-        item["capture_complete"] = all(c["retained"] and not c["partial"] for c in cells)
+-        item["output_charge_unknown"] = any(c["output_charge_bytes"] is None for c in cells)
++                note_secondary(exc)
+         for fd in streams:
+             if fd is None:
+                 continue
+             try:
+                 close_own(fd)
+             except BaseException as exc:
+-                secondary_objects.append(exc)
+-                item["secondary_errors"].append(exact_error(exc))
++                note_secondary(exc)
++        # Fallible public-cell copying happens only AFTER all stream firstcloses.
++        for name, cell in zip(("stdout", "stderr", "status"), stream_cells):
++            try:
++                item[name] = published_cell(cell)
++            except BaseException as exc:
++                note_secondary(exc)
++        try:
++            item["written_data"] = [published_cell(cell) for cell in write_cells]
++            item["capture_complete"] = all(c["retained"] and not c["partial"] for c in cells)
++            item["output_charge_unknown"] = any(c["output_charge_bytes"] is None for c in cells)
++            item["elapsed_seconds"] = (time.monotonic_ns() - start) / 1e9
++        except BaseException as exc:
++            note_secondary(exc)
++        owner["secondary_used"] = secondary_used
++        try:
++            if primary is not None:
++                item["failure"] = deferred_error(primary)
++            for i in range(secondary_used):
++                secondary_public[i] = deferred_error(secondary_objects[i])
++            item["secondary_errors"] = secondary_public[:secondary_used]
++        except BaseException as exc:
++            owner["publication_error"] = exc
++            # Never replace the original first fault with a publication fault.
+     if primary is not None:
+         raise primary.with_traceback(primary_tb)  # original firstfault, not cleanup replacement
+-    if secondary_objects:
++    if secondary_used:
+         raise secondary_objects[0]
++    if owner["publication_error"] is not None:
++        raise owner["publication_error"]
+     require(item["capture_complete"] and not item["output_charge_unknown"] and not OUTPUT_UNKNOWN,
+             "complete actual output/count/charge required")
+     require(all(item[name]["encoding"] == "utf-8" for name in ("stdout", "stderr", "status")),
+@@ -1127,6 +1304,7 @@
+ 
+ 
+ def encode_bounded(record):
++    publish_errors(record)
+     chunks, count = [], 0
+     encoder = json.JSONEncoder(ensure_ascii=True, separators=(",", ":"), allow_nan=False)
+     for part in encoder.iterencode(record):
+@@ -1454,7 +1632,7 @@
+ try:
+     verified = main()
+ except BaseException as exc:
+-    R["failure"] = exact_error(exc)
++    R["failure"] = deferred_error(exc)
+ finally:
+     try:
+         # Failure also checks every held byte/path before closing. Reserve 20s
+@@ -1463,26 +1641,26 @@
+         R["final_custody_confirmed"] = True
+     except BaseException as exc:
+         verified = False
+-        R["custody_failure"] = exact_error(exc)
++        R["custody_failure"] = deferred_error(exc)
+     try:
+         R["own_scratch_bytes_final_before_cleanup"] = scratch()
+         resources("before_cleanup")
+     except BaseException as exc:
+         verified = False
+-        R["resource_failure"] = exact_error(exc)
++        R["resource_failure"] = deferred_error(exc)
+     try:
+         cleanup()
+     except BaseException as exc:
+         STOP = True
+         verified = False
+-        R["cleanup_failure"] = exact_error(exc)
++        R["cleanup_failure"] = deferred_error(exc)
+ 
+ try:
+     finish_allocations()
+ except BaseException as exc:
+     STOP = True
+     verified = False
+-    R["allocation_cleanup_failure"] = exact_error(exc)
++    R["allocation_cleanup_failure"] = deferred_error(exc)
+ 
+ try:
+     due(True)
+@@ -1497,7 +1675,7 @@
+     verified = False
+     # Original R/fullraw/errors remain owned. No hash-only smaller replacement.
+     retain_error_object(exc)
+-    R["publication_failure"] = exact_error(exc)
++    R["publication_failure"] = deferred_error(exc)
+     os._exit(3 if STOP else 2)  # CODE_OPEN: cannot emit full raw within32KiB
+ 
+ try:
+--- LAB865/launch-contract.json
++++ SOL062/launch-contract.json
+@@ -1,14 +1,14 @@
+ {
+-  "schema": "friday.e4.node.supervised-launch-contract.sol060.v1",
++  "schema": "friday.e4.node.supervised-launch-contract.sol062.v1",
+   "assignment": "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048",
+   "generation": 1,
+   "disposition": "INERT_CONNECTED_SOURCE_PENDING_WHOLE_REVIEW_AND_NEW_ROOT_ADMISSION",
+-  "error_raw_onceclose": "SOL060 prospective same-owner allocation records, no numeric retired cache, UNKNOWN before native firstclose; raw stdout/stderr/status/writable preowned captured once with full reversible bytes/count/SHA/custody/rc/production charges before stream close; original+secondary causal graphs held. Exact canonical same-object raw preimages avoid redundant wire copies. ALL resource/end/GPG roles unchanged. Mandatory full prefix/producer/error/history bounds and actual complete inner32KiB/supervisor64KiB fit remain CODE_OPEN; no previous review/qualification transferred. LAB865 consumers recompute original stock type/message from error-graph.v2 nodes[root]; startup and supervisor-entry oracles stay the original Refusal messages.",
++  "error_raw_onceclose": "SOL062 complete deferred original256 journal; joint full stock error/value frontiers and full bothside v2 grammar/bytes/refs; late error aliases retained, no public pending markers. Primary/secondary raw owners precede publication. Per-call finite secondary/capture slots and physical-first known-owner close; both transport cells attempted before fallible copying, pending commits masked without resetting deadline, failed reads not retried. Original onceFD/stock_cause/typed resource/oracles/roles/caps retained. New full factory/width/history/inner32KiB/super64KiB/outer2MiB/durable-delivery proof CODE_OPEN. No runtime credit.",
+   "execution_authority": "NONE in A048. SOURCE ONLY. Independent source review, independent trust admission of host bootstrap/dependencies and a separate finite execution assignment are mandatory.",
+   "source": {
+-    "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/verifier.py",
+-    "sha256": "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60",
+-    "bytes": 73847,
++    "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
++    "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
++    "bytes": 83369,
+     "mode": "0600",
+     "nlink": 1,
+     "generated_source_executed_compiled_imported_or_tested": false
+@@ -104,12 +104,12 @@
+         "sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+       },
+       "5": {
+-        "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/verifier.py",
+-        "sha256": "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60",
+-        "bytes": 73847
++        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/verifier.py",
++        "sha256": "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
++        "bytes": 83369
+       },
+       "6": {
+-        "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/launch-contract.json",
++        "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/launch-contract.json",
+         "sha256_binding": {
+           "fixed_binding": "sealed_contract_full_sha256",
+           "provider": "supervisor.CONTRACT_SHA",
+@@ -140,7 +140,7 @@
+       "-B",
+       "/proc/self/fd/5",
+       "--reviewed-source-sha256",
+-      "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60",
++      "8395d16e1f5da5b33ff8e632452a973cc07ec23a5a8f53acc984ffabe42e5ef6",
+       "--reviewed-contract-sha256",
+       {
+         "fixed_binding": "sealed_contract_full_sha256",
+@@ -489,7 +489,7 @@
+     "only_new_exact_source_contract_result_files": true
+   },
+   "supervisor": {
+-    "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/supervisor.py",
++    "path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure/supervisor.py",
+     "whole_byte_pin_authority": "Acyclic exact chain: full verifier bytes -> this full contract -> literal SOURCE_SHA/CONTRACT_SHA plus sizes in full supervisor -> RESULT and independent review exact supervisor pin. No own SHA literal is embedded in its own file; all binding objects are non-overridable fixed rules resolved by the real launcher, never caller-provided placeholders.",
+     "bootstrap_pre_python_profile": {
+       "executable": "held /usr/bin/prlimit fd3",
+@@ -727,6 +727,26 @@
+     "resources": "all original caps and all6 retained; new performing source sizes, schema, all output/error bounds and full19 custody must be independently qualified",
+     "GPG": "Exact pinned stock no-keyring semantics for show/dearmor and explicit sealed ring for checks/verification under unchanged0500 home, actualrc/fingerprint/six calls mandatory",
+     "complete_error_values": "No message slicing in caller/supervisor/verifier. Independently qualify full factory plus source-prefix bounds and all normal/error receipt shapes under original32/64KiB producer and2MiB whole caps.",
+-    "SOL060": "Different-author WHOLE exact Source6/new19/error/fullraw/reference grammar/finite histories+all35 shapes+bounds; actual new receiver binding required before original all6 authorized effects. SOURCE_READY/ROOT_ADMISSION/GO remain false; no incomplete capture or failed full serialization is acceptance."
++    "SOL062": "Independent WHOLE exact final Source6/actual19/numeric9/rawmanifest/self-crosshash/new graph shapes/prefixes/resources/factories before any effects; SourceReady/Root_admission/GO=false. Full raw and accepted durable publication remain mandatory; no capraise/oraclecut/new role."
++  },
++  "current_actor_receipt_schemas": {
++    "caller": "friday.e4.node.ordinary-stock-outer.sol062.v1",
++    "supervisor": "friday.e4.node.actual-supervisor.sol062.v1",
++    "verifier": "friday.e4.node.bounded-verifier.sol062.v1"
++  },
++  "sol062_error_publication": {
++    "schema": "friday.sol060.error-graph.v2",
++    "private_pending_marker_not_public": true,
++    "full_node_value_reference_byte_check": true,
++    "width_factory_native_cost_bound": "CODE_OPEN",
++    "complete_durable_before_native_end": "CODE_OPEN",
++    "original_arenas_unchanged": {
++      "error_owners": 256,
++      "descriptor_history": 256,
++      "nodes_per_graph": 128,
++      "values_per_graph": 128,
++      "frames_per_node": 128
++    },
++    "stock_native_optional_absence": "Explicit per-node errno/filename/filename2/__notes__ attribute presence; absent and present-null distinct, full values retained"
+   }
+ }
+--- LAB865/expectations.json
++++ SOL062/expectations.json
+@@ -1,9 +1,9 @@
+ {
+-  "schema": "friday.e4.node.ordinary-case-expectations.sol060.v1",
++  "schema": "friday.e4.node.ordinary-case-expectations.sol062.v1",
+   "authority": "NONE_ORDINARY_DATA",
+   "lifetime_memory_source_contract": {
+     "schema": "friday.sol042.retained-lease-natural-ending.v1",
+-    "materialization_path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure",
++    "materialization_path": "/var/tmp/friday-sol062-lab865-a182-node-whole6-all35-all6-stock-raw-bound-connected-source-closure",
+     "numeric_slot_is_not_allocation_lease": true,
+     "retire_launch_aliases_at_first_close": true,
+     "tracked_leases_retained_through_terminal": true,
+@@ -44,7 +44,8 @@
+     "past_payloads_measured_future_payloads_reserved": true,
+     "field_removal_or_peak_subtraction": false,
+     "fixed_producer_encoding": "full raw once; exact canonical same-object preimage refs, checked reversible before emission",
+-    "execution_authority": false
++    "execution_authority": false,
++    "bound_scope": "ARITHMETIC_PARTITION_ONLY_NOT_NEW_STOCK_FACTORY_WIDTH_OR_FULL_DELIVERY_PROOF"
+   },
+   "case_order": [
+     "startup-env-negative",
+@@ -232,7 +233,7 @@
+     "supervisor": "friday.e4.node.supervisor-resources.a172.v1",
+     "verifier": "friday.e4.node.verifier-resources.a172.v1"
+   },
+-  "sol060_raw_error_reference_qualification": {
++  "sol062_stock_error_raw_qualification": {
+     "schema": "friday.sol060.same-raw-object.v1",
+     "new_error_graph": "friday.sol060.error-graph.v2",
+     "mandatory_fullraw": true,
+@@ -240,15 +241,26 @@
+     "closed_all35_metadata_and_history_bound": "CODE_OPEN",
+     "inner32KiB_and_supervisor64KiB_fit": "CODE_OPEN",
+     "old_A175_bound_transfer": false,
+-    "consumer_join": "original_stock_cause(nodes[root])",
++    "consumer_join": "validate_stock_error_graph(full nodes/values/bytes/aliases) then actual nodes[root] stock cause",
+     "stale_top_level_failure_equality": false,
+-    "startup_controls_joined": ["startup-env-negative", "startup-as-negative"],
+-    "supervisor_entry_controls_joined": ["supervisor-entry-fd7", "supervisor-entry-fd127"],
++    "startup_controls_joined": [
++      "startup-env-negative",
++      "startup-as-negative"
++    ],
++    "supervisor_entry_controls_joined": [
++      "supervisor-entry-fd7",
++      "supervisor-entry-fd127"
++    ],
+     "prefunded_descriptor_history_cap": 256,
+     "prefunded_error_object_cap": 256,
+     "prefunded_exception_node_cap": 128,
+     "publication_over_inner_cap": "exit_without_smaller_substitute",
+     "inner32KiB_complete_graph_fit": "NOT_PROVEN",
+-    "native_object_reconstruction": "NOT_QUALIFIED"
++    "native_object_reconstruction": "NOT_QUALIFIED",
++    "private_error_journal": "fixed original256; no graph or str in catch; complete v2 only at publication boundary",
++    "exception_error_ref": "original error aliases in args/state/notes/groups; joint error/value frontiers",
++    "projection_failure_before_later_raw_or_knownclose": "moved outside designated loops; full stock capacity/implicit allocation proof CODE_OPEN",
++    "actual_complete_factory_bound": "CODE_OPEN",
++    "original_domain": "qualified stock32/path160/clock32/shared900; not universal C heap/frame-local/nativecustom"
+   }
+ }

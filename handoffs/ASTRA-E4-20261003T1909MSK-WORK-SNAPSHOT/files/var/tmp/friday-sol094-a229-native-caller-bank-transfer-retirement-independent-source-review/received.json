@@ -1,0 +1,108 @@
+{
+  "schema": "friday.sol094.received.v1",
+  "assignment": "ASTRA-E4-A229-NATIVE-CALLER-FULL-BANK-TRANSFER-RETIREMENT-INDEPENDENT-SOURCE-REVIEW-SOL094",
+  "generation": 1,
+  "event": "ASTRA-E4-SOL094-TASK",
+  "accepted": {
+    "utc": "2026-10-03 15:22:15 UTC",
+    "msk": "2026-10-03 18:22:15 MSK",
+    "epoch": 1791040935000
+  },
+  "task": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-TASK-20261003.txt",
+    "bytes": 1872,
+    "sha256": "9680639223ef9f1a326b62b152a35f77eca81bfcfdeb0a228b85cc53f2e4ea0c",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534290",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1872",
+      "1791040907922749956",
+      "1791040907996754693"
+    ],
+    "stable9": true
+  },
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-INPUT-20261003.json",
+    "bytes": 41535,
+    "sha256": "0abd5747a396e16b86839d74877a227ab56bfaf6a1c555642c5d2cc08e7319c9",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534288",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "41535",
+      "1791040877485802062",
+      "1791040877566807246"
+    ],
+    "stable9": true
+  },
+  "compact": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL094-PRE-TASK-COMPACT-20261003.json",
+    "bytes": 3062,
+    "sha256": "74afb86bc6e7ef81bfcb190f99f8ecda1ddab4bb7194bcd3897677a03f662102",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534292",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3062",
+      "1791040927155980839",
+      "1791040927213984551"
+    ],
+    "stable9": true
+  },
+  "pre_task_compact_verified": true,
+  "checkpoint": {
+    "path": "/home/jericho/.jericho/runtime/ASTRA-E4-CHECKPOINT-20261003T1800MSK.json",
+    "bytes": 138496,
+    "sha256": "c0f8e1417c1ea2f0afa19d144a28cb9fb43cc3f795e594c0fcfb5dc725e5eb9b",
+    "identity9_decimal_strings": [
+      "2050",
+      "9068708",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "138496",
+      "1791039629129169663",
+      "1791039629217174711"
+    ],
+    "stable9": true
+  },
+  "source_manifest": {
+    "path": "/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/manifest.json",
+    "bytes": 40262,
+    "sha256": "6ab1655494f66a919f21291cb3528f8b267a36e5476579f396a1e6ef18ddcd43",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371833",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "40262",
+      "1791040806306246741",
+      "1791040806359250133"
+    ],
+    "stable9": true
+  },
+  "native_queue": {
+    "count": 0,
+    "consume": "NONE_EMPTY_QUEUE",
+    "turn": "01a1025b-bca7-7b10-921d-84cd94b7a78b",
+    "goal": null
+  },
+  "children": 0,
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

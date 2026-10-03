@@ -1,0 +1,149 @@
+{
+  "schema": "friday.a192.original-authority-legal-relation.v1",
+  "read_order": "Full A192 input; full A189 and A180 original inputs; exact pinned original A162/A168/SOL058 normative bodies before current Source. Authenticated whole A185 review read in full; its verdict is not adopted without actual current dependency review.",
+  "normative_pins": [
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A162-INPUT-20261002.json",
+      "bytes": 87521,
+      "sha256": "a9dfb1ae60d4028852b7250682e3033500934b3be7ad7a2b675d7c0c63c08e38",
+      "identity9_decimal_strings": [
+        "2050",
+        "8532882",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "87521",
+        "1790922760031783369",
+        "1790922760090786746"
+      ],
+      "stable9": true,
+      "expected_match": true,
+      "regular_private600_nlink1": true
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A168-INPUT-20261002.json",
+      "bytes": 57136,
+      "sha256": "656c58877d79a2c3f03362c724ee8719d486d2a1809235788af27e83ef9c054c",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533224",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57136",
+        "1790925992628869317",
+        "1790925992692872981"
+      ],
+      "stable9": true,
+      "expected_match": true,
+      "regular_private600_nlink1": true
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A180-INPUT-20261002.json",
+      "bytes": 69476,
+      "sha256": "e9e064f4b29c2b0e6fcb41c9036f79aaaa8283881352687aac82b93498262ca1",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533599",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "69476",
+        "1790935377710479809",
+        "1790935377779483768"
+      ],
+      "stable9": true,
+      "expected_match": true,
+      "regular_private600_nlink1": true
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A189-INPUT-20261002.json",
+      "bytes": 84508,
+      "sha256": "5508c60ea1482ee7f1dc31d8ae7c629e3571a696973960b2232b89f21b645ce0",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533926",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "84508",
+        "1790941411655113530",
+        "1790941411716117022"
+      ],
+      "stable9": true,
+      "expected_match": true,
+      "regular_private600_nlink1": true
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL058-INPUT-20261002.json",
+      "bytes": 73786,
+      "sha256": "edd69e0556070c97b622291e4323344c3aecbccf52ea865ac0d66e7e963e8c19",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533441",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "73786",
+        "1790927525585631058",
+        "1790927525585631058"
+      ],
+      "stable9": true,
+      "expected_match": true,
+      "regular_private600_nlink1": true
+    }
+  ],
+  "actually_authorized": [
+    {
+      "norm": "A180 original_mandatory_edges[1], copied exact original A162 authority and repeated in A168/SOL058",
+      "relation": "Inert cohesive code/topology folding holder/full original202/directwait/registered raw records into an ALREADY EXISTING independently selected outside native parent before bounded birth."
+    },
+    {
+      "norm": "A180 original_mandatory_edges[1..3]; A189 directions[1]",
+      "relation": "Actually called legally accepted ownership/parenthood transfer/adoption before local loss, or confirmed finite actual native retirement within original roles and ends."
+    }
+  ],
+  "actually_prohibited": [
+    "New Root process/service/role/model/TUI",
+    "Guessed issuer/provider authority or invented ownership acceptance",
+    "Capraise/hidden role budget/author256MiB transfer to Source",
+    "Clock refresh/new deadline/expired parking/unbounded wait",
+    "Broad kill/numeric PID as actual parenthood/pidfd-only adoption",
+    "Infinite chain of merely returned local capsules or self-observed final future tail",
+    "Changing original full performing/negative/live/gate/oracle scope"
+  ],
+  "current_stock_topology_constraints": [
+    {
+      "site": "tools/worker_entry.py:86..99",
+      "constraint": "Actual original Source readonly role, unprivileged UID/GID, root_peer=(real getppid(),0,0), exact birth-parent/generation topology; selected bootstrap held and sealed before consuming bodies."
+    },
+    {
+      "site": "tools/native_owner.py:85..132; native/source_owner.c:1432..1461",
+      "constraint": "Distinct actual Root and Source native roles; exact preinitialization caps/interval/Source16/canonical4 and prescribed minread; Root parent permission/held image/provider not issued by Source."
+    },
+    {
+      "site": "native/source_owner.c:1181..1275; root_holder.py:458..510",
+      "constraint": "Only actual existing parent may birth Source after full custody and generation; exact real held child/pidfd into native owner, clone3 writes pidfd preowned before birth; called consumers must match actual direct relation."
+    },
+    {
+      "site": "native/source_owner.c:1737..1837; root_holder.py:532 onward",
+      "constraint": "Existing parent/observer/final C-entry receives immutable original end and actual directRoot pair before init; receiver same generation/start/end, fixed native error/custody before partial Python construction."
+    }
+  ],
+  "mechanism_not_automatically_prohibited_by_silence": [
+    "CLONE_VM",
+    "customheap",
+    "subreaper or other parenthood mechanism"
+  ],
+  "mechanism_not_automatically_permitted_by_name": "Any proposal must demonstrate actual legality under original stock/privilege/topology/caps and exactly called independently accepted relation. Naming it, a theoretical OS property, or local comment is not current performing implementation/qualification.",
+  "independent_conclusion": "The originals authorize a legal relation to an existing outside parent; they do NOT freeze the current dying final-kind2 topology. Current Source lacks an actually called accepted relation on its final Root prefixes and lacks explicit retirement of newly registered Source root/error lane. This review rejects those actual edges but does not certify that authorized original repair is impossible or that a new future authority is its only solution.",
+  "future_absence_alone_CODE": false,
+  "no_universal_heap_expansion": true,
+  "SourceReady": false,
+  "runtime": "NOT_RUN"
+}

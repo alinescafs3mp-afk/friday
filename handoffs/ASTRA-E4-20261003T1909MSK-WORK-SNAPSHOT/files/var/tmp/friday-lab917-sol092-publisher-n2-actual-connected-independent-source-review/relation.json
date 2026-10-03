@@ -1,0 +1,13 @@
+{
+  "caller_disagreement": "child treats a false retirement reply as an unconfirmed end; parent returns that false flag as a retained value; the shallow reader can store an earlier failure without the full body",
+  "full_reader": "current prefix schema consumed by the parent after a second seed join",
+  "ordinary_readers": [
+    "shallow failure object stored with an empty reply",
+    "prefix writer and strict full reader, retirement false on both sides"
+  ],
+  "parser": "one framed JSON object, then row and token checks, then the four script values",
+  "producer": "parent duplicates the response read end onto fd 0 before exec and sends one seed afterward",
+  "retirement": "open on the launched path",
+  "schema": "friday.lab917.sol092.n2.relation.v1",
+  "transport": "child reads the seed on fd 0; later writes use the request write end learned from that seed"
+}

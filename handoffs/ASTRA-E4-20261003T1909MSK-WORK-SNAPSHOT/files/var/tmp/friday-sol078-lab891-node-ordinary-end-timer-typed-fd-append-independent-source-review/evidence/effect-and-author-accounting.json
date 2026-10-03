@@ -1,0 +1,40 @@
+{
+  "schema": "friday.sol078.effect-accounting.v1",
+  "accepted_msk": "2026-10-03T04:47:00+03:00",
+  "authorized": "own JSON review evidence only",
+  "Source_files_written": 0,
+  "Source_execution": 0,
+  "model_children": 0,
+  "network": 0,
+  "friday_calls": 0,
+  "retries_of_Source_action": 0,
+  "global_goal_created": false,
+  "materialized_Source": false,
+  "models_reasoning_tier_provider_guard_lock_unchanged": true,
+  "known_external_hash_read_bytes_so_far": 85017144,
+  "known_external_hash_read_bytes_after_final": 168789078,
+  "final_external_pins": 252,
+  "final_snapshot_stable9": true,
+  "original134_handling": "hash only existing immutable prior Source pins, no full own acceptance",
+  "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required/no waiver",
+  "full_physical_io_RAM_and_transport": "UNKNOWN_NOT_ZERO; hash byte lower bound is not whole physical read accounting",
+  "host_incidents": [
+    "Initial bare python command absent(exit127), then used already-installed exact task host venv Python for inert JSON/stat/hash metadata. No supplied Source execution or denied-action retry.",
+    "Several metadata/literal tool displays exceeded output allowance and were truncated; subsequent reads were narrowed to missing keys/sites. All verification assertions and artifacts use whole exact local bytes, not truncated displays."
+  ],
+  "native_queue": {
+    "profile": "sol",
+    "inspections": 1,
+    "count": 0,
+    "consumed": 0,
+    "deferred": 0
+  },
+  "subagent_work": "Explicit TASK children0, none spawned or revived",
+  "author_cost_reconciliation": {
+    "actual_owned13": 615088,
+    "reported_sealed_tree_bytes": 615088,
+    "equal": true,
+    "whole_product_fit": false,
+    "implicit_IO": "UNKNOWN_NOT_ZERO"
+  }
+}

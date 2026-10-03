@@ -1,0 +1,2434 @@
+--- /var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/receipt_contract.py
++++ /var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/receipt_contract.py
+@@ -130,6 +130,15 @@
+     identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_uid,
+         value.st_gid, value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+     client=raw_client()
++    owner=globals().get("_SOURCE_INVENTORY_OWNER")
++    if retainer is None and owner is not None and not owner.closed and owner.package==package and relative in owner.members:
++        owner.verify()
++        row=owner.members[relative]
++        require(file_identity(info)==row["identity"] and file_identity(os.fstat(row["fd"]))==row["identity"],
++            "cache reads only the same held full-byte/current named9 immutable generation")
++        client.note("receipt.Source_generation.byte_reuse",[relative,row["identity"]],
++            {"bytes":len(row["raw"]),"sha256":hashlib.sha256(row["raw"]).hexdigest(),"physical_read_performed":False})
++        return row["raw"]
+     slot=None if retainer is None else retainer.reserve(relative)
+     fd=client.call("receipt.raw_member.open",_SOURCE_RAW_OS.open,
+         str(path),_SOURCE_RAW_OS.O_RDONLY|_SOURCE_RAW_OS.O_CLOEXEC|_SOURCE_RAW_OS.O_NOFOLLOW)
+@@ -1056,7 +1065,8 @@
+  def __init__(self,package,expected,binding):
+   self.package=package;self.expected=dict(expected);self.binding=binding
+   self.members={};self.pending=None;self.close_errors=[];self.closed=False
+-  self.first_close_error=None;self.close_recording_error=None
++ self.first_close_error=None;self.close_recording_error=None
++  self.bindings=[binding]
+  def reserve(self,relative):
+   slot={"path":relative,"fd":None,"identity":None,"raw":None,"first_error":None,
+    "close_attempted":False,"close_error":None,"closed":False}
+@@ -1108,8 +1118,16 @@
+  global _SOURCE_INVENTORY_OWNER
+  require(type(expected) is dict and len(expected)==54,"original complete Source54")
+  if _SOURCE_INVENTORY_OWNER is not None:
+-  _SOURCE_INVENTORY_OWNER.verify()
+-  _SOURCE_INVENTORY_OWNER.close()
++  owner=_SOURCE_INVENTORY_OWNER
++  require(owner.package==package and owner.expected==expected and not owner.closed,
++   "never refresh/rebind a different Source54 or terminated immutable generation")
++  owner.verify()
++  require(_SOURCE_GRAPH is not None and all(str(package/relative) in _SOURCE_GRAPH.protected for relative in expected),
++   "actual same-process reviewed write fence for legal full-byte ownership reuse")
++  owner.bindings.append(binding)
++  raw_client().note("receipt.Source_generation.bound_reuse",[binding],
++   {"members":54,"same_held_fullbytes_current9":True,"fresh_physical_scan_performed":False})
++  return dict(owner.expected)
+  if _SOURCE_GRAPH is not None:_SOURCE_GRAPH.protect(package,expected)
+  owner=SourceInventoryGeneration(package,expected,binding)
+  _SOURCE_INVENTORY_OWNER=owner
+@@ -1132,6 +1150,13 @@
+         info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+ 
+ def value(item):
++    if type(item) in (bytearray,memoryview):
++        view=memoryview(item)
++        return {"type":"buffer_snapshot","buffer_kind":type(item).__name__,
++            "bytes":value(view.tobytes()),"nbytes":view.nbytes,"readonly":view.readonly,
++            "format":view.format,"itemsize":view.itemsize,"ndim":view.ndim,
++            "shape":list(view.shape),"strides":list(view.strides),
++            "suboffsets":list(view.suboffsets),"contiguous":view.contiguous}
+     if item is None or type(item) in (str, bool, int):
+         return item
+     if type(item) is float:
+@@ -1182,6 +1207,7 @@
+   self.close_attempted=False;self.close_error=None;self.close_state="OWNED"
+   self.emergency_raw=[None]*7;self.first_failed_raw=[None]*7;self.emergency_damage=[None,None]
+   self.last_recording_allocation_error=None
++  self.error_graphs=[];self.pending_error_graph=None;self.error_graph_capture_error=None
+   self.pid,self.parent=os.getpid(),os.getppid()
+   self.sequence=self.frames=self.written_bytes=self.attempts=0
+   self.terminal_sent=False;self.lock=threading.RLock()
+@@ -1210,6 +1236,14 @@
+   raw_owner[0]=self.sequence;raw_owner[1]=operation;raw_owner[2]=arguments
+   raw_owner[3]=result;raw_owner[4]=error;raw_owner[5]=raw_owner[6]=None
+   self.pending_raw=raw_owner
++  if error is not None:
++   self.pending_error_graph=error
++   try:
++    graph=capture_raw_exception_graph(error)
++    self.pending_error_graph=graph;self.error_graphs.append(graph)
++   except BaseException as capture:
++    self.error_graph_capture_error=capture
++    self.damage(raw_owner,capture)
+   try:
+    with self.lock:
+     raw_owner=[self.sequence,operation,arguments,result,error,None,None]
+@@ -1372,6 +1406,28 @@
+         raise RuntimeError("a132_unattached_actor")
+     return _CLIENT
+ 
++def capture_raw_exception_graph(error):
++    """Full raw cause/context/group links with exact original traceback owners.
++
++    Original objects are owned first. This is NOT a native heap size/durable
++    transport bound; C state and final outside serialization remain mandatory.
++    """
++    graph={"root":error,"pending":error,"nodes":[],"complete_python_links":False}
++    todo=[error];seen=set()
++    while todo:
++        current=todo.pop()
++        if id(current) in seen:continue
++        seen.add(id(current));graph["pending"]=current
++        row={"error":current,"args":current.args,"traceback":current.__traceback__,
++            "cause":current.__cause__,"context":current.__context__,
++            "suppress_context":current.__suppress_context__,"notes":getattr(current,"__notes__",None),
++            "groups":getattr(current,"exceptions",()),"python_state":vars(current)}
++        graph["nodes"].append(row)
++        for linked in (row["cause"],row["context"],*row["groups"]):
++            if linked is not None:todo.append(linked)
++    graph["pending"]=None;graph["complete_python_links"]=True
++    return graph
++
+ class _RootObservedModule:
+     OPERATIONS = {"open","close","read","pread","write","pwrite","fstat","lstat","stat",
+         "readlink","listdir","getpid","getppid","pidfd_open","wait4","set_blocking",
+@@ -1489,6 +1545,9 @@
+         self.role=role;self.local=threading.local();self.owners=[];self.pending=None
+         self.first_error=None;self.cleanup_errors=[];self.popen=[];self.fd_generations={}
+         self.protected=set();self.protected_parent=set();self.raw_streams=[]
++        self.raw_call_serial=0;self.physical_writes=[];self.physical_pending=None
++        self.channel_serial=0;self.physical_gaps=[]
++        self.write_lock=threading.RLock()
+     def protect(self,package,relatives):
+         for relative in relatives:
+             path=str(package/relative)
+@@ -1515,6 +1574,12 @@
+             require(str(path) not in self.protected and str(path) not in self.protected_parent,
+                 "same-generation reviewed Source member/ancestor immutable")
+     def invoke(self,operation,function,args,kwargs):
++        if operation in ("os.write","os.pwrite","os.writev","os.pwritev","raw.write") and not getattr(self.local,"recorder",False):
++            # Serializes actual physical writes within this actor/process;
++            # cross-process order is separately reconstructed from real reads.
++            with self.write_lock:return self._invoke(operation,function,args,kwargs)
++        return self._invoke(operation,function,args,kwargs)
++    def _invoke(self,operation,function,args,kwargs):
+         if getattr(self.local,"recorder",False):return function(*args,**kwargs)
+         slot={"operation":operation,"arguments":[args,kwargs],"raw_result":None,
+             "raw_error":None,"recording_error":None,"active_error":sys.exc_info()[1]}
+@@ -1523,7 +1588,7 @@
+         cleanup=operation.endswith(".close") or operation in ("Pool.shutdown","Thread.join","Popen.wait","Popen.poll")
+         if not cleanup:raw_client().check()
+         try:
+-            if operation.startswith("stream.") and bound is not None and hasattr(bound,"fileno"):
++            if operation.startswith(("stream.","raw.")) and not operation.endswith(".__init__") and bound is not None and hasattr(bound,"fileno"):
+                 channel={"fd":None,"encoding":None,"errors":None,"name":None}
+                 slot["channel"]=channel
+                 channel["fd"]=bound.fileno()
+@@ -1532,7 +1597,14 @@
+                 channel["name"]=getattr(bound,"name",None)
+                 channel["unbuffered_stock_fileio"]=(type(bound).__module__=="_io"
+                     and type(bound).__name__=="FileIO")
++                channel["generation"]=getattr(bound,"_source_channel_generation",None)
+             self.fence(operation,args,kwargs)
++            if operation in ("os.write","raw.write"):
++                channel=slot.setdefault("channel",{})
++                fd=channel.get("fd",args[0] if operation=="os.write" else None)
++                channel["fd"]=fd;channel["identity9"]=id9(_SOURCE_RAW_OS.fstat(fd))
++                channel["physical_sequence"]=self.raw_call_serial;self.raw_call_serial+=1
++                channel["pipe_buf"]=_SOURCE_RAW_OS.fpathconf(fd,"PC_PIPE_BUF") if stat.S_ISFIFO(channel["identity9"][2]) else None
+             if not cleanup:raw_client().check()
+             if operation=="os.close":
+                 generation=self.fd_generations.get(args[0])
+@@ -1543,7 +1615,12 @@
+                         return None
+                     require(not generation.get("close_attempted"),"ambiguous close generation: no retry")
+                     generation["close_attempted"]=True
+-            if operation in ("os.read","os.pread") and _SOURCE_READ_METER is not None:
++            if operation in ("raw.read","raw.readinto") and _SOURCE_READ_METER is not None:
++                requested=args[0] if operation=="raw.read" else memoryview(args[0]).nbytes
++                slot["raw_result"]=_SOURCE_READ_METER.raw_read(operation,function,args,kwargs,
++                    requested,slot["channel"]["fd"],"bytes" if operation=="raw.read" else "count",
++                    () if operation=="raw.read" else (args[0],))
++            elif operation in ("os.read","os.pread") and _SOURCE_READ_METER is not None:
+                 slot["raw_result"]=_SOURCE_READ_METER.read(operation,function,args,args[0],
+                     args[2] if operation=="os.pread" else None)
+             elif _SOURCE_READ_METER is not None and (operation in ("os.readv","os.preadv")
+@@ -1552,6 +1629,12 @@
+                 slot["raw_result"]=_SOURCE_READ_METER.adapter(operation,function,args,kwargs,
+                     slot.get("channel",{}).get("fd"))
+             else:slot["raw_result"]=function(*args,**kwargs)
++            if operation=="raw.write":
++                # Raw FileIO.write is the actual buffer/encoder output edge.
++                # Its returned prefix, not text acceptance, defines pipe bytes.
++                slot["physical_bytes"]=bytes(memoryview(args[0]))[:slot["raw_result"]] if slot["raw_result"] is not None else b""
++                slot["physical_serial"]=slot["channel"]["physical_sequence"]
++                self.physical_pending=slot;self.physical_writes.append(slot)
+             if operation in ("os.open","os.memfd_create","os.pidfd_open","os.dup","os.dup2"):
+                 self.fd_generations[slot["raw_result"]]={"owner":slot,"fd":slot["raw_result"]}
+             if operation in ("os.pipe","os.pipe2"):
+@@ -1580,7 +1663,7 @@
+ def install_source_graph(role):
+     global _SOURCE_GRAPH
+     if _SOURCE_GRAPH is not None:return _SOURCE_GRAPH
+-    import builtins,io,posix,subprocess,selectors,threading,concurrent.futures
++    import builtins,io,posix,subprocess,selectors,threading,concurrent.futures,_pyio,_io
+     graph=SourceGraphOwner(role);_SOURCE_GRAPH=graph
+     for name in ("open","close","read","pread","readv","preadv","write","pwrite","writev","pwritev",
+         "fstat","lstat","stat","readlink","listdir","mkdir","unlink","remove","rmdir",
+@@ -1592,8 +1675,103 @@
+             return graph.invoke("os."+_name,_raw,args,kwargs)
+         setattr(os,name,observed)
+         if hasattr(posix,name):setattr(posix,name,observed)
++    class ObservedFileIO(io.FileIO):
++        def __init__(self,*args,**kwargs):
++            slot={"operation":"raw.FileIO.partial","raw_result":self,"arguments":[args,kwargs],
++                "raw_error":None,"recording_error":None}
++            graph.pending=slot;graph.owners.append(slot);graph.raw_streams.append(self)
++            self._source_close_attempted=False;self._source_close_error=None
++            self._source_channel_generation=[os.getpid(),graph.channel_serial]
++            graph.channel_serial+=1
++            try:graph.invoke("raw.FileIO.__init__",super().__init__,args,kwargs)
++            except BaseException as error:slot["raw_error"]=error;raise
++        def read(self,size=-1):
++            if size is None or size<0:return self.readall()
++            return graph.invoke("raw.read",super().read,(size,),{})
++        def readinto(self,buffer):return graph.invoke("raw.readinto",super().readinto,(buffer,),{})
++        def readall(self):
++            slot={"operation":"raw.readall","chunks":[],"raw_result":None,"raw_error":None}
++            graph.pending=slot;graph.owners.append(slot)
++            try:
++                while True:
++                    # The unchanged actor's remaining budget bounds each actual
++                    # physical request; the loop ends only on actual EOF/None.
++                    cap=io.DEFAULT_BUFFER_SIZE
++                    if _SOURCE_READ_METER is not None:
++                        with _SOURCE_READ_METER.lock:
++                            cap=min(cap,max(1,_SOURCE_READ_METER.maximum-
++                                _SOURCE_READ_METER.upper_used-_SOURCE_READ_METER.inflight))
++                    raw=self.read(cap)
++                    if raw is None:
++                        slot["raw_result"]=None if not slot["chunks"] else b"".join(slot["chunks"])
++                        return slot["raw_result"]
++                    if not raw:
++                        slot["raw_result"]=b"".join(slot["chunks"])
++                        return slot["raw_result"]
++                    slot["chunks"].append(raw)
++            except BaseException as error:slot["raw_error"]=error;raise
++        def write(self,buffer):
++            info=_SOURCE_RAW_OS.fstat(self.fileno())
++            if stat.S_ISFIFO(info.st_mode):
++                buffer=memoryview(buffer).cast("B")[:_SOURCE_RAW_OS.fpathconf(self.fileno(),"PC_PIPE_BUF")]
++            # A short raw return is part of RawIOBase's original contract; the
++            # real BufferedWriter retains/retries its unaccepted suffix itself.
++            return graph.invoke("raw.write",super().write,(buffer,),{})
++        def close(self):
++            if self._source_close_attempted:
++                if self._source_close_error is not None:raise RuntimeError("ambiguous raw stream close: no retry")
++                return
++            self._source_close_attempted=True
++            try:return graph.invoke("raw.close",super().close,(),{})
++            except BaseException as error:self._source_close_error=error;raise
++    class ObservedRaw(io.RawIOBase):
++        """Actual existing raw descriptor below transferred stdio buffers."""
++        def __init__(self,raw):
++            self.raw=raw;self._source_channel_generation=[os.getpid(),graph.channel_serial]
++            raw._source_channel_generation=self._source_channel_generation
++            graph.channel_serial+=1;self.close_attempted=False;self.close_error=None
++            graph.raw_streams.append(self)
++        def fileno(self):return self.raw.fileno()
++        @property
++        def name(self):return self.raw.name
++        def readable(self):return self.raw.readable()
++        def writable(self):return self.raw.writable()
++        def seekable(self):return self.raw.seekable()
++        def isatty(self):return graph.invoke("raw.isatty",self.raw.isatty,(),{})
++        def readinto(self,buffer):return graph.invoke("raw.readinto",self.raw.readinto,(buffer,),{})
++        def read(self,size=-1):
++            if size is None or size<0:
++                # RawIOBase.readall calls this same observed raw.read repeatedly.
++                return io.RawIOBase.readall(self)
++            return graph.invoke("raw.read",self.raw.read,(size,),{})
++        def write(self,buffer):
++            info=_SOURCE_RAW_OS.fstat(self.fileno())
++            if stat.S_ISFIFO(info.st_mode):
++                buffer=memoryview(buffer).cast("B")[:_SOURCE_RAW_OS.fpathconf(self.fileno(),"PC_PIPE_BUF")]
++            return graph.invoke("raw.write",self.raw.write,(buffer,),{})
++        def seek(self,*args):return graph.invoke("raw.seek",self.raw.seek,args,{})
++        def tell(self):return graph.invoke("raw.tell",self.raw.tell,(),{})
++        def flush(self):return graph.invoke("raw.flush",self.raw.flush,(),{})
++        def close(self):
++            if self.close_attempted:
++                if self.close_error is not None:raise RuntimeError("ambiguous transferred raw close: no retry")
++                return
++            self.close_attempted=True
++            try:
++                # RawIOBase.closed is set without a second physical descriptor close.
++                io.RawIOBase.close(self)
++                graph.invoke("raw.close",self.raw.close,(),{})
++            except BaseException as error:self.close_error=error;raise
++    # Stock Python open validates modes/arguments and builds the ACTUAL C
++    # Buffered/Text layers on the observed raw object. No result re-encoding.
++    # Its error-order compatibility with stock C open requires independent
++    # qualification; startup/imports and pre-existing streams remain explicit.
++    _pyio.FileIO=ObservedFileIO
++    for name in ("BufferedReader","BufferedWriter","BufferedRandom","TextIOWrapper"):
++        setattr(_pyio,name,getattr(io,name))
++    _pyio.text_encoding=io.text_encoding
+     for module,name in ((builtins,"open"),(io,"open"),(os,"fdopen")):
+-        original=getattr(module,name)
++        original=_pyio.open
+         def opened(*args,_raw=original,_name=name,**kwargs):
+             raw=graph.invoke("stream."+_name,_raw,args,kwargs)
+             graph.pending={"operation":"stream.partial_owner","raw_result":raw,"raw_error":None}
+@@ -1604,6 +1782,12 @@
+             graph.owners.append(graph.pending)
+             return owned
+         setattr(module,name,opened)
++    def source_open_code(path):
++        # importlib's real SourceFileLoader.get_data uses _io.open_code, not
++        # builtins.open. Newly reached loader physical reads now use the same
++        # observed raw path. Pre-attachment interpreter/import IO stays OPEN.
++        return io.open(path,"rb")
++    _io.open_code=source_open_code
+     original_popen=subprocess.Popen
+     class ObservedPopen(original_popen):
+         def __init__(self,*args,**kwargs):
+@@ -1671,7 +1855,25 @@
+     concurrent.futures.ThreadPoolExecutor=ObservedPool
+     for name in ("stdin","stdout","stderr"):
+         stream=getattr(sys,name,None)
+-        if stream is not None and not isinstance(stream,OwnedStream):setattr(sys,name,OwnedStream(stream,graph))
++        if stream is not None and not isinstance(stream,OwnedStream):
++            slot={"operation":"startup.stream.transfer","name":name,"text":stream,
++                "buffer":getattr(stream,"buffer",None),"raw":None,"replacement":None,"error":None}
++            graph.pending=slot;graph.owners.append(slot)
++            graph.physical_gaps.append(slot)
++            if isinstance(stream,io.TextIOWrapper) and isinstance(stream.buffer,(io.BufferedReader,io.BufferedWriter)):
++                encoding,errors=stream.encoding,stream.errors
++                line_buffering,write_through=stream.line_buffering,stream.write_through
++                try:
++                    slot["buffer"]=graph.invoke("stream.detach",stream.detach,(),{})
++                    slot["raw"]=graph.invoke("stream.detach",slot["buffer"].detach,(),{})
++                    proxy=ObservedRaw(slot["raw"])
++                    buffer=io.BufferedReader(proxy) if name=="stdin" else io.BufferedWriter(proxy)
++                    slot["replacement"]=io.TextIOWrapper(buffer,encoding,errors,None,line_buffering,write_through)
++                    setattr(sys,name,OwnedStream(slot["replacement"],graph))
++                except BaseException as error:slot["error"]=error;raise
++            else:
++                # Non-stock startup topology is not silently claimed observed.
++                setattr(sys,name,OwnedStream(stream,graph))
+     return graph
+ 
+ def observe_root_call(role,function,*args,**kwargs):
+--- /var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/source/caller.py
++++ /var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/caller.py
+@@ -83,6 +83,82 @@
+          "site":None,"locals":None,"recording_error":None}
+      self.emergency_raw=[None]*6;self.first_failed_raw=[None]*6;self.emergency_damage=[None,None]
+      self.last_recording_allocation_error=None
++     self.method_serial=0;self.method_stack=[];self.state_ids={};self.state_owners=[]
++     self.state_pending=None;self.method_pending=None
++     self.state_byte_pins=set()
++ def state(self,item):
++     """Stable identity graph, full data leaves and retained native raw owners.
++
++     An opaque C/recorder owner is explicitly NOT a replayable primitive graph.
++     Its actual reference is retained; a consumer cannot count it as complete.
++     """
++     nodes=[];seen={};opaque=[]
++     def walk(value):
++         if value is None or type(value) in (bool,int,str):return value
++         if type(value) is float:return {"kind":"float","hex":value.hex()}
++         if type(value) is bytes:
++             pin=hashlib.sha256(value).hexdigest()
++             if pin in self.state_byte_pins:return {"kind":"owned_bytes","sha256":pin,"bytes":len(value)}
++             return {"kind":"bytes","hex":value.hex()}
++         if isinstance(value,os.stat_result):return {"kind":"identity9","value":_identity(value)}
++         key=id(value)
++         if key in seen:return {"ref":seen[key]}
++         if key not in self.state_ids:
++             self.state_pending=value;self.state_owners.append(value)
++             self.state_ids[key]=len(self.state_owners)-1
++         number=self.state_ids[key];seen[key]=number
++         node={"id":number,"module":type(value).__module__,"class":type(value).__qualname__,"kind":None,"state":None}
++         nodes.append(node)
++         if type(value) in (list,tuple,set,frozenset,bytearray):
++             node["kind"]=type(value).__name__
++             node["state"]=value.hex() if type(value) is bytearray else [walk(v) for v in value]
++         elif type(value) is dict:
++             node["kind"]="dict";node["state"]=[[walk(k),walk(v)] for k,v in value.items()]
++         elif type(value).__name__ in ("Clock","Named","Directory","Generation","OwnScope","Held","IO","Session","AcquisitionOwner","Budget","ReadJournal"):
++             node["kind"]="object";node["state"]={k:walk(v) for k,v in vars(value).items()}
++         else:
++             # Native process/selector/library/callable and recorder objects
++             # require their separately recorded generation/state protocol.
++             node["kind"]="opaque_owned";opaque.append(number)
++         return {"ref":number}
++     root=walk(item)
++     return {"schema":"friday.sol056.method-state-graph.v1","root":root,"nodes":nodes,
++         "opaque_owned_ids":opaque,"complete_replayable_state":not opaque}
++ def method_enter(self,name,args,kwargs,cleanup=False):
++     row={"call":self.method_serial,"parent":self.method_stack[-1] if self.method_stack else None,
++         "name":name,"args":args,"kwargs":kwargs,"raw_self":args[0] if args else None,
++         "raw_result":None,"raw_error":None,"before":None,"after":None,"recording_error":None,"cleanup":cleanup}
++     self.method_pending=row;self.method_serial+=1
++     self.method_stack.append(row["call"])
++     try:
++         row["before"]=self.state([args,kwargs])
++         self.note("sender","method.enter",[name,row["call"],row["parent"]],row["before"])
++         if not cleanup:self.check()
++     except BaseException as error:
++         row["recording_error"]=error
++         if self.method_stack and self.method_stack[-1]==row["call"]:self.method_stack.pop()
++         if not cleanup:raise
++     return row
++ def method_end(self,row,result=None,error=None):
++     row["ended"]=True
++     row["raw_result"],row["raw_error"]=result,error
++     try:
++         row["after"]=self.state([row["args"],row["kwargs"],result])
++         if error is not None:self.note("sender","method.after",[row["name"],row["call"],row["parent"]],row["after"])
++         self.note("sender","method.error" if error is not None else "method.return",
++             [row["name"],row["call"],row["parent"]],row["after"],error)
++     except BaseException as recorder:
++         row["recording_error"]=recorder
++         if error is None and not row["cleanup"]:raise
++     finally:
++         if self.method_stack and self.method_stack[-1]==row["call"]:self.method_stack.pop()
++ def predicate_state(self,frame):
++     if "self" not in frame.f_locals:return
++     raw=frame.f_locals["self"]
++     self.state_pending=raw
++     graph=self.state(raw)
++     self.note("sender","method.predicate.state",
++         [[frame.f_code.co_qualname,frame.f_lineno],self.method_stack[-1] if self.method_stack else None],graph)
+  def value(self,value):
+      if value is None or type(value) in (bool,int,str):
+          return value
+@@ -291,6 +367,13 @@
+      if name == "DefaultSelector":
+          return lambda: _ObservedSelector(self.raw,self.owner)
+      value = getattr(self.raw,name)
++     if self.owner=="sender.stockinternal" and name in ("read","pread"):
++         def internal_read(*args,**kwargs):
++             budget=getattr(getattr(_FO,"session",None),"budget",None)
++             if budget is None:raise RuntimeError("stock subprocess read has no original Sender meter")
++             return budget.read(args[0],args[1],args[2] if name=="pread" else None,
++                 kind="stock-subprocess:"+name)
++         return internal_read
+      if name in self.OPERATIONS:
+          return lambda *args,**kwargs: _E.call(self.owner,name,value,*args,**kwargs)
+      return value
+@@ -881,22 +964,30 @@
+  sender._predicate_frame=sys._getframe
+  sender.failure_owner = _FO
+  sender.native_contract = OrdinaryNativeContract()
++ _expected=stage1.get("expectation") if type(stage1) is dict else None
++ _pins=_expected.get("source_hashes") if type(_expected) is dict else None
++ _E.state_byte_pins={v for v in _pins.values() if type(v) is str and len(v)==64} if type(_pins) is dict else set()
+  def scoped(function,name):
+      def invoke(*args,**kwargs):
+          previous_scope=_E.guard_scope_snapshot
+          _E.guard_scope.append(name)
+          pure = "." not in name
++         method=None
++         cleanup=name.endswith(".close") or name=="Session.cleanup"
+          try:
+              _E.guard_scope_snapshot=tuple(_E.guard_scope)
+              if pure:_E.note("sender","grammar.enter",[name,args,kwargs])
+-             _E.check()
++             else:method=_E.method_enter(name,args,kwargs,cleanup)
++             if not cleanup:_E.check()
+              result = function(*args,**kwargs)
+              if pure:
+                  _E.note("sender","grammar.return",[name],result)
++             else:_E.method_end(method,result)
+              return result
+          except BaseException as error:
+              if pure:
+                  _E.note("sender","grammar.error",[name],error=error)
++             elif method is not None and not method.get("ended"):_E.method_end(method,error=error)
+              raise
+          finally:
+              _E.guard_scope.pop()
+@@ -906,11 +997,15 @@
+      "body_shape","context_shape","namespace_shape","custody_shape","validate_stage1","validate_init",
+      "validate_stage2","validate_claim","validate_report","check_held_observation"):
+      setattr(sender,name,scoped(getattr(sender,name),name))
+- for cls,names in ((sender.Session,("prepare_inputs","spawn","prepare_custody","preauth","final_namespace","run")),):
+-     for name in names:
+-         setattr(cls,name,scoped(getattr(cls,name),cls.__name__+"."+name))
++ for cls in (sender.Clock,sender.Named,sender.Directory,sender.Generation,sender.OwnScope,sender.Held,sender.IO,sender.Session):
++     for name,function in tuple(vars(cls).items()):
++         if callable(function):setattr(cls,name,scoped(function,cls.__name__+"."+name))
++ sender.perform_staged_send=scoped(sender.perform_staged_send,"staged.perform_staged_send")
+  for name in ("os","time","fcntl","resource","selectors","signal"):
+      setattr(sender,name,_ObservedModule(getattr(sender,name),"sender"))
++ # Stock subprocess's own errpipe reads now use the SAME actual Sender
++ # budget. This does not claim pre-import/buffer/C-internal coverage.
++ sender.subprocess.os=_ObservedModule(sender.subprocess.os,"sender.stockinternal")
+  return sender,read_bytes
+ def main():
+  _begin_performing()
+--- /var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/source/controller.py
++++ /var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/controller.py
+@@ -11,9 +11,9 @@
+ ASSIGNMENT = "ASTRA-E4-QUALITY-ROOT-NATIVE-FOCUSED-RUN-A075"
+ ROOT_THREAD = "UNISSUED"
+ ACCEPTED = 0
+-PACKAGE = "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54"
+-INDEX = "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/index/full-source.json"
+-INDEX_SHA = "d843c3cdb7ecd760bc76acaed80935d2584b57d8e219d243901a5749515b2e8d"
++PACKAGE = "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54"
++INDEX = "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/index/full-source.json"
++INDEX_SHA = "5064b09f8b6339ff6e5e74fedc4e658dccd323e94d8649af6a6d4cd3e22a6072"
+ ISSUER_ROOT = "/home/jericho/.jericho/quality-source-admission"
+ ISSUER = "friday.owner.offline-source-run-admission.v1"
+ SOURCE = "ASTRA-E4-QUALITY-STABLE-ROOT-NAMESPACE-CLOSURE-A074#1"
+@@ -145,6 +145,85 @@
+   if self.client is not None and self.client is not client:raise ValueError("Source meter owner cannot change")
+   self.client=client
+   for row in self.rows:self.record(row)
++_SemanticReadMeter=SourceReadMeter
++class SourceReadMeter(_SemanticReadMeter):
++ """Atomic reservations settle against ACTUAL raw calls, never characters."""
++ def __init__(self):
++  super().__init__()
++  import _thread
++  self.lock=_thread.allocate_lock();self.upper_used=0
++  self.raw_pending=None;self.raw_operations=[];self.semantic_operations=[]
++ def perform(self,operation,function,args,kwargs,requested,fd,offset,kind,buffers=()):
++  row={"operation":operation,"arguments":args,"kwargs":kwargs,"fd":fd,"offset":offset,
++   "requested":requested,"kind":kind,"buffers":buffers,"returned":None,"error":None,
++   "raw_buffer_after":None,"recording_error":None,"denied":False,"eof":False,
++   "would_block":False,"physical_bytes":None,"physical_count_known":False,
++   "prefix_returned":None,"settled":False,"reserved":False}
++  self.raw_pending=row;self.raw_operations.append(row)
++  with self.lock:
++   row["prefix_returned"]=self.used
++   if type(requested) is not int or requested<0 or self.upper_used+self.inflight+requested>self.maximum:
++    row["denied"]=True
++   else:
++    self.inflight+=requested;self.requested+=requested;self.calls+=1;row["reserved"]=True
++  if row["denied"]:
++   self.record(row)
++   raise ValueError("original_controller_read_bound")
++  try:
++   if self.client is not None:self.client.check()
++   row["returned"]=function(*args,**kwargs)
++  except BaseException as error:
++   row["error"]=error;row["would_block"]=isinstance(error,BlockingIOError)
++   # The original operation/error and mutable buffers precede projection.
++   # Unreturned physical counts are unknown; reserve the full request upper,
++   # not a fictitious successful zero, and disallow complete accounting credit.
++   with self.lock:
++    self.inflight-=requested;self.upper_used+=requested;row["settled"]=True
++    self.accounting_complete=False
++   if buffers:
++    try:row["raw_buffer_after"]=tuple(bytes(memoryview(b)) for b in buffers)
++    except BaseException as capture:row["buffer_capture_error"]=capture
++   self.record(row)
++   raise
++  raw=row["returned"]
++  amount=(0 if raw is None else raw) if kind=="count" else (0 if raw is None else len(raw))
++  with self.lock:
++   # Release and actual charge are one indivisible transition. A second
++   # thread cannot borrow the uncharged interval from this reservation.
++   self.inflight-=requested;row["settled"]=True
++   if type(amount) is int and 0<=amount<=requested:
++    self.used+=amount;self.upper_used+=amount
++    row["physical_bytes"]=amount;row["physical_count_known"]=True
++   else:
++    self.upper_used+=requested;self.accounting_complete=False
++    row["count_error"]=ValueError("actual_read_count_exceeds_reserved_request")
++  if buffers:
++   try:row["raw_buffer_after"]=tuple(bytes(memoryview(b)) for b in buffers)
++   except BaseException as capture:
++    row["buffer_capture_error"]=capture;self.accounting_complete=False
++  row["eof"]=requested>0 and amount==0 and raw is not None
++  row["would_block"]=raw is None
++  self.record(row)
++  if "count_error" in row:raise row["count_error"]
++  return raw
++ def raw_read(self,operation,function,args,kwargs,requested,fd,kind="bytes",buffers=()):
++  return self.perform(operation,function,args,kwargs,requested,fd,None,kind,buffers)
++ def adapter(self,operation,function,args,kwargs,fd=None):
++  if operation in ("os.readv","os.preadv"):
++   buffers=args[1] if len(args)>1 else kwargs["buffers"]
++   requested=sum(memoryview(b).nbytes for b in buffers)
++   return self.perform(operation,function,args,kwargs,requested,
++    args[0] if args else kwargs["fd"],args[2] if operation=="os.preadv" and len(args)>2 else kwargs.get("offset"),"count",buffers)
++  # A high-level read can consume existing buffered data or call the actual
++  # RawIOBase adapter repeatedly. Only that adapter is charged. readlines(hint)
++  # is a hint, never an upper-bound reservation on line/character acceptance.
++  row={"operation":operation,"arguments":[args,kwargs],"fd":fd,
++   "raw_result":None,"raw_error":None,"before_raw_call":self.calls,"after_raw_call":None}
++  self.post_read_pending=row;self.semantic_operations.append(row)
++  try:row["raw_result"]=function(*args,**kwargs)
++  except BaseException as error:row["raw_error"]=error;raise
++  finally:row["after_raw_call"]=self.calls
++  return row["raw_result"]
+ _METER=SourceReadMeter()
+ _SOURCE_PARTIAL=[]
+ class BootstrapOwner:
+@@ -271,7 +350,12 @@
+     raw = encode(value)
+     require(output_bytes + len(raw) <= OUTPUT_MAX, "output bound")
+     output_bytes += len(raw)
+-    require(os.write(1, raw) == len(raw), "complete output")
++    # Preserve the exact original line/body and output cap, but each ACTUAL
++    # shared-pipe syscall is atomic-sized. No receipt order substitutes for it.
++    pipe_buf=os.fpathconf(1,"PC_PIPE_BUF")
++    for at in range(0,len(raw),pipe_buf):
++        part=raw[at:at+pipe_buf]
++        require(os.write(1,part)==len(part),"complete output")
+ 
+ def control(deadline, phase):
+     raw = b""
+--- /var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/source/native_grammar.py
++++ /var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/native_grammar.py
+@@ -552,15 +552,28 @@
+              or type(controller_stderr) is not bytes or type(worker_files) is not dict):
+          raise ValueError("ordinary_producer_stream_types")
+      combined = {1: bytearray(),2: bytearray()}
+-     previous = -1
++     ranks={1:0,2:0};origins=set();pipe_generations={}
+      for segment in segments:
+-         if (type(segment) is not dict or set(segment) != {"sequence","producer","fd","bytes"}
+-                 or type(segment["sequence"]) is not int or segment["sequence"] <= previous
++         if (type(segment) is not dict or set(segment) != {"sequence","producer","pid","fd","bytes",
++                 "physical_sequence","pipe_identity9","pipe_buf","physical_rank"}
++                 or type(segment["sequence"]) is not int or segment["sequence"] in origins
+                  or segment["producer"] not in ("controller","dispatcher")
+                  or type(segment["fd"]) is not int or segment["fd"] not in (1,2)
+                  or type(segment["bytes"]) is not bytes):
+              raise ValueError("ordinary_producer_segment")
+-         previous = segment["sequence"]
++         origins.add(segment["sequence"])
++         fd=segment["fd"]
++         if (type(segment["physical_rank"]) is not int or segment["physical_rank"]!=ranks[fd]
++                 or type(segment["pid"]) is not int or segment["pid"]<=0
++                 or type(segment["physical_sequence"]) is not int or segment["physical_sequence"]<0
++                 or type(segment["pipe_identity9"]) is not list or len(segment["pipe_identity9"])!=9
++                 or type(segment["pipe_buf"]) is not int or not 0<len(segment["bytes"])<=segment["pipe_buf"]):
++             raise ValueError("ordinary_actual_per_channel_physical_writer_proof")
++         ranks[fd]+=1
++         generation=segment["pipe_identity9"]
++         if fd in pipe_generations and generation!=pipe_generations[fd]:
++             raise ValueError("ordinary_writer_pipe_generation_changed")
++         pipe_generations[fd]=generation
+          combined[segment["fd"]].extend(segment["bytes"])
+      if bytes(combined[1]) != controller_stdout or bytes(combined[2]) != controller_stderr:
+          raise ValueError("ordinary_combined_dispatcher_controller_pipes")
+@@ -568,7 +581,8 @@
+          if type(path) is not str or not path or type(wire) is not bytes:
+              raise ValueError("ordinary_exclusive_worker_stream")
+      return {"stdout": controller_stdout,"stderr": controller_stderr,
+-             "worker_files": dict(worker_files),"claimed_authority": False}
++             "worker_files": dict(worker_files),"claimed_authority": False,
++             "ordering_scope":"ACTUAL_PER_PIPE_BYTE_ORDER_NOT_GLOBAL_RECEIPT_ARRIVAL"}
+  @staticmethod
+  def matching_bytes(trace_wire,byte_producer):
+      ""
+--- /var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/source/ordinary_root_consumers.py
++++ /var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/ordinary_root_consumers.py
+@@ -65,6 +65,15 @@
+         return [decode(v,held) for v in value]
+     if type(value) is dict:
+         kind = value.get("type")
++        if kind=="buffer_snapshot":
++            require(set(value)=={"type","buffer_kind","bytes","nbytes","readonly","format",
++                "itemsize","ndim","shape","strides","suboffsets","contiguous"}
++                and value["buffer_kind"] in ("bytearray","memoryview")
++                and type(value["nbytes"]) is int and value["nbytes"]>=0,
++                "exact full actual raw buffer snapshot schema")
++            raw=decode(value["bytes"],held)
++            require(type(raw) is bytes and len(raw)==value["nbytes"],"all actual mutable/view bytes retained")
++            return {**value,"bytes":raw}
+         if kind=="held_bytes":
+             require(held is not None,"Source byte reference requires an actual independently Root-held full object")
+             return held.full_byte_reference(value)
+@@ -208,7 +217,7 @@
+     def operations(self, name):
+         return [(index, event) for index, event in self.source if event["operation"] == name]
+ 
+-    def bind_variables(self, values, bindings):
++    def bind_variables(self, values, bindings,case,fault):
+         require(type(values) is dict and set(values) == VARIABLE_KEYS
+             and type(bindings) is dict and set(bindings) == VARIABLE_KEYS, "all original variables explicitly bound")
+         roots = {index: row for index, row in self.root}
+@@ -237,11 +246,47 @@
+                 if name in ("wait4_status","wait4_usage") and (not row.get("result") or row["result"][0]!=values["holder_pid"]):continue
+                 try:observed=node(row,list(path))
+                 except (KeyError,IndexError,TypeError):continue
+-                if name=="error_errno" and observed is None:continue
++                if name=="fd_names":
++                    packed=row.get("arguments")
++                    if not (type(packed) is list and len(packed)==3 and packed[0]=="sender"
++                        and packed[1][0]==["/proc/self/fd"] and "Session.fd_guard" in packed[2]):continue
++                if name=="error_errno":
++                    if observed is None:continue
++                    # Errno belongs to the case's ACTUAL first fault, not to a
++                    # convenient arbitrary later recorder/cleanup/native error.
++                    if type(fault) is not dict or index!=fault.get("event_index"):continue
+                 candidates.append((index,row,observed))
+             if values[name] is None or name in ("identities","fd_names") and values[name]==[]:
+-                require(reference == {"state": "NOT_REACHED"} and not candidates,
+-                    "NOT_REACHED requires absent actual purpose, not optional supplied None")
++                if name=="error_errno" and case in ("positive","nonzero-dispatcher","ordinary-regular-artifact-refusal"):
++                    outcomes=self.operations("sender.returned_outcome")
++                    require(len(outcomes)==1 and reference=={"state":"NO_INITIATING_ERRNO","returned_index":outcomes[0][0]}
++                        and outcomes[0][1]["result"]["status"]=="RUN_REPORTED",
++                        "original no-initiating-errno domain binds a reached complete ordinary return, not event absence")
++                    continue
++                if name=="error_errno" and type(reference) is dict and reference.get("state")=="REACHED_NONE":
++                    require(set(reference)=={"state","event_index"} and reference["event_index"] in sources,
++                        "reached None errno has its exact actual original exception")
++                    observed=sources[reference["event_index"]]
++                    first=self.first_guard()
++                    require(observed["error"] is not None and observed["error"]["errno"] is None
++                        and first is not None and observed["error"]["type"]=="Refusal"
++                        and observed["error"]["text"]==first[1]
++                        and observed["arguments"][-1]==first[2],
++                        "original first refusing scope has a reached non-errno guard fault")
++                    continue
++                require(type(reference) is dict and set(reference)=={"state","cut_index","method_call"}
++                    and reference["state"]=="NOT_REACHED" and not candidates,
++                    "absence alone is never a causal NOT_REACHED proof")
++                cuts=[(index,e) for index,e in self.source if index==reference["cut_index"]
++                    and e["operation"]=="method.error" and e["arguments"][1][1]==reference["method_call"]]
++                require(len(cuts)==1 and cuts[0][1]["error"] is not None,
++                    "NOT_REACHED requires actual owned failed-method cut")
++                # Full method/error/phase replay is mandatory before this new
++                # negative interface can credit an unreached branch. Until that
++                # exact cut has been reconstructed, it stays a genuine code gap.
++                replay=[r for r in method_sites(self) if r["end_index"]==reference["cut_index"]]
++                require(len(replay)==1 and replay[0]["full_body_replay"] is True,
++                    "unreached-purpose cut requires complete original method-error replay")
+                 continue
+             require(type(reference) is dict and set(reference) == {"namespace", "event_index", "path"},
+                 "variable exact reached observation reference")
+@@ -330,7 +375,7 @@
+     def captured_producers(self,native):
+         """Full actual original writers and reads; Source bytes stay Source data."""
+         segments=[];combined={1:bytearray(),2:bytearray()};workers={};fd_paths={}
+-        required=set();worker_reads={}
++        required=set();worker_reads={};physical_orders={1:[],2:[]}
+         for index,event in self.source:
+             operation=event["operation"];arguments=event["arguments"]
+             if operation=="dispatcher.worker_launch.begin":
+@@ -352,12 +397,21 @@
+                 fd,requested=arguments[0][:2];count=event["result"]
+                 require(type(count) is int and 0<=count<=len(requested),"actual writer prefix count")
+                 raw=requested[:count]
++            elif operation.endswith(".internal.raw.write") and len(arguments)==3:
++                channel=arguments[2];fd=channel["fd"];requested=arguments[0][0];count=event["result"]
++                if type(requested) is dict and requested.get("type")=="buffer_snapshot":requested=requested["bytes"]
++                require(type(requested) in (bytes,bytearray) and type(count) is int and 0<=count<=len(requested)
++                    and type(channel.get("generation")) is list and len(channel["generation"])==2,
++                    "actual encoded raw writer/held channel generation/returned physical prefix")
++                raw=bytes(requested[:count])
+             elif operation.endswith(".internal.stream.write") and len(arguments)==3:
+                 channel=arguments[2];fd=channel["fd"];requested=arguments[0][0];count=event["result"]
+                 require(type(count) is int and 0<=count<=len(requested),"actual text/binary writer count")
+                 if fd in (1,2):
+-                    require(type(requested) is bytes and channel.get("unbuffered_stock_fileio") is True,
+-                        "buffered/text acceptance is not physical byte chronology; actual raw writer custody missing")
++                    # A semantic text/buffered acceptance is NOT physical data.
++                    # The actual underlying raw.write rows above carry bytes.
++                    if channel.get("unbuffered_stock_fileio") is not True:continue
++                    require(type(requested) is bytes,"actual unbuffered writer bytes")
+                 raw=requested[:count]
+                 if type(raw) is str:
+                     # Keep semantic text acceptance in self.source. It is never
+@@ -365,7 +419,13 @@
+                     raw=None
+             if fd in (1,2) and raw is not None:
+                 require(type(raw) is bytes,"actual producer raw bytes, never filler/silent-zero")
+-                segments.append({"sequence":index,"producer":event["actor"],"fd":fd,"bytes":raw})
++                channel=arguments[2] if len(arguments)==3 else None
++                require(type(channel) is dict and type(channel.get("physical_sequence")) is int
++                    and type(channel.get("identity9")) is list and len(channel["identity9"])==9,
++                    "writer must carry actual raw pipe generation and intra-actor physical order")
++                segments.append({"sequence":index,"producer":event["actor"],"pid":event["pid"],
++                    "fd":fd,"bytes":raw,"physical_sequence":channel["physical_sequence"],
++                    "pipe_identity9":channel["identity9"],"pipe_buf":channel["pipe_buf"]})
+                 combined[fd].extend(raw)
+         require(set(worker_reads)==required,"every exclusive worker stdout AND stderr fully consumed; no absent stream as zero")
+         mapping=native.get("controller_original_fd_map")
+@@ -373,7 +433,11 @@
+             for name,fd in mapping.items():
+                 actual=b"".join(event["result"] for _,event in self.source if event["operation"]=="read.result"
+                     and event["error"] is None and event["arguments"][1][0]==fd)
+-                complete=bytes(combined[1 if name=="stdout" else 2])
++                target=1 if name=="stdout" else 2
++                ordered=physical_pipe_merge([s for s in segments if s["fd"]==target],actual)
++                physical_orders[target]=[{**row,"physical_rank":rank} for rank,row in enumerate(ordered)]
++                complete=b"".join(s["bytes"] for s in ordered)
++                combined[target]=bytearray(complete)
+                 require(complete.startswith(actual),"complete producer recipe joins the literal original shared pipe prefix/order")
+                 observed=native["controller_pipe_observation"][str(fd)]
+                 if observed["eof"] and not observed["capture_stopped"]:
+@@ -394,6 +458,8 @@
+             walk(event)
+             require(candidates and all(raw==candidates[0] for raw in candidates),"full actual bytes tied to original event, not arbitrary producer callback")
+             return candidates[0]
++        require(mapping is not None or not segments,"no physical writer order without the actual original read-channel map")
++        segments=physical_orders[1]+physical_orders[2]
+         return segments,bytes(combined[1]),bytes(combined[2]),worker_reads,worker_reader,byte_producer
+ 
+     def grammar(self,documents,variables,case):
+@@ -497,6 +563,213 @@
+             checked[-1]["ordered_predicates"]=joined
+         return checked
+ 
++def physical_pipe_merge(segments,actual_read_body):
++    """Infer only a uniquely proven actual byte order, never frame arrival."""
++    groups={};positions={};ordered=[]
++    for row in segments:
++        require(type(row["pipe_buf"]) is int and 0<len(row["bytes"])<=row["pipe_buf"],
++            "large/non-atomic physical writes require full separate causal/barrier proof")
++        groups.setdefault(row["pid"],[]).append(row)
++    for pid,rows in groups.items():
++        rows.sort(key=lambda r:r["physical_sequence"])
++        require(len({r["physical_sequence"] for r in rows})==len(rows),"physical serial unique within one actual writer")
++        positions[pid]=0
++    # Each performed pipe read is independent of Source event delivery order.
++    # Equal-prefix candidates are deliberately not assigned arbitrarily to an
++    # actor: exact initiating-purpose/physical chronology remains ambiguous.
++    offset=0
++    while offset<len(actual_read_body):
++        candidates=[(pid,rows[positions[pid]]) for pid,rows in groups.items()
++            if positions[pid]<len(rows) and actual_read_body.startswith(rows[positions[pid]]["bytes"],offset)]
++        require(len(candidates)==1,"cross-actor physical order requires a unique actual-read/atomic-writer correspondence")
++        pid,row=candidates[0];ordered.append(row);offset+=len(row["bytes"]);positions[pid]+=1
++    require(all(positions[pid]==len(rows) for pid,rows in groups.items()),
++        "unread writer suffix/prefix capture does not prove full physical chronology")
++    return ordered
++
++class ObservedMethodReplay:
++    """Execute pinned method BODY against only reached observed results.
++
++    This is not live credit or replay by supplied expected predicate booleans.
++    Unknown/opaque self-state refuses replay instead of native fallthrough.
++    Every permitted effect consumes its exact prior observed syscall in order.
++    """
++    METHODS={"Clock","Named","Directory","Generation","OwnScope","Held","IO","Session","AcquisitionOwner"}
++    EFFECTS={"lstat","fstat","stat","readlink","listdir","open","close","read","pread","write","pwrite",
++        "dup2","pidfd_open","set_blocking","getpid","geteuid","getegid","wait4","fcntl","time","monotonic",
++        "getrlimit","setrlimit","getrusage","pthread_sigmask","signal","getsignal"}
++    def __init__(self,events,held):
++        self.events=events;self.held=held;self.cursor=0;self.objects={};self.reverse={}
++    def restore(self,graph):
++        require(graph["schema"]=="friday.sol056.method-state-graph.v1"
++            and graph["complete_replayable_state"] is True and graph["opaque_owned_ids"]==[],
++            "full actual nonopaque owned self/arguments before method replay")
++        nodes={n["id"]:n for n in graph["nodes"]}
++        require(len(nodes)==len(graph["nodes"]),"method graph stable IDs unique")
++        def leaf(value):
++            if type(value) is not dict:return value
++            if value.get("kind")=="float":return float.fromhex(value["hex"])
++            if value.get("kind")=="bytes":return bytes.fromhex(value["hex"])
++            if value.get("kind")=="owned_bytes":return self.held.full_byte_reference({
++                "type":"held_bytes","length":value["bytes"],"sha256":value["sha256"]})
++            if value.get("kind")=="identity9":return value["value"]
++            require(set(value)=={"ref"} and value["ref"] in nodes,"complete stable method-state reference")
++            number=value["ref"]
++            if number in self.objects:return self.objects[number]
++            row=nodes[number];kind=row["kind"]
++            if kind=="object":
++                require(row["class"] in self.METHODS,"only exact pinned class bodies may be reconstructed")
++                obj=getattr(G,row["class"]).__new__(getattr(G,row["class"]))
++            elif kind=="dict":obj={}
++            elif kind in ("list","tuple"):obj=[]
++            elif kind in ("set","frozenset"):obj=set()
++            elif kind=="bytearray":obj=bytearray.fromhex(row["state"])
++            else:raise ValueError("opaque/native/unknown state is not replayed")
++            self.objects[number]=obj;self.reverse[id(obj)]=number
++            if kind=="object":vars(obj).update({k:leaf(v) for k,v in row["state"].items()})
++            elif kind=="dict":obj.update((leaf(k),leaf(v)) for k,v in row["state"])
++            elif kind in ("list","tuple"):obj.extend(leaf(v) for v in row["state"])
++            elif kind in ("set","frozenset"):obj.update(leaf(v) for v in row["state"])
++            if kind in ("tuple","frozenset"):
++                obj=tuple(obj) if kind=="tuple" else frozenset(obj)
++                self.objects[number]=obj;self.reverse[id(obj)]=number
++            return obj
++        return leaf(graph["root"])
++    def module(self,original):
++        driver=self
++        class StrictObservedAPI:
++            def __getattr__(self,name):
++                if name in driver.EFFECTS:
++                    return lambda *args,**kwargs:driver.call(name,args,kwargs)
++                require(name.isupper() and hasattr(original,name),"replay has no unobserved native callable")
++                return getattr(original,name)
++        return StrictObservedAPI()
++    def call(self,name,args,kwargs):
++        require(self.cursor<len(self.events),"replay operation has an actual reached result")
++        index,event=self.events[self.cursor];self.cursor+=1
++        require(event["operation"]==name and same_typed(event["arguments"][1],[list(args),kwargs]),
++            "literal method operation/operands equal prior captured Source effect")
++        if event["error"] is not None:
++            error=event["error"]
++            if error["module"]=="builtins":
++                import builtins
++                cls=getattr(builtins,error["type"])
++                require(isinstance(cls,type) and issubclass(cls,Exception),"known exact stdlib exception type")
++            elif error["type"]=="Refusal":cls=G.Refusal
++            else:raise ValueError("unknown exception cannot be replaced by a different first fault")
++            observed=cls(*error["args"])
++            require(str(observed)==error["text"] and same_typed(getattr(observed,"errno",None),error["errno"]),
++                "replayed original error retains full arguments/text/errno")
++            raise observed
++        result=event["result"]
++        if name in ("lstat","fstat","stat"):
++            require(type(result) is list and len(result)==9,"observed metadata exact9")
++            class ExactIdentity:
++                pass
++            info=ExactIdentity()
++            for key,value in zip(("st_dev","st_ino","st_mode","st_uid","st_gid","st_nlink","st_size","st_mtime_ns","st_ctime_ns"),result):
++                setattr(info,key,value)
++            return info
++        return result
++    def after(self,graph,actual):
++        require(graph["complete_replayable_state"] is True and not graph["opaque_owned_ids"],
++            "complete actual post-state, never an opaque state promotion")
++        nodes={n["id"]:n for n in graph["nodes"]};seen=set()
++        def bind(wire,value):
++            if type(wire) is not dict:
++                require(same_typed(wire,value),"full actual method scalar state transition")
++                return
++            if wire.get("kind")=="float":require(type(value) is float and value.hex()==wire["hex"],"actual float state");return
++            if wire.get("kind")=="bytes":require(type(value) is bytes and value.hex()==wire["hex"],"actual full byte state");return
++            if wire.get("kind")=="owned_bytes":
++                require(type(value) is bytes and len(value)==wire["bytes"]
++                    and self.held.full_byte_reference({"type":"held_bytes","length":wire["bytes"],"sha256":wire["sha256"]})==value,
++                    "full actual independently held bytes, never checksum-only state replay")
++                return
++            number=wire["ref"];row=nodes[number]
++            if number in self.objects:require(self.objects[number] is value,"method state preserves actual alias identity")
++            else:self.objects[number]=value
++            if number in seen:return
++            seen.add(number);kind=row["kind"]
++            if kind=="object":
++                require(type(value).__name__==row["class"] and set(vars(value))==set(row["state"]),"full pinned method object state keyset")
++                for key,part in row["state"].items():bind(part,vars(value)[key])
++            elif kind=="dict":
++                require(type(value) is dict and len(value)==len(row["state"]),"full method dict state")
++                for (a,b),(k,v) in zip(row["state"],value.items()):bind(a,k);bind(b,v)
++            elif kind in ("list","tuple"):
++                require(type(value).__name__==kind and len(value)==len(row["state"]),"full ordered method sequence")
++                for a,b in zip(row["state"],value):bind(a,b)
++            elif kind=="bytearray":require(type(value) is bytearray and value.hex()==row["state"],"full mutable byte post-state")
++            else:raise ValueError("unimplemented native/set state reconstruction remains open")
++        bind(graph["root"],actual)
++    def run(self,name,before,after,actual_error=None):
++        packed=self.restore(before);args,kwargs=packed
++        cls,method=name.split(".",1)
++        require(type(args) is tuple and (cls=="staged" and method=="perform_staged_send"
++            or cls in self.METHODS and args and type(args[0]).__name__==cls),
++            "actual named pinned performing method and owned self")
++        originals={k:getattr(G,k,None) for k in ("os","time","fcntl","resource","selectors","signal","ctypes")}
++        import os,time,fcntl,resource,selectors,signal
++        modules={"os":os,"time":time,"fcntl":fcntl,"resource":resource,"selectors":selectors,"signal":signal}
++        prior_log=G.PREDICATE_LOG;G.PREDICATE_LOG=[]
++        try:
++            for key in originals:setattr(G,key,self.module(modules.get(key,object())))
++            result=None;replayed_error=None
++            try:result=(G.perform_staged_send(*args,**kwargs) if cls=="staged"
++                else getattr(getattr(G,cls),method)(*args,**kwargs))
++            except Exception as error:replayed_error=error
++            if actual_error is None:
++                require(replayed_error is None,"method body cannot replace an actual successful return with refusal")
++            else:
++                require(replayed_error is not None and type(replayed_error).__name__==actual_error["type"]
++                    and same_typed(list(replayed_error.args),list(actual_error["args"]))
++                    and str(replayed_error)==actual_error["text"]
++                    and same_typed(getattr(replayed_error,"errno",None),actual_error["errno"])
++                    and same_typed(getattr(replayed_error,"filename",None),actual_error["filename"])
++                    and same_typed(getattr(replayed_error,"filename2",None),actual_error["filename2"]),
++                    "entire method's first original stdlib/guard error equals its reached actual outcome")
++            require(self.cursor==len(self.events),"every actual prior effect consumed by complete method body")
++            self.after(after,[args,kwargs,result])
++            return {"returned":actual_error is None,"original_error_matched":actual_error is not None,
++                "ordered_predicates":[{k:v for k,v in row.items() if k!="locals"} for row in G.PREDICATE_LOG],
++                "whole_state_and_prior_effects":True}
++        finally:
++            for key,value in originals.items():setattr(G,key,value)
++            G.PREDICATE_LOG=prior_log
++
++def method_sites(chronology):
++    checked=[];stack={}
++    for index,event in chronology.source:
++        if event["operation"] not in ("method.enter","method.return","method.error"):continue
++        owner,arguments,scope=event["arguments"]
++        name,call,parent=arguments
++        require(owner=="sender" and type(call) is int,"actual method entry identifier")
++        if event["operation"]=="method.enter":
++            require((event["pid"],call) not in stack,"method generation entered once")
++            stack[event["pid"],call]=(index,event)
++            continue
++        require((event["pid"],call) in stack,"method return/error requires actual prior entry")
++        at,start=stack.pop((event["pid"],call))
++        require(start["arguments"]==event["arguments"],"exact method/phase/call parent correspondence")
++        effects=[(n,e) for n,e in chronology.source if at<n<index and e["pid"]==event["pid"]
++            and e["operation"] in ObservedMethodReplay.EFFECTS]
++        row={"name":name,"call":call,"begin_index":at,"end_index":index,"parent":parent,
++            "captured_prior_operations":len(effects),"full_body_replay":False,"status":"OPEN"}
++        try:
++            after=event["result"]
++            if event["operation"]=="method.error":
++                states=[e for n,e in chronology.source if at<n<index and e["pid"]==event["pid"]
++                    and e["operation"]=="method.after" and e["arguments"]==event["arguments"]]
++                require(len(states)==1,"original method error requires its full actually retained post-state")
++                after=states[0]["result"]
++            row["body_result"]=ObservedMethodReplay(effects,chronology.held).run(name,start["result"],after,event["error"])
++            row.update(full_body_replay=True,status="LOCAL_BODY_AND_SELFSTATE_REPLAYED")
++        except Exception as error:row["exact_replay_residual"]=str(error)
++        checked.append(row)
++    require(not stack,"every reached method owns an actual return/error, never absence-as-completion")
++    return checked
++
+ class RootSourceTrace:
+     def __init__(self,chronology):
+         self.chronology=chronology
+@@ -687,7 +960,7 @@
+             result=N.TypedOrdinaryContract().consume_stock_prelude(case,stdout,stderr,native_exit,False)
+             result.update(ordinary_case_reached=False,Source_contract_checked=False)
+             return result
+-        self.chronology.bind_variables(variables, variable_bindings)
++        self.chronology.bind_variables(variables, variable_bindings,case,fault)
+         prefix=self.chronology.native_prefix(native_wire,native_exit,
+             allow_failed_delivery=case in ("terminal-original-end","terminal-pipe-error","strict-inherited-fd"))
+         # A complete final line is compared byte-for-byte with the actual caller
+@@ -740,6 +1013,7 @@
+             "full original stderr/prefix delivery, never assumed silence")
+         self.chronology.bind_inputs(input_documents,native)
+         nested_grammar=self.chronology.actual_grammar_sites()
++        effectful_methods=method_sites(self.chronology)
+         if case in ("positive","nonzero-dispatcher"):
+             require({row["name"] for row in nested_grammar}>={"validate_stage1","body_shape","validate_claim",
+                 "validate_stage2","validate_report","check_held_observation","context_shape","namespace_shape","custody_shape"},
+@@ -757,6 +1031,8 @@
+             "original_producer_segments":len(segments),"exclusive_worker_streams":sorted(worker_files),
+             "full_actual_caller_stderr_bytes":len(captured_stderr),
+             "ordered_performing_nested_grammar":nested_grammar,
++            "ordered_effectful_method_state_replays":effectful_methods,
++            "whole_effectful_method_closure":bool(effectful_methods) and all(row["full_body_replay"] for row in effectful_methods),
+             "inherited_contract_pin":template["inherited_contract_pin"],
+             "complete_all_nested_schema_and_variable_closure":False,
+             "complete_all_actor_coverage":False,"whole_resource_proof":False,
+--- /var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/source/root_native_launcher.py
++++ /var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/root_native_launcher.py
+@@ -126,6 +126,8 @@
+         # The emergency slot is reachable even if list growth fails.
+         self.pending = slot
+         self.slots.append(slot)
++        if self.tail is not None:
++            self.tail.own_raw(slot)
+         self.pending = None
+         return slot
+ 
+@@ -304,6 +306,8 @@
+         self.fd=record_fd;self.identity=identity9;self.ends=(wall_end,mono_end)
+         self.raw=[];self.pending=None;self.first_error=None;self.recorder_errors=[]
+         self.bytes=0;self.digest=hashlib.sha256();self.adopted=[];self.actual_native_exit=None
++        self.owner_pid=os.getpid();self.launchers=[];self.raw_objects=[]
++        self.raw_pending=None;self.native_generations=[];self.native_receipt=None
+         self.finished=False;self.close_attempted=False;self.close_error=None
+         info=os.fstat(record_fd)
+         require(identity(info)==identity9 and stat.S_ISREG(info.st_mode) and info.st_nlink==1
+@@ -333,26 +337,109 @@
+             try:self.recorder_errors.append(error)
+             except BaseException:pass
+             raise
++    def own_raw(self,owner):
++        # The independently selected existing parent owns the actual reference
++        # before the bounded caller's operation, not a JSON object/pid label.
++        require(os.getpid()==self.owner_pid,"raw custody cannot cross a process by numeric values")
++        self.raw_pending=owner
++        self.raw_objects.append(owner)
++        self.raw_pending=None
++    def capture_error(self,error):
++        graph={"root":error,"pending":error,"nodes":[],"capture_error":None,"complete_python_links":False}
++        self.own_raw(graph)
++        try:
++            todo=[error];seen=set()
++            while todo:
++                current=todo.pop()
++                if id(current) in seen:continue
++                seen.add(id(current));graph["pending"]=current
++                row={"error":current,"args":current.args,"traceback":current.__traceback__,
++                    "cause":current.__cause__,"context":current.__context__,
++                    "suppress_context":current.__suppress_context__,"notes":getattr(current,"__notes__",None),
++                    "groups":getattr(current,"exceptions",()),"python_state":vars(current)}
++                graph["nodes"].append(row)
++                for linked in (row["cause"],row["context"],*row["groups"]):
++                    if linked is not None:todo.append(linked)
++            graph["pending"]=None;graph["complete_python_links"]=True
++        except BaseException as capture:graph["capture_error"]=capture
++        return graph
++    def select_before_birth(self,launcher,lifetime):
++        require(os.getpid()==self.owner_pid and not self.finished and lifetime.tail is None,
++            "existing parent selects real launcher/partial lifetime before initialization")
++        slot={"launcher":launcher,"lifetime":lifetime,"selection_pid":self.owner_pid,
++            "constructor_returned":False,"generations":[],"error":None}
++        self.own_raw(slot);self.launchers.append(slot);lifetime.tail=self
++        return slot
++    def bind_native_generation(self,launcher,generation):
++        selected=[s for s in self.launchers if s["launcher"] is launcher]
++        require(len(selected)==1 and generation["parent_pid"]==self.owner_pid
++            and generation["relation"]=="direct_caller","preselected existing parent/direct native creation")
++        context={"generation":generation,"selection":selected[0],"creation_owner":next(
++            s for s in launcher.lifetime.slots if s.process is launcher.child)}
++        self.own_raw(context);selected[0]["generations"].append(generation)
++        self.native_generations.append(context)
+     def adopt(self,launcher):
+-        slot={"launcher":launcher,"fds":[],"accepted":False,"error":None}
+-        self.pending=slot;self.adopted.append(slot)
++        selected=[s for s in self.launchers if s["launcher"] is launcher]
++        require(len(selected)==1 and os.getpid()==self.owner_pid,
++            "only actual pre-birth selected same existing Root parent can receive live objects")
++        slot={"launcher":launcher,"fds":[],"accepted":False,"error":None,
++            "aliases":[],"raw_owner":selected[0],"raw_graph":None,"receipt":None}
++        self.own_raw(slot);self.pending=slot;self.adopted.append(slot)
+         ledger=getattr(launcher,"ledger",None)
+         if ledger is not None:
+-            slot["fds"]=[fd for fd in (ledger.reader or ledger.prefix_reader,
+-                ledger.sideband_reader or ledger.sideband_prefix_reader) if fd is not None]
+-            slot["fds"].extend(item["reader"] for item in ledger.byte_objects.values())
+-        slot["fds"].extend(row["same_held_pidfd"] for row in launcher.generation_custody.values()
++            slot["fds"]=[fd for fd in (getattr(ledger,"reader",None) or getattr(ledger,"prefix_reader",None),
++                getattr(ledger,"sideband_reader",None) or getattr(ledger,"sideband_prefix_reader",None)) if fd is not None]
++            slot["fds"].extend(item["reader"] for item in getattr(ledger,"byte_objects",{}).values())
++        slot["fds"].extend(row["same_held_pidfd"] for row in getattr(launcher,"generation_custody",{}).values()
+             if row["wait4"] is None)
+         slot["fds"]=list(dict.fromkeys(slot["fds"]))
+-        self.append({"operation":"Root.adoption.owned_offer","fds":slot["fds"],
+-            "identities9":[identity(os.fstat(fd)) for fd in slot["fds"]]},slot)
+-        # A same-process live owner is offered, not an outside adoption receipt.
+-        # CLI cannot transfer child FDs by their numeric values. Only the actual
+-        # existing native recipient can qualify/own that transfer independently.
+-        return slot["fds"]
+-    def outside_wait4(self,pid,options=0):
+-        """Only the independently invoking existing native Root calls this."""
+-        slot={"pid":pid,"options":options,"raw_result":None,"raw_error":None}
++        try:
++            slot["raw_graph"]={"launcher":launcher,"lifetime":launcher.lifetime,
++                "ledger":ledger,"meter":getattr(launcher,"meter",None),
++                "collector":getattr(launcher,"collector",None),"run_failure":getattr(launcher,"run_failure",None)}
++            # Real receiver aliases acquired BEFORE any helper-local close.
++            # Each partial acquisition belongs to the already selected parent.
++            for fd in slot["fds"]:
++                alias={"source_fd":fd,"fd":None,"before":None,"after":None,
++                    "close_attempted":False,"closed":False,"error":None}
++                slot["aliases"].append(alias);self.own_raw(alias)
++                alias["before"]=identity(os.fstat(fd))
++                alias["fd"]=fcntl.fcntl(fd,fcntl.F_DUPFD_CLOEXEC,3)
++                alias["after"]=identity(os.fstat(alias["fd"]))
++                require(alias["before"]==alias["after"]==identity(os.fstat(fd)),
++                    "same genuinely held open-file generation after receiver duplication")
++            slot["receipt"]={"operation":"Root.adoption.accepted","owner_pid":self.owner_pid,
++                "descriptor_generations":[{"source_fd":a["source_fd"],"receiver_fd":a["fd"],
++                    "identity9":a["after"]} for a in slot["aliases"]],
++                "partial_lifetime_objects":len(launcher.lifetime.slots),
++                "prebirth_selection":True,"native_generations":[g["start_ticks"] for g in selected[0]["generations"]]}
++            self.append(slot["receipt"],slot)
++            aliases={a["source_fd"]:a["fd"] for a in slot["aliases"]}
++            if ledger is not None:
++                for name in ("reader","prefix_reader","sideband_reader","sideband_prefix_reader"):
++                    old=getattr(ledger,name,None)
++                    if old in aliases:setattr(ledger,name,aliases[old])
++                for item in getattr(ledger,"byte_objects",{}).values():
++                    if item["reader"] in aliases:item["reader"]=aliases[item["reader"]]
++            for generation in getattr(launcher,"generation_custody",{}).values():
++                if generation["same_held_pidfd"] in aliases:
++                    generation["same_held_pidfd"]=aliases[generation["same_held_pidfd"]]
++            slot["accepted"]=True
++        except BaseException as error:
++            slot["error"]=error
++            raise
++        return slot
++    def outside_wait4(self,generation,options=0):
++        """Wait for the actual same-held direct creation owned before Popen."""
++        contexts=[c for c in self.native_generations if c["generation"] is generation]
++        require(len(contexts)==1
++            and generation["parent_pid"]==self.owner_pid and os.getpid()==self.owner_pid
++            and contexts[0]["creation_owner"].process.pid==generation["pid"],
++            "native wait must consume preselected direct creation, not numeric PID")
++        require(generation["wait4"] is None,"same native generation cannot be reaped twice")
++        pid=generation["pid"]
++        slot={"generation":generation,"pid":pid,"options":options,"raw_result":None,"raw_error":None}
++        self.own_raw(slot)
+         self.pending=slot;self.raw.append(slot)
+         try:slot["raw_result"]=os.wait4(pid,options)
+         except BaseException as error:
+@@ -360,8 +447,17 @@
+             self.append({"operation":"outside_native.wait4.error","pid":pid,"error":error_value(error)},slot)
+             raise
+         actual,status,usage=slot["raw_result"]
+-        require(actual==pid and os.WIFEXITED(status),"outside actual native exit, not intended Source status")
+-        self.actual_native_exit=os.WEXITSTATUS(status)
++        if actual==0:
++            require(options&os.WNOHANG,"zero wait result only from performed nonblocking wait")
++            return slot["raw_result"]
++        require(select.select([generation["same_held_pidfd"]],[],[],0)[0],
++            "wait result belongs to independently held exited native creation")
++        require(actual==pid and (os.WIFEXITED(status) or os.WIFSIGNALED(status)),
++            "actual exited/signalled same native creation, never intended Source status")
++        self.actual_native_exit=os.waitstatus_to_exitcode(status)
++        generation["wait4"]={"pid":actual,"status":status,"usage":list(usage)}
++        self.native_receipt={"owner_pid":self.owner_pid,"pid":pid,"start_ticks":generation["start_ticks"],
++            "same_held_pidfd":generation["same_held_pidfd"],"status":status,"native_exit_actual":self.actual_native_exit}
+         self.append({"operation":"outside_native.wait4.returned","pid":pid,"status":status,
+             "usage":list(usage),"actual_native_exit":self.actual_native_exit},slot)
+         return slot["raw_result"]
+@@ -371,7 +467,16 @@
+         for adopted in self.adopted:
+             require(adopted["accepted"],"actual custody adoption, never an unconfirmed label")
+             launcher=adopted["launcher"]
+-            for fd in adopted["fds"]:launcher.lifetime.close_fd(fd,"outside Root.adopted.final_close")
++            for alias in adopted["aliases"]:
++                require(not alias["close_attempted"],"receiver generation close attempt never retried")
++                alias["close_attempted"]=True
++                try:
++                    os.close(alias["fd"]);alias["closed"]=True
++                    self.append({"operation":"Root.receiver.alias.final_close","fd":alias["fd"],
++                        "identity9":alias["after"],"returned":True},alias)
++                except BaseException as error:
++                    alias["error"]=error
++                    raise
+             require(not launcher.lifetime.recording_damage and not any(event.get("raw_error") is not None
+                 for event in launcher.lifetime.close_events),"all final/adopted closes confirmed within original ends")
+         self.append({"operation":"outside_native.tail.complete","actual_native_exit":self.actual_native_exit,
+@@ -528,6 +633,7 @@
+         self.failed = False
+         self.sealed = False
+         self.byte_objects = {}
++        self.allowed_byte_pins={}
+         self.raw_rows=[];self.pending_raw=None;self.recording_errors=[]
+         self.sideband_writer=lifetime.acquire_fd("Root.raw_sideband.writer",os.memfd_create,
+             "a147-original-read-custody",os.MFD_CLOEXEC|os.MFD_ALLOW_SEALING)
+@@ -541,8 +647,11 @@
+         # Root acquired and SHA-checked these complete Source bytes itself before
+         # any caller launch. Source references cannot create or replace an object.
+         pin=hashlib.sha256(raw).hexdigest()
+-        require(pin==CONTROL_OBJECT_SHA and len(raw)==CONTROL_OBJECT_BYTES
+-            and pin not in self.byte_objects,"one complete original Root-owned control byte object")
++        require(type(raw) is bytes and self.allowed_byte_pins.get(pin)==len(raw),
++            "only full independently selected before-birth Source bytes can populate Root cache")
++        if pin in self.byte_objects:
++            require(self.byte_objects[pin]["raw"]==raw,"one actual full owned generation per identical immutable byte object")
++            return
+         writer=self.lifetime.acquire_fd("Root.full_byte_object.writer",os.memfd_create,
+             "a137-original-full-control-bytes",os.MFD_CLOEXEC|os.MFD_ALLOW_SEALING)
+         at=0
+@@ -779,6 +888,28 @@
+             "raw_sideband_owners":self.sideband_reads,
+             "raw_pending_sideband":self.pending_sideband,
+             "outside_acceptance":"REQUIRED_NOT_CONFIRMED"}
++
++def consume_adopted_incomplete_prefix(receiver,adoption):
++    """Actual receiver consumes held aliases/raw graph, never complete rows."""
++    require(any(adoption is a for a in receiver.adopted) and adoption["accepted"]
++        and receiver.owner_pid==os.getpid(),"same preselected existing parent accepted this actual object graph")
++    graph=adoption["raw_graph"];ledger=graph["ledger"]
++    require(ledger.prefix_sealed and not ledger.sealed,"prefix consumer has a distinct incomplete domain")
++    aliases={a["fd"]:a for a in adoption["aliases"]}
++    require(ledger.reader in aliases and not aliases[ledger.reader]["close_attempted"],
++        "receiver still genuinely holds the adopted ledger descriptor")
++    recipe=ledger.incomplete_prefix_recipe()
++    reads=list(ledger.sideband_read_bytes())
++    require(recipe["complete"] is False and all(row["complete"] is False for row in reads),
++        "no incomplete body/torn row/read promoted as complete collection")
++    receipt={"schema":"friday.sol056.accepted-incomplete-prefix.v1","complete":False,
++        "prefix_identity9":recipe["identity9"],"literal_bytes":sum(len(raw) for _,raw in recipe["literal_chunks"]),
++        "sha256":recipe["sha256"],"raw_read_owners":len(reads),
++        "actual_receiver_descriptor":ledger.reader,"prebirth_parent_owned":True,
++        "whole_damage_capacity_proof":False,"SourceReady":False,"GO":False}
++    receiver.append({"operation":"Root.prefix.receiver.consumed","receipt":receipt},
++        {"adoption":adoption,"recipe":recipe,"reads":reads})
++    return receipt
+ 
+ class FrameCollector:
+     def __init__(self, ledger):
+@@ -860,6 +991,8 @@
+         self.lifetime = RootLifetime() if lifetime is None else lifetime
+         require(isinstance(independent_tail,ExistingRootTail),
+             "already existing outside Root must own qualified durable tail before launch")
++        require(any(s["launcher"] is self and s["lifetime"] is self.lifetime
++            for s in independent_tail.launchers),"actual existing parent pre-birth selection before constructor")
+         self.tail=independent_tail;self.lifetime.tail=independent_tail
+         self.ledger = self.child = self.pipe_read = None
+         self.source_wait = None
+@@ -891,8 +1024,12 @@
+         self.meter.bind_policy(external_admission["future_Root_read_policy"])
+         require(self.meter.policy["capacity_proof_sha256"] == external_admission["whole_bound_proof_sha256"],
+             "same external whole-bound proof and separate Root read policy")
+-        self.ledger = HeldLedger(self.meter, self.lifetime)
+-        self.collector = FrameCollector(self.ledger)
++        self.ledger = HeldLedger.__new__(HeldLedger)
++        self.tail.own_raw(self.ledger)
++        HeldLedger.__init__(self.ledger,self.meter,self.lifetime)
++        self.collector = FrameCollector.__new__(FrameCollector)
++        self.tail.own_raw(self.collector)
++        FrameCollector.__init__(self.collector,self.ledger)
+         self.child = self.pipe_read = None
+         self.owned_fds = set()
+         self.source_wait = None
+@@ -929,6 +1066,8 @@
+             raw=function(*args,**kwargs)
+         except BaseException as error:
+             owner["raw_error"]=error
++            try:owner["exception_graph"]=self.tail.capture_error(error)
++            except BaseException as capture:owner["error_graph_capture_error"]=capture
+             if self.lifetime.first_error is None:self.lifetime.first_error=error
+             self.record_owned_effect(owner)
+             raise
+@@ -990,6 +1129,7 @@
+         row = {"pid":pid,"start_ticks":int(fields[19]),"parent_pid":int(fields[1]),
+             "same_held_pidfd":pidfd,"relation":relation,"wait4":None}
+         self.generation_custody[pid] = row
++        if relation=="direct_caller":self.tail.bind_native_generation(self,row)
+         self.ledger.append({"namespace":"Root_recipient","operation":"Root.child.held_generation",**row})
+         return row
+ 
+@@ -1058,8 +1198,8 @@
+             require(path in pins, "Root actual whole launcher/caller/sender/controller/index custody")
+         for path, pin in pins.items():
+             raw = self.held_source(path, pin)
+-            if pin["sha256"]==CONTROL_OBJECT_SHA:
+-                self.ledger.hold_full_byte_object(raw)
++            self.ledger.allowed_byte_pins[pin["sha256"]]=pin["identity"][6]
++            self.ledger.hold_full_byte_object(raw)
+             if path == caller_path or path.endswith("/staged_sender.py"):
+                 require(0 < len(raw) <= SMALL_SOURCE_MAX, "Root caller/sender original byte caps")
+         self.check_adoption_before_launch()
+@@ -1294,7 +1434,8 @@
+                     self.child.stdin.close()
+                     self.ledger.append({"namespace": "Root_recipient", "operation": "caller.fd0.closed_after_actual_Root_EOF"})
+                 if self.source_wait is None:
+-                    pid, status, usage = self.effect("Root.direct_caller.wait4",os.wait4,self.child.pid,os.WNOHANG)
++                    pid, status, usage = self.tail.outside_wait4(
++                        self.generation_custody[self.child.pid],os.WNOHANG)
+                     if pid:
+                         require(pid == self.child.pid, "Root exact owned direct caller wait4")
+                         self.source_wait = {"pid": pid, "status": status, "raw_usage": list(usage)}
+@@ -1331,6 +1472,8 @@
+             failure=self.run_failure
+             failure["raw_error"]=error
+             failure["traceback"]=error.__traceback__
++            try:failure["exception_graph"]=self.tail.capture_error(error)
++            except BaseException as capture:failure["error_graph_capture_error"]=capture
+             if self.lifetime.first_error is None:self.lifetime.first_error=error
+             self.lifetime.last_error=error
+             try:
+@@ -1478,10 +1621,15 @@
+     """
+     lifetime = RootLifetime()
+     launcher = RootNativeLauncher.__new__(RootNativeLauncher)
++    launcher.lifetime=lifetime
++    selection=independent_tail.select_before_birth(launcher,lifetime)
+     result = {"schema":"friday.a137.Root-invocation-result.v1","GO":False,"release_credit":False}
++    entry_failure={"error":None,"traceback":None,"projection_error":None,"cleanup_error":None}
++    independent_tail.own_raw(entry_failure)
+     try:
+         RootNativeLauncher.__init__(launcher, external_admission, retained_root, lifetime=lifetime,
+             independent_tail=independent_tail)
++        selection["constructor_returned"]=True
+         result = launcher.run(stage1_raw, caller_path)
+         if launcher.ledger.failed:result["independent_incomplete_prefix_pin"]=launcher.ledger.seal_incomplete_prefix()
+         if not launcher.ledger.sealed and not launcher.ledger.failed:
+@@ -1490,22 +1638,28 @@
+             result["Root_retention"] = launcher.retain(result, "Root-observer-ledger.jsonl")
+             result["Root_retention"]["complete_collection"] = result.get("collector_complete",False)
+     except BaseException as error:
++        entry_failure["error"]=error;entry_failure["traceback"]=error.__traceback__
+         if lifetime.first_error is None:lifetime.first_error=error
+         lifetime.last_error = error
+         result["original_exception_object"]=error
+-        result.update(status="STOP_UNCONFIRMED",exception=error_value(error),collector_complete=False)
++        result.update(status="STOP_UNCONFIRMED",collector_complete=False)
++        try:result["exception"]=error_value(error)
++        except BaseException as projection:entry_failure["projection_error"]=projection
+     finally:
+         ledger=getattr(launcher,"ledger",None)
+-        reader=None if ledger is None else ledger.reader or ledger.prefix_reader
+-        retained=[] if ledger is None else [item["reader"] for item in ledger.byte_objects.values()]
+-        if ledger is not None:retained.append(ledger.sideband_reader or ledger.sideband_prefix_reader)
+-        retained.extend(row["same_held_pidfd"] for row in getattr(launcher,"generation_custody",{}).values()
+-            if row["wait4"] is None)
+-        result["Root_final_close_evidence"] = lifetime.close(reader,retained)
+-        try:
++        try:
++            adoption=independent_tail.adopt(launcher)
++            require(adoption["accepted"],"receiver acceptance before local alias retirement")
++            result["Root_adoption_receipt"]=adoption["receipt"]
++            if ledger is not None:
++                ledger.custody_acceptance=adoption
++                if getattr(ledger,"prefix_sealed",False):
++                    result["Root_incomplete_prefix_receipt"]=consume_adopted_incomplete_prefix(independent_tail,adoption)
++            result["Root_final_close_evidence"] = lifetime.close()
+             independent_tail.append({"operation":"Root.helper.final_close", "evidence":result["Root_final_close_evidence"]},lifetime)
+-            result["Root_actual_adopted_fds"]=independent_tail.adopt(launcher)
++            result["Root_actual_adopted_fds"]=[a["fd"] for a in adoption["aliases"]]
+         except BaseException as tail_error:
++            entry_failure["cleanup_error"]=tail_error
+             result["Root_tail_error_object"]=tail_error
+             result.update(status="STOP_UNCONFIRMED",collector_complete=False)
+         # The same genuine invoking Root process receives this live owner, not a
+@@ -1552,6 +1706,10 @@
+             and tail_data["fd"]==195,"already outside-owned exact durable Root tail transport")
+         tail=ExistingRootTail(tail_data["fd"],tail_data["identity9"],
+             tail_data["original_wall_end"],tail_data["original_monotonic_end"])
++        # A standalone helper cannot transfer its live Python objects to its
++        # outside tool by JSON/fd numbers. Only the in-process existing-parent
++        # entry above supplies that topology. Refuse BEFORE child birth/closure.
++        raise ValueError("CLI helper custody ABI not admitted; use actual existing-parent entry")
+         RootNativeLauncher.__init__(launcher, envelope["admission"], envelope["retained_root"], meter, lifetime,
+             independent_tail=tail)
+         launcher.owned_fds.add(fd)
+--- /var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/source/source_grammar.py
++++ /var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/source_grammar.py
+@@ -17,10 +17,10 @@
+ ISSUER = "friday.owner.offline-source-run-admission.v1"
+ SOURCE = "ASTRA-E4-QUALITY-STABLE-ROOT-NAMESPACE-CLOSURE-A074#1"
+ ASSIGNMENT = "ASTRA-E4-QUALITY-ROOT-NATIVE-FOCUSED-RUN-A075"
+-PACKAGE = "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54"
+-CONTROLLER = "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/source/controller.py"
+-INDEX = "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/index/full-source.json"
+-INDEX_SHA = "d843c3cdb7ecd760bc76acaed80935d2584b57d8e219d243901a5749515b2e8d"
++PACKAGE = "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54"
++CONTROLLER = "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/controller.py"
++INDEX = "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/index/full-source.json"
++INDEX_SHA = "5064b09f8b6339ff6e5e74fedc4e658dccd323e94d8649af6a6d4cd3e22a6072"
+ ENV3 = {"PATH": "/usr/bin:/bin","LANG": "C","LC_ALL": "C"}
+ ANCESTRY = (("/",0,0,0o755),("/home",0,0,0o755),
+    ("/home/jericho",1000,1000,0o750),
+@@ -363,3 +363,981 @@
+   (row["function"]==name or name==row["function"]+".<lambda>")]
+  require(len(rows)==1,"one exact frozen source expression and field/prior ordering")
+  return rows[0]
++
++# SOL056_METHOD_BODIES_BEGIN: inert author text, strict replay APIs only.
++class AcquisitionOwner:
++ """One permanent owner per acquisition generation; attempted close is sticky."""
++ def __init__(self):
++  self.slots=[];self.pending=None;self.first_error=None;self.cleanup_errors=[]
++ def reserve(self,purpose,args):
++  slot={"purpose":purpose,"arguments":args,"raw":None,"error":None,
++        "state":"OWNED_PARTIAL","close_attempted":False,"close_error":None}
++  self.pending=slot
++  self.slots.append(slot)
++  self.pending=None
++  return slot
++ def acquire(self,purpose,function,*args,**kwargs):
++  slot=self.reserve(purpose,[args,kwargs])
++  try:
++   slot["raw"]=function(*args,**kwargs)
++  except BaseException as error:
++   slot["error"]=error
++   if self.first_error is None:self.first_error=error
++   slot["state"]="FAILED"
++   raise
++  slot["state"]="OWNED"
++  return slot["raw"]
++ def fail(self,error):
++  if self.first_error is None:self.first_error=error
++ def close(self,fd,function):
++  active=sys.exc_info()[1]
++  if active is not None:self.fail(active)
++  owned=next((s for s in reversed(self.slots) if s["raw"]==fd),None)
++  if owned is None:
++   owned=self.reserve("existing_fd",[]);owned["raw"]=fd;owned["state"]="OWNED"
++  if owned["close_attempted"]:
++   if owned["state"]!="CLOSED":raise RuntimeError("ambiguous_close_no_retry")
++   return
++  owned["close_attempted"]=True
++  owned["state"]="CLOSE_ATTEMPTED"
++  try:function(fd)
++  except BaseException as error:
++   owned["close_error"]=error;owned["state"]="AMBIGUOUS_CLOSE"
++   try:self.cleanup_errors.append(error)
++   except BaseException as recorder:owned["recording_error"]=recorder
++   if active is not None:return
++   raise
++  owned["state"]="CLOSED"
++
++class Clock:
++ def __init__(self,stage1,wall0,mono0):
++  self.wall0,self.mono0 = wall0,mono0
++  begin,end = validate_stage1(stage1)
++  self.auth = stage1["auth_deadline_epoch"]
++  self.init = min(wall0 + 30,self.auth,end - 600)
++  self.run,self.cleanup,self.reap_end = end - 600,end,end - HANDOFF_SECONDS
++  require(begin <= self.now() < self.run and self.now() < self.auth <= wall0 + 300,"fixed_deadline")
++ def now(self):
++  wall = time.time()
++  require(abs(wall - self.wall0 - (time.monotonic() - self.mono0)) <= 2,"clock drift")
++  return wall
++ def left(self,deadline):
++  return min(deadline - self.now(),self.mono0 + deadline - self.wall0 - time.monotonic())
++ def cleanup_left(self):
++  return self.mono0 + self.reap_end - self.wall0 - time.monotonic()
++ def handoff_left(self):
++  return min(self.cleanup - time.time(),
++    self.mono0 + self.cleanup - self.wall0 - time.monotonic())
++class Named:
++ def __init__(self,path,pinned_identity,pin,mode,maximum,budget):
++  before = os.lstat(path)
++  require(id9(pinned_identity) and identity(before) == pinned_identity,"stale_identity")
++  require(stat.S_ISREG(before.st_mode) and stat.S_IMODE(before.st_mode) == mode
++    and (before.st_uid,before.st_gid,before.st_nlink) == (1000,1000,1)
++    and 0 < before.st_size <= maximum,"issuer_body")
++  self.path,self.identity,self.pin,self.budget = path,pinned_identity,pin,budget
++  self.fd = None
++  self.fd = self._owner.acquire("Named.fd",os.open,path,os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
++  try:
++   self.raw = self.check()
++  except BaseException as error:
++   self._owner.fail(error)
++   try:self.close()
++   except BaseException:pass
++   raise
++ def check(self):
++  require(identity(os.lstat(self.path)) == self.identity and identity(os.fstat(self.fd)) == self.identity,
++    "stale_identity")
++  raw = self.budget.read(self.fd,self.identity[6] + 1,0,kind="named:" + self.path)
++  require(len(raw) == self.identity[6] and identity(os.fstat(self.fd)) == self.identity
++    and identity(os.lstat(self.path)) == self.identity,"stale_identity")
++  require(digest(raw) == self.pin,"pin_mismatch")
++  return raw
++ def close(self):
++  if self.fd is not None:
++   self._owner.close(self.fd,os.close)
++   self.fd = None
++class Directory:
++ def __init__(self,path,expected,uid=1000,gid=1000,mode=0o700):
++  self.path,self.identity = path,expected
++  self.fd = None
++  info = os.lstat(path)
++  require(id9(expected) and identity(info) == expected and stat.S_ISDIR(info.st_mode)
++    and stat.S_IMODE(info.st_mode) == mode and (info.st_uid,info.st_gid) == (uid,gid),
++    "stale_identity")
++  self.fd = self._owner.acquire("Directory.fd",os.open,path,os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
++  try:
++   self.check()
++  except BaseException as error:
++   self._owner.fail(error)
++   try:self.close()
++   except BaseException:pass
++   raise
++ def check(self):
++  require(identity(os.lstat(self.path)) == self.identity and identity(os.fstat(self.fd)) == self.identity,
++    "stale_identity")
++ def close(self):
++  if self.fd is not None:
++   self._owner.close(self.fd,os.close)
++   self.fd = None
++class Generation:
++ def __init__(self,pid,parent,budget,allow_exited=False):
++  self.pid,self.parent,self.budget = pid,parent,budget
++  self.pidfd,self.procfd = None,None
++  self.terminal_children,self.reaped,self.wait_status,self.wait_usage = None,False,None,None
++  try:
++   self.pidfd = self._owner.acquire("Generation.pidfd",os.pidfd_open,pid,0)
++   self.procfd = self._owner.acquire("Generation.procfd",os.open,"/proc/%d" % pid,os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
++   self.ticks = self.stat()[1]
++   self.check(allow_exited=allow_exited)
++  except BaseException as error:
++   self._owner.fail(error)
++   try:self.close()
++   except BaseException:pass
++   raise
++ def proc_read(self,relative,cap):
++  fd = self._owner.acquire("temporary",os.open,relative,os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,dir_fd=self.procfd)
++  try:
++   raw = self.budget.read(fd,cap + 1,kind="proc:" + relative)
++   require(len(raw) <= cap,"proc_bound")
++   return raw
++  finally:
++   self._owner.close(fd,os.close)
++ def stat(self):
++  raw = self.proc_read("stat",4096).decode("ascii")
++  head,tail = raw.rsplit(")",1)
++  values = tail.split()
++  require(int(head.split("(",1)[0]) == self.pid and int(values[1]) == self.parent,"pid_generation")
++  return values[0],int(values[19])
++ def exited(self):
++  with selectors.DefaultSelector() as selector:
++   selector.register(self.pidfd,selectors.EVENT_READ)
++   return bool(selector.select(0))
++ def check(self,allow_exited=False):
++  require((allow_exited or not self.exited()) and self.stat()[1] == self.ticks,"pid_generation")
++  fd = self._owner.acquire("temporary",os.open,"/proc/self/fdinfo/%d" % self.pidfd,os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
++  try:
++   raw = self.budget.read(fd,4097,kind="proc:self_fdinfo")
++   require(len(raw) <= 4096,"proc_bound")
++   rows = [v.split()[1] for v in raw.decode("ascii").splitlines() if v.startswith("Pid:")]
++   require(rows == [str(self.pid)],"pid_generation")
++  finally:
++   self._owner.close(fd,os.close)
++ def children(self,terminal=False):
++  self.check(allow_exited=terminal)
++  tasksfd = self._owner.acquire("temporary",os.open,"task",os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,dir_fd=self.procfd)
++  try:
++   tasks = self.budget.strings(os.listdir(tasksfd),4096,kind="proc:task_names")
++   require(len(tasks) <= 32 and all(v.isdigit() for v in tasks),"own_tree_bound")
++   children = set()
++   for tid in tasks:
++    raw = self.proc_read("task/" + tid + "/children",4096)
++    values = raw.decode("ascii").split()
++    require(all(v.isdigit() for v in values),"own_tree_visibility")
++    children.update(int(v) for v in values)
++   require(len(children) <= 16,"own_tree_bound")
++   self.check(allow_exited=terminal)
++   if terminal:
++    require(self.exited() and self.stat()[0] in ("Z","X") and not children,
++      "terminal_children_unconfirmed")
++    self.terminal_children = []
++   return children
++  finally:
++   self._owner.close(tasksfd,os.close)
++ def close(self):
++  first=None
++  for name in ("procfd","pidfd"):
++   fd = getattr(self,name,None)
++   if fd is not None:
++    try:
++     self._owner.close(fd,os.close)
++     setattr(self,name,None)
++    except BaseException as error:
++     if first is None:first=error
++  if first is not None:raise first
++class OwnScope:
++ """Isolated owning subreaper; terminal wait4/list proof,sticky UNKNOWN."""
++ def __init__(self,budget,runtime):
++  self.budget,self.runtime,self.fd = budget,runtime,None
++  self.lib = self._owner.acquire("OwnScope.library",ctypes.CDLL,None,use_errno=True)
++  self.lib.prctl.restype = ctypes.c_int
++  self.lib.prctl.argtypes = [ctypes.c_int,ctypes.c_ulong,ctypes.c_ulong,ctypes.c_ulong,ctypes.c_ulong]
++  self.initial_empty,self.terminal_empty,self.creation_started = False,False,False
++  self.snapshots = []
++  self.runtime_check()
++  require(signal.SIGCHLD not in signal.pthread_sigmask(signal.SIG_BLOCK,[]),"SIGCHLD_blocked")
++  signal.signal(signal.SIGCHLD,signal.SIG_DFL)
++  require(signal.getsignal(signal.SIGCHLD) == signal.SIG_DFL,"own_reaper_policy")
++  self.fd = self._owner.acquire("OwnScope.procfd",os.open,"/proc/self",os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
++  try:
++   self.single_thread()
++   require(not self.children(),"initial_own_scope_not_empty")
++   self.initial_empty = True
++   self.pr(36,1)
++   self.check()
++  except BaseException as error:
++   self._owner.fail(error)
++   try:self.close()
++   except BaseException:pass
++   raise
++ def pr(self,op,value=None):
++  observed = ctypes.c_int(0) if op == 37 else None
++  argument = ctypes.addressof(observed) if observed is not None else value
++  slot=self._owner.reserve("prctl",[op,argument,observed]);TRACE.check()
++  returned = self.lib.prctl(op,argument,0,0,0)
++  slot["raw"]=returned
++  failure_errno = ctypes.get_errno() if returned < 0 else None
++  fault=OSError(failure_errno,"own_subreaper") if returned<0 else None
++  slot["error"]=fault
++  output = observed.value if observed is not None and returned >= 0 else None
++  TRACE.note("sender","ownscope.prctl",[op],
++      {"returned": returned,"error_errno": failure_errno,"output_value": output})
++  if fault is not None:raise fault
++  TRACE.check()
++  return output
++ def proc_read(self,name,maximum=4096):
++  fd = self._owner.acquire("temporary",os.open,name,os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,dir_fd=self.fd)
++  try:
++   raw = self.budget.read(fd,maximum + 1,kind="proc:" + name)
++   require(len(raw) <= maximum,"proc_bound")
++   return raw.decode("ascii")
++  finally:
++   self._owner.close(fd,os.close)
++ def single_thread(self):
++  rows = dict(v.split(":",1) for v in self.proc_read("status").splitlines() if ":" in v)
++  require(rows.get("Threads","").strip() == "1" and rows.get("Pid","").strip() == str(os.getpid()),
++    "own_scope_single_thread")
++ def runtime_check(self):
++  r = self.runtime
++  require(identity(os.fstat(r["fd"])) == r["identity"]
++    and fcntl.fcntl(r["fd"],fcntl.F_GETFD) == fcntl.FD_CLOEXEC
++    and fcntl.fcntl(r["fd"],fcntl.F_GETFL) == r["flags"],"stock_runtime_fd_drift")
++  link = os.readlink("/proc/self/fd/%d" % r["fd"])
++  self.budget.strings([link],4096,kind="proc:fd_link")
++  require(link == r["path"],"stock_runtime_fd_drift")
++ def check(self):
++  self.single_thread()
++  self.runtime_check()
++  value = self.pr(37)
++  require(value == 1 and signal.getsignal(signal.SIGCHLD) == signal.SIG_DFL
++    and signal.SIGCHLD not in signal.pthread_sigmask(signal.SIG_BLOCK,[]),"own_reaper_policy")
++ def children(self):
++  self.single_thread()
++  values = self.proc_read("task/%d/children" % os.getpid()).split()
++  require(len(values) <= 16 and all(v.isascii() and v.isdecimal() and int(v) > 0 for v in values),
++    "own_tree_bound")
++  return {int(v) for v in values}
++ def terminal(self,generations):
++  self.check()
++  before = self.children()
++  require(not before and all(gen.reaped and gen.terminal_children == [] for gen in generations.values()),
++    "own_tree_terminal_unconfirmed")
++  self.check()
++  after = self.children()
++  require(not after and self.initial_empty and self.creation_started,"own_tree_terminal_unconfirmed")
++  self.terminal_empty = True
++  self.snapshots = [{"boundary": "terminal_before","children": sorted(before)},
++      {"boundary": "terminal_after","children": sorted(after)}]
++ def close(self):
++  if self.fd is not None:
++   self._owner.close(self.fd,os.close)
++   self.fd = None
++class Held:
++ def __init__(self,generation,target,maximum,raw,budget):
++  self.generation,self.target,self.maximum = generation,target,maximum
++  self.raw,self.budget,self.fd = raw,budget,None
++  generation.check()
++  self.original_flags = self.flags()
++  require(self.original_flags & os.O_ACCMODE == os.O_RDONLY
++    and self.original_flags & os.O_CLOEXEC == os.O_CLOEXEC,"fd_not_readonly")
++  self.fd = self._owner.acquire("Held.fd",os.open,"fd/%d" % target,os.O_RDONLY | os.O_CLOEXEC,dir_fd=generation.procfd)
++  try:
++   self.observation = self.check()
++  except BaseException as error:
++   self._owner.fail(error)
++   try:self.close()
++   except BaseException:pass
++   raise
++ def flags(self):
++  raw = self.generation.proc_read("fdinfo/%d" % self.target,4096).decode("ascii")
++  rows = [line.split()[1] for line in raw.splitlines() if line.startswith("flags:")]
++  require(len(rows) == 1,"fd_not_readonly")
++  return int(rows[0],8)
++ def check(self,fixed=None):
++  self.generation.check()
++  flags = self.flags()
++  require(flags == self.original_flags,"fd_not_readonly")
++  before = identity(os.stat("fd/%d" % self.target,dir_fd=self.generation.procfd,follow_symlinks=True))
++  opened = identity(os.fstat(self.fd))
++  require(before == opened and 0 < opened[6] <= self.maximum,"stale_identity")
++  current = self._owner.acquire("temporary",os.open,"fd/%d" % self.target,os.O_RDONLY | os.O_CLOEXEC,dir_fd=self.generation.procfd)
++  try:
++   require(identity(os.fstat(current)) == opened,"stale_identity")
++   raw = self.budget.read(self.fd,opened[6] + 1,0,kind="held:original")
++   current_raw = self.budget.read(current,opened[6] + 1,0,kind="held:current")
++   observation = {"identity": opened,"original_flags": flags,
++    "opened_flags": fcntl.fcntl(self.fd,fcntl.F_GETFL),
++    "opened_cloexec": bool(fcntl.fcntl(self.fd,fcntl.F_GETFD) & fcntl.FD_CLOEXEC),
++    "seals": fcntl.fcntl(self.fd,fcntl.F_GET_SEALS),"sha256": digest(raw)}
++   check_held_observation(observation,self.raw,None if fixed is None else fixed["identity"])
++   require(fcntl.fcntl(current,fcntl.F_GET_SEALS) & SEALS == SEALS
++     and fcntl.fcntl(current,fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDONLY
++     and raw == current_raw == self.raw and len(raw) == opened[6]
++     and identity(os.fstat(self.fd)) == opened and identity(os.fstat(current)) == opened
++     and identity(os.stat("fd/%d" % self.target,dir_fd=self.generation.procfd)) == opened
++     and self.flags() == flags,"stale_identity")
++   if fixed is not None:
++    require(observation == fixed,"stale_identity")
++   self.generation.check()
++   return observation
++  finally:
++   self._owner.close(current,os.close)
++ def close(self):
++  if self.fd is not None:
++   self._owner.close(self.fd,os.close)
++   self.fd = None
++class IO:
++ def __init__(self,clock,budget):
++  self.clock,self.budget = clock,budget
++  self.buffers,self.eof,self.root_output = {},set(),0
++  self.raw_outputs,self.overflow_samples,self.capture_stopped = {},{},set()
++  self.capture_errors = {}
++  self.root_requests = []
++  self.controlled_lines = []
++  self.controlled_offsets = {}
++  self.original_fd_map = None
++  self.producer_stdio = {"dispatcher_stdout": "INHERITED_CONTROLLER_STDOUT",
++       "dispatcher_stderr": "INHERITED_CONTROLLER_STDERR",
++       "worker_stdout": "EXCLUSIVE_REGULAR_FILE",
++       "worker_stderr": "EXCLUSIVE_REGULAR_FILE",
++       "observed_on_controller_pipes": False,"separate_dispatcher_bytes": "UNKNOWN_NOT_ZERO",
++       "filler_is_producer_output": False,
++       "silent_zero": False}
++  self.proc,self.sample = None,lambda: None
++  for fd in (0,1):
++   os.set_blocking(fd,False)
++ def attach(self,proc,sample):
++  self.proc,self.sample = proc,sample
++  self.original_fd_map = {"stdout": proc.stdout.fileno(),"stderr": proc.stderr.fileno()}
++  self.producer_stdio["observed_on_controller_pipes"] = True
++  self.raw_outputs = {proc.stdout.fileno(): bytearray(),proc.stderr.fileno(): bytearray()}
++  for pipe in (proc.stdin,proc.stdout,proc.stderr):
++   os.set_blocking(pipe.fileno(),False)
++ def detach(self):
++  self.proc,self.sample = None,lambda: None
++  self.buffers.clear()
++ def terminal(self,raw):
++  TRACE.note("sender","native.before_delivery",[],raw)
++  result = {"confirmed": False,"bytes_written": 0,"complete_line": False,
++    "original_channel": True,"no_endpoint_refresh": True,
++    "original_wall_end": self.clock.cleanup,
++    "original_monotonic_end": self.clock.mono0 + self.clock.cleanup - self.clock.wall0}
++  try:
++   require(type(raw) is bytes and 0 < len(raw) <= ROOT_OUT_MAX
++     and self.root_output + len(raw) <= ROOT_OUT_MAX,"root_output_bound")
++   result["attempted_bytes"] = len(raw)
++   with selectors.DefaultSelector() as selector:
++    selector.register(1,selectors.EVENT_WRITE)
++    while result["bytes_written"] < len(raw):
++     left = self.clock.handoff_left()
++     require(left > 0,"failed_handoff_deadline")
++     if not selector.select(min(left,0.25)):
++      continue
++     require(self.clock.handoff_left() > 0,"failed_handoff_deadline")
++     try:
++      at = result["bytes_written"]
++      count = os.write(1,raw[at:at + 4096])
++     except BlockingIOError as error:
++      TRACE.note("sender","terminal.write",[1,at,raw[at:at + 4096]],error=error)
++      continue
++     except BaseException as error:
++      TRACE.note("sender","terminal.write",[1,at,raw[at:at + 4096]],error=error)
++      raise
++     require(count > 0,"failed_handoff_write")
++     result["bytes_written"] += count
++     self.root_output += count
++     TRACE.note("sender","terminal.write",[1,at,raw[at:at + 4096]],count)
++   wall,mono = time.time(),time.monotonic()
++   result.update(complete_line=True,completed_wall=wall,completed_monotonic=mono)
++   require(wall < result["original_wall_end"] and mono < result["original_monotonic_end"],
++     "failed_handoff_deadline")
++   result["confirmed"] = True
++  except BaseException as error:
++   result.update(error_type=type(error).__name__,
++      error_errno=getattr(error,"errno",None),
++      reason=str(error)[:512] if isinstance(error,Refusal) else type(error).__name__)
++   result["complete_line"] = result.get("attempted_bytes") == result["bytes_written"]
++  return result
++ def pump(self,target,event,deadline):
++  left = self.clock.left(deadline)
++  require(left > 0,"fixed_deadline")
++  with selectors.DefaultSelector() as selector:
++   interests = {target: event}
++   for fd in self.raw_outputs:
++    if fd not in self.eof and fd not in self.capture_stopped:
++     interests[fd] = interests.get(fd,0) | selectors.EVENT_READ
++   for fd,mask in interests.items():
++    if fd not in self.eof and fd not in self.capture_stopped:
++     selector.register(fd,mask)
++   events = selector.select(min(left,0.25))
++   for key,mask in events:
++    fd = key.fd
++    if fd in self.raw_outputs and mask & selectors.EVENT_READ:
++     cap = CONTROLLER_OUT_MAX - sum(len(v) for v in self.raw_outputs.values())
++     try:
++      part = self.budget.read(fd,min(8192,cap + 1),kind="controller_pipe")
++     except BlockingIOError:
++      continue
++     except (OSError,Refusal) as error:
++      self.capture_stopped.add(fd)
++      self.capture_errors[str(fd)] = {"error_type": type(error).__name__,
++          "error_errno": getattr(error,"errno",None),
++          "cause": str(error)[:512] if isinstance(error,Refusal) else type(error).__name__}
++      raise
++     if len(part) > cap:
++      self.raw_outputs[fd].extend(part[:cap])
++      self.overflow_samples[str(fd)] = part[cap:].hex()
++      self.capture_stopped.add(fd)
++      raise Refusal("controller_output_bound")
++     if part:
++      self.raw_outputs[fd].extend(part)
++      self.buffers.setdefault(fd,bytearray()).extend(part)
++     else:
++      self.eof.add(fd)
++  self.sample()
++  return any(key.fd == target and mask & event for key,mask in events)
++ def write(self,fd,raw,deadline,root=False,before_write=None):
++  require(type(raw) is bytes and 0 < len(raw) <= (ROOT_OUT_MAX if root else CONTROL_MAX),"wire_bound")
++  if root:
++   require(self.root_output + len(raw) <= ROOT_OUT_MAX,"root_output_bound")
++   self.root_requests.append({"wire_hex": raw.hex(),"wire_bytes": len(raw),
++                              "sha256": digest(raw),"successful_prefix_bytes": 0})
++  at = 0
++  while at < len(raw):
++   if not self.pump(fd,selectors.EVENT_WRITE,deadline):
++    continue
++   if before_write is not None:
++    before_write()
++   try:
++    count = os.write(fd,raw[at:at + 4096])
++   except BlockingIOError as error:
++    TRACE.note("sender","write",[fd,at,raw[at:at + 4096]],error=error)
++    continue
++   except BaseException as error:
++    TRACE.note("sender","write",[fd,at,raw[at:at + 4096]],error=error)
++    raise
++   require(count > 0,"pipe_write")
++   at += count
++   if root:
++    self.root_output += count
++    self.root_requests[-1]["successful_prefix_bytes"] += count
++   TRACE.note("sender","write",[fd,at - count,raw[at - count:at - count + 4096]],count)
++ def line(self,fd,deadline,maximum,role="controlled_line"):
++  buffer = self.buffers.setdefault(fd,bytearray())
++  while b"\n" not in buffer:
++   require(len(buffer) <= maximum and fd not in self.eof,"bounded control or EOF")
++   if not self.pump(fd,selectors.EVENT_READ,deadline):
++    continue
++   if fd not in self.raw_outputs:
++    try:
++     part = self.budget.read(fd,1,kind="inputwire_fd0")
++    except BlockingIOError:
++     continue
++    if not part:
++     self.eof.add(fd)
++    buffer.extend(part)
++  index = buffer.index(10) + 1
++  require(index <= maximum,"wire_bound")
++  result = bytes(buffer[:index])
++  self.controlled_lines.append({"fd": fd,"bytes": len(result),"sha256": digest(result),
++         "role": role,"producer": False,
++         "offset": self.controlled_offsets.get(fd,0),
++         "controller_pipe": fd in self.raw_outputs})
++  self.controlled_offsets[fd] = self.controlled_offsets.get(fd,0) + len(result)
++  del buffer[:index]
++  return result
++
++class Session:
++ def __init__(self,stage1,raw,wall0,mono0,bootstrap_read_bytes,runtime_fd,prior_trace):
++  self.handles,self.proc,self.generation = [],None,None
++  self.generations,self.cleanup_unknown = {},False
++  self.reaped,self.wait_status,self.wait_usage = False,None,None
++  self.spawn_attempted,self.sample_at = False,0
++  self.held,self.stage2,self.report,self.prior_error = [],None,None,None
++  self.scope,self.runtime_fd = None,runtime_fd
++  self.clock = self.budget = self.io = None
++  self.close_error_objects=[];self.stream_close_attempted={}
++  failure_owner.session,failure_owner.domain = self,"sender_session"
++  self.s1,self.stage1_sha = stage1,digest(raw)
++  self.clock,self.budget = Clock(stage1,wall0,mono0),Budget(bootstrap_read_bytes,prior_trace,{"os":os,"TRACE":TRACE,"Refusal":Refusal})
++  TRACE.client.ends = (self.clock.cleanup,self.clock.mono0 + self.clock.cleanup - self.clock.wall0)
++  self.io=IO.__new__(IO)
++  IO.__init__(self.io,self.clock,self.budget)
++ def own(self,handle):
++  failure_owner.emergency_handle = handle
++  self.handles.append(handle)
++  failure_owner.emergency_handle = None
++  TRACE.check()
++  return handle
++ def acquire(self,cls,*args,**kwargs):
++  handle = self.own(cls.__new__(cls))
++  handle._owner=AcquisitionOwner()
++  cls.__init__(handle,*args,**kwargs)
++  return handle
++ def fd_guard(self):
++  expected = {0,1,2,196,self.runtime_fd["fd"]}
++  for handle in self.handles:
++   expected.update(fd for fd in (getattr(handle,name,None) for name in ("fd","procfd","pidfd"))
++       if fd is not None)
++  if self.proc is not None:
++   expected.update(pipe.fileno() for pipe in (self.proc.stdin,self.proc.stdout,self.proc.stderr)
++       if pipe is not None and not pipe.closed)
++  actual = set()
++  for name in self.budget.strings(os.listdir("/proc/self/fd"),4096,kind="proc:self_fd_names"):
++   require(name.isascii() and name.isdecimal(),"bounded_fd_map")
++   fd = int(name)
++   try:
++    flags = fcntl.fcntl(fd,fcntl.F_GETFD)
++   except OSError as error:
++    require(error.errno == errno.EBADF,"bounded_fd_map")
++    continue
++   require(flags == (0 if fd < 3 else fcntl.FD_CLOEXEC),"owned_fd_cloexec")
++   actual.add(fd)
++  require(actual == expected,"exact_owned_fd_map")
++ def prepare_inputs(self):
++  expected = self.s1["expectation"]
++  for row,(_,uid,gid,mode) in zip(expected["namespace_identities"],ANCESTRY):
++   self.acquire(Directory,row["path"],row["identity"],uid,gid,mode)
++  for path,ident in self.s1["source_directories"].items():
++   self.acquire(Directory,path,ident)
++  self.named = {}
++  for name in ("controller","index"):
++   pin = self.s1[name]
++   self.named[name] = self.acquire(Named,pin["path"],pin["identity"],pin["sha256"],0o600,65536,self.budget)
++  self.body = self.acquire(Named,ISSUER_ROOT + "/" + expected["admission_sha256"] + ".json",
++      expected["admission_identity"],expected["admission_sha256"],0o400,65536,self.budget)
++  body = object_wire(self.body.raw)
++  body_shape(body)
++  require(body == {"schema": "friday.a049.offline-run-admission.v1","issuer": ISSUER,
++    "source_assignment": SOURCE,"source_hashes": expected["source_hashes"],
++    "run_context": expected["run_context"]},"issuer_body")
++  index = object_wire(self.named["index"].raw,canonical=False,maximum=65536)
++  require(type(index.get("mandatory_member_count")) is int and index["mandatory_member_count"] == 54
++    and index.get("mandatory_source_hashes") == expected["source_hashes"],"source54")
++  controller_raw = self.named["controller"].raw
++  require(re.search(rb'^ACCEPTED = ' + str(self.s1["controller"]["accepted_epoch"]).encode("ascii") + rb'$',
++      controller_raw,re.MULTILINE) is not None,"fixed_deadline")
++  thread_literal = json.dumps(self.s1["root_thread"],ensure_ascii=True).encode("ascii")
++  require(b"\nROOT_THREAD = " + thread_literal + b"\n" in controller_raw,"claim_binding")
++  for name,pin in self.s1["sender"]["files"].items():
++   self.acquire(Named,self.s1["sender"]["root"] + "/" + name,pin["identity"],pin["sha256"],0o600,65536,self.budget)
++  for name,pin in expected["source_hashes"].items():
++   self.acquire(Named,PACKAGE + "/" + name,self.s1["source54_identities"][name],pin,0o600,16777216,self.budget)
++  for handle in self.handles:
++   if isinstance(handle,Directory):
++    handle.check()
++  require(self.clock.left(self.clock.init) > 0,"fixed_deadline")
++  self.scope = self.acquire(OwnScope,self.budget,self.runtime_fd)
++  self.fd_guard()
++ def sample_tree(self,force=False):
++  if self.scope is None or self.proc is None:
++   return
++  now = time.monotonic()
++  if not force and now - self.sample_at < 5:
++   return
++  self.sample_at = now
++  try:
++   self.scope.check()
++   for pid in self.scope.children():
++    if pid not in self.generations:
++     require(self.scope.creation_started and len(self.generations) < 16,"own_tree_bound")
++     self.generations[pid] = self.acquire(Generation,pid,os.getpid(),self.budget,allow_exited=True)
++    gen = self.generations[pid]
++    require(not gen.reaped,"pid_generation")
++    if gen.exited():
++     gen.children(terminal=True)
++    else:
++     gen.check()
++  except (OSError,ValueError,IndexError,Refusal):
++   self.cleanup_unknown = True
++   raise Refusal("own_tree_visibility")
++ def spawn(self):
++  self.fd_guard()
++  self.scope.check()
++  require(not self.scope.children(),"initial_own_scope_not_empty")
++  require(self.named["controller"].check() == self.named["controller"].raw,"pin_mismatch")
++  self.scope.creation_started = True
++  self.spawn_attempted = True
++  try:
++   self.proc = OwnedPopen.__new__(OwnedPopen)
++   OwnedPopen.__init__(self.proc,["/usr/bin/python3.14","-I","-S","-B",CONTROLLER],
++    env=dict(ENV3),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
++    close_fds=True,pass_fds=(196,),preexec_fn=controller_limits)
++  except BaseException as error:
++   TRACE.note("sender","spawn.error",[],error=error)
++   raise
++  TRACE.note("sender","spawn.returned",[],[self.proc.pid,self.proc.stdin.fileno(),self.proc.stdout.fileno(),self.proc.stderr.fileno()])
++  self.io.attach(self.proc,self.sample_tree)
++  self.generation = self.acquire(Generation,self.proc.pid,os.getpid(),self.budget,allow_exited=True)
++  self.generations[self.proc.pid] = self.generation
++  self.sample_tree(True)
++  self.fd_guard()
++ def prepare_custody(self):
++  expected = self.s1["expectation"]
++  init = {"assignment": self.s1["assignment"],"generation": 1,"root_thread": self.s1["root_thread"],
++    "phase": "INIT","controller_sha256": self.s1["controller"]["sha256"],
++    "init_deadline_epoch": self.s1["auth_deadline_epoch"],"expectation": expected}
++  validate_init(init,self.s1)
++  self.io.write(self.proc.stdin.fileno(),encode(init),self.clock.init)
++  claim = object_wire(self.io.line(self.proc.stdout.fileno(),self.clock.init,CONTROLLER_OUT_MAX,
++         role="controlled_claim"))
++  validate_claim(claim,self.s1,self.generation.pid,self.generation.ticks)
++  self.held = [self.acquire(Held,self.generation,198,131072,encode(expected),self.budget),
++     self.acquire(Held,self.generation,199,65536,self.body.raw,self.budget)]
++  observations = [item.observation for item in self.held]
++  require(claim["identities"] == [item["identity"] for item in observations],"stale_identity")
++  require(self.clock.left(self.clock.init) > 0,"fixed_deadline")
++  self.io.write(1,encode({"status": "ROOT_CUSTODY_REQUEST","claims_are_not_authority": True,
++   "stage1_sha256": self.stage1_sha,"holder_pid": self.generation.pid,
++   "holder_start_ticks": self.generation.ticks,"claim": claim,"held_observations": observations,
++   "auth_deadline_epoch": self.clock.auth,
++   "original_cleanup_deadline_at_utc": expected["run_context"]["deadline_at_utc"],
++   "run_completion_deadline": "original_cleanup_deadline_at_utc minus seal_reserve_seconds",
++   "seal_reserve_seconds": expected["run_context"]["seal_reserve_seconds"],
++   "outside_Root_must_independently_inspect_and_select_existing_TASK": True}),self.clock.auth,root=True)
++ def preauth(self):
++  self.generation.check()
++  for handle in self.handles:
++   if isinstance(handle,Named):
++    require(handle.check() == handle.raw,"pin_mismatch")
++   elif isinstance(handle,Directory):
++    handle.check()
++  for item in self.held:
++   item.check(item.observation)
++  self.sample_tree(True)
++  self.generation.check()
++  self.fd_guard()
++  require(self.clock.left(self.clock.auth) > 0,"fixed_deadline")
++  self.final_namespace()
++ def final_namespace(self):
++  require(self.clock.left(self.clock.auth) > 0,"fixed_deadline")
++  for handle in self.handles:
++   if isinstance(handle,Directory):
++    handle.check()
++ def run(self):
++  TRACE.check()
++  TRACE.note("sender","phase",["prepare_inputs"])
++  self.prepare_inputs()
++  TRACE.note("sender","phase",["spawn"])
++  self.spawn()
++  TRACE.note("sender","phase",["prepare_custody"])
++  self.prepare_custody()
++  raw = self.io.line(0,self.clock.auth,CONTROL_MAX,role="root_stage2_input")
++  self.stage2 = object_wire(raw)
++  auth = validate_stage2(self.stage2,self.s1,self.stage1_sha,self.generation.pid,
++       self.generation.ticks,[v.observation for v in self.held])
++  self.preauth()
++  self.io.write(self.proc.stdin.fileno(),encode(auth),self.clock.auth,
++     before_write=self.final_namespace)
++  TRACE.call("sender","controller.stdin.close",self.proc.stdin.close)
++  while True:
++   raw = self.io.line(self.proc.stdout.fileno(),self.clock.run,CONTROLLER_OUT_MAX,
++       role="controlled_report")
++   report = object_wire(raw,telemetry=True,maximum=CONTROLLER_OUT_MAX)
++   if report.get("status") in ("RUN_RETURNED","REFUSED_OR_FAILED"):
++    self.report = report
++    return validate_report(report,self.stage2,self.s1)
++   raise Refusal("unexpected_controller_output")
++ def cleanup(self):
++  TRACE.note("sender","phase",["cleanup"])
++  if self.proc is None or not integer(getattr(self.proc,"pid",None),1):
++   return {"confirmed": not self.spawn_attempted,"cause": "spawn_not_observed" if self.spawn_attempted else None}
++  if self.proc.stdin is not None and not self.proc.stdin.closed:
++   TRACE.call("sender","controller.stdin.close",self.proc.stdin.close)
++  generation_known = self.generation is not None
++  if not generation_known or self.scope is None:
++   self.cleanup_unknown = True
++  if self.io.capture_stopped:
++   self.cleanup_unknown = True
++  terminal_scope = False
++  while self.clock.cleanup_left() > 0:
++   if self.scope is not None:
++    try:
++     self.sample_tree(True)
++    except BaseException:
++     self.cleanup_unknown = True
++   for gen in list(self.generations.values()):
++    if gen.reaped:
++     continue
++    try:
++     if not gen.exited():
++      continue
++     try:
++      gen.children(terminal=True)
++     except BaseException:
++      self.cleanup_unknown = True
++     gen.check(allow_exited=True)
++     pid,status,usage = os.wait4(gen.pid,os.WNOHANG)
++     require(pid == gen.pid,"exact_own_wait4")
++     gen.reaped,gen.wait_status,gen.wait_usage = True,status,usage
++     if gen.pid == self.proc.pid:
++      self.reaped,self.wait_status,self.wait_usage = True,status,gen.wait_usage
++      self.proc.returncode = os.waitstatus_to_exitcode(status)
++    except BaseException:
++     self.cleanup_unknown = True
++   if self.generation is None and not self.reaped:
++    try:
++     pid,status,usage = os.wait4(self.proc.pid,os.WNOHANG)
++     if pid == self.proc.pid:
++      self.reaped,self.wait_status,self.wait_usage = True,status,usage
++      self.proc.returncode = os.waitstatus_to_exitcode(status)
++    except (ChildProcessError,OSError):
++     self.cleanup_unknown = True
++   if self.reaped and self.scope is not None:
++    try:
++     self.sample_tree(True)
++     if not self.scope.children() and all(gen.reaped for gen in self.generations.values()):
++      self.scope.terminal(self.generations)
++      terminal_scope = True
++    except BaseException:
++     terminal_scope = False
++     self.cleanup_unknown = True
++   if terminal_scope and all(fd in self.io.eof or fd in self.io.capture_stopped for fd in self.io.raw_outputs):
++    break
++   with selectors.DefaultSelector() as selector:
++    for gen in self.generations.values():
++     if not gen.reaped:
++      selector.register(gen.pidfd,selectors.EVENT_READ)
++    for fd in self.io.raw_outputs:
++     if fd not in self.io.eof and fd not in self.io.capture_stopped:
++      selector.register(fd,selectors.EVENT_READ)
++    for key,_mask in selector.select(min(0.25,self.clock.cleanup_left())):
++     if key.fd not in self.io.raw_outputs:
++      continue
++     try:
++      cap = CONTROLLER_OUT_MAX - sum(len(v) for v in self.io.raw_outputs.values())
++      part = self.budget.read(key.fd,min(8192,cap + 1),kind="controller_pipe_cleanup")
++      if len(part) > cap:
++       self.io.raw_outputs[key.fd].extend(part[:cap])
++       self.io.overflow_samples[str(key.fd)] = part[cap:].hex()
++       self.cleanup_unknown = True
++       self.io.capture_stopped.add(key.fd)
++      elif part:
++       self.io.raw_outputs[key.fd].extend(part)
++      else:
++       self.io.eof.add(key.fd)
++     except BlockingIOError:
++      continue
++     except (OSError,Refusal) as error:
++      self.cleanup_unknown = True
++      self.io.capture_stopped.add(key.fd)
++      self.io.capture_errors[str(key.fd)] = {"error_type": type(error).__name__,
++           "error_errno": getattr(error,"errno",None),
++       "cause": str(error)[:512] if isinstance(error,Refusal) else type(error).__name__}
++  if any(fd not in self.io.eof for fd in self.io.raw_outputs):
++   self.cleanup_unknown = True
++  if not terminal_scope:
++   self.cleanup_unknown = True
++  descendants_closed = (terminal_scope and bool(self.generations)
++   and all(gen.reaped and gen.terminal_children == [] for gen in self.generations.values()))
++  confirmed = (self.reaped and generation_known and descendants_closed and not self.cleanup_unknown
++     and all(fd in self.io.eof for fd in self.io.raw_outputs))
++  return {"confirmed": confirmed,"exact_direct_child_reaped": self.reaped,
++    "generation_observed": generation_known,"known_descendants_closed": descendants_closed,
++    "bounded_own_tree_visibility_unknown": self.cleanup_unknown,
++    "wait4_status": self.wait_status,"wait4_raw_usage_observed": self.wait_usage,
++    "returncode_observed": self.proc.returncode,
++    "capture_stopped_original_fds": sorted(self.io.capture_stopped),
++    "capture_errors_by_original_fd": dict(self.io.capture_errors),
++    "tree_evidence_scope": "ISOLATED_OWN_SUBREAPER_EMPTY_INITIAL_SCOPE_TERMINAL_DIRECT_ADOPTED_LISTS_EXACT_WAIT4_NO_GLOBAL_ABSENCE",
++    "terminal_scope": self.scope.snapshots if self.scope is not None else None,
++    "handoff_reserved_seconds": HANDOFF_SECONDS,
++    "known_generations": [{"pid": gen.pid,"parent_pid": gen.parent,"start_ticks": gen.ticks,
++     "terminal_children": gen.terminal_children,"reaped": gen.reaped,
++     "wait4_status": gen.wait_status,"wait4_raw_usage": gen.wait_usage}
++         for gen in self.generations.values()],"signals": "NONE","retry": False}
++ def close(self):
++  TRACE.note("sender","phase",["close"])
++  errors = []
++  emergency = failure_owner.emergency_handle
++  if emergency is not None:
++   try:
++    emergency.close()
++    failure_owner.emergency_handle = None
++   except BaseException as error:
++    self.close_error_objects.append(error)
++    errors.append(type(error).__name__)
++  if self.io is not None:
++   self.io.detach()
++  for handle in reversed(self.handles):
++   try:
++    handle.close()
++   except BaseException as error:
++    self.close_error_objects.append(error)
++    errors.append(type(error).__name__)
++  if self.proc is not None:
++   for pipe in (getattr(self.proc,name,None) for name in ("stdin","stdout","stderr")):
++    if pipe is not None and not pipe.closed and id(pipe) not in self.stream_close_attempted:
++     self.stream_close_attempted[id(pipe)]=[pipe,None]
++     try:
++      TRACE.call("sender","controller.pipe.close",pipe.close)
++     except BaseException as error:
++      self.stream_close_attempted[id(pipe)][1]=error
++      self.close_error_objects.append(error)
++      errors.append(type(error).__name__)
++  for handle in self.handles:
++   for error in getattr(getattr(handle,"_owner",None),"cleanup_errors",[]):
++    if error not in self.close_error_objects:
++     self.close_error_objects.append(error);errors.append(type(error).__name__)
++  return errors
++
++PREDICATE_SITE_MAP.update({419: 'sender.predicate.Clock.__init__.1', 422: 'sender.predicate.Clock.now.1', 434: 'sender.predicate.Named.__init__.1', 435: 'sender.predicate.Named.__init__.2', 436: 'sender.predicate.Named.__init__.2', 437: 'sender.predicate.Named.__init__.2', 449: 'sender.predicate.Named.check.1', 450: 'sender.predicate.Named.check.1', 452: 'sender.predicate.Named.check.2', 453: 'sender.predicate.Named.check.2', 454: 'sender.predicate.Named.check.3', 465: 'sender.predicate.Directory.__init__.1', 466: 'sender.predicate.Directory.__init__.1', 467: 'sender.predicate.Directory.__init__.1', 477: 'sender.predicate.Directory.check.1', 478: 'sender.predicate.Directory.check.1', 502: 'sender.predicate.Generation.proc_read.1', 510: 'sender.predicate.Generation.stat.1', 517: 'sender.predicate.Generation.check.1', 521: 'sender.predicate.Generation.check.2', 523: 'sender.predicate.Generation.check.3', 531: 'sender.predicate.Generation.children.1', 536: 'sender.predicate.Generation.children.2', 538: 'sender.predicate.Generation.children.3', 541: 'sender.predicate.Generation.children.4', 542: 'sender.predicate.Generation.children.4', 568: 'sender.predicate.OwnScope.__init__.1', 570: 'sender.predicate.OwnScope.__init__.2', 574: 'sender.predicate.OwnScope.__init__.3', 602: 'sender.predicate.OwnScope.proc_read.1', 608: 'sender.predicate.OwnScope.single_thread.1', 609: 'sender.predicate.OwnScope.single_thread.1', 612: 'sender.predicate.OwnScope.runtime_check.1', 613: 'sender.predicate.OwnScope.runtime_check.1', 614: 'sender.predicate.OwnScope.runtime_check.1', 617: 'sender.predicate.OwnScope.runtime_check.2', 622: 'sender.predicate.OwnScope.check.1', 623: 'sender.predicate.OwnScope.check.1', 627: 'sender.predicate.OwnScope.children.1', 628: 'sender.predicate.OwnScope.children.1', 633: 'sender.predicate.OwnScope.terminal.1', 634: 'sender.predicate.OwnScope.terminal.1', 637: 'sender.predicate.OwnScope.terminal.2', 651: 'sender.predicate.Held.__init__.1', 652: 'sender.predicate.Held.__init__.1', 664: 'sender.predicate.Held.flags.1', 669: 'sender.predicate.Held.check.1', 672: 'sender.predicate.Held.check.2', 675: 'sender.predicate.Held.check.3', 683: 'sender.predicate.Held.check.4', 684: 'sender.predicate.Held.check.4', 685: 'sender.predicate.Held.check.4', 686: 'sender.predicate.Held.check.4', 687: 'sender.predicate.Held.check.4', 688: 'sender.predicate.Held.check.4', 690: 'sender.predicate.Held.check.5', 736: 'sender.predicate.IO.terminal.1', 737: 'sender.predicate.IO.terminal.1', 743: 'sender.predicate.IO.terminal.2', 746: 'sender.predicate.IO.terminal.3', 756: 'sender.predicate.IO.terminal.4', 762: 'sender.predicate.IO.terminal.5', 763: 'sender.predicate.IO.terminal.5', 773: 'sender.predicate.IO.pump.1', 810: 'sender.predicate.IO.write.1', 812: 'sender.predicate.IO.write.2', 829: 'sender.predicate.IO.write.3', 838: 'sender.predicate.IO.line.1', 850: 'sender.predicate.IO.line.2', 897: 'sender.predicate.Session.fd_guard.1', 902: 'sender.predicate.Session.fd_guard.2', 904: 'sender.predicate.Session.fd_guard.3', 906: 'sender.predicate.Session.fd_guard.4', 921: 'sender.predicate.Session.prepare_inputs.1', 922: 'sender.predicate.Session.prepare_inputs.1', 923: 'sender.predicate.Session.prepare_inputs.1', 925: 'sender.predicate.Session.prepare_inputs.2', 926: 'sender.predicate.Session.prepare_inputs.2', 928: 'sender.predicate.Session.prepare_inputs.3', 929: 'sender.predicate.Session.prepare_inputs.3', 931: 'sender.predicate.Session.prepare_inputs.4', 939: 'sender.predicate.Session.prepare_inputs.5', 953: 'sender.predicate.Session.sample_tree.1', 956: 'sender.predicate.Session.sample_tree.2', 967: 'sender.predicate.Session.spawn.1', 968: 'sender.predicate.Session.spawn.2', 998: 'sender.predicate.Session.prepare_custody.1', 999: 'sender.predicate.Session.prepare_custody.2', 1012: 'sender.predicate.Session.preauth.1', 1020: 'sender.predicate.Session.preauth.2', 1023: 'sender.predicate.Session.final_namespace.1', 1081: 'sender.predicate.Session.cleanup.1'})
++def perform_staged_send(stage1,stage1_raw,wall0,mono0,bootstrap_read_bytes,runtime_fd,prior_trace):
++ """Actual stock call graph; no execution was performed by the Source author."""
++ session,codes,cause,cleanup = None,None,None,None
++ failure_owner.domain = "sender_pre_session"
++ try:
++  for name,expected in LIMITS.items():
++   require(resource.getrlimit(getattr(resource,name)) == expected,"trusted_pre_interpreter_limits")
++  validate_stage1(stage1)
++  require(encode(stage1) == stage1_raw,"canonical object wire")
++  require(integer(bootstrap_read_bytes,len(stage1_raw),393216),"read_bound")
++  session = Session.__new__(Session)
++  Session.__init__(session,stage1,stage1_raw,wall0,mono0,bootstrap_read_bytes,runtime_fd,prior_trace)
++  codes = session.run()
++ except BaseException as error:
++  cause = str(error)[:512] if isinstance(error,Refusal) else type(error).__name__
++  TRACE.note("sender","run.failure",[cause,type(error).__name__],error=error)
++ finally:
++  if session is not None:
++   try:
++    cleanup = session.cleanup()
++   except BaseException as error:
++    cleanup = {"confirmed": False,"cause": "cleanup_exception","error_type": type(error).__name__}
++   failure_owner.cleanup = cleanup
++   close_errors = session.close()
++   if close_errors:
++    cleanup["confirmed"] = False
++    cleanup["handle_close_errors"] = close_errors
++   failure_owner.cleanup = cleanup
++ if session is None:
++  early_commitment = {"retained": ReadJournal(prior_trace).wire(),"omitted_events": 0,"complete": True,"denied": None}
++  early_raw = encode(early_commitment)
++  outcome = {"status": "REFUSED","cause": cause,"spawned": False,"runtime_GO": False,
++    "release_credit": False,"cleanup": "NO_CHILD_NO_OWN_HANDLES","retry": False,
++         "read_trace_sha256": digest(early_raw),"read_trace_events": len(prior_trace),
++         "read_trace": early_commitment,"read_trace_bytes": len(early_raw),
++    "read_trace_complete": True,"read_denied": None,
++    "producer_stdio": {"dispatcher_stdout": "NOT_OBSERVED","dispatcher_stderr": "NOT_OBSERVED",
++         "worker_stdout": "NOT_OBSERVED","worker_stderr": "NOT_OBSERVED",
++         "observed_on_controller_pipes": False,"filler_is_producer_output": False,
++         "silent_zero": False},
++    "child_failure_stderr": "NO_KNOWN_CHILD_FAILURE_NOT_A_ZERO_MEASUREMENT",
++    "explicit_operation_trace": TRACE.wire(),"whole_performing_trace_complete": False}
++  try:
++   raw = encode(outcome)
++   TRACE.note("sender","native.before_delivery",[],raw)
++   native_contract.before_early_delivery(outcome,raw)
++   require(len(raw) <= ROOT_OUT_MAX,"root_output_bound")
++   os.set_blocking(1,False)
++   with selectors.DefaultSelector() as selector:
++    selector.register(1,selectors.EVENT_WRITE)
++    left = min(wall0 + 30 - time.time(),mono0 + 30 - time.monotonic())
++    if left <= 0 or not selector.select(left):
++     raise Refusal("fixed_deadline")
++    count = os.write(1,raw)
++    outcome["delivery"] = {"confirmed": False,"original_channel": True,
++         "bytes_written": count,"complete_line": count == len(raw)}
++    failure_owner.delivery = outcome["delivery"]
++    TRACE.note("sender","early.write",[1,raw],count)
++    require(count == len(raw),"pipe_write")
++    wall,mono = time.time(),time.monotonic()
++    outcome["delivery"].update(completed_wall=wall,completed_monotonic=mono)
++    require(wall < wall0 + 30 and mono < mono0 + 30,"failed_handoff_deadline")
++    outcome["delivery"]["confirmed"] = True
++  except BaseException as error:
++   outcome.setdefault("delivery",{"confirmed": False,"bytes_written": 0})
++   outcome["delivery"]["error_type"] = type(error).__name__
++  outcome["post_delivery_explicit_operation_trace"] = TRACE.wire()
++  outcome["post_delivery_trace_is_in_written_line"] = False
++  return outcome
++ if not cleanup["confirmed"]:
++  status = "STOP_UNCONFIRMED"
++ elif (cause is not None or session.proc is None or session.proc.returncode != 0
++  or session.report is None or session.report["status"] != "RUN_RETURNED"):
++  status = "REFUSED_OR_FAILED"
++ else:
++  status = "RUN_REPORTED"
++ def pipe_hex(fd,buf):
++  raw = bytes(buf)
++  eof = fd in session.io.eof
++  stopped = fd in session.io.capture_stopped
++  actual_zero = bool(eof and not stopped and not raw)
++  return {"prefix_hex": raw.hex() if raw else ("" if actual_zero else None),
++    "prefix_bytes": len(raw),"eof": eof,"capture_stopped": stopped,
++    "actual_zero": actual_zero,"silent_zero": False,
++    "capture_error": session.io.capture_errors.get(str(fd)),
++    "overflow_probe_hex": session.io.overflow_samples.get(str(fd))}
++ known_child_failure = bool(session.report is not None and session.report.get("status") == "REFUSED_OR_FAILED")
++ if codes and any(code != 0 for code in codes):
++  known_child_failure = True
++ if cleanup.get("returncode_observed") not in (None,0):
++  known_child_failure = True
++ commitment = {"retained": session.budget.trace.wire(),"omitted_events": session.budget.omitted,
++    "complete": not session.budget.trace.failed,"denied": session.budget.denied,
++    "later_denials": session.budget.later_denials,
++               "encoding": "LOSSLESS_TABLE_AND_ADJACENT_EQUAL_CALL_RLE_NOT_DEDUPLICATION",
++               "scope": "GUARDED_READ_AND_STRING_CALLS; NOT_FULL_STAT_CLOCK_WAIT_WRITE_SEQUENCE"}
++ commitment_raw = encode(commitment)
++ pipes = {str(fd): pipe_hex(fd,value) for fd,value in session.io.raw_outputs.items()}
++ outcome = {"status": status,"cause": cause,"cleanup": cleanup,
++  "reported_controller_output_claim": session.report,"reported_entrypoint_returncodes": codes,
++  "controller_raw_output_hex_by_original_fd": {fd: row["prefix_hex"] for fd,row in pipes.items()},
++  "controller_pipe_observation": pipes,
++  "controller_original_fd_map": session.io.original_fd_map,
++  "controlled_stdout_lines": list(session.io.controlled_lines),
++  "producer_stdio": dict(session.io.producer_stdio),
++  "child_failure_stderr": "UNKNOWN_NOT_ZERO" if known_child_failure else "NO_KNOWN_CHILD_FAILURE_NOT_A_ZERO_MEASUREMENT",
++  "controller_overflow_probe_hex_by_original_fd": dict(session.io.overflow_samples),
++  "sender_read_bytes_observed": session.budget.observed,
++  "sender_read_requested_upper_bytes": session.budget.reserved,
++  "read_trace_sha256": digest(commitment_raw),"read_trace_bytes": len(commitment_raw),
++  "read_trace_events": len(session.budget.trace),"read_trace_omitted": session.budget.omitted,
++  "read_trace_complete": not session.budget.trace.failed,"read_trace": commitment,
++  "whole_performing_trace_complete": False,
++  "read_denied": session.budget.denied,
++  "later_read_denials": session.budget.later_denials,
++  "root_custody_request_bytes_written": session.io.root_output,
++  "root_custody_request_observations": session.io.root_requests,
++  "read_accounting_scope": "EXPLICIT_REPEAT_HASH_READS_COUNTED_CAPS_ARE_RESERVATIONS_IMPLICIT_IO_UNKNOWN_NOT_ZERO",
++  "sender_rlimits_observed": {name: list(resource.getrlimit(getattr(resource,name))) for name in LIMITS},
++  "sender_raw_usage_observed": usage_wire(resource.getrusage(resource.RUSAGE_SELF)),
++  "Root_image_RAM_IO": "UNKNOWN_NOT_ZERO","aggregate_RAM_IO": "UNKNOWN_NOT_ZERO",
++  "origin": "EXTERNAL_PRECONDITION_NOT_AUTHENTICATED_FROM_DATA",
++  "execution_custody": "EXTERNAL_INDEPENDENT_IMMUTABLE_EXECUTION_PRECONDITION_REQUIRED_CHECKED_SENDER_BYTES_DIRECTLY_LOADED_NO_SOURCE_GRANT",
++  "handoff": "FULL_ORIGINAL_ROOT_LINE_AND_NATIVE_EXIT_REQUIRED_INCOMPLETE_OR_125_FAILED_HANDOFF",
++  "native_exit_rule": "NATIVE0_IFF_RUN_REPORTED_CODES0_CLEANUP_DELIVERY_CONFIRMED_ELSE125",
++  "runtime_GO": False,"release_credit": False,"full_gate": "NOT_PROVEN","retry": False}
++ outcome["explicit_operation_trace"] = TRACE.wire()
++ outcome["explicit_operation_trace_scope"] = "EXPLICIT_METADATA_EXTERNAL_MATCHING_BYTES_CHILD_INTERNALS_IMPLICIT_IO_SIZE_RAM_NOT_PROVEN"
++ _pre = encode(outcome,telemetry=True)
++ try:
++  native_contract.before_delivery(outcome,_pre,session.io.root_output)
++  outcome["delivery"] = session.io.terminal(_pre)
++  failure_owner.delivery = outcome["delivery"]
++  native_contract.after_delivery(_pre,outcome,session.io.root_output)
++  if not outcome["delivery"]["confirmed"]:
++   outcome["status"] = "STOP_UNCONFIRMED" if not cleanup["confirmed"] else "FAILED_HANDOFF"
++ except BaseException as error:
++  outcome.setdefault("delivery",{"bytes_written": 0,"complete_line": False})
++  outcome["delivery"].update(confirmed=False,error_type=type(error).__name__)
++  outcome["status"] = "STOP_UNCONFIRMED" if not cleanup["confirmed"] else "FAILED_HANDOFF"
++ outcome["native_final_line"] = {"channel": "original_fd1","bytes": len(_pre),
++         "sha256": digest(_pre),"contained_in_written_line": False}
++ outcome["post_delivery_explicit_operation_trace"] = TRACE.wire()
++ outcome["post_delivery_trace_is_in_written_line"] = False
++ return outcome
++if __name__ == "__main__":
++ raise SystemExit("use the independently Root-selected stock caller; no sender CLI")
++
++PREDICATE_SITE_MAP.update({1201: 'sender.predicate.perform_staged_send.1', 1203: 'sender.predicate.perform_staged_send.2', 1204: 'sender.predicate.perform_staged_send.3', 1241: 'sender.predicate.perform_staged_send.4', 1253: 'sender.predicate.perform_staged_send.5', 1256: 'sender.predicate.perform_staged_send.6'})
+--- /var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/source/staged_sender.py
++++ /var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/staged_sender.py
+@@ -20,10 +20,10 @@
+ ISSUER = "friday.owner.offline-source-run-admission.v1"
+ SOURCE = "ASTRA-E4-QUALITY-STABLE-ROOT-NAMESPACE-CLOSURE-A074#1"
+ ASSIGNMENT = "ASTRA-E4-QUALITY-ROOT-NATIVE-FOCUSED-RUN-A075"
+-PACKAGE = "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54"
+-CONTROLLER = "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/source/controller.py"
+-INDEX = "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/index/full-source.json"
+-INDEX_SHA = "d843c3cdb7ecd760bc76acaed80935d2584b57d8e219d243901a5749515b2e8d"
++PACKAGE = "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54"
++CONTROLLER = "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/controller.py"
++INDEX = "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/index/full-source.json"
++INDEX_SHA = "5064b09f8b6339ff6e5e74fedc4e658dccd323e94d8649af6a6d4cd3e22a6072"
+ ENV3 = {"PATH": "/usr/bin:/bin","LANG": "C","LC_ALL": "C"}
+ ANCESTRY = (("/",0,0,0o755),("/home",0,0,0o755),
+    ("/home/jericho",1000,1000,0o750),
+@@ -70,7 +70,7 @@
+  try:
+   pending["first_error"]=fault
+   pending.update(ok=ok,cause=cause,site=None,locals=None,recording_error=None)
+-  frame=_predicate_frame(1)
++  frame=_predicate_frame(1);TRACE.predicate_state(frame)
+   site=[frame.f_code.co_qualname,frame.f_lineno]
+   observed={key:item for key,item in frame.f_locals.items() if key!="self"
+    and type(item) in (type(None),str,bool,int,float,bytes,list,tuple,dict,set,frozenset)}

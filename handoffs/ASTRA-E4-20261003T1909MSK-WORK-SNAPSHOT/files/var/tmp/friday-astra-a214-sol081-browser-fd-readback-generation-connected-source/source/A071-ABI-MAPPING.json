@@ -1,0 +1,1788 @@
+{
+  "a158_extension": {
+    "ABI": {
+      "fr_controller_finish": "int(fr_evidence344*); same actual producer consumes exact FINISH_ACK, not kernel wait/reap",
+      "fr_controller_join": "int(unsigned exact_original_position,fr_evidence344*); actual fork child consumes separately Root-selected exact START",
+      "fr_controller_observe": "int(fr_observation96*); readonly distinct child context, all wait/status/cleanup fields zero",
+      "fr_controller_prepare": "int(unsigned exact_original_position); original coordinator request only, no new grant"
+    },
+    "F10_waiver": false,
+    "GO": false,
+    "Root_Image_execution_admission": false,
+    "SourceReady": false,
+    "all216_credit": false,
+    "all216_required": true,
+    "assignment": "ASTRA-E4-BROWSER-A153-A156-WHOLE216-ALL6-ALL2-CONNECTED-SOURCE-IMPLEMENTATION-A158",
+    "custody": {
+      "incomplete": "missing/preclone unknown raw is null, not invented empty output; overflow/read/retention/close/nonEOF remains false or unknown; original errors and actual auxiliary uncertainty preserved",
+      "normal_public": "A071-FULL-CONTROLS._run_held and A079.run_public call held_capture under a fixed actual-FD ledger before first pipe; immediate acquisition ownership and finite _exit125 child setup; raw both streams frozen before semantics on success/refusal",
+      "persistence": "same-process owned Python objects only; no disk or crash durability asserted",
+      "typed_inner": "actual producer stdout/stderr drained continuously by same coordinator under original1MiB each; raw bytes frozen before expected cause checks, emitted as bounded raw_hex only when complete; no hash-only credit",
+      "typed_outer": "A087 same repaired four-stream raw transfer/bind_inner_streams receipt, consume_whole216 retains original immutable objects on success/refusal"
+    },
+    "gates": "NOT_RUN",
+    "generation": 1,
+    "implementation_status": "PARTIAL_SOURCE_WRITTEN_NOT_RUN_PENDING_DIFFERENT_AUTHOR_WHOLE_REVIEW",
+    "mandatory_unimplemented_ID_count": 165,
+    "ownership": {
+      "child": "one actual fr_own_fork role0; exact PID/birth/private pidfd record; ordinary REGISTER_ACK and child barrier precede child context",
+      "no_reset": "never reassign original native_owner, clear poison, reset original START/session or adopt caller-provided status",
+      "parent": "unchanged original coordinator/native_owner/private native sequence",
+      "selection": "Root actual records[1], actual proc/pidfd/credential/direct-parent checks; exact separately selected START1 and FINISH2/ACK10",
+      "special_evidence": "fr_evidence phase1 register_ack_ns means typed START receipt time; phase10 reap_ack_ns means typed FINISH_ACK receipt time. Neither is registration/reap/kernel credit; private child evidence is separate.",
+      "status": "Root borrowed records and child FINISH are never kernel wait authority; coordinator actual wait4 plus original REAP_ACK publishes status"
+    },
+    "runtime": "NOT_RUN",
+    "safe_connected_ID_count": 51,
+    "unsafe_historical_IDs": "ABSTRACT_REQUIRED_NOT_RUN: no operational payload, fixture, generator, reproduction or exploitation implementation"
+  },
+  "a201_extension_historical_only": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "binding": {
+      "capacity_authority": "Existing SOL069 expanded-body limit, not a new RAM/IO grant or fit proof.",
+      "capacity_each_bytes": 16777216,
+      "clock": "Actual original capsule start/work/hard offsets32/40/48; hardguard reused, never refreshed. Copy/map/read/close worst-case native duration requires qualification and whole prospective fit, checks alone not proof.",
+      "existing_fixed_ABI": "Source19/capsule848/packet96/child32/original role and mode topology unchanged",
+      "header_bytes": 128,
+      "plane_magic": "FRBOD201",
+      "record_header_bytes": 48,
+      "reference_bytes": 72,
+      "reference_magic": "FRREF201",
+      "source_fixed_fds": [
+        131,
+        132,
+        133,
+        134
+      ]
+    },
+    "compiler_ABI": "NOT_RUN",
+    "physical_custody": "Existing outside public caller creates four Source-only bodies/read-only views before outer fork. Actual native Root validates generation/session/capsule/extent/seals/UID and passes only Source writable plane to worker fixed131; public actual snapshot consumes committed records after confirmed bounded Root retirement even if reference not delivered. Native/error original objects BEFORE encoding, physical complete-body domain/full stock/init/end custody remain OPEN.",
+    "remaining": [
+      "Original native/raw primary+allsecondary/body before encode + actual final outside-parent end remain OPEN",
+      "Full original packet/capprobe/sourcebody representation and whole original resource fit not established",
+      "Current stable image/compiler/native ABI/grants/provider/resources/clock/non-author Source acceptance and all required gates NOT_RUN"
+    ],
+    "resource_costs": {
+      "RAM_IO_native_stock_copy_read_header_FD_hash_encoder_decoder_error_overlap": "UNKNOWN_NOT_ZERO",
+      "extra_descriptions": "4SourceRW+4outsideRO+Source receiver read-only opens/mappings; actual baseline/multiplicity must fit original FD caps",
+      "extra_physical_extent_bytes": 67109376,
+      "original_limits": "Source coord48MiB/worker48MiB, Rootouter64MiB/inner192MiB/aggregate256MiB; stream1MiB/event131072, original end/roles/cases preserved",
+      "qualification": "REQUIRED_NOT_RUN; no sample or declared cap treated as measured upper"
+    },
+    "runtime": "NOT_RUN",
+    "schema": "friday.astra.a201.physical-frame-source.v1",
+    "source_execution": 0,
+    "state": "SCOPED_AUTHORED_FRAME_MECHANISM_NOT_WHOLE_NATIVE_ERROR_ACCEPTANCE",
+    "wire_scope": "Generic terminal JSON and whole packet wire bytes/caps remain ORIGINAL. Only explicit worker event emitter uses72byte physical reference; actual G1 events decoder resolves full bytes before original DS69 parse. Old full-packet1MiB/meaningfulcap obligations still OPEN, not waived."
+  },
+  "actual_observations": "NOT_RUN",
+  "all216_integration": "PARTIAL51_BOUNDED_INERT_SOURCE_WRITTEN;165_OPEN_SOURCE_CODE_GAP;WHOLE216_INCOMPLETE",
+  "current_dependencies": {
+    "G1": {
+      "bytes": 101856,
+      "identity9_decimal_strings": [
+        "2050",
+        "4226856",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101856",
+        "1790997245220570954",
+        "1790997245220570954"
+      ],
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1.py",
+      "sha256": "c18c296f1c5f349a063e2657e1d2a53fd2b4c07dccabf12f7a117608281cc24f",
+      "stable9": true
+    },
+    "R4": {
+      "bytes": 57488,
+      "identity9_decimal_strings": [
+        "2050",
+        "4226855",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57488",
+        "1790997245331577317",
+        "1790997245331577317"
+      ],
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+      "sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2",
+      "stable9": true
+    }
+  },
+  "current_extension": "sol081_extension with current sol076_extension journals; prior extensions historical-only; no admission",
+  "legacy_symbol": "fr_fixture_reap retained but refuses caller-supplied wait status",
+  "new_actual_graph": [
+    "CONTRACT.startup validates full held Source/image before loading exact bridge and calling fr_session_start; no Python packet fallback",
+    "fr_session_start consumes actual FR_START; exact cap SHA/full cap bytes, actual owner birth and fixed root origin birth, SO_PEERCRED plus SCM_CREDENTIALS and same socket inode",
+    "Monotonic private request sequence begins2 after FR_START1; root registry matches the exact next sequence, increments only after actual ACK send; native increments only after exact ACK receive",
+    "CONTRACT.native_bridge declares4-argument fr_fixture_wait and native-only close/observation APIs",
+    "enable_fixture_forks.waitpid calls fr_fixture_wait instead of Python wait status + fr_fixture_reap",
+    "fr_fixture_wait chooses only actual native clone table/current coordinator",
+    "fr_own_wait consumes wait4 exact direct child; durable PRIVATE kernel_status plus public UNKNOWN/zero status precedes exact REAP_ACK",
+    "ACK checks real parent SCM_CREDENTIALS PID UID0 GID0, no SCM_RIGHTS, every packet/session/type/sequence/role/PID/owner/status/detail/birth/owner_birth/deadline field",
+    "Only exact ACK changes native record UNKNOWN -> REAPED and publishes actual status; Root borrowed receipt does not fabricate Root wait4 status",
+    "Sticky UNKNOWN permits one own pidfd signal plus finite exact direct wait4 and exact owned handle close, with public status still UNKNOWN and no ACK credit",
+    "NativeOwner uses fr_own_release; Python no longer closes a published native pidfd outside its native binding",
+    "Unknown signal/close/deadline/transaction latches fixture generation against later creation; no reset API"
+  ],
+  "public_entry": "held110 --held-a061",
+  "root_service_added": false,
+  "schema": "friday.a087.actual-fixed-native-session-source-dataflow.v1",
+  "sol064_extension_historical_only": {
+    "F10_waiver": false,
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "all216": "REQUIRED_NOT_RUN",
+    "capsule_bytes": 848,
+    "direct_target_domains": "original coordinator+1/3; no waiting producer; original inner4 retained",
+    "evidence_bytes": 344,
+    "new_readonly_export": "int fr_fixture_evidence(int, struct fr_evidence*)",
+    "packet_bytes": 96,
+    "runtime": "NOT_RUN",
+    "source_execution": false,
+    "source_roles": 19
+  },
+  "sol066_extension_historical_only": {
+    "F10_waiver": false,
+    "FD_history": "FULL_FD64_OR_FD65_IDENTITY_DICTIONARY_WITH_PRESENCE_NONE_EXTRAS_ALL_RECORDS",
+    "GO": false,
+    "Root_admission": false,
+    "Root_private_source_load": "Only roles101/105/103; exact independently reviewed sealed bytes; readonly explicit external grant; no sys.modules mutation or carrier/objects shared with Source1000",
+    "SourceReady": false,
+    "actor_domains": {
+      "G1.resources": "EXISTING_A087_UID0_CALLER_BEFORE_ANY_PIPE_CLONE_OR_CGROUP_ATTACH",
+      "acquisition_resources": "ACTUAL_EXISTING_UID1000_INNER192_COORDINATOR"
+    },
+    "all216": "REQUIRED_NOT_RUN",
+    "assignment": "ASTRA-E4-SOL064-BROWSER-WHOLE209-ALL216-ALL29-PREPARER-CONNECTED-CLOSURE-SOL066",
+    "capsule_bytes": 848,
+    "fixed_source_roles": 19,
+    "generation": 1,
+    "no_new_native_ABI": true,
+    "packet_bytes": 96,
+    "resource_provider_input": {
+      "bytes": 14528,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225717",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14528",
+        "1790961660783193482",
+        "1790961660783193482"
+      ],
+      "path": "/var/tmp/friday-sol066-sol064-browser-whole209-all216-all29-preparer-connected-closure/resource-provider-input.json",
+      "sha256": "bb63d9ec60fe85b7d1a1a1c9e7af0e74ed4176a897de02c51c775b28b7ade0c9",
+      "stable9": true
+    },
+    "runtime": "NOT_RUN",
+    "source_execution": false,
+    "source_status": "PARTIAL_CONNECTED_IMPLEMENTATION_WHOLE_CODE_OPEN_NEW_NON_AUTHOR_REVIEW_REQUIRED"
+  },
+  "sol067_extension_historical_only": {
+    "F10_waiver": false,
+    "FD_history": "FULL_FD64_OR_FD65_CONDITIONAL_NOT_A_UNIVERSAL_BOUND",
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "actor_domains": {
+      "G1.resources": "EXISTING_A087_UID0_PRE_INNER",
+      "acquisition_resources": "ACTUAL_EXISTING_INNER192"
+    },
+    "all216": "REQUIRED_NOT_RUN",
+    "assignment": "ASTRA-E4-SOL066-BROWSER-WHOLE209-ALL216-ALL29-BOUNDS-CUSTODY-SAFE-ROUTES-CLOSURE-SOL067",
+    "capsule_bytes": 848,
+    "errors": "typed identity graph + stock args/attrs/traceback; unsupported types and immutable dependency losses explicitly OPEN",
+    "fixed_source_roles": 19,
+    "generation": 1,
+    "no_new_native_ABI": true,
+    "packet_bytes": 96,
+    "resource_DATA": "DS67 full string dictionary; same receiver functions; actual complete preimages, no clipping",
+    "resource_provider_input": {
+      "bytes": 14712,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225786",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14712",
+        "1790965832910256707",
+        "1790965832910256707"
+      ],
+      "path": "/var/tmp/friday-sol067-sol066-browser-whole209-all216-all29-bounds-custody-safe-routes-closure/resource-provider-input.json",
+      "sha256": "56b71fddaea71ea556a321979478628797283b86ad6c6e179e32e786ffe108d8",
+      "stable9": true
+    },
+    "runtime": "NOT_RUN",
+    "source_execution": false,
+    "source_status": "PARTIAL_CONNECTED_SOURCE_IMPLEMENTATION_NARROW_DECISION_AND_CODE_RESIDUALS"
+  },
+  "sol068_extension_historical_only": {
+    "AS_coordinator_worker": 50331648,
+    "AS_outer": 67108864,
+    "F10_waiver": false,
+    "GO": false,
+    "NOFILE": 512,
+    "Root_admission": false,
+    "Root_admission_keys_production_source_instrument": [
+      "interface",
+      "mode_id",
+      "position",
+      "id",
+      "source_manifest_sha256"
+    ],
+    "SourceReady": false,
+    "aggregate": 268435456,
+    "assignment": "ASTRA-E4-SOL067-BROWSER-WHOLE209-COHERENT-INTERFACE-AND-CONNECTED-CLOSURE-SOL068",
+    "capsule_bytes": 848,
+    "control_clock": [
+      180,
+      170,
+      10
+    ],
+    "dependency_original_bill_provenance": {
+      "G1": {
+        "bytes": 46980,
+        "identity9_decimal_strings": [
+          "2050",
+          "9176708",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "46980",
+          "1790809499402626239",
+          "1790809499402626239"
+        ],
+        "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1.py",
+        "sha256": "ba70d584ab4b145195283456b17d98a8ff129a8f7bb3be3595c711fe97d6c223",
+        "stable9": true
+      },
+      "R4": {
+        "bytes": 38388,
+        "identity9_decimal_strings": [
+          "2050",
+          "9176754",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "38388",
+          "1790814359154276295",
+          "1790814359154276295"
+        ],
+        "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1-R4.py",
+        "sha256": "a68f62ce16883f108992a8f237b9614d964ff0141d9002b5e714fdc2887b414c",
+        "stable9": true
+      }
+    },
+    "evidence_bytes": 344,
+    "exact_selected_fd119_suffix": ",\"source_interface\":\"friday.sol068.production-clock-source-interface.v1\"}\n",
+    "fixed_source_roles": 19,
+    "fresh_signed_allowlist_image_qualifications": "REQUIRED_NOT_RUN_NO_SELF_ACCEPTANCE",
+    "generation": 1,
+    "inner_pids": 4,
+    "interface": "friday.sol068.production-clock-source-interface.v1",
+    "known_code_residuals": [
+      "full legal DATA/frame/error storage fit",
+      "guaranteed deadline plus reserved retirement",
+      "preexec/partial/emission/close origin transport",
+      "remaining ordinary routes"
+    ],
+    "mode_ids_meaning_unchanged": true,
+    "new_actual_held_dependencies": {
+      "105": {
+        "bytes": 62515,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225863",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "62515",
+          "1790973844125727475",
+          "1790973844125727475"
+        ],
+        "path": "/var/tmp/friday-sol069-sol068-browser-bounded-data-error-custody-original-retirement-connected-closure/source/A025-G1.py",
+        "sha256": "55749e97918b964c8de79dbf72ede3c7528f2252b88630aeb6f32b498a1db8e4",
+        "stable9": true
+      },
+      "106": {
+        "bytes": 38626,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225864",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "38626",
+          "1790973844126274807",
+          "1790973844126274807"
+        ],
+        "path": "/var/tmp/friday-sol069-sol068-browser-bounded-data-error-custody-original-retirement-connected-closure/source/A025-G1-R4.py",
+        "sha256": "c7137353179688185f3cf3371f0c9db0fa5ece9e98d724b5c63b35f77d788dd7",
+        "stable9": true
+      }
+    },
+    "observation_bytes": 96,
+    "packet_bytes": 96,
+    "production_clock": [
+      1200,
+      1140,
+      60
+    ],
+    "production_selected_original216": {
+      "112": "deadline_final_retained_hash",
+      "113": "deadline_inventory_serialization",
+      "114": "deadline_inventory_serialized",
+      "125": "body_eof_at_cap",
+      "126": "body_cap_without_eof",
+      "127": "body_short_write",
+      "128": "body_partial_write",
+      "35": "whole3_actual_G1_worker_positive",
+      "37": "whole3_http404",
+      "38": "whole3_tls_certificate",
+      "39": "whole3_tls_protocol",
+      "44": "whole3_truncated",
+      "57": "deadline_receipt_write",
+      "58": "deadline_receipts_fsynced",
+      "59": "deadline_inventory_write",
+      "60": "deadline_inventory_fsynced",
+      "61": "deadline_terminal_seal",
+      "62": "deadline_closed_terminal"
+    },
+    "resource_provider_input": {
+      "bytes": 14864,
+      "identity9_decimal_strings": [
+        "2050",
+        "3558687",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14864",
+        "1790970176349601206",
+        "1790970176349601206"
+      ],
+      "path": "/var/tmp/friday-sol068-sol067-browser-coherent-interface-connected-source-closure/resource-provider-input.json",
+      "sha256": "7ee5c871fb25700b44aac1843b27a1690bd0dfedab813a0ab27884d7bec0d0bb",
+      "stable9": true
+    },
+    "runtime": "NOT_RUN",
+    "source_execution": false,
+    "source_status": "CONNECTED_INTERFACE_IMPLEMENTATION_WITH_EXACT_NON_WAIVER_BOUND_AND_CUSTODY_CONFLICTS",
+    "unchanged_compile_dependencies": {
+      "A071-COMMON.c": {
+        "bytes": 14047,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225859",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14047",
+          "1790973319370040696",
+          "1790973319370040696"
+        ],
+        "path": "/var/tmp/friday-sol069-sol068-browser-bounded-data-error-custody-original-retirement-connected-closure/source/A071-COMMON.c",
+        "sha256": "aaafe2777ea6d7d3d9828ec3d089f4de495d93c36a96c69033c83c220ab9e931",
+        "stable9": true
+      },
+      "A071-RUNTIME.c": {
+        "bytes": 7458,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225860",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7458",
+          "1790973319370582328",
+          "1790973319370582328"
+        ],
+        "path": "/var/tmp/friday-sol069-sol068-browser-bounded-data-error-custody-original-retirement-connected-closure/source/A071-RUNTIME.c",
+        "sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca",
+        "stable9": true
+      }
+    }
+  },
+  "sol069_extension_historical_only": {
+    "F10_waiver": false,
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "assignment": "ASTRA-E4-SOL068-BROWSER-BOUNDED-DATA-ERROR-CUSTODY-AND-ORIGINAL-RETIREMENT-CLOSURE-SOL069",
+    "binary_original_bodies": true,
+    "caps_source_roles_ABI_unchanged": true,
+    "codec": "DS69.bounded-full-body-identity.v1",
+    "expanded_ceiling_IS_NOT_required_domain_proof": true,
+    "expanded_operand_ceiling": 16777216,
+    "generation": 1,
+    "mutable_alias_graph": true,
+    "one_frame_no_total_split": true,
+    "original_clock": [
+      1200,
+      1140,
+      60
+    ],
+    "partial_after_emission_outside_owner_custody": "OPEN",
+    "producer_receivers_inline_codec": {
+      "bytes": 7172,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225868",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7172",
+        "1790973844042010778",
+        "1790974006850366630"
+      ],
+      "path": "/var/tmp/friday-sol069-sol068-browser-bounded-data-error-custody-original-retirement-connected-closure/source/A069-DATA-CODEC.py",
+      "sha256": "600d85977fc53bb263922519812df695ada47be2856619fbfe8687dcdc99c75f",
+      "stable9": true
+    },
+    "retirement_window": "same hard_ns minus3s; no new ordinary work",
+    "runtime": "REQUIRED_NOT_RUN",
+    "stream_cap": 1048576,
+    "worker_event_payload_cap": 131068,
+    "worker_event_total_cap": 131072
+  },
+  "sol073_extension_historical_only": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "append": "All cursor, record and reference allocations precede commit. One shared per-process writer/fault latch joins the four helper copies. Fault latches before any body mutation; no retry/rollback/overwrite after fault. End then sequence commits one appended record; snapshot consumes only sequence-committed prefix and retains an uncommitted published tail without retirement credit.",
+    "assignment": "ASTRA-E4-A201-LAB885-BROWSER-ADMITTED-DECODER-APPEND-PUBLICATION-CONNECTED-CLOSURE-SOL073",
+    "author_accepts_own_source": false,
+    "binding": "Root MUST select these exact G1/R4 leaves into the existing capsule pins and fd105/106 before any load. Executor, R4 and Worker literals agree. No runtime admission or fabricated capsule is issued.",
+    "both_decoders": [
+      "actual admitted G1.sol069_events/sol069_decode",
+      "Supervisor.full_DATA_decode/sol069_decode",
+      "Public.full_DATA_decode/sol069_decode"
+    ],
+    "caps_unchanged": {
+      "Source19": 19,
+      "cap_probe": 1048577,
+      "environment_roles": 3,
+      "event_payload": 131068,
+      "event_total": 131072,
+      "packet": 1048576
+    },
+    "clock": "Original capsule32/40/48 start/work/hard and original minimum ends only; no renewal. Duration/cost fit is NOT established by guard checks.",
+    "compiler_ABI": "REQUIRED_NOT_RUN",
+    "current_dependencies": {
+      "G1": {
+        "bytes": 86846,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226446",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "86846",
+          "1790983846659032722",
+          "1790983846659032722"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A025-G1.py",
+        "sha256": "36a717486ef95287001d2e4cae0ad7340271040374861abdc9d3fe95e5c49a3f",
+        "stable9": true
+      },
+      "R4": {
+        "bytes": 41303,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226445",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "41303",
+          "1790983846774819042",
+          "1790983846774819042"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A025-G1-R4.py",
+        "sha256": "d24ff3b552eedc77fd7a75dd309c649609097586575877c2ba78454c1c778c64",
+        "stable9": true
+      }
+    },
+    "current_performing_leaves": {
+      "A025-G1-R4.py": {
+        "bytes": 41303,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226445",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "41303",
+          "1790983846774819042",
+          "1790983846774819042"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A025-G1-R4.py",
+        "sha256": "d24ff3b552eedc77fd7a75dd309c649609097586575877c2ba78454c1c778c64",
+        "stable9": true
+      },
+      "A025-G1.py": {
+        "bytes": 86846,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226446",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "86846",
+          "1790983846659032722",
+          "1790983846659032722"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A025-G1.py",
+        "sha256": "36a717486ef95287001d2e4cae0ad7340271040374861abdc9d3fe95e5c49a3f",
+        "stable9": true
+      },
+      "A069-DATA-CODEC.py": {
+        "bytes": 30108,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226447",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30108",
+          "1790983846661032837",
+          "1790983846661032837"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A069-DATA-CODEC.py",
+        "sha256": "2aa56db8c3521cf5e56ea0307bb4a5c23d3a2240830d925a790559bfb7a3ffa2",
+        "stable9": true
+      },
+      "A071-BOOTSTRAP.c": {
+        "bytes": 72935,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226449",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "72935",
+          "1790983343888582873",
+          "1790983343888582873"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A071-BOOTSTRAP.c",
+        "sha256": "83c8ff4a94b9987d10ba04d8fc63432c080ccbd630357837448d57720734e622",
+        "stable9": true
+      },
+      "A071-COMMON.c": {
+        "bytes": 15178,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226451",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15178",
+          "1790983343888788584",
+          "1790983343888788584"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A071-COMMON.c",
+        "sha256": "83ad4f18b3887746cfcfe716e22a5032b539d28e9ec05085cef8facb2d830e14",
+        "stable9": true
+      },
+      "A071-EXECUTOR.py": {
+        "bytes": 69913,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226458",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "69913",
+          "1790983846778771270",
+          "1790983846778771270"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A071-EXECUTOR.py",
+        "sha256": "bcbc362714ed3c7b704fb37f577372ad90a50570eca2973bb2b0598e9eb58113",
+        "stable9": true
+      },
+      "A071-NATIVE.h": {
+        "bytes": 9301,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226452",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9301",
+          "1790983343888871189",
+          "1790983343888871189"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A071-NATIVE.h",
+        "sha256": "1060c2583e65c6c7076781437f09f9de386ec94f34860c4abf76e5964a7c2816",
+        "stable9": true
+      },
+      "A071-OWNED.c": {
+        "bytes": 42771,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226453",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42771",
+          "1790983343888952494",
+          "1790983343888952494"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A071-OWNED.c",
+        "sha256": "7a1278bfc09c900f148eb7d3318e118f463a43c1587ec9943b42133405abe95d",
+        "stable9": true
+      },
+      "A071-SUPERVISOR.py": {
+        "bytes": 104025,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226454",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "104025",
+          "1790983846664033010",
+          "1790983846664033010"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A071-SUPERVISOR.py",
+        "sha256": "0f978bb9657fbc224a479396454747aa6460618644d585058dfa29b5f60e3d6a",
+        "stable9": true
+      },
+      "A071-WORKER.py": {
+        "bytes": 9557,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226455",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9557",
+          "1790983846776043713",
+          "1790983846776043713"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A071-WORKER.py",
+        "sha256": "822051e8313b58254377e16b4cb645973991c922362261701a4a67b5e44c51bc",
+        "stable9": true
+      },
+      "A087-PUBLIC-DRIVER.py": {
+        "bytes": 181581,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226456",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "181581",
+          "1790983846668033240",
+          "1790983846668033240"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+        "sha256": "9d270aca9358a2184472a063eb611076bfb4038ad71030be48f628d1c438fd63",
+        "stable9": true
+      }
+    },
+    "fixed_original_source_fds": [
+      101,
+      102,
+      103,
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      110,
+      112,
+      113,
+      114,
+      115,
+      116,
+      117,
+      118,
+      119,
+      127
+    ],
+    "fork_binding": "Existing exact three browser-role planes are validated before fork. Child remaps only its role plane onto131, retains original capsule100, clears inherited writer state, and closes all other project descriptors. Native own_spawn preserves the same existing plane. No new plane or role. Unbound legacy workflows retain original fd scope.",
+    "fork_paths": [
+      "R4.launch",
+      "G1.run_wave",
+      "Executor.journalled_launch",
+      "native own_spawn/close_except"
+    ],
+    "generation": 1,
+    "held_dependency_sources": {
+      "105": {
+        "bytes": 86846,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226446",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "86846",
+          "1790983846659032722",
+          "1790983846659032722"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A025-G1.py",
+        "sha256": "36a717486ef95287001d2e4cae0ad7340271040374861abdc9d3fe95e5c49a3f",
+        "stable9": true
+      },
+      "106": {
+        "bytes": 41303,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226445",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "41303",
+          "1790983846774819042",
+          "1790983846774819042"
+        ],
+        "path": "/var/tmp/friday-sol073-a201-lab885-browser-admitted-decoder-append-publication-connected-source-closure/source/A025-G1-R4.py",
+        "sha256": "d24ff3b552eedc77fd7a75dd309c649609097586575877c2ba78454c1c778c64",
+        "stable9": true
+      }
+    },
+    "logical_role_paths": {
+      "105": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1.py",
+      "106": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1-R4.py"
+    },
+    "logical_role_paths_are_not_actual_source_file_pins": true,
+    "original_scopes": "209/216/29/all6/all9/C01-C08/M01/all30/F0-F11/live remain required; unsafe HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false",
+    "physical_plane_owner": "Existing UID0 caller uses the exact original capsule Source UID/GID at offsets20/24 (1000/1000), fchown/fchmod0600 of SOURCE-ONLY memfd before any birth/seal/readonly binding. Matches unchanged native fr_body_source_validate. No Root-private object or grant is exposed.",
+    "physical_protocol": {
+      "capacity_each_bytes": 16777216,
+      "header_bytes": 128,
+      "magic": "FRBOD201",
+      "native_header_ABI_unchanged": true,
+      "record_header_bytes": 48,
+      "reference": "FRREF201",
+      "reference_bytes": 72,
+      "source_planes": [
+        131,
+        132,
+        133,
+        134
+      ]
+    },
+    "precedence": "sol073_extension and current_dependencies/performing_sources are CURRENT. Earlier named historical-only extensions are immutable failed/superseded provenance, never current fd pin selection.",
+    "remaining_CODE": [
+      "Original native/stock/error/body aliases BEFORE encoding remain open. Encoded physical frame is not complete original object custody.",
+      "An uncommitted tail or close/read/copy failure stays red and retains its actual backing; universal complete final outside-end custody remains open.",
+      "Full original packet/cap-probe/source-body domain and full native/encoder/decoder/copy/catch/retirement costs remain open."
+    ],
+    "runtime": "REQUIRED_NOT_RUN",
+    "schema": "friday.sol073.connected.admitted.append.source.v1",
+    "source_execution": 0,
+    "state": "SCOPED_AUTHORED_REPAIR_NOT_INDEPENDENT_ACCEPTANCE",
+    "whole_RAM_IO": "UNKNOWN_NOT_ZERO"
+  },
+  "sol076_extension": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "admission": "Existing Root must admit exact current leaves into original capsule/fd105/106. No image/compiler/ABI/provider/grant/runtime admission issued.",
+    "assignment": "ASTRA-E4-LAB888-BROWSER-ORDINARY-LAUNCH-FAILURE-CONNECTED-CLEANUP-SOL076",
+    "author_accepts_own_source": false,
+    "birth_states": [
+      "PENDING",
+      "NOT_CREATED",
+      "CREATED",
+      "UNCONFIRMED"
+    ],
+    "callers": [
+      "G1.run_wave",
+      "R4.launch/run_wave/collect",
+      "Executor.journalled_launch including delegated original R4 path",
+      "Worker exact G1 fd105 SHA"
+    ],
+    "cleanup": "Actual acquired write/read/body/pidfd slots each attempted once; all slots considered after failure. Observation refusal cannot skip close. A failed close is never retried. No recycled fd-number close credit.",
+    "compiler_ABI": "REQUIRED_NOT_RUN",
+    "current_dependencies": {
+      "G1": {
+        "bytes": 101856,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226856",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "101856",
+          "1790997245220570954",
+          "1790997245220570954"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1.py",
+        "sha256": "c18c296f1c5f349a063e2657e1d2a53fd2b4c07dccabf12f7a117608281cc24f",
+        "stable9": true
+      },
+      "R4": {
+        "bytes": 57488,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226855",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "57488",
+          "1790997245331577317",
+          "1790997245331577317"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+        "sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2",
+        "stable9": true
+      }
+    },
+    "current_performing_leaves": {
+      "A025-G1-R4.py": {
+        "bytes": 57488,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226855",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "57488",
+          "1790997245331577317",
+          "1790997245331577317"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+        "sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2",
+        "stable9": true
+      },
+      "A025-G1.py": {
+        "bytes": 101856,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226856",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "101856",
+          "1790997245220570954",
+          "1790997245220570954"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1.py",
+        "sha256": "c18c296f1c5f349a063e2657e1d2a53fd2b4c07dccabf12f7a117608281cc24f",
+        "stable9": true
+      },
+      "A069-DATA-CODEC.py": {
+        "bytes": 30108,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226857",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30108",
+          "1790996337568547498",
+          "1790996337658552658"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A069-DATA-CODEC.py",
+        "sha256": "2aa56db8c3521cf5e56ea0307bb4a5c23d3a2240830d925a790559bfb7a3ffa2",
+        "stable9": true
+      },
+      "A071-BOOTSTRAP.c": {
+        "bytes": 72935,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226790",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "72935",
+          "1790993415573904051",
+          "1790993415573904051"
+        ],
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-BOOTSTRAP.c",
+        "sha256": "83c8ff4a94b9987d10ba04d8fc63432c080ccbd630357837448d57720734e622",
+        "stable9": true
+      },
+      "A071-COMMON.c": {
+        "bytes": 15178,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226792",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15178",
+          "1790993415576022602",
+          "1790993415576022602"
+        ],
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-COMMON.c",
+        "sha256": "83ad4f18b3887746cfcfe716e22a5032b539d28e9ec05085cef8facb2d830e14",
+        "stable9": true
+      },
+      "A071-EXECUTOR.py": {
+        "bytes": 75365,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226922",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "75365",
+          "1790999087116141984",
+          "1790999087168144964"
+        ],
+        "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+        "sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78",
+        "stable9": true
+      },
+      "A071-NATIVE.h": {
+        "bytes": 9301,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226794",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9301",
+          "1790993415577904281",
+          "1790993415577904281"
+        ],
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-NATIVE.h",
+        "sha256": "1060c2583e65c6c7076781437f09f9de386ec94f34860c4abf76e5964a7c2816",
+        "stable9": true
+      },
+      "A071-OWNED.c": {
+        "bytes": 42771,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226795",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42771",
+          "1790993415578904338",
+          "1790993415578904338"
+        ],
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-OWNED.c",
+        "sha256": "7a1278bfc09c900f148eb7d3318e118f463a43c1587ec9943b42133405abe95d",
+        "stable9": true
+      },
+      "A071-OWNER.py": {
+        "bytes": 9774,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226865",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9774",
+          "1790996759397725275",
+          "1790996759397725275"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+        "sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440",
+        "stable9": true
+      },
+      "A071-SUPERVISOR.py": {
+        "bytes": 123038,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226861",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "123038",
+          "1790997138129079962",
+          "1790997138129079962"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-SUPERVISOR.py",
+        "sha256": "c5a3d1ead2990e2482c1c30b7eac0ff785e63452e39e3c89678d24625f99206d",
+        "stable9": true
+      },
+      "A071-WORKER.py": {
+        "bytes": 9557,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226862",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9557",
+          "1790997245333577431",
+          "1790997245333577431"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-WORKER.py",
+        "sha256": "571da66c347d9c3ec941f4c3b146be98dfacceb132eed325b135c1c2238d790e",
+        "stable9": true
+      },
+      "A087-PUBLIC-DRIVER.py": {
+        "bytes": 200423,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226863",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "200423",
+          "1790997138131432957",
+          "1790997138131432957"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+        "sha256": "a1d2097212ae19c585f8fa696c32c80eab73ba411542b44441f6799883ac8d86",
+        "stable9": true
+      }
+    },
+    "current_selector": "sol076_extension and current_dependencies/performing_sources are CURRENT; earlier historical-only extensions are immutable provenance, not active selectors.",
+    "fixed_original_source_fds": [
+      101,
+      102,
+      103,
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      110,
+      112,
+      113,
+      114,
+      115,
+      116,
+      117,
+      118,
+      119,
+      127
+    ],
+    "generation": 1,
+    "held_dependency_sources": {
+      "105": {
+        "bytes": 101856,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226856",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "101856",
+          "1790997245220570954",
+          "1790997245220570954"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1.py",
+        "sha256": "c18c296f1c5f349a063e2657e1d2a53fd2b4c07dccabf12f7a117608281cc24f",
+        "stable9": true
+      },
+      "106": {
+        "bytes": 57488,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226855",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "57488",
+          "1790997245331577317",
+          "1790997245331577317"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+        "sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2",
+        "stable9": true
+      },
+      "127": {
+        "bytes": 9774,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226865",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9774",
+          "1790996759397725275",
+          "1790996759397725275"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+        "sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440",
+        "stable9": true
+      }
+    },
+    "journal_schema": "friday.sol076.ordinary-launch.v1",
+    "logical_role_paths": {
+      "105": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1.py",
+      "106": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1-R4.py"
+    },
+    "logical_role_paths_are_not_actual_source_file_pins": true,
+    "no_birth": "Intention before acquisition. Pre-fork failure or exact stock posix fork exception records NOT_CREATED, pid=null, stop_confirmed=false, no native retirement credit.",
+    "original_contract": "All original209/216/29/all6/all9/Source19/capsule848/packet96/child32/canonical resources and meaningful positives/negatives remain required; no relaxed caps or disabled functions. Original safe Source only; unsafe HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false.",
+    "original_resources": "UNCHANGED; author envelope is not a product grant",
+    "receiver_guard": {
+      "byte_equal": true,
+      "bytes": 6703,
+      "recipe": "bytes from def sol076_receiver_guard( through the newline before the next def or class",
+      "selected": [
+        {
+          "bytes": 6703,
+          "line": 539,
+          "name": "A071-SUPERVISOR.py",
+          "sha256": "17d56042d8c4a7793b099249fa991656d26035d63e56a329603f5b3e40685dc5"
+        },
+        {
+          "bytes": 6703,
+          "line": 240,
+          "name": "A087-PUBLIC-DRIVER.py",
+          "sha256": "17d56042d8c4a7793b099249fa991656d26035d63e56a329603f5b3e40685dc5"
+        }
+      ],
+      "sha256": "17d56042d8c4a7793b099249fa991656d26035d63e56a329603f5b3e40685dc5",
+      "source_execution": 0
+    },
+    "receivers": [
+      "Supervisor.inert/terminal_check",
+      "Public.json_DATA/connected existing oracles"
+    ],
+    "retained_open": [
+      "Complete pre-encoding native/stock/raw/error original bodies and aliases",
+      "Original full packet/cap-probe domain, uncommitted/precommit and final outside ownership",
+      "Whole physical/native/RAM/FD/IO/time costs UNKNOWN_NOT_ZERO",
+      "Exact independent source/Root image/compiler-ABI/provider/grants/finite clocks and all original runtime/negative controls/gates REQUIRED_NOT_RUN"
+    ],
+    "runtime": "REQUIRED_NOT_RUN",
+    "schema": "friday.sol076.ordinary-launch.connected-source.v1",
+    "scope": "Ordinary defensive Python launch acquisition/failure, prospective FD tokens, original error retention, receiver refusal and terminal ordering ONLY.",
+    "source_execution": 0,
+    "state": "AUTHORED_ORDINARY_SOURCE_ONLY_NOT_ACCEPTED",
+    "terminal": "Late ordinary descriptor/observation failure revokes affected material and terminal completion. Failed/no-birth rows never imply reaping/native body retirement. Required original positives/negatives remain unexecuted.",
+    "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "unsafe_required": true,
+    "unsafe_waiver": false,
+    "whole_RAM_IO": "UNKNOWN_NOT_ZERO",
+    "wrapped_fork": "Opaque/wrapped fork error after call begins is BIRTH_UNCONFIRMED; absence of returned PID is not proof of no birth. No native implementation or finite native retirement repair."
+  },
+  "sol081_extension": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "actual_helper_set": [
+      "Run",
+      "error_name",
+      "close_fd",
+      "stop_child",
+      "guarded_digest",
+      "guarded_write",
+      "ordinary_failure",
+      "unknown_record",
+      "launch",
+      "drain",
+      "collect",
+      "run_wave",
+      "sol076_publish_caller_receipt",
+      "sol076_append_receipt_end",
+      "sol081_decode_receipt_stream",
+      "sol081_rebuild_receipt_stream",
+      "sol081_receipt_snapshot"
+    ],
+    "actual_owner_source_fd": 127,
+    "assignment": "ASTRA-E4-SOL080-BROWSER-ACTUAL-CALLER-STREAM-ROUTE-DEADLINE-CONNECTED-CLOSURE-SOL081",
+    "author_accepts_own_source": false,
+    "current_dependencies": {
+      "G1": {
+        "bytes": 101856,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226856",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "101856",
+          "1790997245220570954",
+          "1790997245220570954"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1.py",
+        "sha256": "c18c296f1c5f349a063e2657e1d2a53fd2b4c07dccabf12f7a117608281cc24f",
+        "stable9": true
+      },
+      "R4": {
+        "bytes": 57488,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226855",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "57488",
+          "1790997245331577317",
+          "1790997245331577317"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+        "sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2",
+        "stable9": true
+      }
+    },
+    "current_performing_leaves": {
+      "A025-G1-R4.py": {
+        "bytes": 57488,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226855",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "57488",
+          "1790997245331577317",
+          "1790997245331577317"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+        "sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2",
+        "stable9": true
+      },
+      "A025-G1.py": {
+        "bytes": 101856,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226856",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "101856",
+          "1790997245220570954",
+          "1790997245220570954"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1.py",
+        "sha256": "c18c296f1c5f349a063e2657e1d2a53fd2b4c07dccabf12f7a117608281cc24f",
+        "stable9": true
+      },
+      "A069-DATA-CODEC.py": {
+        "bytes": 30108,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226857",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30108",
+          "1790996337568547498",
+          "1790996337658552658"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A069-DATA-CODEC.py",
+        "sha256": "2aa56db8c3521cf5e56ea0307bb4a5c23d3a2240830d925a790559bfb7a3ffa2",
+        "stable9": true
+      },
+      "A071-BOOTSTRAP.c": {
+        "bytes": 72935,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226790",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "72935",
+          "1790993415573904051",
+          "1790993415573904051"
+        ],
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-BOOTSTRAP.c",
+        "sha256": "83c8ff4a94b9987d10ba04d8fc63432c080ccbd630357837448d57720734e622",
+        "stable9": true
+      },
+      "A071-COMMON.c": {
+        "bytes": 15178,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226792",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15178",
+          "1790993415576022602",
+          "1790993415576022602"
+        ],
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-COMMON.c",
+        "sha256": "83ad4f18b3887746cfcfe716e22a5032b539d28e9ec05085cef8facb2d830e14",
+        "stable9": true
+      },
+      "A071-EXECUTOR.py": {
+        "bytes": 75365,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226922",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "75365",
+          "1790999087116141984",
+          "1790999087168144964"
+        ],
+        "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+        "sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78",
+        "stable9": true
+      },
+      "A071-NATIVE.h": {
+        "bytes": 9301,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226794",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9301",
+          "1790993415577904281",
+          "1790993415577904281"
+        ],
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-NATIVE.h",
+        "sha256": "1060c2583e65c6c7076781437f09f9de386ec94f34860c4abf76e5964a7c2816",
+        "stable9": true
+      },
+      "A071-OWNED.c": {
+        "bytes": 42771,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226795",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42771",
+          "1790993415578904338",
+          "1790993415578904338"
+        ],
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-OWNED.c",
+        "sha256": "7a1278bfc09c900f148eb7d3318e118f463a43c1587ec9943b42133405abe95d",
+        "stable9": true
+      },
+      "A071-OWNER.py": {
+        "bytes": 9774,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226865",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9774",
+          "1790996759397725275",
+          "1790996759397725275"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+        "sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440",
+        "stable9": true
+      },
+      "A071-SUPERVISOR.py": {
+        "bytes": 123038,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226861",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "123038",
+          "1790997138129079962",
+          "1790997138129079962"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-SUPERVISOR.py",
+        "sha256": "c5a3d1ead2990e2482c1c30b7eac0ff785e63452e39e3c89678d24625f99206d",
+        "stable9": true
+      },
+      "A071-WORKER.py": {
+        "bytes": 9557,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226862",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9557",
+          "1790997245333577431",
+          "1790997245333577431"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-WORKER.py",
+        "sha256": "571da66c347d9c3ec941f4c3b146be98dfacceb132eed325b135c1c2238d790e",
+        "stable9": true
+      },
+      "A087-PUBLIC-DRIVER.py": {
+        "bytes": 200423,
+        "identity9_decimal_strings": [
+          "2050",
+          "4226863",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "200423",
+          "1790997138131432957",
+          "1790997138131432957"
+        ],
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+        "sha256": "a1d2097212ae19c585f8fa696c32c80eab73ba411542b44441f6799883ac8d86",
+        "stable9": true
+      }
+    },
+    "generation": 1,
+    "independent_whole_source_and_runtime_gates": "REQUIRED_NOT_RUN",
+    "literal_shared_functions": {
+      "sol076_browser_terminal_join": {
+        "byte_equal": true,
+        "bytes": 1232,
+        "recipe": "bytes from def sol076_browser_terminal_join( through the newline before the next def or class",
+        "selected": [
+          {
+            "bytes": 1232,
+            "line": 512,
+            "name": "A071-SUPERVISOR.py",
+            "sha256": "0f0762109ae57b1e175747b4bcdb068a55c9069df112a50890d6c541c8a4029a"
+          },
+          {
+            "bytes": 1232,
+            "line": 213,
+            "name": "A087-PUBLIC-DRIVER.py",
+            "sha256": "0f0762109ae57b1e175747b4bcdb068a55c9069df112a50890d6c541c8a4029a"
+          }
+        ],
+        "sha256": "0f0762109ae57b1e175747b4bcdb068a55c9069df112a50890d6c541c8a4029a",
+        "source_execution": 0
+      },
+      "sol076_receiver_guard": {
+        "byte_equal": true,
+        "bytes": 6703,
+        "recipe": "bytes from def sol076_receiver_guard( through the newline before the next def or class",
+        "selected": [
+          {
+            "bytes": 6703,
+            "line": 539,
+            "name": "A071-SUPERVISOR.py",
+            "sha256": "17d56042d8c4a7793b099249fa991656d26035d63e56a329603f5b3e40685dc5"
+          },
+          {
+            "bytes": 6703,
+            "line": 240,
+            "name": "A087-PUBLIC-DRIVER.py",
+            "sha256": "17d56042d8c4a7793b099249fa991656d26035d63e56a329603f5b3e40685dc5"
+          }
+        ],
+        "sha256": "17d56042d8c4a7793b099249fa991656d26035d63e56a329603f5b3e40685dc5",
+        "source_execution": 0
+      },
+      "sol081_browser_stream_join": {
+        "byte_equal": true,
+        "bytes": 4179,
+        "recipe": "bytes from def sol081_browser_stream_join( through the newline before the next def or class",
+        "selected": [
+          {
+            "bytes": 4179,
+            "line": 445,
+            "name": "A071-SUPERVISOR.py",
+            "sha256": "5ffd8312962774ba39ee681e521db65dd96abefff86f073988092fc7b289b735"
+          },
+          {
+            "bytes": 4179,
+            "line": 146,
+            "name": "A087-PUBLIC-DRIVER.py",
+            "sha256": "5ffd8312962774ba39ee681e521db65dd96abefff86f073988092fc7b289b735"
+          }
+        ],
+        "sha256": "5ffd8312962774ba39ee681e521db65dd96abefff86f073988092fc7b289b735",
+        "source_execution": 0
+      },
+      "sol081_decode_receipt_stream": {
+        "byte_equal": true,
+        "bytes": 4239,
+        "recipe": "bytes from def sol081_decode_receipt_stream( through the newline before the next def or class",
+        "selected": [
+          {
+            "bytes": 4239,
+            "line": 456,
+            "name": "A025-G1-R4.py",
+            "sha256": "4549af2844a767332b9a5bb51c6147716b61d86071e6ee8547a46c47859438ee"
+          },
+          {
+            "bytes": 4239,
+            "line": 326,
+            "name": "A071-SUPERVISOR.py",
+            "sha256": "4549af2844a767332b9a5bb51c6147716b61d86071e6ee8547a46c47859438ee"
+          },
+          {
+            "bytes": 4239,
+            "line": 27,
+            "name": "A087-PUBLIC-DRIVER.py",
+            "sha256": "4549af2844a767332b9a5bb51c6147716b61d86071e6ee8547a46c47859438ee"
+          }
+        ],
+        "sha256": "4549af2844a767332b9a5bb51c6147716b61d86071e6ee8547a46c47859438ee",
+        "source_execution": 0
+      },
+      "sol081_rebuild_receipt_stream": {
+        "byte_equal": true,
+        "bytes": 2399,
+        "recipe": "bytes from def sol081_rebuild_receipt_stream( through the newline before the next def or class",
+        "selected": [
+          {
+            "bytes": 2399,
+            "line": 535,
+            "name": "A025-G1-R4.py",
+            "sha256": "2c0cea04a7a24a63e4fb4334c3c46c811034fa29a7ebbe5a8456d9c26c5231b8"
+          },
+          {
+            "bytes": 2399,
+            "line": 405,
+            "name": "A071-SUPERVISOR.py",
+            "sha256": "2c0cea04a7a24a63e4fb4334c3c46c811034fa29a7ebbe5a8456d9c26c5231b8"
+          },
+          {
+            "bytes": 2399,
+            "line": 106,
+            "name": "A087-PUBLIC-DRIVER.py",
+            "sha256": "2c0cea04a7a24a63e4fb4334c3c46c811034fa29a7ebbe5a8456d9c26c5231b8"
+          }
+        ],
+        "sha256": "2c0cea04a7a24a63e4fb4334c3c46c811034fa29a7ebbe5a8456d9c26c5231b8",
+        "source_execution": 0
+      }
+    },
+    "native_body": "CODE",
+    "native_both_ends": "CODE",
+    "negative_prefix": "Original FullControls.transport_oracle first-two already-reaped positive BODY facts preserved on genuine third-route failures. Such rows are CANDIDATE/unqualified/both_receivers_accepted=false and only admissible as local facts under a failed unaccepted terminal with no stream certificate. A standalone candidate or positive terminal without full certificate is rejected. Existing structured ordinary refusals retain their causes/materials; any new postserialization error gets fixed incomplete fallback.",
+    "ordinary_end": "Typed cleanup_fault is emitted from actual launch DATA. finish_record demotes an affected non-REAPED route even when FD closes themselves were clean. Receipt/retained/inventory close booleans cannot be ignored. Existing ordinary refusal with local body prefix survives serialization; new postserialization first/secondary error invalidates positive output. No retry of uncertain descriptor close or reliance on failed END append.",
+    "original_negative": "Both physical writes use original guarded receipt_write stage and original terminal clock/end, with additional provisional/commit observations. Original causes, deadlines, all216/29/6/9/Source19/C01-C08/M01 preserved REQUIRED_NOT_RUN.",
+    "original_obligations": "All original209/216/29/all6/all9/Source19/capsule848/packet96/child32/canonical resources and meaningful positives/negatives remain required; no relaxed caps or disabled functions. Original safe Source only; unsafe HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false.",
+    "owner_scope": "Ordinary Python intent and body/pipe/write/config bookkeeping only; unchanged original native fr_own_* call expressions, native wait/stop/release methods and all4 native source files. No native-body/grant implementation or admission. Opaque failed native call with no returned owned pid remains unconfirmed; no guessed/adopted PID.",
+    "protocol": "Browser canonical PROVISIONAL/CANDIDATE lines always unqualified. Actual fsynced fd is fully decoded, its exact bounded gapless canonical projection rejoined, close boolean required; final named retained bytes/SHA9 match. Final terminal qualification follows all ordinary held/output/signal/clock cleanup. BOTH actual parsers rebuild exact canonical metadata preimage and decode full relation. No raw stream duplication in terminal. Non-Browser legacy protocol remains historical scoped-local credit only.",
+    "schema": "friday.sol081.browser.actual-connected-source.v1",
+    "source_execution": 0,
+    "tests": "NOT_RUN",
+    "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false",
+    "whole_costs": "UNKNOWN_NOT_ZERO"
+  },
+  "sol881_extension_historical_only": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "assignment": "ASTRA-E4-SOL069-BROWSER-PREOWNED-BODY-CUSTODY-BOTH-RECEIVERS-FINITE-END-CLOSURE-LAB-881",
+    "author_accepts_own_source": false,
+    "both_existing_receivers": "event-pipe read end created before birth, and receipt readback",
+    "cap_get": "no work gate; hard minus 1s unchanged",
+    "cap_probe": "PACKET_CAP+1",
+    "caps_not_raised": true,
+    "clock": [
+      1200,
+      1140,
+      60
+    ],
+    "codec": "DS69.preowned-backing-both-existing-receivers.v1",
+    "constant_run_stored_bytes": 5,
+    "deadline9_intended_stage": "NOT_RUN",
+    "exit_eof_digest_pending_are_handover": false,
+    "expanded_ceiling_IS_NOT_required_domain_proof": true,
+    "expanded_operand_ceiling": 16777216,
+    "fr_cap_read": "START-only work refusal unchanged",
+    "generation": 1,
+    "in_process_metadata_pair_is_outside_owner": false,
+    "known_unclosed_ram_is_not_admission": true,
+    "known_unclosed_ram_three_pools_bytes": 50331648,
+    "literal_probe_exceeds_packet": true,
+    "literal_probe_wire": "8+PACKET_CAP+1",
+    "owned_codec": {
+      "bytes": 9503,
+      "identity9_decimal_strings": [
+        "2050",
+        "4226193",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9503",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A069-DATA-CODEC.py",
+      "sha256": "a6fb1620587ca64affc89c3e7bf6df46016efb704f236ff1f3f5302ad81e7cf1",
+      "stable9": false
+    },
+    "owned_controls": {
+      "bytes": 276107,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225990",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "276107",
+        "1790976216351906203",
+        "1790976216351906203"
+      ],
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTROLS.py",
+      "sha256": "315c95540e0472c0c07240a16718d3f6dd991ef500a7096b6c9223afdc1acb5b",
+      "stable9": false
+    },
+    "owned_executor": {
+      "bytes": 69828,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225991",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "69828",
+        "1790976216351906203",
+        "1790976216351906203"
+      ],
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-EXECUTOR.py",
+      "sha256": "ef87592b3912cb252f8769bcd2a40935c4a9093ab8314cda0644d41c73c60ab5",
+      "stable9": false
+    },
+    "owned_g1": {
+      "bytes": 65664,
+      "identity9_decimal_strings": [
+        "2050",
+        "4226191",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "65664",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A025-G1.py",
+      "sha256": "ec2e8d70b4b6c791b4f33b65a2a6a99c8b6dac5c7b2aee2d70dcd0d7d8718651",
+      "stable9": false
+    },
+    "owned_public_driver": {
+      "bytes": 158060,
+      "identity9_decimal_strings": [
+        "2050",
+        "4226054",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158060",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-PUBLIC-DRIVER.py",
+      "sha256": "987c41431db0c3eaeda40e8ec65ee7dbdb8402c6079c2916211157ab51af25a5",
+      "stable9": false
+    },
+    "owned_r4": {
+      "bytes": 41213,
+      "identity9_decimal_strings": [
+        "2050",
+        "4226192",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "41213",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A025-G1-R4.py",
+      "sha256": "e372cb4599d99cadf48a41c365dd78985c35354079b935caf7c52a6bee8dfed3",
+      "stable9": false
+    },
+    "owned_supervisor": {
+      "bytes": 83126,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225999",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "83126",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-SUPERVISOR.py",
+      "sha256": "df7992d63323008ec65f8fd8f441ce594abe4b40acb90eb341c0e43de54eabea",
+      "stable9": false
+    },
+    "owned_worker": {
+      "bytes": 9555,
+      "identity9_decimal_strings": [
+        "2050",
+        "4226000",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9555",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-WORKER.py",
+      "sha256": "80a35b1186bbc5a4d3c7a744d277affc238f0869ba9fa0ef42a0741eb9538778",
+      "stable9": false
+    },
+    "packet_cap": 1048576,
+    "parent_read_end_bound_before_birth": true,
+    "partial_after_emission_outside_owner_custody": "PIPE_UNWRITTEN_TAIL_AND_SIGKILL_REMAIN_OPEN",
+    "preowned_backing_before_channel_write": true,
+    "rle_is_not_universal_fit": true,
+    "roles_not_added": true,
+    "runtime": "REQUIRED_NOT_RUN",
+    "worker_event_total_cap": 131072,
+    "worker_length_prefix": 4,
+    "worker_literal_body_min_failure": 131069,
+    "worker_literal_exceeds_event": true,
+    "worker_literal_prefix_plus_body": 131073
+  },
+  "status": "SOL066_PARTIAL_SOURCE_NOT_RUN_NO_ADMISSION",
+  "whole_native_cause_closed": false,
+  "wire": "A061 v1 fixed848/208/56/1088/96B unchanged;19 roles; types1..14 unchanged"
+}

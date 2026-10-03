@@ -1,0 +1,276 @@
+{
+  "schema": "friday.astra.lab898.browser.changed-context.received.v1",
+  "recorded_utc": "2026-10-03T03:56:44Z",
+  "assignment": "ASTRA-E4-SOL081-BROWSER-ACTUAL-STREAM-CALLER-END-NONAUTHOR-REVIEW-LAB-898",
+  "generation": 1,
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB898-INPUT-20261003.json",
+    "bytes": 37466,
+    "sha256": "fc129da816645d38aa7ada2b40166a18887f35618219722422946775bbda8deb",
+    "identity9_decimal_strings": [
+      "2050",
+      "8531928",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "37466",
+      "1790998584938358890",
+      "1790998584998362330"
+    ],
+    "stable9": true
+  },
+  "run": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB898-RUN-20261003.json",
+    "bytes": 3954,
+    "sha256": "426766dd88f1c303449676ecb6c0d5a0e036002427c77ce77c849ab326fd093e",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532098",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3954",
+      "1790998620584402013",
+      "1790998620632404764"
+    ],
+    "stable9": true
+  },
+  "job_id": "job_52f9fd2e02d8498ab32e961c978fe0f2",
+  "run_message_id": "msg_2cb8cc23197d45d5a6ec1948788b78ce",
+  "delivery_id": "del_7c7f2c53333347ae9f06fd74829f8ab3",
+  "executor_ack_at": "2026-10-03T03:37:18.444574Z",
+  "session_id": "01a0d5fd-0b0a-7191-b5ed-b423082558ae",
+  "instance_id": "inst_172422d9b66c41ed842072313428cb36",
+  "result_message_id": "msg_71c34ee568354937b68db4927c48e999",
+  "result_transport": {
+    "manifest": {
+      "path": "/var/tmp/friday-lab898-sol081-browser-actual-stream-caller-end-independent-source-review/manifest.json",
+      "bytes": 952,
+      "sha256": "f00e4f84ce6d0705c2c0ac682af28215a41378403d48cbe642fffbcfa67937c7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226929",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "952",
+        "1790999090122706203",
+        "1790999090122706203"
+      ],
+      "stable9": true
+    },
+    "payload": {
+      "path": "/var/tmp/friday-lab898-sol081-browser-actual-stream-caller-end-independent-source-review/payload.json",
+      "bytes": 98,
+      "sha256": "35356c27e45a4c4ca495e27ea693d32fe49be376af5f807c01ffc2bdb4a5d03e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226930",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "98",
+        "1790999090122706203",
+        "1790999090122706203"
+      ],
+      "stable9": true
+    }
+  },
+  "full_owned_pins": [
+    {
+      "path": "/var/tmp/friday-lab898-sol081-browser-actual-stream-caller-end-independent-source-review/manifest.json",
+      "bytes": 952,
+      "sha256": "f00e4f84ce6d0705c2c0ac682af28215a41378403d48cbe642fffbcfa67937c7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226929",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "952",
+        "1790999090122706203",
+        "1790999090122706203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab898-sol081-browser-actual-stream-caller-end-independent-source-review/pin-checks.json",
+      "bytes": 17924,
+      "sha256": "dcba9f99f688110fc075036f586e4df3ea3cfa95fafa0c73bab72f4e87b97f18",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226924",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17924",
+        "1790999090122706203",
+        "1790999090122706203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab898-sol081-browser-actual-stream-caller-end-independent-source-review/result.json",
+      "bytes": 1810,
+      "sha256": "d6b39fbbcde715e6d7075355e4d40a350e3929dc24b0e53a1a8ad21f6001a281",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226925",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1810",
+        "1790999090122706203",
+        "1790999090122706203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab898-sol081-browser-actual-stream-caller-end-independent-source-review/review.json",
+      "bytes": 3855,
+      "sha256": "daa81c306296873e6c9237523ca8b7fd256a58ee3199f40c2d7314e964eac09f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226926",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3855",
+        "1790999090122706203",
+        "1790999090122706203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab898-sol081-browser-actual-stream-caller-end-independent-source-review/review.txt",
+      "bytes": 7751,
+      "sha256": "8ecb93aa83e57c7159bf47c0d87154bf60ee38b2ba1e42bfc1bbbef732debdc5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226927",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7751",
+        "1790999090122706203",
+        "1790999090122706203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab898-sol081-browser-actual-stream-caller-end-independent-source-review/pathset.json",
+      "bytes": 701,
+      "sha256": "80e60fd4d7c462f18944320c75af676fcc9df8e002ea87f3cefd90521eef7b47",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226928",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "701",
+        "1790999090122706203",
+        "1790999090122706203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab898-sol081-browser-actual-stream-caller-end-independent-source-review/payload.json",
+      "bytes": 98,
+      "sha256": "35356c27e45a4c4ca495e27ea693d32fe49be376af5f807c01ffc2bdb4a5d03e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226930",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "98",
+        "1790999090122706203",
+        "1790999090122706203"
+      ],
+      "stable9": true
+    }
+  ],
+  "files": 7,
+  "dirs": 1,
+  "completed_msk": "2026-10-03T06:44:50.121987+03:00",
+  "elapsed_seconds": 451.67739,
+  "lab_decision": "E01_E04_SCOPED_CREDIT_NOT_WHOLE_ACCEPTED",
+  "root_decision": "E01_E02_E04_SCOPED_SOURCE_CREDIT_E03_PARTIAL_CREDIT_FD_GENERATION_DEFECT_RETAINED",
+  "credits": [
+    "E01 actual 17 helper namespace/loader and producer refs",
+    "E02 actual native-intention PID and BOTH identical route/material/stream joins; not native body authority",
+    "E04 actual physical receipt_write preserved with original natural-clock control",
+    "E03 physical PROVISIONAL/CANDIDATE unqualified, exact 6-line stream and ordinary finally ordering are real local credits"
+  ],
+  "rejected_overbroad_credit": {
+    "id": "E03",
+    "invariant": "Fresh retained-readback FD must be registered into its own generation and closed once before finite-end qualification",
+    "actual_path": "Sol081 Executor:918-919 raw os.open bypasses FDJournal.acquire; later close_owned_fd can consult old closed generation after legitimate FD reuse",
+    "evidence": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A214-SOL081-BROWSER-CONNECTED-NONAUTHOR-SOURCE-REVIEW-20261003.json",
+      "bytes": 19386,
+      "sha256": "f63b8eb0f22735e3fd87a3bfae9e1271d34214ad5f42b74c3ca4aa9591b588bc",
+      "identity9_decimal_strings": [
+        "2050",
+        "8532102",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19386",
+        "1790998980259017307",
+        "1790998980312020345"
+      ],
+      "stable9": true
+    },
+    "author_correction_manifest": {
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/manifest.json",
+      "bytes": 22629,
+      "sha256": "b48767637bddf842ae1d2cd1e1afe01af0970c17ba590cfc6f4773ca6d18fc66",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226950",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "22629",
+        "1790999510877430504",
+        "1790999510944434345"
+      ],
+      "stable9": true
+    },
+    "validation": "First different-author review of Root A214 exact4-file connected delta; no supplied Source execution"
+  },
+  "context_evidence": "Lab read precise actual Source; did not independently rebuild 353 gapless partitions. Root full immutable prior rejoin remains scoped static evidence only; no Lab claim promoted to stronger evidence.",
+  "authorship": "Historical LAB893 authorship bars Grok whole own baseline acceptance; Sol081 changed context is different-author narrow review",
+  "remaining": [
+    "C1 native/stock/raw/pre-encode/alias/BOTH outside end CODE_OPEN",
+    "C2 whole inclusive prospective resource fit UNKNOWN_NOT_ZERO",
+    "Source/Root admission, compiler ABI/runtime, original216/all29/all6/all9 remain required NOT_RUN"
+  ],
+  "Source_execution": 0,
+  "whole_accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

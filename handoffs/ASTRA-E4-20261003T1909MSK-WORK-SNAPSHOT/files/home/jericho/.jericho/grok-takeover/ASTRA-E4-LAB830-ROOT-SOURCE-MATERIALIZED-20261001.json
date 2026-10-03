@@ -1,0 +1,134 @@
+{
+  "schema": "friday.astra.node.root-selected-source-materialization.v1",
+  "at_utc": "2026-10-01T15:37:45.695832+00:00",
+  "Root_actor": "existing Astra native tool /root",
+  "root": "/var/tmp/friday-astra-node-root-source-a080-successor-g1",
+  "root_identity9": [
+    "2050",
+    "3980333",
+    "16832",
+    "1000",
+    "1000",
+    "2",
+    "4096",
+    "1790869065588848692",
+    "1790869065588848692"
+  ],
+  "source_review": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB830-NODE-SOURCE-ACCEPTED-20261001.json",
+    "sha256": "d29ad65ae1f6b1c1373c021cb1cad334bfc204f3c62c93381b7346d1fb904023"
+  },
+  "files": [
+    {
+      "Source": {
+        "path": "/var/tmp/friday-lab830-node-canonical-path-rebind-source/source/verifier.py",
+        "sha256": "c571ed6114e1fb5231d600718d4a891ab17d1403598eb9172edf61f9c10b56e9",
+        "size": 55895,
+        "identity9": [
+          "2050",
+          "3980255",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "55895",
+          "1790865828336516071",
+          "1790865828336516071"
+        ]
+      },
+      "Root_materialized": {
+        "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/verifier.py",
+        "sha256": "c571ed6114e1fb5231d600718d4a891ab17d1403598eb9172edf61f9c10b56e9",
+        "size": 55895,
+        "identity9": [
+          "2050",
+          "3980334",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "55895",
+          "1790869065582810120",
+          "1790869065582810120"
+        ]
+      }
+    },
+    {
+      "Source": {
+        "path": "/var/tmp/friday-lab830-node-canonical-path-rebind-source/source/launch-contract.json",
+        "sha256": "c0f0a9566ef9639d3189d3da65b94d93f2304beb5b15d7232e79ae347967ccd7",
+        "size": 45320,
+        "identity9": [
+          "2050",
+          "3980253",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "45320",
+          "1790865828336045144",
+          "1790865828336045144"
+        ]
+      },
+      "Root_materialized": {
+        "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/launch-contract.json",
+        "sha256": "c0f0a9566ef9639d3189d3da65b94d93f2304beb5b15d7232e79ae347967ccd7",
+        "size": 45320,
+        "identity9": [
+          "2050",
+          "3980335",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "45320",
+          "1790869065586342022",
+          "1790869065586342022"
+        ]
+      }
+    },
+    {
+      "Source": {
+        "path": "/var/tmp/friday-lab830-node-canonical-path-rebind-source/source/supervisor.py",
+        "sha256": "1a80b686159a348777bfdc4e3281566de331583c29fcc4813c97efb60f5f14e8",
+        "size": 84058,
+        "identity9": [
+          "2050",
+          "3980254",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "84058",
+          "1790865828336375963",
+          "1790865828336375963"
+        ]
+      },
+      "Root_materialized": {
+        "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/supervisor.py",
+        "sha256": "1a80b686159a348777bfdc4e3281566de331583c29fcc4813c97efb60f5f14e8",
+        "size": 84058,
+        "identity9": [
+          "2050",
+          "3980336",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "84058",
+          "1790869065589834822",
+          "1790869065589834822"
+        ]
+      }
+    }
+  ],
+  "total_files": 3,
+  "total_bytes": 185273,
+  "old_Source_unchanged_full9": true,
+  "mechanical_copy_only": true,
+  "source_execution": false,
+  "Root_runtime_context": "UNISSUED",
+  "Node_GPG": "NOT_RUN",
+  "RootImage_RAMIO": "NOT_PROVEN",
+  "gate_release_credit": false
+}

@@ -1,0 +1,691 @@
+{
+  "schema": "friday.astra.e4.a169.exact-int9-new-qualified-root-node-whole-scope.v1",
+  "assignment": "ASTRA-E4-NODE-A131-EXACT-INT9-WHOLE-QUALIFIED-RUN-A169",
+  "generation": 1,
+  "owner_scope": "turn",
+  "accepted_msk": "2026-10-02T10:54:17.152570+03:00",
+  "origin_monotonic_ns": "305861594105550",
+  "hard_deadline_monotonic_ns": "306761594105550",
+  "caller_deadline_monotonic_ns": "306641594105550",
+  "Root_capture_seal_reserve_seconds": 120,
+  "target_absent_at_acceptance": true,
+  "root": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1",
+  "actor": "Existing Astra /root exact native tool action under active owner release mandate; own bounded trusted stock preparation/capture helper only, not new Root service/model/TUI. Root evidence or Source/DATA does not itself confer authority.",
+  "phase": "PREPARATION_ONLY_EXPLICIT_ROOT_NATIVE_ADMISSION_REQUIRED",
+  "selected19": {
+    "accepted": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB830-NODE-SOURCE-ACCEPTED-20261001.json",
+      "bytes": 5880,
+      "sha256": "d29ad65ae1f6b1c1373c021cb1cad334bfc204f3c62c93381b7346d1fb904023",
+      "identity9_decimal_strings": [
+        "2050",
+        "8529578",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5880",
+        "1790867713767913769",
+        "1790867713817916614"
+      ],
+      "stable9": true
+    },
+    "archive": {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/archives/node/node-v22.23.2-linux-x64.tar.xz",
+      "bytes": 31058332,
+      "sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307",
+      "identity9_decimal_strings": [
+        "2050",
+        "6823289",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31058332",
+        "1790815333325014219",
+        "1790815333325014219"
+      ],
+      "stable9": true
+    },
+    "bill": {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json",
+      "bytes": 466956,
+      "sha256": "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2",
+      "identity9_decimal_strings": [
+        "2050",
+        "9176751",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "466956",
+        "1790814359032038331",
+        "1790814359032038331"
+      ],
+      "stable9": true
+    },
+    "contract": {
+      "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/launch-contract.json",
+      "bytes": 45320,
+      "sha256": "c0f0a9566ef9639d3189d3da65b94d93f2304beb5b15d7232e79ae347967ccd7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980335",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "45320",
+        "1790869065586342022",
+        "1790869065586342022"
+      ],
+      "stable9": true
+    },
+    "ffi": {
+      "path": "/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0",
+      "bytes": 64184,
+      "sha256": "1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa",
+      "identity9_decimal_strings": [
+        "2050",
+        "7631364",
+        "33188",
+        "0",
+        "0",
+        "1",
+        "64184",
+        "1774599998000000000",
+        "1784581430109030886"
+      ],
+      "stable9": true
+    },
+    "gpg": {
+      "path": "/usr/bin/gpg",
+      "bytes": 1186456,
+      "sha256": "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754",
+      "identity9_decimal_strings": [
+        "2050",
+        "7602949",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "1186456",
+        "1788377917000000000",
+        "1788492750343617162"
+      ],
+      "stable9": true
+    },
+    "gpgv": {
+      "path": "/usr/bin/gpgv",
+      "bytes": 302296,
+      "sha256": "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d",
+      "identity9_decimal_strings": [
+        "2050",
+        "7603893",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "302296",
+        "1788377917000000000",
+        "1788492749979756867"
+      ],
+      "stable9": true
+    },
+    "key": {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/metadata/node/publisher-key.asc",
+      "bytes": 3163,
+      "sha256": "e31e1aa40a8331f01d753cef475f7b9eab934fc25f5f0b36995bfd80bd66ad27",
+      "identity9_decimal_strings": [
+        "2050",
+        "6823493",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3163",
+        "1790815403317057000",
+        "1790815403317057000"
+      ],
+      "stable9": true
+    },
+    "materialized": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB830-ROOT-SOURCE-MATERIALIZED-20261001.json",
+      "bytes": 3724,
+      "sha256": "893dabaca55b8abe3d4fe80ef04593f30f6d1a133bd8df9c53868729965c7cbc",
+      "identity9_decimal_strings": [
+        "2050",
+        "8529582",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3724",
+        "1790869065738857229",
+        "1790869065788860074"
+      ],
+      "stable9": true
+    },
+    "original_archive": {
+      "path": "/home/jericho/.jericho/runtime/friday-toolchain22.bSt8Uu/archives/node-v22.23.2-linux-x64.tar.xz",
+      "bytes": 31058332,
+      "sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307",
+      "identity9_decimal_strings": [
+        "2050",
+        "12073242",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31058332",
+        "1786872629589802674",
+        "1786872629589802674"
+      ],
+      "stable9": true
+    },
+    "prlimit": {
+      "path": "/usr/bin/prlimit",
+      "bytes": 27616,
+      "sha256": "cb28811cb3902773c1a0f3ac0ea554c7a1e232724e9d4cae055ede54b65a7bc4",
+      "identity9_decimal_strings": [
+        "2050",
+        "7605447",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "27616",
+        "1787149416000000000",
+        "1788318815864895069"
+      ],
+      "stable9": true
+    },
+    "python": {
+      "path": "/usr/bin/python3.14",
+      "bytes": 7477160,
+      "sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41",
+      "identity9_decimal_strings": [
+        "2050",
+        "7603281",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "7477160",
+        "1787222518000000000",
+        "1789010692636990403"
+      ],
+      "stable9": true
+    },
+    "raw": {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/metadata/node/SHASUMS256.txt.asc",
+      "bytes": 4696,
+      "sha256": "cfcf12eb3146d641be185d08ca018166b98495b1d8e5f7f94ab77f9965b651d2",
+      "identity9_decimal_strings": [
+        "2050",
+        "6823492",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4696",
+        "1790815403055574089",
+        "1790815403055574089"
+      ],
+      "stable9": true
+    },
+    "receipts": {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/transport-receipts.ndjson",
+      "bytes": 400979,
+      "sha256": "180c44ad4439a96f89335a62e35a5668327a228ce164d1f31b503b867b05fe9b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4072710",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "400979",
+        "1790815410397447819",
+        "1790815410397447819"
+      ],
+      "stable9": true
+    },
+    "supervisor": {
+      "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/supervisor.py",
+      "bytes": 84058,
+      "sha256": "1a80b686159a348777bfdc4e3281566de331583c29fcc4813c97efb60f5f14e8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980336",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "84058",
+        "1790869065589834822",
+        "1790869065589834822"
+      ],
+      "stable9": true
+    },
+    "verifier": {
+      "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/verifier.py",
+      "bytes": 55895,
+      "sha256": "c571ed6114e1fb5231d600718d4a891ab17d1403598eb9172edf61f9c10b56e9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980334",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "55895",
+        "1790869065582810120",
+        "1790869065582810120"
+      ],
+      "stable9": true
+    },
+    "caller": {
+      "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/caller.py",
+      "bytes": 106870,
+      "sha256": "c98f1ff72c808785327cc7d37af2ee25c074682d21f833ed586a731aaaf50a9f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370257",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "106870",
+        "1790900083234541013",
+        "1790905750063496235"
+      ],
+      "stable9": true
+    },
+    "expectations": {
+      "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/expectations.json",
+      "bytes": 7202,
+      "sha256": "86cf7eaf3f681d9e67d3542df8740f63f201d0a82a21f167a9968c109d58d292",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370258",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7202",
+        "1790900103794713859",
+        "1790905750066704621"
+      ],
+      "stable9": true
+    },
+    "plain": {
+      "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370259",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790900042448682950",
+        "1790905750069987111"
+      ],
+      "stable9": true
+    }
+  },
+  "current_Source3": {
+    "caller": {
+      "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/caller.py",
+      "bytes": 106870,
+      "sha256": "c98f1ff72c808785327cc7d37af2ee25c074682d21f833ed586a731aaaf50a9f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370257",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "106870",
+        "1790900083234541013",
+        "1790905750063496235"
+      ],
+      "stable9": true
+    },
+    "expectations": {
+      "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/expectations.json",
+      "bytes": 7202,
+      "sha256": "86cf7eaf3f681d9e67d3542df8740f63f201d0a82a21f167a9968c109d58d292",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370258",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7202",
+        "1790900103794713859",
+        "1790905750066704621"
+      ],
+      "stable9": true
+    },
+    "plain": {
+      "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370259",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790900042448682950",
+        "1790905750069987111"
+      ],
+      "stable9": true
+    }
+  },
+  "whole_Source_A134": {
+    "pin": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A134-SOURCE-REVIEW-RECEIVED-20261002.json",
+      "bytes": 2958,
+      "sha256": "7cf4c977d12e139a82a7589eef4709c689e2b9b24c23089fd38e6b3bb07ed1d5",
+      "identity9_decimal_strings": [
+        "2050",
+        "8532005",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2958",
+        "1790902159237278984",
+        "1790902159292282150"
+      ],
+      "stable9": true
+    },
+    "summary": {
+      "assignment": "ASTRA-E4-NODE-A131-WHOLE-DISJOINT-PUBLICATION-INDEPENDENT-SOURCE-REVIEW-A134",
+      "generation": 1,
+      "whole_verdict": "ACCEPT_UNDER_EXPLICIT_QUALIFIED_STOCK_ENVELOPE",
+      "new_Root_before_effects_requirement": "Admit exact stock CPython3.14/JSON/codecs/int/ctypes/Linux/libc factories: complete messages<=900 ASCII chars, only JSON two-byte control escapes, type names<=32 ASCII chars, native scalar widths<=32, fixed filenames ASCII<=160, Root clock arguments canonical ASCII decimals<=32. Establish full factory format bounds, not merely sampled exceptions. libc C strerror <=256 ASCII chars over native errno domain/fallback is one required subfact. Exact16 fixed full9 and independently materialized Source3 identities required.",
+      "complete_bound_bytes": 2095321,
+      "margin_bytes": 1831,
+      "source_contradictions_found": [],
+      "current_stock900_measurement": "NOT_PERFORMED_NOT_CLAIMED",
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false
+    },
+    "terminal": {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-NODE-A131-WHOLE-DISJOINT-PUBLICATION-INDEPENDENT-SOURCE-REVIEW-A134-G1-RESULT.json",
+      "bytes": 6119,
+      "sha256": "444f46b1eda7353b503850d10d1c110ee77688cd799eb7055e82aaedc882cb08",
+      "identity9_decimal_strings": [
+        "2050",
+        "9177195",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6119",
+        "1790901796340390337",
+        "1790901796340390337"
+      ],
+      "stable9": true
+    },
+    "manifest": {
+      "path": "/var/tmp/friday-astra-node-a131-whole-disjoint-publication-independent-source-review-a134-g1/manifest.json",
+      "bytes": 6318,
+      "sha256": "0bf75f46f37d6eb552c3f9d870a8d430cf8100beed3348698e183471c2236655",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980451",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6318",
+        "1790901796337390164",
+        "1790901796337390164"
+      ],
+      "stable9": true
+    }
+  },
+  "all35_A161": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A161-INDEPENDENT-ALL35-STOCK-DATA-RESULT-RECEIVED-20261002.json",
+    "bytes": 18310,
+    "sha256": "7aee73be527a5635f2b69cbe9376f9451ffd66c24efc915fe2917d901979e3c5",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532890",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "18310",
+      "1790923384421762478",
+      "1790923384483534080"
+    ],
+    "stable9": true
+  },
+  "current_stock_provider_A164": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A164-ROOT-PREFLIGHT-RESULT-RECEIVED-20261002.json",
+    "bytes": 18362,
+    "sha256": "3f996ff220813f6ac741ddf89549a3796b556dc62c4179b8e208177b0c7d1252",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533218",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "18362",
+      "1790925271186565396",
+      "1790925271244568717"
+    ],
+    "stable9": true
+  },
+  "Root_stock_provider_report": [
+    {
+      "path": "/var/tmp/friday-astra-node-a131-stock-provider-root-preflight-a164-g1/stock-provider-root-preflight-report.json",
+      "bytes": 30476,
+      "sha256": "1ac5b9a6d5f714728ce3aa01e95151832a8f55ed8b992a727f714ceb0ff3b1bf",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979181",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30476",
+        "1790924094711201210",
+        "1790924094770204589"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-node-a131-stock-provider-root-preflight-a164-g1/stock_provider_probe.py",
+      "bytes": 5126,
+      "sha256": "f587e3a091e0f613359477d14a1cab8214b0a0381773fbe61964cc84aa0455f5",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979174",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5126",
+        "1790924094308178134",
+        "1790924094308178134"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-node-a131-stock-provider-root-preflight-a164-g1/initial-incomplete-proc-read-report.json",
+      "bytes": 22201,
+      "sha256": "1cf5893501313082bfb2c1b24dd48384fb7dd0ff6fdf16e8f437f98e2e076226",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979180",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "22201",
+        "1790924094335179680",
+        "1790924094383182429"
+      ],
+      "stable9": true
+    }
+  ],
+  "canonical_all6": [
+    "startup-env-negative",
+    "startup-as-negative",
+    "verify-node",
+    "supervisor-entry-fd7",
+    "supervisor-entry-fd127",
+    "verifier-entry-fd7"
+  ],
+  "limits": {
+    "whole900s": true,
+    "outer_AS_bytes": 134217728,
+    "outer_CPU_soft_hard_seconds": [
+      60,
+      120
+    ],
+    "outer_NOFILE": 256,
+    "outer_FSIZE_public_bytes": 2097152,
+    "outer_stdout_stderr_complete": 2097152,
+    "outer_canonical_explicit_read_bytes": 268435456,
+    "outer_case_stdout_bytes": 65536,
+    "outer_case_stderr_bytes": 32768,
+    "Root_preparation_capture_seal_explicit_read_ceiling_bytes": 268435456,
+    "Root_preparation_memory_allowance_bytes": 8589934592,
+    "Root_seal_capture_reserve_seconds": 120,
+    "source_process_deadline_never_refreshed": true,
+    "canonical_caps_raised": false,
+    "Root_model_children": 0,
+    "network_calls": 0,
+    "retries": 0
+  },
+  "qualified_assumptions": "Exact already installed stock Python3.14/Linux/libc/stdlib/stock binaries and dynamic loader are explicitly qualified assumptions, NOT immutable RootImage/general installed closure/aggregate RAM-IO proof.",
+  "allowed_native_effects_if_separately_admitted": "Only one exact reviewed caller and original all6 own-process environment/AS/ordinary-surplus-FD cause checks; fixed supervisor/verifier + six exact stock GPG calls on held authenticated public Node release metadata. SHA-read Node archive only, NO parse/extract/exec/install. Exact new /var/tmp/friday-a048-g1-<32hex> private readonly-empty GPG homes allocated by actual owned supervisor and removed only after genuine ownership/identity/empty/exact-reap proof. Own registered actual pidfd/generation signals/waits only; never foreign processes.",
+  "Root_launch": "Ordinary synchronous stock bash normal fork/wait -> env3/prlimit/Python exact new reviewed current caller +fd3 ordinaryDATA. Capture complete native stdout/stderr separately to new private files, relay actual caller native rc unchanged. No directexec native parent or subtraction/reset of rawrusage.",
+  "preparation_plan": "Root full19 fresh read/hash/named-held9 before effect; one pass72359277 + second boundary pass72359277 if necessary, within Root256MiB. Selected stock providers and namespace/cache/preload/argv0 revalidated; exact fd3 plain selection schema only. Root holds acquisition descriptors during single synchronous normal stock bash fork/wait caller; inheritance to caller only0,1,2,3. Complete stdoutstderr/actualrc separate private captures; no peak subtraction/reset/directexec parent. Root preparation/capture helper costs separate from original Source caps and unknown implicitIO/wholeRAM honest.",
+  "write_scope": [
+    "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1",
+    "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A169-NODE-EXACT-INT9-WHOLE-SCOPE-20261002.json",
+    "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A169-NODE-EXACT-INT9-QUALIFIED-ROOT-ADMISSION-20261002.json",
+    "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A169-NODE-EXACT-INT9-WHOLE-NATIVE-RESULT-20261002.json"
+  ],
+  "safety": "NO offensive payload/generator/reproduction/exploit/bypass, network/packages download/archive extraction/Node execution/install/system/config/Git writes/native model/UI/gates, protections/model/reasoning/tier/provider/TUI/goal/writer-lock changes. Full originals all6/19/strictinheritedfd/caps/nopeaksubtraction/sameheldcustody/onecleanup/stickyunknown mandatory. Stop on scope/pin/resource/effect/custody failure. No RootImage/GO/gate/release admission; prior A101 expired/red/no reuse.",
+  "repeat_because": "A165 ended RED after exactlyone startup Source action/no innerbirths/all6NOT_RUN because Root DATA int9 producer rounded normative nanoseconds through V8 Number. New actualexactint9 DATA and new exactnumeric9 validator correct identified Root boundary defect. Unchanged A131 Source3/A134/A161/A164 reused only exactcurrent9; freshRootfull19/currentstock/beforeeffect predicates/NEWwhole900clock and originalall6 mandated. NOT retry/continuation/reclock/acceptance of A165; oldSourceSTOP_UNCONFIRMED and captures preserved.",
+  "SourceReady": false,
+  "Root_Image": false,
+  "aggregate_RAM_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "exact_int9_DATA_preparation_pin": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-NODE-A131-EXACT-INT9-SELECTION-PREPARATION-20261002.json",
+    "bytes": 5618,
+    "sha256": "bb35bc1cb68c8ade7008d881720ce8390cbc63618993bb21d678f231240c0567",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533222",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "5618",
+      "1790925887128829360",
+      "1790925887201833540"
+    ],
+    "stable9": true
+  },
+  "corrected_Root_boundary_validator_pin": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-NODE-A131-ROOT-NATIVE-ACTION-EXACT-INT9-VALIDATOR-20261002.py",
+    "bytes": 6786,
+    "sha256": "75bfb4c0fe267f85ed89e9214300281cbad6c2709c467037dd335c5caf02d77d",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533226",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "6786",
+      "1790926058095617335",
+      "1790926058154620713"
+    ],
+    "stable9": true
+  },
+  "exact_int9_rule": "Authoritative fd3 numeric JSON lexemes retained raw text, exactintegerparser compares all19*9 numericINTs to held Rootdecimalstrings before Sourceeffects. Never parse selectionJSON into V8 Number/float then rewrite.",
+  "prior_ended_A165_result_pin": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A165-NODE-WHOLE-NATIVE-RESULT-20261002.json",
+    "bytes": 26890,
+    "sha256": "ef892949e11a2b47274d02b88e388013ffddf74e023f8c76d891d0873f7d5a60",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533221",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "26890",
+      "1790925887127829303",
+      "1790925887201833540"
+    ],
+    "stable9": true
+  },
+  "preparation_current_resources": {
+    "IO_pressure": "some avg10=0.04 avg60=0.02 avg300=0.00 total=3002334646\nfull avg10=0.04 avg60=0.02 avg300=0.00 total=2667763252\n",
+    "accepted_msk": "2026-10-02T10:54:17.152570+03:00",
+    "caller_deadline_monotonic_ns": "306641594105550",
+    "cgroup": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/ptyxis-spawn-88e5963e-83d3-4456-8d97-46f97e4d24c0.scope\n",
+    "cpu_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23
+    ],
+    "cpu_pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1999038723\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+    "hard_deadline_monotonic_ns": "306761594105550",
+    "meminfo": "MemTotal:       31765068 kB\nMemFree:          931184 kB\nMemAvailable:   14527380 kB\nBuffers:         3231248 kB\nCached:          7982296 kB\nSwapCached:        90368 kB\nActive:          8244796 kB\nInactive:       16980592 kB\nActive(anon):    7461780 kB\nInactive(anon):  7608484 kB\nActive(file):     783016 kB\nInactive(file):  9372108 kB\nUnevictable:         184 kB\nMlocked:             184 kB\nSwapTotal:       4194300 kB\nSwapFree:             28 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:              2660 kB\nWriteback:           192 kB\nAnonPages:      13924124 kB\nMapped:           801924 kB\nShmem:           2147076 kB\nKReclaimable:    3906464 kB\nSlab:            4701756 kB\nSReclaimable:    3906464 kB\nSUnreclaim:       795292 kB\nKernelStack:       33824 kB\nPageTables:       102504 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    20076832 kB\nCommitted_AS:   27108732 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       60252 kB\nVmallocChunk:          0 kB\nPercpu:           128000 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    679936 kB\nFilePmdMapped:     10240 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      237376 kB\nDirectMap2M:     9199616 kB\nDirectMap1G:    26214400 kB\n",
+    "memory_pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=180826758\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=161695031\n",
+    "namespace_mnt": "mnt:[4026531832]",
+    "origin_monotonic_ns": "305861594105550",
+    "own_RSS_native_KiB": 16744,
+    "root": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1",
+    "target_absent": true,
+    "uid_gid": [
+      1000,
+      1000
+    ]
+  }
+}

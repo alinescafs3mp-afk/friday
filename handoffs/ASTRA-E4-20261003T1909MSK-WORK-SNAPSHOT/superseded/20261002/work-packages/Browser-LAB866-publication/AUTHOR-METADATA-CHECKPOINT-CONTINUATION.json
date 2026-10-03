@@ -1,0 +1,7 @@
+{
+  "initial_own_metadata_failure": "KeyError helper_pins: original bill exact key is helper_source_pins",
+  "effect_before_failure": "only four complete hash9 Source/delta reference JSON artifacts written; no Source imported/evaluated/compiled/executed/tested",
+  "continuation": "changed author-owned metadata code; exact previously emitted four JSON bytes verified and reused without overwrite; source snapshot unchanged",
+  "supplied_Runtime_native_network_attempts_or_retries": 0,
+  "untraced_failed_metadata_reads": "UNKNOWN_WITHIN_CONSERVATIVE_LITERAL_TOOL_READ_RESERVATION_NOT_ZERO"
+}

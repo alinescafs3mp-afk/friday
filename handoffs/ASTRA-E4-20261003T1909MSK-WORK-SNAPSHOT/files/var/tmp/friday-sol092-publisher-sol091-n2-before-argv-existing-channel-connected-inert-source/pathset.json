@@ -1,0 +1,35 @@
+{
+  "schema": "friday.sol092.exact-private-pathset.v1",
+  "root": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source",
+  "regular_files": [
+    "README.txt",
+    "evidence/LAB916-interface-request.json",
+    "evidence/code-conflicts.json",
+    "evidence/connected-relations.json",
+    "evidence/current134-source-map.json",
+    "evidence/current49-source-map.json",
+    "evidence/data-integrity.json",
+    "evidence/external-final-snapshot.json",
+    "evidence/full-gapless-partitions.json",
+    "evidence/original-obligations.json",
+    "evidence/qualification-and-costs.json",
+    "evidence/source-byte-materialization.json",
+    "evidence/validation-plan.json",
+    "manifest.json",
+    "pathset.json",
+    "received.json",
+    "source/actor_bootstrap.py",
+    "source/root_tool_adapter.py"
+  ],
+  "directories": [
+    ".",
+    "source",
+    "evidence"
+  ],
+  "file_mode": "0600",
+  "directory_mode": "0700",
+  "single_link": true,
+  "symlinks": 0,
+  "manifest_excludes_itself": true,
+  "Source_materialized_only2": true
+}

@@ -1,0 +1,27 @@
+{
+  "admitted": [
+    "The same project_owned_error body is in caller, supervisor, and verifier. It reserves a permissive lower bound before each reference, value, node, traceback name, and base64 payload, then builds those objects.",
+    "String width uses the codepoint count and integer width uses a four-bit digit floor, both before the literal cell. Base64 width is reserved before b64encode. No original field is dropped.",
+    "With the public budget above the per-graph budget, the untouched aggregate leaves one full per-graph budget. That is the same cap seal_stock_graph enforces with the exact canonical JSON length.",
+    "validate_stock_error_graph, decode_channel_frame, seal_stock_graph, and publish_errors match the Sol079 text. The decoder still requires a string message and NOT_QUALIFIED.",
+    "A message of None stays on the local node until str, the 900 cap, and the width debit succeed. seal_stock_graph then requires a string. The three outer tails still call finish_outside_end and one publish_preowned_then_frame, and they commit only when that frame exists.",
+    "Lease, dup2 adoption, outside-end, and the one publication wrapper match the Sol079 text aside from the package path and the acyclic verifier, contract, and supervisor hashes. expectations.json and ordinary-surplus.txt are byte-equal."
+  ],
+  "not_admitted": [
+    "str of the original object runs before its width debit. Float hex and the fixed sha256 hex text are not pre-debited. Those gaps undercharge; they do not measure the selected message factory.",
+    "Native body, custody, and both native ends stay C1 CODE_OPEN. The allocator, decoder, and end cost stays UNKNOWN_NOT_ZERO. No RSS or fit figure is claimed.",
+    "Current image, compiler ABI, grants, providers, resources, and finite clocks were not admitted. Positive and negative cases were not run.",
+    "Byte-equal expectations and surplus are not whole acceptance. Author prose was not used as credit. Whole Root and GO stay false."
+  ],
+  "schema": "friday.astra.lab913.node.prospective-errorgraph.connected-nonauthor.run.v1",
+  "static_bounds": {
+    "aggregate": 36348,
+    "available_at_zero_charge": 6058,
+    "graph_budget": 6058,
+    "non_graph": 14592,
+    "public_budget": 49152,
+    "raw_room": 12118,
+    "source": "literals in derived_stock_bounds and GRAPH_PUBLIC_BUDGET, arithmetic in this review, package not executed"
+  },
+  "whole_root_and_go": false
+}

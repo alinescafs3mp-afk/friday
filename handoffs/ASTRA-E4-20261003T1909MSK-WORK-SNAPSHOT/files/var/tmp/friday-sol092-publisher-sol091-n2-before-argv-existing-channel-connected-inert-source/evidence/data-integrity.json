@@ -1,0 +1,218 @@
+{
+  "schema": "friday.sol092.data-integrity-not-Source-acceptance.v1",
+  "new_owned_safe_Python2": [
+    {
+      "name": "source/actor_bootstrap.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/actor_bootstrap.py",
+      "bytes": 58684,
+      "sha256": "168fd8a2d1649dfe531c4d938d72f1d356a0afadf849dd4f743223a3da61e85a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371757",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "58684",
+        "1791036478773836019",
+        "1791036478773836019"
+      ],
+      "stable9": true,
+      "materialized": true,
+      "changed": true
+    },
+    {
+      "name": "source/root_tool_adapter.py",
+      "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/source/root_tool_adapter.py",
+      "bytes": 149208,
+      "sha256": "c3709fa05cf5fa1b008e4301ffd6cb39d23cab113eac8052bc9070c6741fbe50",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371758",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "149208",
+        "1791036379916164618",
+        "1791036379916164618"
+      ],
+      "stable9": true,
+      "materialized": true,
+      "changed": true
+    }
+  ],
+  "new_owned_Source_bytes": 207892,
+  "original_safe44": 44,
+  "consumer23_unchanged_external": true,
+  "current_Source49_joined": 49,
+  "current_Source_materialized2_external47": true,
+  "current134_slots": 134,
+  "current134_materialized2_external132": true,
+  "all_other_native_C_H_HASHONLY_external": true,
+  "LAB916_direct_content_untouched": true,
+  "original_full_prefix_receiver_literal_unchanged": true,
+  "original_H2": {
+    "literal_function_unchanged": true,
+    "function_bytes": 4829,
+    "function_sha256": "092a12ccbea7f87beb1de39c9cd76e56cf1e3b07517c6952744a8a74cd38e827",
+    "prior_scoped_credit": {
+      "prior_scoped_credit": {
+        "nonauthor_decision": "SCOPED_TEXT_CREDIT_OWNEDFDS_TRANSFER_ORDERED_OWNED_PROJECTION",
+        "same_function_as_Root_delta": true,
+        "function": {
+          "same_function": true,
+          "bytes": 4829,
+          "sha256": "092a12ccbea7f87beb1de39c9cd76e56cf1e3b07517c6952744a8a74cd38e827",
+          "paths": [
+            "/var/tmp/friday-astra-a218-publisher-h2-current-owner-projection-connected-inert-source/observer.py",
+            "/var/tmp/friday-astra-a218-sol086-h2-connected-inert-source/observer.py",
+            "/var/tmp/friday-sol087-publisher-c04-early-prefix-both-end-connected-inert-source/source/observer.py"
+          ]
+        },
+        "review": {
+          "path": "/var/tmp/friday-sol087-publisher-c04-early-prefix-both-end-connected-inert-source/evidence/H2-nonauthor-review.json",
+          "name": "evidence/H2-nonauthor-review.json",
+          "bytes": 3925,
+          "sha256": "4b4173eddd0ec45c7879238e98f3f7c12cbed16dc13829e663c3e53c329e1470",
+          "identity9_decimal_strings": [
+            "2050",
+            "4227346",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "3925",
+            "1791010167387364924",
+            "1791010210919863117"
+          ],
+          "stable9": true
+        },
+        "scope_not_baseline_or_new_author_acceptance": true
+      },
+      "exact_function_literal": {
+        "function": "def validate_fd_value_histories(nodes,domains):",
+        "unchanged": true,
+        "scope_not_new_author_or_runtime_credit": true
+      },
+      "scope_not_new_source_qualification": true
+    },
+    "not_new_Source_or_native_acceptance": true
+  },
+  "old_package_full63_regular_files_SHA9_dirs_pathset_unchanged": {
+    "files": 63,
+    "bytes": 3295631,
+    "directories": [
+      {
+        "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371665",
+          "16832",
+          "1000",
+          "1000",
+          "6",
+          "4096",
+          "1791022634804079833",
+          "1791022634804079833"
+        ]
+      },
+      {
+        "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371667",
+          "16832",
+          "1000",
+          "1000",
+          "3",
+          "4096",
+          "1791020794584495050",
+          "1791022242515576001"
+        ]
+      },
+      {
+        "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/consumer/source",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371668",
+          "16832",
+          "1000",
+          "1000",
+          "2",
+          "4096",
+          "1791020794641498322",
+          "1791022242515576001"
+        ]
+      },
+      {
+        "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/evidence",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371730",
+          "16832",
+          "1000",
+          "1000",
+          "2",
+          "4096",
+          "1791022413903407745",
+          "1791022413903407745"
+        ]
+      },
+      {
+        "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/native",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371715",
+          "16832",
+          "1000",
+          "1000",
+          "2",
+          "4096",
+          "1791020794772505839",
+          "1791022242519576230"
+        ]
+      },
+      {
+        "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/source",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371692",
+          "16832",
+          "1000",
+          "1000",
+          "2",
+          "4096",
+          "1791020995618031082",
+          "1791022242520576288"
+        ]
+      }
+    ],
+    "exactSHA9AndPathset": true
+  },
+  "source_materialization": "All two authored Source files exactly match their trusted JSON expected byte strings, literal bytes only, no Source AST/parser.",
+  "source_partitions": "Complete contiguous literal-byte/SHA9 boundaries for original_safe44, predecessor49, current49 plus original auxiliary fixture HASHONLY metadata. NOT semantic/runtime review.",
+  "required_obligations": {
+    "name": "evidence/original-obligations.json",
+    "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/evidence/original-obligations.json",
+    "bytes": 38970,
+    "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371734",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "38970",
+      "1791022108009371618",
+      "1791022242519576230"
+    ],
+    "stable9": true
+  },
+  "source_execution": 0,
+  "accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

@@ -1,0 +1,285 @@
+{
+  "schema": "friday.astra.lab875.node-connected-source-input.v1",
+  "assignment": "ASTRA-E4-LAB868-SOL065-NODE-WHOLE6-ALL35-ALL6-ALL3-R01-R04-CONNECTED-SOURCE-CLOSURE-LAB-875",
+  "generation": 1,
+  "current_original_material": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A196-INPUT-20261002.json",
+    "bytes": 119701,
+    "sha256": "f413a07cac241997bbec1814ec7ae04dc203755d77f8c6301146dd51fc139b30",
+    "identity9_decimal_strings": [
+      "2050",
+      "8521710",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "119701",
+      "1790950161579074062",
+      "1790950161646077909"
+    ],
+    "stable9": true
+  },
+  "material_use": "A196 unused staging is CANCELLED with no child. Read this immutable material only; do not spawn or revive A196, change its generation, or inherit old B04/B05 findings mechanically.",
+  "independent_source_review_received": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL065-NODE-INDEPENDENT-SOURCE-REVIEW-RECEIVED-20261002.json",
+    "bytes": 27385,
+    "sha256": "ce3c73785ed5e988b5e63afc4dc6085c6a5c2122657a6cf92e045f2a29076c89",
+    "identity9_decimal_strings": [
+      "2050",
+      "8524795",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "27385",
+      "1790958714687431943",
+      "1790958714738434886"
+    ],
+    "stable9": true
+  },
+  "independent_source_review_manifest": {
+    "path": "/var/tmp/friday-sol065-lab868-node-whole6-all35-all6-all3-independent-source-review/outermanifest.json",
+    "bytes": 12426,
+    "sha256": "c6d97431c63e1312d6c15a6dbb643c4d758b941ee5ec1f799047e9beb843f3a4",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980545",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "12426",
+      "1790956785084355146",
+      "1790956785084355146"
+    ],
+    "stable9": true
+  },
+  "actual_current_findings": {
+    "schema": "friday.sol065.independent-whole-source-findings.v1",
+    "assignment": "ASTRA-E4-LAB868-NODE-WHOLE6-ALL35-ALL6-ALL3-INDEPENDENT-SOURCE-REVIEW-SOL065",
+    "generation": 1,
+    "decision": "REJECT_CURRENT_SOURCE_CLOSURE_CODE_OPEN",
+    "review_complete": true,
+    "non_author_of_LAB868": true,
+    "SourceReady": false,
+    "Root_admission": false,
+    "Root_Image": false,
+    "GO": false,
+    "execution": "NOT_RUN",
+    "gates": "REQUIRED_NOT_RUN",
+    "original_domain": "Only the original finite installed-stock Node6/35/3/GPG6/F1/F2/D1/D2/current19 domain; not hostile kernels, arbitrary custom factories, interpreter-wide private heaps or malloc-impossibility.",
+    "findings": [
+      {
+        "id": "R01",
+        "reconciles": "B01",
+        "classification": "IMPLEMENTATION_COMPLETE_STOCK_PRODUCER_BOUND_NOT_CLOSED",
+        "severity": "HIGH",
+        "runtime_observed": false,
+        "original_invariant": "Complete actual original stock graph/value/raw/default/alias/history producer and both consumer byte bounds within inner32768/supervisor65536/outer2097152; no dropped fields or smaller summary.",
+        "sites": [
+          "caller.py:626",
+          "caller.py:632",
+          "caller.py:652",
+          "caller.py:2648",
+          "supervisor.py:293",
+          "supervisor.py:299",
+          "supervisor.py:2050",
+          "supervisor.py:2112",
+          "verifier.py:348",
+          "verifier.py:354",
+          "verifier.py:374",
+          "verifier.py:1396",
+          "verifier.py:1515"
+        ],
+        "actual_change_credit": "Current complete graphs are now checked against an8192 canonical-byte guard; actor aggregate graph budgets are8192/8192/49152. Existing reversible full preimages and exact receiver validation remain. This is a real new guard, not a complete producer bound.",
+        "fact": "seal_stock_graph first materializes the full original graph and JSON, then refuses on measured-looking field/count/8192 limits. prove_joined_stock_channels only checks constants8192+24576 and32768+24576, not actual non-graph maxima. It does not derive24576 for all six actual GPG/writable/resource/default records, repeated graph references, optional fields, native error byte arguments or graph aggregate duplication. Count128 and per-message900 remain different from whole-graph or whole-receipt width. Actual byte checks after creation are honest refusal, not proof original producers fit.",
+        "negative_scope": "The87384-byte base64 size of65536 bytes refutes caps-alone inference only; no claim pinned GPG produced65536 or a graph exceeded8192 in this review.",
+        "closure": "Derive finite actual current stock factory/argument/traceback/error-count and whole non-graph/raw/copy bounds for every original normal and required failure prefix. Join actual sender encodings and both independent decoders, preserve all original data and unchanged caps. If an allowed branch cannot fit, change the lossless representation coherently rather than treating the guard as a proof.",
+        "validation": "Before future effects, independently check typed presence/alias and complete byte bounds against exact new source. Later separately admitted original safe positive and overflow/decode/first-fault controls must use these exact bytes; gates/live remain required.",
+        "future_image_or_ABI_absence_is_CODE": false
+      },
+      {
+        "id": "R02",
+        "reconciles": "B02",
+        "classification": "IMPLEMENTATION_FULL_OTHER_SIDE_CUSTODY_BEFORE_NATIVE_END_OPEN",
+        "severity": "HIGH",
+        "runtime_observed": false,
+        "original_invariant": "All required full original raw/error evidence must have an accepted existing other-side owner before the last private owner is lost, including projection, fit and emission failure prefixes.",
+        "sites": [
+          "verifier.py:1771",
+          "verifier.py:1780",
+          "verifier.py:1787",
+          "verifier.py:1789",
+          "supervisor.py:2244",
+          "supervisor.py:2253",
+          "supervisor.py:2260",
+          "caller.py:2932",
+          "caller.py:2936",
+          "caller.py:2943"
+        ],
+        "fact": "The new other_side_full_receipt_admitted flag is assigned after the complete buffer was serialized/emitted, so that assignment is not even in the emitted original buffer; it is a local statement, not a receiver admission. Actual encode/fit/emission failures still call _exit without handing full private original bytes/errors to an accepted existing receiver. Kernel close and private object loss happen at that end. Receiver rejection/nonzero exit is truthful but does not satisfy required complete failure-prefix custody.",
+        "normal_credit": "Successful complete original transport remains reversible and strictly checked by supervisor/caller. No blank acceptance flag is requested and no new ACK/Root service is authorized.",
+        "closure": "Complete every required prefix through an already allowed finite original receiver/custody boundary, or give a precise unresolved existing-contract boundary. Preserve original clocks, roles and caps; do not add a privileged service, postpone exit past the original deadline, raise output or substitute a hash/short status.",
+        "validation": "Source proof of final owner and full original receiver path on each normal/projection/encode/emission branch, followed only under new admission by ordinary complete/partial/finite-end controls. New Root facts alone are qualification, not this code gap."
+      },
+      {
+        "id": "R03",
+        "reconciles": "B03 and part of B05",
+        "classification": "IMPLEMENTATION_UNREAD_PREFIX_HOLD_NOT_COMPLETE_HANDOFF_AND_NOT_PROSPECTIVE_ON_ALL_PATHS",
+        "severity": "HIGH",
+        "runtime_observed": false,
+        "original_invariant": "Complete original produced stdout/stderr/status/writable prefixes, actual count/SHA, native errors and owner aliases before once-close/end; a failed read is not retried or guessed.",
+        "sites": [
+          "verifier.py:856",
+          "verifier.py:1118",
+          "verifier.py:548",
+          "verifier.py:581",
+          "supervisor.py:1087",
+          "supervisor.py:1136",
+          "supervisor.py:2169",
+          "supervisor.py:2177",
+          "supervisor.py:526",
+          "caller.py:1853",
+          "caller.py:2181",
+          "caller.py:917",
+          "caller.py:2936"
+        ],
+        "actual_change_credit": "The new hold bit can prevent an explicit userspace firstclose after an incomplete raw cell, and the cleanup flags are now false when such holds exist. Returned pending bytes and native errors are still held; normal complete captures are not replaced by a digest.",
+        "fact": "The held unread FD is still closed at _exit with no complete original handoff. Additionally, supervisor finalizer invokes retain_produced_transport before marking holds. That routine can record an fstat/read/short/pending partial prefix and then throw from its later fallible projection pass. The exception leaves the hold-marking loop unexecuted. The separate finish_allocations pass then retires every still RETURNED, unheld transport record, closing that unread FD. Thus even the new userspace-close exclusion is not prospective on the exact original recorder-failure prefix.",
+        "symbolic_failure_path": [
+          "one existing TRANSPORT cell has an incomplete original raw prefix",
+          "retain_produced_transport attempts all original cells, then records and raises a later projection failure",
+          "finalizer catches descriptor_cleanup_failure before its hold loop",
+          "finish_allocations sees unread record RETURNED with no unread_prefix_hold",
+          "retire_record once-closes it before complete raw receiver ownership"
+        ],
+        "scope_of_path": "Conditional original stock recorder/raw failure branch, not an observed failure, hostile fixture or arbitrary private-heap demand.",
+        "closure": "Make original raw-prefix owner/hold intentions durable before any fallible capture/projection and preserve them through cleanup. Complete the actual original full-prefix capture or permitted receiver handoff before release/end. Keep honest unknown production, no retries, no new end or broad numeric FD recovery.",
+        "validation": "Read actual callers through hold/capture/projection/finish/native end; later separately admitted ordinary fstat/short/EOF/decode/partial/recorder/close controls must demonstrate complete original data and once-owner cleanup."
+      },
+      {
+        "id": "R04",
+        "reconciles": "B05, narrowed after real repair",
+        "classification": "CONDITIONAL_IMPLEMENTATION_EMERGENCY_FULL_CAUSE_CONTRACT_OPEN",
+        "severity": "HIGH",
+        "runtime_observed": false,
+        "sites": [
+          "caller.py:486",
+          "caller.py:501",
+          "caller.py:503",
+          "caller.py:513",
+          "caller.py:2911",
+          "supervisor.py:153",
+          "supervisor.py:168",
+          "supervisor.py:170",
+          "verifier.py:208",
+          "verifier.py:223",
+          "verifier.py:225",
+          "verifier.py:235",
+          "verifier.py:1734"
+        ],
+        "fixed_old_mechanism": "Old claim deferred_error propagates an exhausted owner-journal exception before later physical cleanup is RETIRED: its new catch returns a static marker. Designated verifier.call still preserves primary/native traceback in CALL_OWNERS and all capture/close loops before publication.",
+        "remaining_fact": "JOURNAL_EXHAUSTED has complete_graph=false and no original exception reference. publish_errors only recognizes its256 prefunded marker identities, so the emergency marker is left in the public object rather than restored to a full v2 cause. At a catch with no independent owner such as module-level failure storage, the helper has not retained that native exception. The candidate does not supply a complete finite original stock reachable journal/factory bound proving this branch excluded, or a full-cause emergency owner/receiver implementation. Its contract still says private_pending_marker_not_public=true. This is a conditional specific contract gap, not a claim exhaustion happened or that arbitrary malloc/native reconstruction must be impossible.",
+        "closure": "Prove exact finite original per-call/actor error-owner and factory capacity at each catch, or pre-own a bounded full original emergency cause/traceback/reference path without interrupting later physical work. Keep CALL_OWNERS/verifier.call credits and both original consumers. A static incomplete marker is not full cause delivery.",
+        "validation": "Concrete actual caller/catch capacity and primary/secondary/graph coverage, then only under separate qualification ordinary recorder/quota failure controls. Universal heap qualification is not required."
+      }
+    ],
+    "B04_reconciliation": {
+      "old_definite_normal_255_plus7_gt256": "RETIRED_FIXED_IN_CURRENT_TEXT",
+      "actual_current_layout": "Each actor has a live256 table. Confirmed close swap-removes the exact record and decrements live use; unconfirmed close and unread holds do not reclaim; old alias still holds its exact retired record. Actual process caps remain caller256/supervisor64:128/verifier128.",
+      "lifetime512_claim": "No separate literal512 history table or finite512 record theorem exists in these supplied current bytes. That description is not assumed. Arbitrary new512 retention is not imposed as a requirement.",
+      "symbolic_normal_basis": "For each confirmed close, live occupancy changes by-1 before later acquisition. Total lifetime counts255,262 or512 do not by themselves imply live occupancy>256. Normal transient proc closures now reclaim slots. Finalizer iterations use sliced snapshots, so swap-removal does not skip their later records. This is a static Source credit, not an executed all6 or measured peak.",
+      "new_audit_limitation": "The publication field descriptor_allocation_history now contains only unreclaimed records; closed record details are not reconstructed from the count/digest fd_lifetime_audit. The receivers do not validate that added audit. Full historical data/cost/receiver credit must not be inferred from the digest. This observation is not a mechanically retained normal capacity blocker or a newly imposed history format.",
+      "all_normal_original_cases_still_required": true,
+      "actual_peak_and_runtime": "NOT_RUN; original finite qualification remains required"
+    },
+    "author_residual_reclassification": [
+      {
+        "label": "KERNEL_EXIT_STILL_CLOSES_UNHANDED_UNREAD_PREFIX",
+        "class": "ACTUAL_IMPLEMENTATION_R02_R03"
+      },
+      {
+        "label": "PUBLICATION_OVER_CAP_EXITS_WITHOUT_SUBSTITUTE",
+        "class": "ACTUAL_IMPLEMENTATION_R01_R02; truthful rejection credited"
+      },
+      {
+        "label": "STOCK_GRAPH_OVER_8192_REFUSES_RATHER_THAN_UNIVERSAL_FIT",
+        "class": "ORIGINAL_FINITE_PRODUCER_BOUND_R01; no universal stock heap requested"
+      },
+      {
+        "label": "NATIVE_OBJECT_RECONSTRUCTION_NOT_QUALIFIED",
+        "class": "QUALIFICATION_ONLY_NOT_CODE_BY_ITSELF"
+      },
+      {
+        "label": "WHOLE_RAM_IO_UNKNOWN_NOT_ZERO",
+        "class": "UNKNOWN_NONZERO_COST; not automatically_CODE or zero"
+      },
+      {
+        "label": "FUTURE_ROOT_IMAGE_CLOCK_GPG_ABI_REQUIRED_NOT_RUN",
+        "class": "MANDATORY_FUTURE_QUALIFICATION_ONLY_NOT_CODE_BY_ITSELF"
+      },
+      {
+        "label": "NOT_RUN",
+        "class": "EXECUTION_STATE_NOT_SOURCE_DEFECT"
+      }
+    ],
+    "scoped_credits": [
+      "Old B04 lifetime-vs-simultaneous contradiction retired; actual confirmed-close live reclamation and exact old-alias state preserved.",
+      "Old B05 propagating-deferred_error interruption retired, not reported again.",
+      "Full v2 typed graph cause/context including suppressed context, group, error aliases discovered through args/state/notes, exact bytes and absence-vs-null remain; both cause consumers recompute the full graph root.",
+      "Verifier.call retains original primary/traceback and bounded11+2*w secondary owners, attempts all existing raw cells before stream closes and public copies.",
+      "Normal complete reversible same-object raw preimages and strict consumer count/SHA/presence/partial checks preserved.",
+      "Original ordered typed all6 cases/oracles, all3 resource/keyless/proc-token repairs and original finite caps/schemas retained; four expected prelaunch source identity leaves explicitly rebound.",
+      "Actual source19 arithmetic independently recomputed:72472958 total, supervisor7829968, verifier7802086; fixed247950960 + running20484496 =268435456. Prior input arithmetic72457444 etc is old evidence, not current runtime or a new Source install_plan bug.",
+      "Actual current full6 equality5 changed/1 equal, private author14 pins/pathset/DAG and source literal chain verified; this is not Root image/admission or execution credit."
+    ],
+    "mandatory_future_qualification": [
+      "new independently selected exact19 Source image and original actor grants",
+      "original finite non-refreshed launch/work/cleanup/emission clocks",
+      "installed-stock interpreter/module/loader/environment/provider facts and compiler/ELF ABI where required",
+      "actual narrow detached proc token relation",
+      "current stock GPG read-only-home/no-keyring/explicit-ring/trustdb/agent/common.conf behaviors and key validity",
+      "original actual all6/GPG6/3/F1/F2/D1/D2, full mandatory gates/live and independent final artifact acceptance"
+    ],
+    "unsafe_history": {
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false,
+      "operational_payload": null,
+      "fixture": null,
+      "generator": null,
+      "reproduction": null,
+      "exploit": null,
+      "ordinary_safe_ownchild_EOF_write_deadline_cleanup_controls": "PRESERVED_REQUIRED"
+    }
+  },
+  "lead_directions": [
+    "Connected actual caller/supervisor/verifier producer->both receivers->original ordinary failure->once cleanup->finite native end on current6/35/all6/all3/GPG6/F1F2D1D2/current19. Close actual R01-R04 as one source package, not another local guard or full-heap theorem.",
+    "Preserve independently credited B04 actual live256 reclamation with sticky unknown/unread rows, exact retired alias state and sliced finalization. No literal lifetime512 requirement. A digest is not complete historical-body acceptance. Preserve B05 non-propagating deferred_error, original verifier.call primary/traceback and 11+2*w owners.",
+    "R01: derive numeric finite bounds from actual original stock factories/args/catch graph/default/non-graph/GPG/raw/copy paths and both decoders before allocations/effects. An after-materialization8192 check or constants24576 is not this derivation. If actual representation cannot fit original32768/65536/2097152, repair full lossless representation across both consumers without dropping bodies or raising caps.",
+    "R02/R03: establish full actual existing permitted receiver custody on required encode/fit/emission/fstat/read/short/projection prefixes BEFORE owner loss; local admitted flag after serialization is not receiver acceptance. Make raw-owner/hold prospective before retain_produced_transport and later fallible projection so finish_allocations cannot close an unheld unread original cell. No blind retries/exit-as-handover/observerchain/new privileged role/service/cap/clock refresh.",
+    "R04: prove exact finite original owner-journal/catch capacity including emergency use or preown full original emergency cause/traceback/reference without interrupting later cleanup; static incomplete JOURNAL_EXHAUSTED marker cannot substitute. Preserve primary and all bounded secondary paths.",
+    "Rejoin full current6 gapless delta/equal/current19 and all35/original6/GPG6/3 ordered field/cause/role/consumer/schema/cost bindings. Exact new costs must be recomputed; old72457444 arithmetic is stale evidence, current72472958 not new runtime. Unknown wholeRAM/IO and absent future image/grant/GPG/ABI/clock are separate qualification, not automatically CODE.",
+    "If a connected permitted relation cannot be closed after genuine source attempt, return exact pinned original invariant->actual path->finite bounds->smallest genuine authority conflict/decision. No generic universal privateheap/malloc/kernel impossibility, no author self-acceptance."
+  ],
+  "effects": "New own inert Source text/JSON + bounded trusted installed stock metadata only. No supplied imports/AST/compile/eval/exec/tests/native/Root/archive/GPG/network/install/live/UI/model/gates, no original Source/Git/config/models/guards/locks writes.",
+  "resources": {
+    "wall_seconds": 4200,
+    "seal_reserve_seconds": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 16777216,
+    "local_workers": 4,
+    "model_children": 0,
+    "network": 0,
+    "retries": 0,
+    "friday_calls": 0
+  },
+  "output": "/var/tmp/friday-lab875-lab868-sol065-node-whole6-all35-all6-all3-r01-r04-connected-source-closure",
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

@@ -1,0 +1,59 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "author_accepts_own_source": false,
+  "body": {
+    "alias_fd": 8,
+    "cap": 32768,
+    "cap_is_existing_stream": true,
+    "created_before_fork": true,
+    "custody": "ORIGINAL_MEMFD_NOT_RENDERED_TRANSPORT",
+    "final_pwrite_at_zero": "REFUSED",
+    "marker": "A206BODY",
+    "po880_is_not_this_body": true,
+    "sealed_only_by_caller_after_children": true
+  },
+  "chain": {
+    "caller_bytes": 188629,
+    "caller_sha256": "1c86a4b1141385a87967cb6a15dfa55fc24a643764603b46a6450d044f4df2e9",
+    "contract_bytes": 51597,
+    "contract_sha256": "4ca1514c1f6bfbf017144ec622aea135dac3670644de58d07e6aff47bdf39bd4",
+    "supervisor_bytes": 152193,
+    "supervisor_sha256": "96ac9259e92f9812631ed093c0ef5db34fa3b3611e6c4931b486679eaa70e49b",
+    "verifier_bytes": 121795,
+    "verifier_sha256": "bec97b0b194f675738a1ab99fabd9311def266254be85d51dfc7d6ec7b769fca"
+  },
+  "compiler_ABI": "NOT_RUN",
+  "current6_changed": 4,
+  "current6_equal": 2,
+  "decision": "OUTSIDE_BODY_PREHELD_BEFORE_PUBLICATION",
+  "edges": {
+    "C1": "Caller creates one memfd, writes the header once, and keeps fd 8 inheritable before any fork or publication. Supervisor and verifier adopt that alias. Both decoders pread it. PO880 on fd 1 stays transport.",
+    "C2": "The same body records factory ordinals F0 through F5 and the existing derived split. Caps 108, 256, 32768, 65536, and 2097152 stay. Overflow faults and does not truncate.",
+    "C3": "Inherited roles disarm the timer without changing the deadline and record a transfer. The caller retires only after seal, consume, and success. os._exit remains process death and is not the custody proof."
+  },
+  "gates": "NOT_RUN",
+  "joined": "SCOPED_SOURCE_NOT_WHOLE_ACCEPTED",
+  "new_dependencies": [],
+  "prefix_rewrites": {
+    "caller.py": 1,
+    "launch-contract.json": 4,
+    "supervisor.py": 1,
+    "verifier.py": 1
+  },
+  "qualification": "REQUIRED_NOT_RUN",
+  "residuals": [
+    "Image, compiler, native ABI, grants, provider, clock, and gates were not run.",
+    "Whole RAM, IO, native, stock, copy, read, header, FD, hash, encoder, decoder, and error overlap stay UNKNOWN_NOT_ZERO.",
+    "32768 is the existing stream cap, not a new grant.",
+    "per_cell 160, per_call 480, non_graph 14592, graph 6058, and raw 12118 remain conditional arithmetic.",
+    "Meaningful positives, negatives, legacy, and live qualification stay REQUIRED_NOT_RUN."
+  ],
+  "runtime": "NOT_RUN",
+  "schema": "friday.e4.lab889.a206.findings.v1",
+  "source_execution": 0,
+  "verdict": "FD8_MEMFD_RESERVE_BEFORE_PWRITE_FINITE_END_SEPARATED",
+  "whole_self_acceptance": false
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "friday.astra.a229.native.caller.transfer.validation-plan.v1",
+  "scope": "Actual original Caller Invoke -> complete raw/bank/root/close aliases -> actual Source receiver -> same caller strong custody -> Run refs retire -> final native packet",
+  "original_obligations": {
+    "name": "evidence/original-obligations.json",
+    "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/evidence/original-obligations.json",
+    "bytes": 38970,
+    "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371734",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "38970",
+      "1791022108009371618",
+      "1791022242519576230"
+    ],
+    "stable9": true
+  },
+  "all_original69_exact6_all15_schema20_current134_required": true,
+  "additional_required": [
+    "Meaningful positive: full raw bank nonempty/multi-part, aliases current, Source end actual, one native final FD close -> complete caller bytes remain usable without active Source context after Run references retired",
+    "Meaningful negative: open/partial bank, alias drift, malformed Source packet/end, original bindings/Source qualification mismatch, missing/failed receiver, changed inventory during callback, unknown/failed close, packet/debit allocation ordinary failure, native pre-module failure, last write/fsync/close/final-result failure, repeated retirement",
+    "Actual last-reference proof: all28 cleared Run-owned Python references+every close row are strongly held in original caller packet before cleanup, no temporary/lost-only owner; final status assigned after actual field clearing",
+    "Actual binding/ABI/image/selected components/grants/prospective factory/CPU/RSS/implicitIO/native execution and current Source+Root admission required before permitted runtime qualification",
+    "Source_return and original immutable v2 document unchanged; transferred packet is real bytes not digest/flag; new return schema consumed by actual original caller, no old receipt imported"
+  ],
+  "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+  "required": true,
+  "waiver": false,
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

@@ -1,0 +1,380 @@
+{
+  "schema": "friday.sol089.preserved-and-prospective-cases.v1",
+  "original32": [
+    {
+      "id": "positive",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "nonzero-dispatcher",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "body",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "deadline",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "pid-generation",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "pin",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "read-write",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "stale-identity",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "unsealed",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "wrong-field",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "wrong-role",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "adopted-child-pending",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "blocked-SIGCHLD",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "body-context-bool",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "clock-drift",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "controller-output-bound",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "final-ancestor-boundary",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "handle-close-error",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "initial-scope-nonempty",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "ordinary-regular-artifact-refusal",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "proc-acquisition-error",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "report-custody-bool",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "report-namespace-bool",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "report-resource-bool",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "sender-read-bound",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "spawn-constructor-error",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "strict-inherited-fd",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "terminal-original-end",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "terminal-pipe-error",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "terminal-tree-list-missed",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "usage-integer-bool",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    },
+    {
+      "id": "wait4-unavailable",
+      "obligation": "ORIGINAL_UNCHANGED_REQUIRED",
+      "runtime": "NOT_RUN",
+      "oracle_changed": false,
+      "unsafe_operational_reproduction": false
+    }
+  ],
+  "original_R01_R07": [
+    {
+      "id": "R01",
+      "scope": "ORIGINAL_WHOLE_OBLIGATION_RETAINED",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "R02",
+      "scope": "ORIGINAL_WHOLE_OBLIGATION_RETAINED",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "R03",
+      "scope": "ORIGINAL_WHOLE_OBLIGATION_RETAINED",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "R04",
+      "scope": "ORIGINAL_WHOLE_OBLIGATION_RETAINED",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "R05",
+      "scope": "ORIGINAL_WHOLE_OBLIGATION_RETAINED",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "R06",
+      "scope": "ORIGINAL_WHOLE_OBLIGATION_RETAINED",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "R07",
+      "scope": "ORIGINAL_WHOLE_OBLIGATION_RETAINED",
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "prospective_ordinary_positives": [
+    {
+      "name": "actual selected pure object allocator and full empty pre-init Python dictionary",
+      "status": "REQUIRED_NOT_RUN_NO_SYNTHETIC_EXPECTED_DATA"
+    },
+    {
+      "name": "original successful initializer with wholly representable qualified Python fields",
+      "status": "REQUIRED_NOT_RUN_NO_SYNTHETIC_EXPECTED_DATA"
+    },
+    {
+      "name": "ordinary initializer error with genuine complete partial Python state and original error",
+      "status": "REQUIRED_NOT_RUN_NO_SYNTHETIC_EXPECTED_DATA"
+    },
+    {
+      "name": "shared raw/facade/body/container/scalar/data aliases and actual typed SelectorKey result",
+      "status": "REQUIRED_NOT_RUN_NO_SYNTHETIC_EXPECTED_DATA"
+    },
+    {
+      "name": "register/select/context/one-close with observed complete post-state, no kernel replay",
+      "status": "REQUIRED_NOT_RUN_NO_SYNTHETIC_EXPECTED_DATA"
+    }
+  ],
+  "meaningful_negatives": [
+    {
+      "name": "different Source origin pid/ordinal/object or replayed/recycled address",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "absent birth / body introduced by expected completed-call arguments",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "wrong actual selected class/MRO/metaclass/layout/image",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "dangling/duplicate/unreachable graph node / dropped field",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "immutable type/body mismatch or alias collapse",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "begin args overwritten by post-init self state",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "wrong purpose/owner/event/Source sequence for post-body",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "lost facade/raw/SelectorKey.data correspondence",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "native body replaced by FD/class/empty dict/hash/opaque carrier",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "real native/selector initializer invoked during readonly replay",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "original successful method replaced by intentional refusal",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "primary initializer/close error overwritten by recording/cleanup error",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "after-body capture absent / native field full supplier absent",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "close uncertain or repeated / later retirement not proven",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    },
+    {
+      "name": "original Source read/output/AS/CPU/dual end or whole cost exceeded",
+      "status": "SYMBOLIC_CODE_REVIEW_CASE_ONLY_REQUIRED_NOT_RUN",
+      "executed": false
+    }
+  ],
+  "controls": "All original132/16/12/72/all54/current96/all32/all7/fixed63/accepted49/full56/self96/all30/F0F11/full gates remain mandatory; no operational unsafe fixture",
+  "Source_execution": 0,
+  "compiler_AST": "NOT_RUN",
+  "compiler_ABI": "NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "independent_changed_dependency_review": "REQUIRED_NOT_RUN",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

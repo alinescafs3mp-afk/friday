@@ -1,0 +1,522 @@
+{
+  "schema": "friday.e4.lab905.actual-result.received.v1",
+  "recorded_utc": "2026-10-03T06:56:00Z",
+  "assignment": "ASTRA-E4-A219-SENDER-PREINIT-SELECTOR-ACTUAL-STOCK-FENCE-SUPPLIER-DECISION-LAB-905",
+  "generation": 1,
+  "job_id": "job_2206b34f1e384881b4a9b65d1126dabc",
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB905-INPUT-20261003.json",
+    "bytes": 6869,
+    "sha256": "0c1d1af40c76c3dc1f0b86ab21f41be2a3e01e764be783b4a3a7e9adc56d7310",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533404",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "6869",
+      "1791009767812434466",
+      "1791009767872437910"
+    ],
+    "stable9": true
+  },
+  "run": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB905-RUN-20261003.json",
+    "bytes": 4075,
+    "sha256": "a46f870c9955190a3fdcbdbcb34e92d58b4aa53e7618bc877eb41516e265100c",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533407",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "4075",
+      "1791009817616292567",
+      "1791009817670295667"
+    ],
+    "stable9": true
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/manifest.json",
+    "bytes": 1290,
+    "sha256": "61bd884fe52e4e87cb93584a88256f0a28388f23fb026f5c78c03eb9873e3c91",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371286",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1290",
+      "1791010241488617380",
+      "1791010241488617380"
+    ],
+    "stable9": true
+  },
+  "result": {
+    "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/result.json",
+    "bytes": 2486,
+    "sha256": "1917d736c44f01da80ed1ffdf641a16bf7cc8cdc54e824bd0a1f7f0f1c8299c1",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371291",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "2486",
+      "1791010241488617380",
+      "1791010241488617380"
+    ],
+    "stable9": true
+  },
+  "result_value": {
+    "GO": false,
+    "Root_admission": false,
+    "SourceReady": false,
+    "accepted": false,
+    "author_self_acceptance_used": false,
+    "classification": "DECISION",
+    "compiler_ABI": "NOT_RUN",
+    "constructors_executed": 0,
+    "costs": {
+      "completed_msk": "2026-10-03T09:50:41.488609+03:00",
+      "cumulative": 288590,
+      "elapsed_s": 411.867104,
+      "memory_hash": 18034,
+      "physical": 250036,
+      "proc": 1963,
+      "seal_elapsed_s": 0.00187,
+      "sealed_tree": 18034,
+      "transport": 20520,
+      "vmrss_kib": 19756
+    },
+    "current_blocker": false,
+    "current_reassignment": false,
+    "decision": "PREINIT_PYTHON_INSTANCE_ALIAS_NOT_REPLAY_CONSTRUCTOR",
+    "decision_changes_next_action": true,
+    "delivery_id": "del_2b2be7723b9e45baabb92016ada44df6",
+    "finite_end": "ONE_SELECTOR_CLOSE_NOT_WHOLE_OUTSIDE_END",
+    "full_physical_package": false,
+    "gates": "NOT_RUN",
+    "image_mro_metaclass_qualification": "EVIDENCE_NOT_ESTABLISHED",
+    "input_bytes": 6869,
+    "input_sha256": "0c1d1af40c76c3dc1f0b86ab21f41be2a3e01e764be783b4a3a7e9adc56d7310",
+    "job_id": "job_2206b34f1e384881b4a9b65d1126dabc",
+    "joined": "STOCK_FENCE_ROUTE_SPECIFIED_NOT_ADMITTED",
+    "kind": "sender-preinit-selector-actual-stock-fence-supplier-decision",
+    "legal_origin_tied_supplier": "HELD_PREINIT_PYTHON_ALIAS_ONLY",
+    "legal_replay_constructor": false,
+    "lexical_new_in_observed_stock": false,
+    "observed_stock_is_image_or_abi_credit": false,
+    "operational_payload": null,
+    "output_names": [
+      "bound.json",
+      "bound.txt",
+      "manifest.json",
+      "pathset.json",
+      "payload.json",
+      "pin-checks.json",
+      "relation.json",
+      "result.json",
+      "validation-plan.txt"
+    ],
+    "passport_consulted": true,
+    "passport_recorded_pids_used": false,
+    "pins_matched": 6,
+    "pre_seal_heartbeat": "2026-10-03T06:50:40.838119Z pid=793654 epoch=15",
+    "prospective_graph_cost": "UNKNOWN_NOT_ZERO",
+    "qualification": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "qualification_required": true,
+    "retained_e01": "CODE",
+    "runtime": "NOT_RUN",
+    "schema": "friday.e4.lab905.sender-preinit-selector.stock-fence.decision.run.v1",
+    "selected_class_guessed": false,
+    "selectors_imported": false,
+    "source_execution": 0,
+    "source_proof": false,
+    "stamp_inequality": 4,
+    "stamp_inequality_is_host_drift": false,
+    "supplier_closed": false,
+    "task_done": false,
+    "verdict": "ALLOCATOR_BEFORE_INIT_IS_DISTINCT_FROM_KERNEL_WRAPPER_BIRTH",
+    "waiver": false,
+    "whole_accepted": false,
+    "whole_outside_end": false
+  },
+  "transport": [
+    {
+      "pin": {
+        "path": "/home/jericho/jericho/.git/friday-lab/v2/artifacts/job_2206b34f1e384881b4a9b65d1126dabc/result.json",
+        "bytes": 90,
+        "sha256": "3beb8ac7c3d42e391e3dc2aeb208e537b708ac4945b0fc730632dcecc40a3aa3",
+        "identity9_decimal_strings": [
+          "2050",
+          "8260384",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "90",
+          "1791010252679259570",
+          "1791010252679259570"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "sha256": "61bd884fe52e4e87cb93584a88256f0a28388f23fb026f5c78c03eb9873e3c91",
+        "size": 1290
+      }
+    },
+    {
+      "pin": {
+        "path": "/home/jericho/jericho/.git/friday-lab/v2/messages/msg_233502cc735b499ba0cdc572868a17a4.json",
+        "bytes": 393,
+        "sha256": "fbd9e9d50a9295712195e5dd74a5d7cf8499ce3385af566f075087d93ad02b81",
+        "identity9_decimal_strings": [
+          "2050",
+          "7797828",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "393",
+          "1791010252674874977",
+          "1791010252675259341"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "auth": {
+          "cwd": "/home/jericho/jericho",
+          "euid": 1000,
+          "pid": 806830,
+          "uid": 1000
+        },
+        "created_at": "2026-10-03T06:50:52.675264Z",
+        "from": "grok-lab",
+        "job_id": "job_2206b34f1e384881b4a9b65d1126dabc",
+        "message_id": "msg_233502cc735b499ba0cdc572868a17a4",
+        "payload": {
+          "sha256": "61bd884fe52e4e87cb93584a88256f0a28388f23fb026f5c78c03eb9873e3c91",
+          "size": 1290
+        },
+        "protocol": "friday-lab/2",
+        "to": "astra",
+        "type": "RESULT"
+      }
+    }
+  ],
+  "physical_package": {
+    "pins": [
+      {
+        "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/manifest.json",
+        "bytes": 1290,
+        "sha256": "61bd884fe52e4e87cb93584a88256f0a28388f23fb026f5c78c03eb9873e3c91",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371286",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1290",
+          "1791010241488617380",
+          "1791010241488617380"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/bound.json",
+        "bytes": 632,
+        "sha256": "2dfbd8be124f02132b07f6ac808cbf63ca70dcc44755e4751c66378a1c1f982a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371284",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "632",
+          "1791010241488617380",
+          "1791010241488617380"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/bound.txt",
+        "bytes": 477,
+        "sha256": "2a734ef4881e16458453a38f4124b5205fc35541709374dec4dd4341f761b748",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371285",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "477",
+          "1791010241488617380",
+          "1791010241488617380"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/pathset.json",
+        "bytes": 947,
+        "sha256": "0e4e0567f6801153c912a4a973fe90e23abb3c8e59b2477799b8d49b7e8f9b60",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371287",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "947",
+          "1791010241488617380",
+          "1791010241488617380"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/pin-checks.json",
+        "bytes": 4577,
+        "sha256": "32eabf8700f491c489742dcce254a60c355f90ae4cc9e4a9a64bfeb275e924e6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371289",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4577",
+          "1791010241488617380",
+          "1791010241488617380"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/relation.json",
+        "bytes": 6712,
+        "sha256": "117e06fdf981e5c817f4b83fc83ae4dbf4ac962ef57725c6f1e660173b38292f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371290",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6712",
+          "1791010241488617380",
+          "1791010241488617380"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/result.json",
+        "bytes": 2486,
+        "sha256": "1917d736c44f01da80ed1ffdf641a16bf7cc8cdc54e824bd0a1f7f0f1c8299c1",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371291",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2486",
+          "1791010241488617380",
+          "1791010241488617380"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/validation-plan.txt",
+        "bytes": 814,
+        "sha256": "f7b09e48c3dd54e4ccd5fcfe7dbd96624e05654a1580f69bf9ddf6a69c234d21",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371292",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "814",
+          "1791010241488617380",
+          "1791010241488617380"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/payload.json",
+        "bytes": 99,
+        "sha256": "655e98d7d01ce4d68cb02752305e71e78651ef40cc734986b97763fa4c152163",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371288",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "99",
+          "1791010241488617380",
+          "1791010241488617380"
+        ],
+        "stable9": true
+      }
+    ],
+    "files": [
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/bound.json",
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/bound.txt",
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/manifest.json",
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/pathset.json",
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/payload.json",
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/pin-checks.json",
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/relation.json",
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/result.json",
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision/validation-plan.txt"
+    ],
+    "dirs": [
+      "/var/tmp/friday-lab905-a219-sender-preinit-selector-actual-stock-fence-decision"
+    ]
+  },
+  "external_actual_SHA9": [
+    {
+      "role": "caller",
+      "pin": {
+        "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/caller.py",
+        "bytes": 65491,
+        "sha256": "ff6fd365165a3e94971aabb546d051e1c7cbd313273a1b8917aab0ab1bdb43cc",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225618",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "65491",
+          "1790956169964899288",
+          "1790956169964899288"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "role": "consumer",
+      "pin": {
+        "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/source/ordinary_root_consumers.py",
+        "bytes": 93844,
+        "sha256": "814db7af6a4183f5e7ff1f389ffea65a0ef5a02e4e21faa048350d3cca8d6e81",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226873",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "93844",
+          "1790996661665123584",
+          "1790996661665123584"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "role": "prior_exact_bounded_decision",
+      "pin": {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A215-SENDER-ACTUAL-SELECTOR-SUPPLIER-CONNECTED-DECISION-20261003.json",
+        "bytes": 6137,
+        "sha256": "5445ae61ee8f972b3ae0261f45d00af70fdf24f83573f3a55a6b9900ed3e7b8a",
+        "identity9_decimal_strings": [
+          "2050",
+          "8532468",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6137",
+          "1791000797379193038",
+          "1791000797427195797"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "role": "current_manifest",
+      "pin": {
+        "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/manifest/manifest.json",
+        "bytes": 1214,
+        "sha256": "3640d1973ef956cadbad7efa11ae91343f132631931beb9e21494eb188b1aac9",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226879",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1214",
+          "1790996661665123584",
+          "1790996661665123584"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "role": "Sol082_review",
+      "pin": {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL082-SENDER-CONNECTED-SOURCE-RESULT-RECEIVED-20261003.json",
+        "bytes": 10338,
+        "sha256": "7d6ece71682eeeedd5139069632cd67c25ec65a72831d59957287415f6b59115",
+        "identity9_decimal_strings": [
+          "2050",
+          "8532103",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10338",
+          "1790999804739273610",
+          "1790999804821278311"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "role": "observed_stock_selectors",
+      "pin": {
+        "path": "/usr/lib/python3.14/selectors.py",
+        "bytes": 19457,
+        "sha256": "4b8a60cfbb619d080f87dffe1578372e56e8c0ac826f043224a154cf7b77606d",
+        "identity9_decimal_strings": [
+          "2050",
+          "7604505",
+          "33188",
+          "0",
+          "0",
+          "1",
+          "19457",
+          "1787222518000000000",
+          "1789010692739996393"
+        ],
+        "stable9": true
+      }
+    }
+  ],
+  "reviewer": "Astra epoch4 non-author bounded text decision intake",
+  "disposition": "STOCK_TEXT_PREINIT_INITIALIZER_DISTINCTION_ONLY_E01_CODE_NO_SUPPLIER_CLOSURE",
+  "credits": [
+    "Observed pinned stock text distinguishes Python allocator operand from later initializer kernel wrapper; no actual selected image/MRO/metaclass/ABI qualification.",
+    "Readonly replay must not construct a selector."
+  ],
+  "actual_existing_residual": [
+    "E01 actual full operand/body/alias producer->capture->decoder->same_typed->ordinary outcome->finite end remains CODE.",
+    "Held alias proposal is not independently established complete physical body representation; no native/error/BOTH-end credit.",
+    "Later native birth, C1 whole finite end, C2 prospective whole cost remain open."
+  ],
+  "next": "Grok finite connected safe-Python Sender actual operand implementation proposal; non-author review by Astra/Sol after intake, no self-acceptance.",
+  "metadata_gap": "Author input pin-check row omitted exact9; Astra independently validated exact input SHA/size/9. Author historical stamp inequalities are not host drift.",
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

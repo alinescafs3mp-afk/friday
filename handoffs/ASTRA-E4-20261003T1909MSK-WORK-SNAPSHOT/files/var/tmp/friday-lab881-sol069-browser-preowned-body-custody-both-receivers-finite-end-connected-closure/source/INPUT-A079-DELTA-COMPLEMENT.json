@@ -1,0 +1,768 @@
+{
+  "schema": "friday.a079.exact-source-delta-complement.v1",
+  "input_manifest_sha256": "5e4e8f95c1b6ccd4b13ca8fc1dd1e12dbb807caa5da682b26dfd42098e9c6aaa",
+  "scope": "All78 reused input filenames; program/raw delta and exact unchanged complement. Recursive proof metadata replaces its own snapshot and is sealed by the final manifest/external pin.",
+  "reused_input_members": [
+    {
+      "name": "A071-ABI-MAPPING.json",
+      "input_bytes": 1223,
+      "input_sha256": "dd88e108d2e75081fc5f753a95643fabb6ff2fabd1a0d69c42ff3ed3f66183b9",
+      "output_bytes": 2173,
+      "output_sha256": "1cbd33a0f2999dde9886e7509d26fa2c056c92ce664925dd2fb59275599fc8e4",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-BILL.json",
+      "input_bytes": 106316,
+      "input_sha256": "b9173a3b8eac8d0bd255081cd01fdd76f809601bcca70dccf8ba10c884e47ef5",
+      "output_bytes": 106316,
+      "output_sha256": "b9173a3b8eac8d0bd255081cd01fdd76f809601bcca70dccf8ba10c884e47ef5",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "A071-BOOTSTRAP.c",
+      "input_bytes": 25562,
+      "input_sha256": "7947d4494f120629b2431e1c2c8fd08a2e53e2bad8b2ddc566a204fc10eb00c5",
+      "output_bytes": 27697,
+      "output_sha256": "fb4dc6a35d460d5fa9c41b4d5083a2b7ad0a4a0f997c66ba789367065180a01a",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-BUILD-RECIPE.json",
+      "input_bytes": 3285,
+      "input_sha256": "457db9d3f96f6086eaa6f160e929e762d122d8a81bb1e3680aeb635c93a6ecbf",
+      "output_bytes": 3340,
+      "output_sha256": "5c62653f9bb767067ca3bcba87d396fb0812b1d7f0fef030855b4e8d7723fee0",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-COMMON.c",
+      "input_bytes": 13216,
+      "input_sha256": "932393df67e0b77bd1b615e1f044540de5620d9838010d98ca417d925573ed63",
+      "output_bytes": 13216,
+      "output_sha256": "932393df67e0b77bd1b615e1f044540de5620d9838010d98ca417d925573ed63",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "A071-CONTRACT.py",
+      "input_bytes": 19897,
+      "input_sha256": "fd3b4e76558e6821f4829c92c69015840dc595d757aca6bc495ff80ceda8640b",
+      "output_bytes": 21170,
+      "output_sha256": "8ecd1009c613b21b119f5b393256eb239b17ad8515b06b057552d566cab01aa2",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-CONTROL-COVERAGE.json",
+      "input_bytes": 331035,
+      "input_sha256": "615c6db31e76e053bbb91972b29051595f997bfc4d653f44850b89a073418d4c",
+      "output_bytes": 331035,
+      "output_sha256": "615c6db31e76e053bbb91972b29051595f997bfc4d653f44850b89a073418d4c",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "A071-CONTROLS.py",
+      "input_bytes": 728,
+      "input_sha256": "27bf4f4e0bcb8361f0ff93dc71983b1d66cf56693b7eb43b09847334d0af562c",
+      "output_bytes": 8976,
+      "output_sha256": "69aab635f72a3bd8521f2812b034ca6fd4a4da09c0108cc1fbe4adc0fd28fc49",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-EXECUTOR.py",
+      "input_bytes": 46227,
+      "input_sha256": "a3ecceda097c997bd7e8dfa63e863257a3fe805fde70819b1efb484d9c885226",
+      "output_bytes": 46228,
+      "output_sha256": "a06660c9c8abbb3562083ab020e02c7097cdab52ee661f86dd018174508133f5",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-FULL-CONTROLS.py",
+      "input_bytes": 55746,
+      "input_sha256": "0efe9eca8f3318b6e8ab010ef8718bd127b251e22831aed7f5498588bbeba8d1",
+      "output_bytes": 55746,
+      "output_sha256": "0efe9eca8f3318b6e8ab010ef8718bd127b251e22831aed7f5498588bbeba8d1",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "A071-NATIVE.h",
+      "input_bytes": 4544,
+      "input_sha256": "54e40df8cf76d1ba8e6132d523ffd7299ba06c35594ff38d33e0f7cc72d899c9",
+      "output_bytes": 5310,
+      "output_sha256": "71ec4f8edf1d460f140c2da7737a9fac1e5c4fdce2b1347b62c2388793d53be0",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-OWNED.c",
+      "input_bytes": 15997,
+      "input_sha256": "247ae13a50c2aa55c8de2ab5ddf1a25c8e0b58721e94f4d8a61d710113579e1a",
+      "output_bytes": 24872,
+      "output_sha256": "a508fdb07cd41fd4995aee597269838b5002acafb1986ecf54f1fcfcf7bb0ecc",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-OWNER.py",
+      "input_bytes": 7370,
+      "input_sha256": "3b93947879c3c5a7a4c3c468e6698045e4bcba913f8166fb70e38956140b1193",
+      "output_bytes": 7757,
+      "output_sha256": "5b7711388865e464f9b3f30a2c1d250fdc33645d742a7776d457805e4557a6cf",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-PRODUCER.py",
+      "input_bytes": 19432,
+      "input_sha256": "731dddf98ad512595809e40d1a2e4580caf130b75bed5200fa6e0064a13a241e",
+      "output_bytes": 19436,
+      "output_sha256": "0d09bbe45fd6eb839672532412c7234eaa46ff2d84ea131efa006ef925cc4b3c",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-RUNTIME.c",
+      "input_bytes": 7458,
+      "input_sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca",
+      "output_bytes": 7458,
+      "output_sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "A071-SCHEMA.json",
+      "input_bytes": 7768,
+      "input_sha256": "7d756e9b7096335afc4581ba222dc6e55dc9bc6eb982b3383c57a8ee09c75c85",
+      "output_bytes": 9078,
+      "output_sha256": "25d5a9506f4b0f45ec9439d90571e2f79ca25c4bf5018d324d58e36f66913e4f",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-SUPERVISOR.py",
+      "input_bytes": 49335,
+      "input_sha256": "05ecb8743769e14c5137de0381adb3ee7f66244b8fcfc79256febba73cfcf269",
+      "output_bytes": 50384,
+      "output_sha256": "b13434128b413ebe730110d9cba0fb559a45c4cc5e9de0f38439b3681498cb53",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "A071-WORKER.py",
+      "input_bytes": 7965,
+      "input_sha256": "21329594e1577649030d0095a547c71e9673a3b7c3cc70a8ba2822c194a60733",
+      "output_bytes": 7966,
+      "output_sha256": "64fe2967b220aa5fe17872913fcf5d03c5f0818e7d2f81491cec607eaa7dc534",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "DELTA-COMPLEMENT.json",
+      "input_bytes": 29956,
+      "input_sha256": "a3955b858530d94cd5849153938952b3791ccc30ea5150e494d361c2a99b3831",
+      "output_bytes": "BOUND_BY_FINAL_MANIFEST_OR_EXTERNAL_MANIFEST_SELF_PIN",
+      "output_sha256": "BOUND_BY_FINAL_MANIFEST_OR_EXTERNAL_MANIFEST_SELF_PIN",
+      "comparison": "GENERATED_PROOF_REPLACEMENT"
+    },
+    {
+      "name": "INDEX.md",
+      "input_bytes": 2382,
+      "input_sha256": "de733c302bb30670fc9a9e98e2fb5541d61cbcf04860366bbfbb8023c4330916",
+      "output_bytes": 2674,
+      "output_sha256": "c27d60165426fc52ea9991a8842d1728c149a5fbd54404ec1697015e261f662d",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "RAW-DELTA.patch",
+      "input_bytes": 290788,
+      "input_sha256": "2834aca534e74cfffb9932efc0abf867b341f9e958711774fef1e816203302e9",
+      "output_bytes": 98050,
+      "output_sha256": "ec50e5c5102bdc75acb92772da036ceb2f8a04b7693b9dae5b76745067d46e4c",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "READ-LEDGER.tsv",
+      "input_bytes": 1331,
+      "input_sha256": "6662a02aaca647e88fcefc15d8aee5d669d8d17e815b43d94402d28be10bdaa6",
+      "output_bytes": 1340,
+      "output_sha256": "8b0b7b06c551c958525ef2961f3c4f20223de9b029414dd789f32bc56c1d5aa0",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "RESULT.json",
+      "input_bytes": 8422,
+      "input_sha256": "02f5c6bc9e1c5fa66b06c66d12c342efcab3fb7a37d157a8f4154915cb6561f4",
+      "output_bytes": 8429,
+      "output_sha256": "93d53a0ef85de6f095ab92b20cab01fe2a577f707c99e3b48a0c153772d2612f",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "REVIEW-REQUEST.md",
+      "input_bytes": 2550,
+      "input_sha256": "74d646400bed20d882593b57fe7be554de01fafb8817c529716b1f3820e994ee",
+      "output_bytes": 2316,
+      "output_sha256": "1fd82a04c37061613fc39d3245584f3eb8d4567edcc9dc663cec9c7dae853f34",
+      "comparison": "CHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-ABI-MAPPING.json",
+      "input_bytes": 1222,
+      "input_sha256": "e395295b700f1b76d0f8555bafc2ce6fed78e0d5267c93a426e4a2b0c7af1a87",
+      "output_bytes": 1222,
+      "output_sha256": "e395295b700f1b76d0f8555bafc2ce6fed78e0d5267c93a426e4a2b0c7af1a87",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-BILL.json",
+      "input_bytes": 105071,
+      "input_sha256": "a5ad77e70d1a2d540ce2bf18f75da0af760383900a716563ffe1232c5bf36fa1",
+      "output_bytes": 105071,
+      "output_sha256": "a5ad77e70d1a2d540ce2bf18f75da0af760383900a716563ffe1232c5bf36fa1",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+      "input_bytes": 23716,
+      "input_sha256": "198c895663016ac2a1a6c7a5445c30e640167cd97b0595f474b5a7cd5b945bd9",
+      "output_bytes": 23716,
+      "output_sha256": "198c895663016ac2a1a6c7a5445c30e640167cd97b0595f474b5a7cd5b945bd9",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-BUILD-RECIPE.json",
+      "input_bytes": 3285,
+      "input_sha256": "d4780f915524badaedcbb3d17a1b20820e7de80b1b660fd95e7ef0209b97cd9e",
+      "output_bytes": 3285,
+      "output_sha256": "d4780f915524badaedcbb3d17a1b20820e7de80b1b660fd95e7ef0209b97cd9e",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-COMMON.c",
+      "input_bytes": 13215,
+      "input_sha256": "31cda48199bee974c0204a4662fc9852ddf43f24c9629016fed369823d068fc2",
+      "output_bytes": 13215,
+      "output_sha256": "31cda48199bee974c0204a4662fc9852ddf43f24c9629016fed369823d068fc2",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+      "input_bytes": 19885,
+      "input_sha256": "93bda86a667817e5cbc06a94c7e0c0b513bfafbb3f891a8696f6b4fbaa973cde",
+      "output_bytes": 19885,
+      "output_sha256": "93bda86a667817e5cbc06a94c7e0c0b513bfafbb3f891a8696f6b4fbaa973cde",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-CONTROL-COVERAGE.json",
+      "input_bytes": 277271,
+      "input_sha256": "2f47b09ecd8af02f8e910b66b179bbda08412e6046dec72034f9c1c6dd9fe2ca",
+      "output_bytes": 277271,
+      "output_sha256": "2f47b09ecd8af02f8e910b66b179bbda08412e6046dec72034f9c1c6dd9fe2ca",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+      "input_bytes": 704,
+      "input_sha256": "4904b585110926cbb5971fff88e04421a366a1c3c856e907b2af9a4f87956460",
+      "output_bytes": 704,
+      "output_sha256": "4904b585110926cbb5971fff88e04421a366a1c3c856e907b2af9a4f87956460",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+      "input_bytes": 46216,
+      "input_sha256": "af177f3efaa6b46e2d8905486e9da6afdea32e18c4b3149f24aff4ae2121e733",
+      "output_bytes": 46216,
+      "output_sha256": "af177f3efaa6b46e2d8905486e9da6afdea32e18c4b3149f24aff4ae2121e733",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+      "input_bytes": 29558,
+      "input_sha256": "76c717e38b909d5b41e2ff48582dc27e3c4dc82fd0643ac8206748e97b8c70d1",
+      "output_bytes": 29558,
+      "output_sha256": "76c717e38b909d5b41e2ff48582dc27e3c4dc82fd0643ac8206748e97b8c70d1",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-NATIVE.h",
+      "input_bytes": 4317,
+      "input_sha256": "5fc40d1e1417a31bdb71b46f30196d267e64898660746dd1093481af7f800e20",
+      "output_bytes": 4317,
+      "output_sha256": "5fc40d1e1417a31bdb71b46f30196d267e64898660746dd1093481af7f800e20",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-OWNED.c",
+      "input_bytes": 11576,
+      "input_sha256": "2a0574d33c4372a3edb2b87b2594bc13f8146d61d62524aa50566230ac83894f",
+      "output_bytes": 11576,
+      "output_sha256": "2a0574d33c4372a3edb2b87b2594bc13f8146d61d62524aa50566230ac83894f",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-OWNER.py",
+      "input_bytes": 7369,
+      "input_sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155",
+      "output_bytes": 7369,
+      "output_sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+      "input_bytes": 12180,
+      "input_sha256": "dd4249a75e6cfc5124513a91ce5da9506f82ceae61dd6a3011e91a41c859db97",
+      "output_bytes": 12180,
+      "output_sha256": "dd4249a75e6cfc5124513a91ce5da9506f82ceae61dd6a3011e91a41c859db97",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-RUNTIME.c",
+      "input_bytes": 7457,
+      "input_sha256": "48a581112f4b3ec16658c2415c9e667144ed7a21a9d839831bf6c8bb6d490e76",
+      "output_bytes": 7457,
+      "output_sha256": "48a581112f4b3ec16658c2415c9e667144ed7a21a9d839831bf6c8bb6d490e76",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-SCHEMA.json",
+      "input_bytes": 6504,
+      "input_sha256": "d44887d602d654b89c909a47bbbf5debd45e755793b1830e909757e70c3dfd5c",
+      "output_bytes": 6504,
+      "output_sha256": "d44887d602d654b89c909a47bbbf5debd45e755793b1830e909757e70c3dfd5c",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+      "input_bytes": 49327,
+      "input_sha256": "34f4b2585fdc1a721e5c31bd702c02e2e55ee5e4526621ef39f167418ab6552e",
+      "output_bytes": 49327,
+      "output_sha256": "34f4b2585fdc1a721e5c31bd702c02e2e55ee5e4526621ef39f167418ab6552e",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-WORKER.py",
+      "input_bytes": 7957,
+      "input_sha256": "95da47af5986cd1549edab0c9f3b2832d453ac06032b985e9425a04375457825",
+      "output_bytes": 7957,
+      "output_sha256": "95da47af5986cd1549edab0c9f3b2832d453ac06032b985e9425a04375457825",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A037.md",
+      "input_bytes": 4529,
+      "input_sha256": "69a322cf08b8038d9af867f919d8639df4a932fa593ffb3d155a35d325a7b8bc",
+      "output_bytes": 4529,
+      "output_sha256": "69a322cf08b8038d9af867f919d8639df4a932fa593ffb3d155a35d325a7b8bc",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A039.md",
+      "input_bytes": 4566,
+      "input_sha256": "8e04c3d3516e7eb361fb31d7d33e3a45eaa0d523188aa0aba3c75eed3e314da5",
+      "output_bytes": 4566,
+      "output_sha256": "8e04c3d3516e7eb361fb31d7d33e3a45eaa0d523188aa0aba3c75eed3e314da5",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A042.md",
+      "input_bytes": 4369,
+      "input_sha256": "3339163945188c482239c6c757293fdc02876452630a9739a5608f45bebca8ea",
+      "output_bytes": 4369,
+      "output_sha256": "3339163945188c482239c6c757293fdc02876452630a9739a5608f45bebca8ea",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A046.md",
+      "input_bytes": 5141,
+      "input_sha256": "7b25a398d47b6ae50eccd1888f841bee0d06c795c38f05c5d418f0d03dc3341c",
+      "output_bytes": 5141,
+      "output_sha256": "7b25a398d47b6ae50eccd1888f841bee0d06c795c38f05c5d418f0d03dc3341c",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A051.md",
+      "input_bytes": 6304,
+      "input_sha256": "f467bb553668e48132ca0b9bac98b791f97b48c34e1cd2e9595ee4dc08f3ce26",
+      "output_bytes": 6304,
+      "output_sha256": "f467bb553668e48132ca0b9bac98b791f97b48c34e1cd2e9595ee4dc08f3ce26",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A066.md",
+      "input_bytes": 2868,
+      "input_sha256": "b7909d2b2f5a3b924765b4a9f13112936389729fda88d990fc0a17559d0a2f5e",
+      "output_bytes": 2868,
+      "output_sha256": "b7909d2b2f5a3b924765b4a9f13112936389729fda88d990fc0a17559d0a2f5e",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-INDEX.md",
+      "input_bytes": 1696,
+      "input_sha256": "1e91a4bbed4f32dfb625de12e199cc3562dd3d6d32d7f5c8a574250eae298fa1",
+      "output_bytes": 1696,
+      "output_sha256": "1e91a4bbed4f32dfb625de12e199cc3562dd3d6d32d7f5c8a574250eae298fa1",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-MANIFEST.json",
+      "input_bytes": 13182,
+      "input_sha256": "0a519f021c0430a4d8fb08b30fe6912ca8f4f73e0fdef8ef3fb94c06e99082c7",
+      "output_bytes": 13182,
+      "output_sha256": "0a519f021c0430a4d8fb08b30fe6912ca8f4f73e0fdef8ef3fb94c06e99082c7",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-READ-LEDGER.tsv",
+      "input_bytes": 1759,
+      "input_sha256": "f2de95cd4dcbaa478c218068c268a7c36a6460454d2a86b120e69a704cb5679e",
+      "output_bytes": 1759,
+      "output_sha256": "f2de95cd4dcbaa478c218068c268a7c36a6460454d2a86b120e69a704cb5679e",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-RESULT.json",
+      "input_bytes": 9836,
+      "input_sha256": "9d00af0bc3b1b4273c8f23cd55b0c40f4ef9a3e888fb0ef494e2c15a7d807227",
+      "output_bytes": 9836,
+      "output_sha256": "9d00af0bc3b1b4273c8f23cd55b0c40f4ef9a3e888fb0ef494e2c15a7d807227",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-REVIEW-REQUEST.md",
+      "input_bytes": 2366,
+      "input_sha256": "2c3bb531db846d328f7e963fd78fbf96623fa3d7f0df102a4573cec5e07d02f7",
+      "output_bytes": 2366,
+      "output_sha256": "2c3bb531db846d328f7e963fd78fbf96623fa3d7f0df102a4573cec5e07d02f7",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-ABI-MAPPING.json",
+      "input_bytes": 2238,
+      "input_sha256": "aec6724c05c20882450acf0c0e14592b0225a324a8d906fb6603c51053269ff3",
+      "output_bytes": 2238,
+      "output_sha256": "aec6724c05c20882450acf0c0e14592b0225a324a8d906fb6603c51053269ff3",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BILL.json",
+      "input_bytes": 104731,
+      "input_sha256": "488e8dc7e16d6aded4d082301f4a7e8ebf8575452a584eb7a9f70d897f7ce650",
+      "output_bytes": 104731,
+      "output_sha256": "488e8dc7e16d6aded4d082301f4a7e8ebf8575452a584eb7a9f70d897f7ce650",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+      "input_bytes": 23717,
+      "input_sha256": "7641f18ca0e9fbe67ed0bab6d70454aace4014c2b7ce6a63dcabf411767fd03e",
+      "output_bytes": 23717,
+      "output_sha256": "7641f18ca0e9fbe67ed0bab6d70454aace4014c2b7ce6a63dcabf411767fd03e",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BUILD-RECIPE.json",
+      "input_bytes": 3373,
+      "input_sha256": "2c8d0f32fc7eeefea73f5fce4d24d6b2c91b06ad53716b0439fcc8411395c19d",
+      "output_bytes": 3373,
+      "output_sha256": "2c8d0f32fc7eeefea73f5fce4d24d6b2c91b06ad53716b0439fcc8411395c19d",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-COMMON.c",
+      "input_bytes": 13215,
+      "input_sha256": "9524b0ac2461b824b9c206501911fb0aec3fb55a572acfc5fbc4cf8b2012086f",
+      "output_bytes": 13215,
+      "output_sha256": "9524b0ac2461b824b9c206501911fb0aec3fb55a572acfc5fbc4cf8b2012086f",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+      "input_bytes": 19703,
+      "input_sha256": "09e0f328547a3bc937c297fa9bc0dfbf4871633fe7ecd6dd3b90fb8d4526fc88",
+      "output_bytes": 19703,
+      "output_sha256": "09e0f328547a3bc937c297fa9bc0dfbf4871633fe7ecd6dd3b90fb8d4526fc88",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROL-MATRIX.json",
+      "input_bytes": 3052,
+      "input_sha256": "ac63be0ab49795fe9d0d20b3ab212c567ba34b7ef2cc7a3986673a1d46418805",
+      "output_bytes": 3052,
+      "output_sha256": "ac63be0ab49795fe9d0d20b3ab212c567ba34b7ef2cc7a3986673a1d46418805",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "input_bytes": 78027,
+      "input_sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+      "output_bytes": 78027,
+      "output_sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+      "input_bytes": 46214,
+      "input_sha256": "92a641025cb078b01418f7ec9e1701181c0d6d680ef5dbf1089279df688753c3",
+      "output_bytes": 46214,
+      "output_sha256": "92a641025cb078b01418f7ec9e1701181c0d6d680ef5dbf1089279df688753c3",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+      "input_bytes": 23060,
+      "input_sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf",
+      "output_bytes": 23060,
+      "output_sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-NATIVE.h",
+      "input_bytes": 4278,
+      "input_sha256": "5f269a4494ef7e7c1c2377242b9c407068b6af29abca85c36ff199a3899def17",
+      "output_bytes": 4278,
+      "output_sha256": "5f269a4494ef7e7c1c2377242b9c407068b6af29abca85c36ff199a3899def17",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c",
+      "input_bytes": 10649,
+      "input_sha256": "638d84391b4351f06499c1ad5aaa2966e9cc42cdfaf658a2148d25bf264d9290",
+      "output_bytes": 10649,
+      "output_sha256": "638d84391b4351f06499c1ad5aaa2966e9cc42cdfaf658a2148d25bf264d9290",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNER.py",
+      "input_bytes": 7369,
+      "input_sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155",
+      "output_bytes": 7369,
+      "output_sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+      "input_bytes": 12182,
+      "input_sha256": "2e7fd79e1754588364a76975ffbf9ff1ca7dacf38dbef30659151c241b8e364e",
+      "output_bytes": 12182,
+      "output_sha256": "2e7fd79e1754588364a76975ffbf9ff1ca7dacf38dbef30659151c241b8e364e",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-RUNTIME.c",
+      "input_bytes": 7457,
+      "input_sha256": "50ad41fa45923515433ca153c33199e21c8e704db4163861dd35a0e065e1f26f",
+      "output_bytes": 7457,
+      "output_sha256": "50ad41fa45923515433ca153c33199e21c8e704db4163861dd35a0e065e1f26f",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SCHEMA.json",
+      "input_bytes": 6074,
+      "input_sha256": "c8e2d4a30f559c58f121ae0928564809b52c33237924f7f0a834a605c137a96c",
+      "output_bytes": 6074,
+      "output_sha256": "c8e2d4a30f559c58f121ae0928564809b52c33237924f7f0a834a605c137a96c",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+      "input_bytes": 49225,
+      "input_sha256": "4b6ad763b0883310445d625414fc178e76b28e36c66ca617a8f92b4a71d3d85f",
+      "output_bytes": 49225,
+      "output_sha256": "4b6ad763b0883310445d625414fc178e76b28e36c66ca617a8f92b4a71d3d85f",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py",
+      "input_bytes": 7958,
+      "input_sha256": "2da91ef0254d5b92aa82e12f2c049ce1ad3940da1a2ae54f0750658cec1b6d66",
+      "output_bytes": 7958,
+      "output_sha256": "2da91ef0254d5b92aa82e12f2c049ce1ad3940da1a2ae54f0750658cec1b6d66",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-BENIGN-FIXTURES.json",
+      "input_bytes": 1573,
+      "input_sha256": "64e93fb9fc3f93e3420ad1fb03007416aaffeaea0195532811c4ac380074da4c",
+      "output_bytes": 1573,
+      "output_sha256": "64e93fb9fc3f93e3420ad1fb03007416aaffeaea0195532811c4ac380074da4c",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-INDEX.md",
+      "input_bytes": 1647,
+      "input_sha256": "855d5daade942ae4b1cae99ddf1479fc8e47f7f3fa6f998fb0b7a9c8db8b4239",
+      "output_bytes": 1647,
+      "output_sha256": "855d5daade942ae4b1cae99ddf1479fc8e47f7f3fa6f998fb0b7a9c8db8b4239",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-MANIFEST.json",
+      "input_bytes": 6074,
+      "input_sha256": "3a91f7d1e73f140a68805cf52a6159b29e74a186856289ee67b9d96ca5defcd2",
+      "output_bytes": 6074,
+      "output_sha256": "3a91f7d1e73f140a68805cf52a6159b29e74a186856289ee67b9d96ca5defcd2",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-READ-LEDGER.tsv",
+      "input_bytes": 2517,
+      "input_sha256": "41fee460f7d563c6d882040e716153ebc4443da6d8e6f6bb1e0ac9d68edc04eb",
+      "output_bytes": 2517,
+      "output_sha256": "41fee460f7d563c6d882040e716153ebc4443da6d8e6f6bb1e0ac9d68edc04eb",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-RESULT.json",
+      "input_bytes": 5703,
+      "input_sha256": "439f93fe5dbb590928acbc91794ba5a84101a849e01d6066d0382c8892ae0ea9",
+      "output_bytes": 5703,
+      "output_sha256": "439f93fe5dbb590928acbc91794ba5a84101a849e01d6066d0382c8892ae0ea9",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-REVIEW-REQUEST.md",
+      "input_bytes": 1856,
+      "input_sha256": "e3c87c5e4481dd543d111565998e140b348a2437270bb0bbc749d29fe322c31a",
+      "output_bytes": 1856,
+      "output_sha256": "e3c87c5e4481dd543d111565998e140b348a2437270bb0bbc749d29fe322c31a",
+      "comparison": "EXACT_UNCHANGED"
+    },
+    {
+      "name": "MANIFEST.json",
+      "input_bytes": 19586,
+      "input_sha256": "5e4e8f95c1b6ccd4b13ca8fc1dd1e12dbb807caa5da682b26dfd42098e9c6aaa",
+      "output_bytes": "BOUND_BY_FINAL_MANIFEST_OR_EXTERNAL_MANIFEST_SELF_PIN",
+      "output_sha256": "BOUND_BY_FINAL_MANIFEST_OR_EXTERNAL_MANIFEST_SELF_PIN",
+      "comparison": "GENERATED_PROOF_REPLACEMENT"
+    }
+  ],
+  "changed": [
+    "A071-ABI-MAPPING.json",
+    "A071-BOOTSTRAP.c",
+    "A071-BUILD-RECIPE.json",
+    "A071-CONTRACT.py",
+    "A071-CONTROLS.py",
+    "A071-EXECUTOR.py",
+    "A071-NATIVE.h",
+    "A071-OWNED.c",
+    "A071-OWNER.py",
+    "A071-PRODUCER.py",
+    "A071-SCHEMA.json",
+    "A071-SUPERVISOR.py",
+    "A071-WORKER.py",
+    "INDEX.md",
+    "RAW-DELTA.patch",
+    "READ-LEDGER.tsv",
+    "RESULT.json",
+    "REVIEW-REQUEST.md"
+  ],
+  "unchanged": [
+    "A071-BILL.json",
+    "A071-COMMON.c",
+    "A071-CONTROL-COVERAGE.json",
+    "A071-FULL-CONTROLS.py",
+    "A071-RUNTIME.c",
+    "UPSTREAM-A066-SNAPSHOT-A066-ABI-MAPPING.json",
+    "UPSTREAM-A066-SNAPSHOT-A066-BILL.json",
+    "UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+    "UPSTREAM-A066-SNAPSHOT-A066-BUILD-RECIPE.json",
+    "UPSTREAM-A066-SNAPSHOT-A066-COMMON.c",
+    "UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+    "UPSTREAM-A066-SNAPSHOT-A066-CONTROL-COVERAGE.json",
+    "UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+    "UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+    "UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+    "UPSTREAM-A066-SNAPSHOT-A066-NATIVE.h",
+    "UPSTREAM-A066-SNAPSHOT-A066-OWNED.c",
+    "UPSTREAM-A066-SNAPSHOT-A066-OWNER.py",
+    "UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+    "UPSTREAM-A066-SNAPSHOT-A066-RUNTIME.c",
+    "UPSTREAM-A066-SNAPSHOT-A066-SCHEMA.json",
+    "UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+    "UPSTREAM-A066-SNAPSHOT-A066-WORKER.py",
+    "UPSTREAM-A066-SNAPSHOT-CONTRACT-A037.md",
+    "UPSTREAM-A066-SNAPSHOT-CONTRACT-A039.md",
+    "UPSTREAM-A066-SNAPSHOT-CONTRACT-A042.md",
+    "UPSTREAM-A066-SNAPSHOT-CONTRACT-A046.md",
+    "UPSTREAM-A066-SNAPSHOT-CONTRACT-A051.md",
+    "UPSTREAM-A066-SNAPSHOT-CONTRACT-A066.md",
+    "UPSTREAM-A066-SNAPSHOT-INDEX.md",
+    "UPSTREAM-A066-SNAPSHOT-MANIFEST.json",
+    "UPSTREAM-A066-SNAPSHOT-READ-LEDGER.tsv",
+    "UPSTREAM-A066-SNAPSHOT-RESULT.json",
+    "UPSTREAM-A066-SNAPSHOT-REVIEW-REQUEST.md",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-ABI-MAPPING.json",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BILL.json",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BUILD-RECIPE.json",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-COMMON.c",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROL-MATRIX.json",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-NATIVE.h",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNER.py",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-RUNTIME.c",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SCHEMA.json",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-BENIGN-FIXTURES.json",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-INDEX.md",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-MANIFEST.json",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-READ-LEDGER.tsv",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-RESULT.json",
+    "UPSTREAM-A066-SNAPSHOT-UPSTREAM-REVIEW-REQUEST.md"
+  ],
+  "proof_replacements": [
+    "DELTA-COMPLEMENT.json",
+    "MANIFEST.json"
+  ],
+  "added": [
+    {
+      "name": "A079-CALLER-STATUS-DATA.json",
+      "bytes": 280,
+      "sha256": "f24801464aea2fae3a81ea77d25627986f5a717c639631c348a9ea441720cde7"
+    },
+    {
+      "name": "A079-NATIVE-ORACLES.json",
+      "bytes": 3448,
+      "sha256": "10c844da321d5f4d8984e409d8f111edd3cab82bb11f9e1fe8519168fe7401a2"
+    },
+    {
+      "name": "A079-NATIVE-PUBLIC-DRIVER.py",
+      "bytes": 13552,
+      "sha256": "b66ee837c110663f1ea1ce795e6f6b6da191f02b43303a452ce59d023d229be7"
+    },
+    {
+      "name": "A079-ORDINARY-POSITIVE-DATA.json",
+      "bytes": 270,
+      "sha256": "4536ca15335392725103545e1ef1027745dfbc6fb2834d0eeab0406cbe0ed2aa"
+    },
+    {
+      "name": "A079-REGISTRY-COVERAGE.json",
+      "bytes": 4539,
+      "sha256": "450e69a264549ac5d3badbe23ad1ee8623bca103cf29a382ba0e4bd9f846be20"
+    },
+    {
+      "name": "A079-WAIT-FLAGS-DATA.json",
+      "bytes": 277,
+      "sha256": "1f94b36280021e99031901576157ab889cf471af6ba32082b394261e85eb5691"
+    },
+    {
+      "name": "CONTRACT-A071.md",
+      "bytes": 3929,
+      "sha256": "eb46835cea1d30a2f8465b67bf0629529456054b36b80712e8dc255f42356b76"
+    },
+    {
+      "name": "CONTRACT-A079.md",
+      "bytes": 3798,
+      "sha256": "ac98979759c33f8ddd5207627ff829138e2681efd5be0f1c4ea846420aea3bbb"
+    },
+    {
+      "name": "INPUT-A071-MANIFEST.json",
+      "bytes": 19586,
+      "sha256": "5e4e8f95c1b6ccd4b13ca8fc1dd1e12dbb807caa5da682b26dfd42098e9c6aaa"
+    }
+  ],
+  "raw_program_delta": "RAW-DELTA.patch",
+  "all_source_files_current_final": true,
+  "all216_plus8_coverage_exact_unchanged": true,
+  "all63_and_original_positive_HTTP_oracle_exact_unchanged": true,
+  "bill_exact_unchanged": true,
+  "acceptance": "AUTHOR_STATIC_ONLY; all controls/builds/loads NOT_RUN"
+}

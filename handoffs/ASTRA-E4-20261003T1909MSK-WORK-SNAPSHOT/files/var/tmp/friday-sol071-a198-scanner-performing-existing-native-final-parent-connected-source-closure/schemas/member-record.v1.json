@@ -1,0 +1,763 @@
+{
+  "$id": "friday.astra.e4.lab818.member-record.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "compression_method": {
+      "type": "string"
+    },
+    "content_sha256": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "crc32": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "executable": {
+      "type": "boolean"
+    },
+    "executed": {
+      "const": false,
+      "type": "boolean"
+    },
+    "extension_records": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pax"
+              },
+              "key": {
+                "type": "string",
+                "maxLength": 65535
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 1048576
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "global",
+                  "local"
+                ]
+              },
+              "header_offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "applies_to_next": {
+                "type": "boolean"
+              },
+              "record_id": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "record_offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "raw_record_utf8": {
+                "type": "string",
+                "maxLength": 1048576
+              },
+              "raw_record_sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "raw_header_hex": {
+                "type": "string",
+                "maxLength": 1024,
+                "pattern": "^[0-9a-f]*$",
+                "minLength": 1024
+              },
+              "applied_to_header_offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE",
+                  "DELETED",
+                  "SUPERSEDED"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "key",
+              "value",
+              "scope",
+              "header_offset",
+              "applies_to_next",
+              "record_id",
+              "record_offset",
+              "raw_record_utf8",
+              "raw_record_sha256",
+              "raw_header_hex",
+              "applied_to_header_offset",
+              "disposition"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "gnu_longname",
+                  "gnu_longlink"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 1048576
+              },
+              "scope": {
+                "type": "string",
+                "const": "gnu"
+              },
+              "header_offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "applies_to_next": {
+                "type": "boolean"
+              },
+              "record_id": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "raw_header_hex": {
+                "type": "string",
+                "maxLength": 1024,
+                "pattern": "^[0-9a-f]*$",
+                "minLength": 1024
+              },
+              "raw_payload_hex": {
+                "type": "string",
+                "maxLength": 2097152,
+                "pattern": "^[0-9a-f]*$"
+              },
+              "applied_to_header_offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE",
+                  "SUPERSEDED"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "value",
+              "scope",
+              "header_offset",
+              "applies_to_next",
+              "record_id",
+              "raw_header_hex",
+              "raw_payload_hex",
+              "applied_to_header_offset",
+              "disposition"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "gnu_atime",
+                  "gnu_ctime"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "minimum": -9223372036854775808,
+                "maximum": 9223372036854775807
+              },
+              "header_offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              }
+            },
+            "required": [
+              "kind",
+              "value",
+              "header_offset"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "raw_header"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "mode": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "uid": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "gid": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "typeflag": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1
+              },
+              "dialect": {
+                "type": "string",
+                "enum": [
+                  "gnu",
+                  "posix"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "offset",
+              "size",
+              "mode",
+              "uid",
+              "gid",
+              "typeflag",
+              "dialect"
+            ]
+          }
+        ]
+      },
+      "maxItems": 259
+    },
+    "final_destination": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "flags": {
+      "type": "integer"
+    },
+    "gid": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "gname": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "header_dialect": {
+      "type": "string"
+    },
+    "installed_observation": {
+      "$ref": "friday.astra.e4.lab818.scan-resource.v1#/$defs/installed"
+    },
+    "link_target": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "link_target_sha256": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "mode": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "mtime": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "normalized_path": {
+      "type": "string"
+    },
+    "package_script": {
+      "type": "boolean"
+    },
+    "raw_header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hex",
+        "offset",
+        "dialect",
+        "effective",
+        "application"
+      ],
+      "properties": {
+        "hex": {
+          "type": "string",
+          "minLength": 1024,
+          "maxLength": 1024,
+          "pattern": "^[0-9a-f]{1024}$"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dialect": {
+          "type": "string",
+          "enum": [
+            "gnu",
+            "posix"
+          ]
+        },
+        "effective": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "linkname",
+            "mode",
+            "uid",
+            "gid",
+            "size",
+            "mtime"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "linkname": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "uid": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "gid": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "mtime": {
+              "type": "string"
+            }
+          }
+        },
+        "application": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "global": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "null",
+                  "string"
+                ],
+                "maxLength": 1048576
+              }
+            },
+            "local": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "null",
+                  "string"
+                ],
+                "maxLength": 1048576
+              }
+            },
+            "gnu_name": {
+              "type": [
+                "null",
+                "string"
+              ],
+              "maxLength": 65535
+            },
+            "gnu_link": {
+              "type": [
+                "null",
+                "string"
+              ],
+              "maxLength": 65535
+            }
+          },
+          "required": [
+            "global",
+            "local",
+            "gnu_name",
+            "gnu_link"
+          ]
+        }
+      }
+    },
+    "shared_directory": {
+      "type": "boolean"
+    },
+    "size": {
+      "type": "integer"
+    },
+    "source_archive_sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_domain": {
+      "type": "string"
+    },
+    "source_format": {
+      "enum": [
+        "tar",
+        "zip"
+      ],
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "directory",
+        "hardlink",
+        "regular",
+        "symlink"
+      ],
+      "type": "string"
+    },
+    "uid": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "uname": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "source_relative_path": {
+      "type": "string"
+    },
+    "resolved_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "path",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "regular"
+        },
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "zip_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "local_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "central_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "method": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "creator_host": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "local_offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "data_offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "range_end": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "compressed_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncompressed_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "local_extra_hex": {
+          "type": "string",
+          "maxLength": 131070,
+          "pattern": "^[0-9a-f]*$"
+        },
+        "central_extra_hex": {
+          "type": "string",
+          "maxLength": 131070,
+          "pattern": "^[0-9a-f]*$"
+        },
+        "local_header_hex": {
+          "type": "string",
+          "maxLength": 60,
+          "pattern": "^[0-9a-f]*$",
+          "minLength": 60
+        },
+        "central_header_hex": {
+          "type": "string",
+          "maxLength": 92,
+          "pattern": "^[0-9a-f]*$",
+          "minLength": 92
+        },
+        "name_hex": {
+          "type": "string",
+          "maxLength": 131070,
+          "pattern": "^[0-9a-f]*$"
+        },
+        "central_header_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "descriptor_hex": {
+          "type": "string",
+          "maxLength": 48,
+          "pattern": "^[0-9a-f]*$"
+        },
+        "external_attributes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "extra_policy": {
+          "type": "string",
+          "const": "framed-owner-time-ancillary-recorded-not-applied-v1"
+        }
+      },
+      "required": [
+        "local_version",
+        "central_version",
+        "flags",
+        "method",
+        "creator_host",
+        "local_offset",
+        "data_offset",
+        "range_end",
+        "compressed_size",
+        "uncompressed_size",
+        "local_extra_hex",
+        "central_extra_hex",
+        "local_header_hex",
+        "central_header_hex",
+        "name_hex",
+        "central_header_offset",
+        "descriptor_hex",
+        "external_attributes",
+        "extra_policy"
+      ]
+    },
+    "final_link_terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 65535
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "regular",
+            "symlink",
+            "directory"
+          ]
+        },
+        "size": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          ]
+        },
+        "sha256": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "type",
+        "size",
+        "sha256"
+      ]
+    }
+  },
+  "required": [
+    "compression_method",
+    "content_sha256",
+    "crc32",
+    "executable",
+    "executed",
+    "gid",
+    "link_target",
+    "link_target_sha256",
+    "mode",
+    "name",
+    "normalized_path",
+    "package_script",
+    "size",
+    "source_archive_sha256",
+    "source_format",
+    "type",
+    "uid"
+  ],
+  "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "source_format": {
+            "const": "tar"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "raw_header",
+          "header_dialect",
+          "extension_records",
+          "mtime",
+          "uname",
+          "gname"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source_format": {
+            "const": "zip"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "zip_envelope",
+          "flags"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "hardlink"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "resolved_link"
+        ]
+      }
+    }
+  ]
+}

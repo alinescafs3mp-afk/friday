@@ -1,0 +1,241 @@
+{
+  "archive_publication": {
+    "partial_inert_archive": true,
+    "original_source_files_included": 819,
+    "publication_review_proof_files": 9,
+    "archive_files_total_including_generated_manifest_status": 830,
+    "omitted_files": 7,
+    "source_work_bytes": 41617397,
+    "source_plus_review_proof_bytes": 42141244,
+    "original_full_package_seals_are_provenance_not_reduced_archive_completeness": true,
+    "decoded_or_encoded_hostile_bodies_not_published": true,
+    "all_copied_bytes_SHA256_verified": true,
+    "exclusion_reasons_and_hashes": "ARCHIVE-MANIFEST.json"
+  },
+  "post_snapshot_events": {
+    "A193": {
+      "result_arrived_msk": "2026-10-02T16:35:10.269659+03:00",
+      "decision": "COMPLETE_REVIEW_REJECT_SOURCE_CLOSURE_CODE_OPEN_NOT_RUN",
+      "terminal_pin": {
+        "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-LAB867-SENDER-WHOLE54-ALL96-ALL32-ALL7-INDEPENDENT-SOURCE-REVIEW-A193-G1-RESULT.json",
+        "bytes": 16198,
+        "sha256": "415c7156f2c6705b59fc8ab5f8f3b8b5808b40f312a405ab4cfd80af031720ab",
+        "identity9_decimal_strings": [
+          "2050",
+          "9177373",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16198",
+          "1790948110313084578",
+          "1790948110313084578"
+        ],
+        "stable9": true
+      },
+      "terminal_only_root_authenticated": true,
+      "full_artifact_intake_and_lifecycle_close": "PENDING_NEXT_CHECKPOINT",
+      "SourceReady": false,
+      "GO": false
+    }
+  },
+  "current_lab_assignment": {
+    "assignment": "ASTRA-E4-A190-PUBLISHER-WHOLE15-ALL134-ALL69-ALL9-INDEPENDENT-SOURCE-REVIEW-LAB-869",
+    "job": "job_ffde424ba7dc49a1b7ea772b5f6aa56b",
+    "source": "A190 Publisher independent whole Source review",
+    "native_same_visible_tui": true,
+    "pre_task_compact": "FORBIDDEN_OWNER_POLICY",
+    "submission_state": "RUNNING",
+    "executor_receipt": "not yet checkpoint-verified; submission alone is not executor ACK",
+    "scope": "whole15/134/69/9/Source21/consumer24/schema20/full11/source only",
+    "limits": {
+      "deadline_seconds": 4200,
+      "read_bytes": 268435456,
+      "RAM_bytes": 8589934592,
+      "output_bytes": 16777216,
+      "local_parallelism": 4,
+      "children": 0,
+      "network": 0,
+      "retries": 0
+    },
+    "input": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB869-INPUT-20261002.json",
+      "bytes": 318990,
+      "sha256": "cd51073997877c99c29a6604b266a715b0f87e85c9b8a1fced0ad5d38e1df422",
+      "identity9_decimal_strings": [
+        "2050",
+        "8519908",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "318990",
+        "1790947691574125787",
+        "1790947691662130822"
+      ],
+      "stable9": true
+    },
+    "run_ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB869-RUN-20261002.json"
+  },
+  "schema": "friday.owner.work-checkpoint-status.v1",
+  "recorded_msk": "2026-10-02T16:30:00+03:00",
+  "purpose": "Owner-requested current project/work/progress GitHub backup, NOT release.",
+  "summary_ru": "Продуктовый код 0.208.64/schema50 уже находится в базовом main. Этот коммит сохраняет инертные рабочие пакеты, ревью, доказательства, SHA-256 и задачи для продолжения. Релиз НЕ принят.",
+  "release": {
+    "candidate": "0.208.64/schema50",
+    "installed_production": "0.208.58 UNCHANGED",
+    "r5": "IMMUTABLE_RED_NO_REUSE_CREDIT",
+    "r6": "ABSENT",
+    "full_pair_all30_F0_F11": "NOT_COMPLETE",
+    "mandatory_gates_live_build_install_final_acceptance": "NOT_COMPLETE/NOT_RUN",
+    "GO": false,
+    "old_A101_native_failure": "IMMUTABLE_SOURCE_MONITORING_REFUSAL, exact failing-state race not recorded/no reconstruction",
+    "source_acceptance_is_not_runtime_gate_release": true
+  },
+  "goal": {
+    "status": "active",
+    "unbounded": true,
+    "completion": false,
+    "owner_pause": false,
+    "no_goal_created_for_Sol": true
+  },
+  "lead": {
+    "role": "Astra active Lead Architect",
+    "epoch": 4,
+    "continuity_deputy": "Kimi",
+    "models_reasoning_tier_provider_bindings_and_guards": "UNCHANGED"
+  },
+  "product_baseline": {
+    "commit": "cecd28a92ac4fd4e34c4d3813d0c598debe09436",
+    "tree": "e7e86c7796a3db6571ffea715e666247f8876d63",
+    "index_sha256": "29ddfd4a8810d4396673e153fd5da301f7cf86ea00c1bf478ea2ec76fe844e4f",
+    "tracked_and_staged_clean": true,
+    "product_Git_changes": 0,
+    "push": 0,
+    "index_pin": {
+      "path": "/home/jericho/jericho/.git/index",
+      "bytes": 239765,
+      "sha256": "29ddfd4a8810d4396673e153fd5da301f7cf86ea00c1bf478ea2ec76fe844e4f",
+      "identity9_decimal_strings": [
+        "2050",
+        "7508342",
+        "33204",
+        "1000",
+        "1000",
+        "1",
+        "239765",
+        "1790761254447191111",
+        "1790761352816257053"
+      ],
+      "stable9": true
+    },
+    "Git_read_optional_locks_disabled": true,
+    "current_HEAD_main_origin_verified_same": true,
+    "user_untracked_material": "PRESERVED_UNTOUCHED",
+    "Git_readonly_identity_check_msk": "2026-10-02T11:23:34.950325+03:00",
+    "Git_optional_locks": 0,
+    "Git_readonly_refs_checked_msk": "2026-10-02T15:19:00+03:00",
+    "latest_index_held_named9": "2026-10-02T15:21:52.661520+03:00",
+    "index_full_SHA9_reused_only_exact_current9": true
+  },
+  "source_boundary": {
+    "SourceReady": false,
+    "Root_admission": false,
+    "runtime": "NOT_RUN",
+    "compiler_ELF_ABI": "NOT_RUN",
+    "GO": false,
+    "archive_is_not_installed_code": true,
+    "archive_is_not_execution_authority": true,
+    "do_not_run_or_import_supplied_helpers": true,
+    "old_red_not_reused": true
+  },
+  "workstreams": {
+    "Browser": {
+      "Source": "LAB866 current209:2changed207equal",
+      "review": "SOL063 REJECT_CURRENT_WHOLE_SOURCE:9 actual CODE+1 metadata join",
+      "next": "SOL064 whole209/216/29/all6 connected author Source",
+      "status": "Native same existing SolTUI latest turn01a0fcc4-c679-7631-95d5-e4666b3ab19b inProgress;102307ms one pre-task compact completed before exact1978byte TASK; no Sol goal"
+    },
+    "Scanner": {
+      "Source": "A189 current52:16changed36equal; original24 entire bytes equal",
+      "review": "A192 REJECT_CURRENT_SOURCE_CLOSURE",
+      "actual_CODE": [
+        "Final existing outside Root raw/full202 custody/child-parenthood unresolved on failure/end prefixes",
+        "Actual Source native main does not retire source_raw_root/caller_errors16"
+      ],
+      "credit": "Generic complete raw before projection materially implemented",
+      "authority": "Original norms permit fold into existing outside native parent; no new role/process/service/cap/clock.",
+      "lifecycle": "A189/A192 received+CLOSED confirmed"
+    },
+    "Publisher": {
+      "Source": "A190 current134:17changed117equal; original69 ordered six-field rows preserved",
+      "review": "Author source-only, independent whole review pending",
+      "remaining_author_CODE": [
+        "C01",
+        "C02",
+        "C04",
+        "C05",
+        "C06",
+        "C09"
+      ],
+      "credit": "C03 local transaction/release implemented",
+      "scope": "15/134/69/9;Source21/consumer24/schema20/original58/22",
+      "lifecycle": "A190 received+CLOSED confirmed"
+    },
+    "Node": {
+      "previous_Source": "SOL062 current6:5changed1equal/current19 exact SHA/size budget",
+      "previous_review": "A1915 actual CODE B01-B05; lifetime history256 != simultaneous NOFILE256",
+      "latest_Source": "LAB868 completed16:09:36MSK:5changed1equal;full14 authenticated;official RESULT received/ACK",
+      "review": "Independent whole review REQUIRED_NOT_RUN",
+      "no_self_acceptance": true
+    },
+    "Sender": {
+      "Source": "LAB867 partial1changed95equal/current96; localR03/R05 credits",
+      "review": "A193 whole54/96/32/7 inProgress",
+      "interim_not_final": [
+        "Nested Clock/pure wrapper coverage",
+        "guard.refused producer/consumer mismatch",
+        "Filename-bearing ordinary OSError reconstruction order"
+      ],
+      "original_data": "Interim whole32 DATA/role/phase/cause/type/absence and132/16/12classes/72 literal joins0drift",
+      "not_whole_source_or_runtime_acceptance": true
+    }
+  },
+  "next_release_requirements": [
+    "Close actual connected Source defects within original roles, whole independent review of changed bytes",
+    "Fresh exact Root image/grant/epoch/provider/selection/finiteclock/compiler/native qualification after Source admission",
+    "Complete original all30/F0-F11/fullgates/live/positives/meaningful negatives/canonical concurrency/exclusive heavy slot",
+    "Final independent artifact acceptance/build/install/release;then TinyFish/AgentZeroV6"
+  ],
+  "continuity": {
+    "lab_durable_reader_cursor": "msg_8c04f12d266044cd9d44e1e30f6a129c",
+    "checkpoint": "continuity/ASTRA-E4-CHECKPOINT-20261002T1524MSK.json",
+    "checkpoint_seal": "continuity/ASTRA-E4-CHECKPOINT-20261002T1524MSK-SELF-SEAL.json",
+    "base_registry": 3388,
+    "archive_manifest": "ARCHIVE-MANIFEST.json",
+    "local_paths_and_identity9_are_original_provenance_not_portable_identity": true,
+    "older_referenced_artifacts_not_claimed_fully_archived": true,
+    "old_chat_not_loaded_or_reconstructed": true,
+    "settings_models_reasoning_tier_provider_guards_preserved": true,
+    "same_visible_TUIs": true,
+    "Grok_never_compact_latest_owner_policy": true,
+    "native_results_received_before_exact_consume_or_ACK": true
+  },
+  "publication": {
+    "not_release": true,
+    "secrets_private_history_unrelated_untracked_excluded": true,
+    "operational_hostile_test_bodies_not_published": true,
+    "omissions_listed_by_path_hash_reason": true,
+    "original_omitted_artifacts_untouched": true,
+    "omission_is_not_scope_waiver": true
+  },
+  "git_strategy": {
+    "isolated_clone": "/var/tmp/friday-astra-owner-github-checkpoint-20261002.Qy9OX0/repo",
+    "remote": "https://github.com/alinescafs3mp-afk/friday.git",
+    "branch": "main",
+    "force_push": false,
+    "active_original_checkout_remains_frozen": true,
+    "index_sha256": "29ddfd4a8810d4396673e153fd5da301f7cf86ea00c1bf478ea2ec76fe844e4f",
+    "note": "Remote main advances with backup; do not pull/reset frozen active checkout while pins/assignments are in use. Reconcile at safe subsequent checkpoint."
+  }
+}

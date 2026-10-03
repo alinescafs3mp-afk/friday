@@ -1,0 +1,111 @@
+{
+  "schema": "friday.a091.receiving-native-ABI-and-caller.v1",
+  "current_Source": "A158 partial51 connected bounded inert/read-only typed producer Source graph plus FULL/A079 first-resource/raw-refusal custody. A1164/A1523 receiving repairs preserved.165 mandatory OPEN_SOURCE_CODE_GAP; no guessed unsafe-ID classification or unsafe operational bodies. Different-author WHOLE final-byte review required.",
+  "fixed_ABI": {
+    "cap": 848,
+    "OS": 208,
+    "image_header": 56,
+    "image_member": 1088,
+    "packet": 96,
+    "packet_types": "1..14 unchanged",
+    "fr_child": 32,
+    "fr_observation": 96,
+    "fr_receive_receipt": 24,
+    "fr_evidence": 344,
+    "source_roles": 19
+  },
+  "new_readonly_public": {
+    "fr_session_projection": "int(fr_observation96*); inherited DATA only, no ownership/status authority"
+  },
+  "Root_stages": {
+    "30": "actual proc parent vs expected argument",
+    "31": "actual proc birth vs expected argument",
+    "32": "real pending state/deadline",
+    "33": "actual descriptor type",
+    "34": "READY reserved, no fake observation",
+    "35": "actual or deliberately omitted ACK result",
+    "36": "sticky generation",
+    "37": "duplicate actual PID",
+    "38": "live ownership barrier",
+    "39": "finish/drain state"
+  },
+  "public": "A087-PUBLIC-DRIVER.run_receiving_positive_first -> exact independent readonly actor/oracle/full Source manifest/capsule/19 Source/image descriptors -> real owned origin/generation -> same held110 --held-a061",
+  "receiver": "BOOTSTRAP.registry -> COMMON.fr_recv_receipt/real recvmsg -> full actual origin/parent/birth -> Root-selected expected fields -> role/sequence/deadline -> SCM cardinality/type/proc/PID binding -> original durable Root registration/ACK -> same finite cleanup",
+  "ordinary_caller": "run_receiving_positive_first -> run_connected -> run_public -> exact held110 --held-a061 -> BOOTSTRAP.run actual direct stock_caller -> stock_program positive -> three INTENT/allocate/REGISTER_ACK/READY operations -> Root actual all3-live and private actual all3-READY observation -> first private wait4/REAP_ACK -> exact final cleanup -> real raw pipes -> bind_inner_streams -> oracle_receiving -> consume_connected_positive",
+  "output_transport": {
+    "original_stream_cap": 1048576,
+    "stdout_terminal_cap": 1048576,
+    "inner_raw_output_only_fds": [
+      128,
+      129
+    ],
+    "compile_time_Source_roles_added": 0,
+    "fixed_packet_types_added": 0,
+    "raw_durable_destination": "same driver returned receipt, including refusal; same immutable bounded bytes, no Source-issued authority",
+    "writer_receiver_identity9": "each actual anonymous pipe; separate native_original EOF/overflow/read/retained_size/total_seen/SHA/emitted_bytes and receiver transfer EOF/overflow/size/SHA/identity/close",
+    "original_complete": "inner null until all actual native-original and transfer predicates bind; explicit incomplete original false; mismatch/refusal never promotes transfer EOF to original complete"
+  },
+  "first_resource_custody": "run_public creates PublicAuxiliaries ledger before first pipe; protects all acquisition and real parent fork PID; preclone typed actual auxiliary cleanup with original error and no native PID/streams; postclone same actual-owned finite drain/reap/refusal raw custody within original ends; child setup failure _exit125",
+  "all3_live": "one Root-selected coordinator records[0] plus three live registered workers before private waits; Root proc/pidfd/cgroup/image/argv observation is distinct from the same coordinator's actual READY/pipe/pidfd observation",
+  "owner_pair": "same protected CPython/NATIVE bridge -> CONTROLS.controls_inherited_start -> actual fr_own_fork -> inherited START refusal before owner reassignment -> read-only full causal projection -> owner/binding/creation refusal without clone -> parent actual native wait/ACK/release",
+  "register_without_intent": "Actual coordinator self-pidfd REGISTER operand without INTENT or clone; unchanged membership(121,0) remains valid; receiver checks real absent pending at stage32 before adopting a handle; original self-pidfd and rejected receiving duplicate are independently closed; no worker record/status is created",
+  "owner_receipt_dependency": "The actual controls module explicitly imports stock json in its own loader namespace; future same-image standard library remains externally required",
+  "link": "Original two native targets and all original flags/bounds unchanged. Static BOOTSTRAP includes new A091-STOCK-CALLER.h from exact final-byte compiler Source view; it has no PyOS link. Shared OWNED still resolves PyOS hooks only from exact admitted CPython. New header is a compile input, not a new held runtime role.",
+  "full_positive": "all three actually READY workers before first private wait in the positive generation; every controlled generation still requires its separate successful positive-first receipt; original other44 rows preserved",
+  "Root_current_authority": "NONE_ISSUED",
+  "actual_candidate_execution": 0,
+  "runtime": "NOT_RUN",
+  "all216": "PARTIAL51_SOURCE_WRITTEN_NOT_RUN;165_OPEN_SOURCE_CODE_GAP",
+  "GO": false,
+  "F10_waiver": false,
+  "independent_final_byte_review": "REQUIRED_NOT_PERFORMED",
+  "a158_extension": {
+    "assignment": "ASTRA-E4-BROWSER-A153-A156-WHOLE216-ALL6-ALL2-CONNECTED-SOURCE-IMPLEMENTATION-A158",
+    "generation": 1,
+    "implementation_status": "PARTIAL_SOURCE_WRITTEN_NOT_RUN_PENDING_DIFFERENT_AUTHOR_WHOLE_REVIEW",
+    "safe_connected_ID_count": 51,
+    "mandatory_unimplemented_ID_count": 165,
+    "all216_required": true,
+    "all216_credit": false,
+    "SourceReady": false,
+    "Root_Image_execution_admission": false,
+    "runtime": "NOT_RUN",
+    "gates": "NOT_RUN",
+    "F10_waiver": false,
+    "GO": false,
+    "unsafe_historical_IDs": "ABSTRACT_REQUIRED_NOT_RUN: no operational payload, fixture, generator, reproduction or exploitation implementation",
+    "ABI": {
+      "fr_controller_prepare": "int(unsigned exact_original_position); original coordinator request only, no new grant",
+      "fr_controller_join": "int(unsigned exact_original_position,fr_evidence344*); actual fork child consumes separately Root-selected exact START",
+      "fr_controller_finish": "int(fr_evidence344*); same actual producer consumes exact FINISH_ACK, not kernel wait/reap",
+      "fr_controller_observe": "int(fr_observation96*); readonly distinct child context, all wait/status/cleanup fields zero"
+    },
+    "ownership": {
+      "parent": "unchanged original coordinator/native_owner/private native sequence",
+      "child": "one actual fr_own_fork role0; exact PID/birth/private pidfd record; ordinary REGISTER_ACK and child barrier precede child context",
+      "selection": "Root actual records[1], actual proc/pidfd/credential/direct-parent checks; exact separately selected START1 and FINISH2/ACK10",
+      "no_reset": "never reassign original native_owner, clear poison, reset original START/session or adopt caller-provided status",
+      "status": "Root borrowed records and child FINISH are never kernel wait authority; coordinator actual wait4 plus original REAP_ACK publishes status",
+      "special_evidence": "fr_evidence phase1 register_ack_ns means typed START receipt time; phase10 reap_ack_ns means typed FINISH_ACK receipt time. Neither is registration/reap/kernel credit; private child evidence is separate."
+    },
+    "resources": {
+      "caps": "original bill limits/outer_supervision, wire848/96/evidence344/observation96/child32/receipt24 and19 Source roles unchanged",
+      "typed_topology": "same outer1 inner coordinator+one actual role0 producer=2, within original inner global4; no extra inner parent, new cgroup or named-host fallback",
+      "ordinary_topology": "original outer1/64MiB plus inner coordinator+3 workers/192MiB/global4; all3 live and positive-first routes unchanged",
+      "clock": "same actual cap work/hard monotonic clocks and original normal180/10, production1200/60; finite child join/finish and cleanup bounded by original ends",
+      "raw": "unchanged1MiB per stream; producer terminal local emission bound32768; existing native-inner and transfer buffers within original cgroups",
+      "startup": "fixed18-slot FULL/A079 actual-FD ledger initialized before first pipe; typed coordinator fixed4 pipe ledger before acquisition and native intention",
+      "error_ownership": "one close attempt per owned FD, failed close/error retained; exact actual native/direct child stop/reap only; sticky uncertainty never success",
+      "new_source_bookkeeping": "exact216 abstract contract table and Root ID strings increase Source text; interpreter/native capacity NOT_MEASURED, must remain under unchanged limits",
+      "whole_RAM": "UNKNOWN_NOT_ZERO_NOT_PASS",
+      "implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PASS"
+    },
+    "custody": {
+      "normal_public": "A071-FULL-CONTROLS._run_held and A079.run_public call held_capture under a fixed actual-FD ledger before first pipe; immediate acquisition ownership and finite _exit125 child setup; raw both streams frozen before semantics on success/refusal",
+      "typed_inner": "actual producer stdout/stderr drained continuously by same coordinator under original1MiB each; raw bytes frozen before expected cause checks, emitted as bounded raw_hex only when complete; no hash-only credit",
+      "typed_outer": "A087 same repaired four-stream raw transfer/bind_inner_streams receipt, consume_whole216 retains original immutable objects on success/refusal",
+      "incomplete": "missing/preclone unknown raw is null, not invented empty output; overflow/read/retention/close/nonEOF remains false or unknown; original errors and actual auxiliary uncertainty preserved",
+      "persistence": "same-process owned Python objects only; no disk or crash durability asserted"
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "schema": "friday.sol094.required.validation.v1",
+  "original": {
+    "name": "evidence/original-obligations.json",
+    "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/evidence/original-obligations.json",
+    "bytes": 38970,
+    "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371734",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "38970",
+      "1791022108009371618",
+      "1791022242519576230"
+    ],
+    "stable9": true
+  },
+  "original69_exact6_all15_schema20_current134_required": true,
+  "additional": [
+    {
+      "id": "P1",
+      "invariant": "After full before-close transfer and actual mapping.close, terminal reader verifies retained full cut/bytes/row/credit/close transition, not a still-live mmap.",
+      "validation": "After proper admission: full selected mapping snapshot -> actual mapping.close and complete close record -> terminal verifier. Positive must accept retained exact immutable historical bytes/cut after close; meaningful full-byte/alias/row/credit/close mismatch negatives still fail. REQUIRED_NOT_RUN.",
+      "closure": "Same-original-role phase-aware after-close full-body/cut reader. Keep live alias checks before actual close and retain full raw bank/parts/aliases plus actual close transition. No skipped snapshot, hash/flag substitute, reopen, lowered cap or new owner.",
+      "status": "REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "G1",
+      "invariant": "Changed Invoke return ABI must be supplied and consumed by SAME actual original outer caller with owned pre-effect storage and both success/failure ends.",
+      "validation": "Exact actual outer call-site/storage/Bindings/return-schema/consumer pins; full byte readback after active context cleared, original NULL/retained Run failure ownership, actual final caller alias/error end. Independent Source review then admitted image/compiler/ABI/runtime. REQUIRED_NOT_RUN.",
+      "closure": "Implement and supply SAME original caller/consumer and finite error path under existing role/caps. No reconstructed Source replacement, fabricated pointer/table, new grant or documentation-as-authority.",
+      "status": "REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "E1",
+      "invariant": "Late packet/debit/verifier failures require actual full original error/body custody at finite original caller end, not retained pointer alone.",
+      "validation": "Meaningful debit/allocation/receiver/qualification failures after actual final close preserve original triple/full bank/document/source_return/syscall outcomes; actual original caller handles them without true result, repeated syscall or lost Run. BOTH finite ends REQUIRED_NOT_RUN.",
+      "closure": "One finite same-original-caller failure custody/handback/cleanup protocol retaining originals and actual uncertain outcomes. STOP_UNCONFIRMED remains honest pending qualification; no hidden service/retry.",
+      "status": "REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "P3",
+      "invariant": "Allocation-free final status publication uses valid mutable preowned representation or truly private preconstructed final return, not immutable tuple already exposed to Source.",
+      "validation": "After admission, receiver observes/retains pre-retirement status; original caller receives correctly phased final immutable or explicitly mutable representation, no post-retirement allocation/fallible Source callback, old document unchanged. REQUIRED_NOT_RUN.",
+      "closure": "Preconstruct genuinely private final packet not exposed until cleanup, validating transfer skeleton first, or SAME preowned native mutable completion cell with actual outer ABI. No optimistic end/new grant/late allocation.",
+      "status": "REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "R1",
+      "invariant": "Full transfer/readers fit SAME whole original pools/caps without dropping raw/native/alias/control requirements.",
+      "validation": "All original69/exact6/all15/schema20/current134/caps/clocks and positive/negative controls required. Full original suppliers/first-effect/layout/BOTH readers/public-native state/whole-cost and actual outer end independently qualified before execution. REQUIRED_NOT_RUN.",
+      "closure": "Exact same-original-role N1/prebirth/native prepared table/N2/N3 whole layout/full public state, P1 reader, actual G1 caller, E1 error end, P3 valid publication; then current nonauthor Source and admitted execution layers.",
+      "status": "REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    }
+  ],
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  },
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

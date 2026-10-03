@@ -1,0 +1,25 @@
+{
+  "schema": "friday.sol094.pathset.v1",
+  "root": "/var/tmp/friday-sol094-a229-native-caller-bank-transfer-retirement-independent-source-review",
+  "names": [
+    "README.txt",
+    "costs.json",
+    "manifest.json",
+    "pathset.json",
+    "pins.json",
+    "received.json",
+    "review.json",
+    "source-integrity.json",
+    "validation-plan.json"
+  ],
+  "regular_mode": "0600",
+  "directories": [
+    {
+      "relative": ".",
+      "mode": "0700"
+    }
+  ],
+  "symlinks": false,
+  "hardlinks": false,
+  "Source_copies_or_code_authored": 0
+}

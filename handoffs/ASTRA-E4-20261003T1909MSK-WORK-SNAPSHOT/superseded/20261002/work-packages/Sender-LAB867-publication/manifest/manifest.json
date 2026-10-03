@@ -1,0 +1,15 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "acyclic": "leaves -> pathset -> manifest -> payload",
+  "assignment": "ASTRA-E4-SOL061-A188-SENDER-WHOLE54-ALL96-ALL32-ALL7-CONNECTED-SOURCE-CLOSURE-LAB-867",
+  "compiler_ELF_ABI": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "leaf_count": 12,
+  "pathset_bytes": 4664,
+  "pathset_sha256": "23e8d7edcd533267bc4f7b568f2cb5f5541e13702346f16b839a1da9e8eea53d",
+  "runtime": "NOT_RUN",
+  "schema": "friday.grok.lab867.manifest.v1",
+  "self_excluded": true
+}

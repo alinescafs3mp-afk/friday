@@ -1,0 +1,2397 @@
+--- LAB863/caller.py
++++ SOL060/caller.py
+@@ -22,15 +22,15 @@
+ import time
+ 
+ # Future package path only. This source does not create that directory.
+-PACKAGE = "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure"
++PACKAGE = "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure"
+ SOURCE = PACKAGE
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+ PRIMARY = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ ARCHIVE = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+-VHASH = "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9"
+-CHASH = "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418"
+-SHASH = "bcd0fb9f0c5d68468aa896b4a6f9a36f5e32a5d62dc11c6c3bc3787cfa128d10"
++VHASH = "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e"
++CHASH = "ed4c5043e0c2fbb6022f15b4998dd142cc14eafe3846666f38070f21d27396ff"
++SHASH = "6b41511574416232d8a5bb6651f48b3fc65e3dc72e6e03b01cb221471f414ac2"
+ ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+ AS_OUTER = 134217728
+ READ_CAP, PUBLIC_CAP = 268435456, 2097152
+@@ -47,9 +47,9 @@
+     "gpg": ("/usr/bin/gpg", 1186456, "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754", 0, 0o755),
+     "gpgv": ("/usr/bin/gpgv", 302296, "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d", 0, 0o755),
+     "ffi": ("/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0", 64184, "1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa", 0, 0o644),
+-    "supervisor": (SOURCE + "/supervisor.py", 89782, SHASH, 1000, 0o600),
+-    "verifier": (SOURCE + "/verifier.py", 62097, VHASH, 1000, 0o600),
+-    "contract": (SOURCE + "/launch-contract.json", 48250, CHASH, 1000, 0o600),
++    "supervisor": (SOURCE + "/supervisor.py", 99751, SHASH, 1000, 0o600),
++    "verifier": (SOURCE + "/verifier.py", 71834, VHASH, 1000, 0o600),
++    "contract": (SOURCE + "/launch-contract.json", 48583, CHASH, 1000, 0o600),
+     "bill": ("/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json", 466956, "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2", 1000, 0o600),
+     "receipts": (BASE + "/transport-receipts.ndjson", 400979, "180c44ad4439a96f89335a62e35a5668327a228ce164d1f31b503b867b05fe9b", 1000, 0o600),
+     "raw": (BASE + "/metadata/node/SHASUMS256.txt.asc", 4696, "cfcf12eb3146d641be185d08ca018166b98495b1d8e5f7f94ab77f9965b651d2", 1000, 0o600),
+@@ -162,10 +162,10 @@
+     "fd_lease_policy_counters_and_bounded_native_check_plan": 8192,
+ }
+ PUBLIC_FIXED_RESERVE = sum(PUBLIC_METADATA_PARTS.values())
+-# The exact fixed verifier publishes <=32768 bytes including its newline.
+-# Supervisor and verifier use the SAME compact ensure_ascii/finite stock JSON
+-# encoding as this collector. Complete parse/re-encode is byte-length stable;
+-# a separately retained inner subtree therefore needs 32768, not 65536 bytes.
++# The exact verifier's original producer limit remains32768, not a fit claim.
++# Full parsed supervisor/inner objects have exact reversible same-raw preimages;
++# wire_receipt/recover_wire_receipt verify their complete original bodies.
++# Every new history/error metadata branch still requires independent bounds.
+ # Reserve BOTH raw channels in EVERY case, including validation-red cases which
+ # can continue. Reserve an inclusive overflow byte on every channel as well.
+ # For raw n bytes, ordinary quoted ASCII is <=2*n+2. Exceptional full base64
+@@ -175,14 +175,13 @@
+ PUBLIC_RAW_STDERR = 2 * (STDERR_CAP + 1) + 16
+ PUBLIC_INNER_CAP = 32768
+ PUBLIC_PAYLOAD_KEYS = frozenset(("stdout_text", "stderr_text", "stdout_raw_base64",
+-    "stderr_raw_base64", "full_supervisor_receipt", "full_verifier_receipt"))
++    "stderr_raw_base64", "stdout_pending_raw_base64", "stderr_pending_raw_base64"))
+ PUBLIC_CASE_PAYLOAD_BOUNDS = tuple(
+     PUBLIC_RAW_STDOUT + PUBLIC_RAW_STDERR
+-    + (STDOUT_CAP + PUBLIC_INNER_CAP if i < 3 else STDOUT_CAP if i < 5 else 0)
+     for i in range(len(CASES)))
+ PUBLIC_STREAM_RESERVE = sum(PUBLIC_CASE_PAYLOAD_BOUNDS)
+ PUBLICATION_SOURCE_CONTRACT = {
+-    "schema": "friday.a131.disjoint-complete-publication.v1",
++    "schema": "friday.sol060.lossless-raw-preimage-publication.v1",
+     "fixed_metadata_bound_bytes": PUBLIC_FIXED_RESERVE,
+     "case_payload_bound_bytes": list(PUBLIC_CASE_PAYLOAD_BOUNDS),
+     "all_case_payload_bound_bytes": PUBLIC_STREAM_RESERVE,
+@@ -193,16 +192,17 @@
+     "whole_metadata_reserved_once": True,
+     "past_payloads_measured_future_payloads_reserved": True,
+     "field_removal_or_peak_subtraction": False,
+-    "fixed_producer_encoding": "same stock compact finite ensure_ascii JSON; parsed full inner remains duplicated",
++    "fixed_producer_encoding": "full raw once; exact canonical same-object preimage refs, checked reversible before emission",
+     "execution_authority": False,
+ }
+ STOP = False
+ DIRS, HELD, OWN = {}, {}, {}
+ TRACKED = []
+ ACTIVE = None
++LAUNCH_OWNERS = []
+ SELECTED = None
+ SELECT_META = None
+-R = {"schema": "friday.e4.node.ordinary-stock-outer.a172.v1", "status": "NOT_PROVEN",
++R = {"schema": "friday.e4.node.ordinary-stock-outer.sol060.v1", "status": "NOT_PROVEN",
+      "qualified_node_only": False, "GO": False, "gate_release_credit": False,
+      "Root_image_proven": False, "RAM_IO_proven": False,
+      "execution_authority": "External genuine Root native tool only; selection is ordinary DATA",
+@@ -461,6 +461,75 @@
+     return [s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid]
+ 
+ 
++ERROR_OBJECTS = []
++
++
++def exact_error(exc):
++    # Original native Python objects/tracebacks stay in the same owner lifetime.
++    # Lossless stock value graph includes UnicodeDecodeError's original bytes.
++    ERROR_OBJECTS.append(exc)
++    objects, nodes, values, cells = [exc], [], [], []
++    def ref(value):
++        if value is None:
++            return None
++        for i, old in enumerate(objects):
++            if old is value:
++                return i
++        objects.append(value)
++        return len(objects) - 1
++    def val(value):
++        if type(value) in (type(None), bool, int, str):
++            return {"literal": value}
++        if type(value) is float:
++            # Exact binary floating value, no JSON NaN or lossy decimal inference.
++            return {"float_hex": value.hex()}
++        for i, old in enumerate(values):
++            if old is value:
++                return {"value_ref": i}
++        require(type(value) in (bytes, bytearray, list, tuple, dict),
++                "unsupported native error value; original object retained, not proof")
++        values.append(value)
++        return {"value_ref": len(values) - 1}
++    i = 0
++    while i < len(objects):
++        obj = objects[i]
++        frames, tb = [], obj.__traceback__
++        while tb is not None:
++            frames.append({"file": tb.tb_frame.f_code.co_filename,
++                           "function": tb.tb_frame.f_code.co_name,
++                           "line": tb.tb_lineno, "lasti": tb.tb_lasti})
++            tb = tb.tb_next
++        nodes.append({"id": i, "module": type(obj).__module__,
++            "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
++            "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
++            "filename": val(getattr(obj, "filename", None)),
++            "filename2": val(getattr(obj, "filename2", None)),
++            "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
++            "cause": ref(obj.__cause__), "context": ref(obj.__context__),
++            "suppress_context": obj.__suppress_context__,
++            "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
++        i += 1
++    i = 0
++    while i < len(values):
++        obj = values[i]
++        if type(obj) in (bytes, bytearray):
++            cell = {"id": i, "kind": type(obj).__name__,
++                    "bytes": len(obj), "sha256": hashlib.sha256(obj).hexdigest(),
++                    "base64": base64.b64encode(obj).decode("ascii")}
++        elif type(obj) in (list, tuple):
++            cell = {"id": i, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
++        else:
++            cell = {"id": i, "kind": "dict", "pairs": [[val(k), val(v)] for k, v in obj.items()]}
++        cells.append(cell)
++        i += 1
++    return {"schema": "friday.sol060.error-graph.v2", "root": 0,
++            "nodes": nodes, "values": cells, "native_object_reconstruction": "NOT_QUALIFIED"}
++
++
++FD_ALLOCATION_HISTORY = []
++SELECT_CLOSE = {"attempted": False, "state": "NOT_ATTEMPTED", "error_object": None}
++
++
+ class OwnedFD(int):
+     """One allocation lease, not merely a reusable numeric descriptor slot."""
+     def __new__(cls, number, role, generation):
+@@ -472,47 +541,71 @@
+         value.terminal_proc_identity9 = None
+         value.retired = False
+         value.close_failed = False
++        value.allocation_record = None
+         return value
+ 
+ 
+-def register_fd(fd, role):
++def register_fd(fd, role, record=None):
+     global FD_LEASE_GENERATION
+     require(type(fd) is int and fd >= 0 and fd not in OWN,
+             "new allocation conflicts with a retained owned lease")
+     FD_LEASE_GENERATION += 1
+     lease = OwnedFD(fd, role, FD_LEASE_GENERATION)
++    if record is not None:
++        record["lease"] = lease
++        lease.allocation_record = record
+     OWN[fd] = lease
+     lease.identity9 = full9(os.fstat(fd))
+     return lease
+ 
+ 
++def preown_fd(role):
++    record = {"role": role, "number": None, "lease": None, "state": "PLANNED",
++              "attempted": False, "error_object": None, "error": None}
++    FD_ALLOCATION_HISTORY.append(record)  # before any native acquisition
++    return record
++
++
++def publish_fd(record, number):
++    record["number"], record["state"] = number, "RETURNED"
++    lease = register_fd(number, record["role"], record)
++    # register_fd/fstat failure is still owned by the prospective history above.
++    record["lease"] = lease
++    lease.allocation_record = record
++    return lease
++
++
+ def allocate_owned(operation, role, *args, **kwargs):
+-    # Only the lexical stock open/dup/pidfd operations below call this helper.
+-    # Mask the existing raising signals across syscall-return -> ledger insert.
+-    # On failure the exact returned lease remains known, never guessed/reopened.
++    record = preown_fd(role)
+     saved = signal.pthread_sigmask(signal.SIG_BLOCK, MASK)
+     try:
+-        return register_fd(operation(*args, **kwargs), role)
++        record["state"] = "ACQUIRE_UNKNOWN"
++        number = operation(*args, **kwargs)
++        return publish_fd(record, number)
++    except BaseException as exc:
++        record["error_object"] = exc
++        raise
+     finally:
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+ 
+ 
+ def allocate_pipe(role):
++    records = [preown_fd(role + ":" + str(i)) for i in (0, 1)]
++    leases = [None, None]
+     saved = signal.pthread_sigmask(signal.SIG_BLOCK, MASK)
+     try:
++        for record in records:
++            record["state"] = "ACQUIRE_UNKNOWN"
+         numbers = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
+-        # Register BOTH syscall-returned numbers before any fstat can fail.
+-        leases = []
+-        global FD_LEASE_GENERATION
+-        for i, number in enumerate(numbers):
+-            require(number not in OWN, "new pipe conflicts with retained owned lease")
+-            FD_LEASE_GENERATION += 1
+-            lease = OwnedFD(number, role + ":" + str(i), FD_LEASE_GENERATION)
+-            OWN[number] = lease
+-            leases.append(lease)
+-        for lease in leases:
+-            lease.identity9 = full9(os.fstat(lease))
++        records[0]["number"], records[1]["number"] = numbers
++        records[0]["state"] = records[1]["state"] = "RETURNED"
++        for i, record in enumerate(records):
++            leases[i] = publish_fd(record, numbers[i])
+         return leases
++    except BaseException as exc:
++        for record in records:
++            record["error_object"] = exc
++        raise
+     finally:
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+ 
+@@ -568,6 +661,9 @@
+         require_lease(fd, retiring=True)
+     fd.retired = True
+     del OWN[int(fd)]
++    record = fd.allocation_record
++    if record is not None:
++        record["attempted"], record["state"] = True, "RETIRE_UNKNOWN"
+     FD_CLOSE_ATTEMPTS += 1
+     try:
+         os.close(fd)
+@@ -576,11 +672,16 @@
+         # cause a second close on a potentially already reused numeric slot.
+         fd.close_failed = True
+         STOP = True
++        if record is not None:
++            record["error_object"] = exc
++            record["error"] = exact_error(exc)
+         require(len(FD_CLOSE_FAILURES) < 256, "bounded closure failure evidence exceeded")
+         FD_CLOSE_FAILURES.append({"fd":int(fd),"lease_generation":fd.lease_generation,
+-            "role":fd.role,"type":type(exc).__name__,"errno":getattr(exc,"errno",None)})
++            "role":fd.role,"type":type(exc).__name__,"errno":getattr(exc,"errno",None),"error":exact_error(exc),"error":exact_error(exc)})
+         raise
+     FD_CLOSE_SUCCESSES += 1
++    if record is not None:
++        record["state"] = "CONFIRMED_CLOSED"
+ 
+ 
+ def close_batch(leases):
+@@ -1315,14 +1416,14 @@
+                             signal_held(child, signal.SIGKILL)
+             except BaseException as exc:
+                 STOP = True
+-                problems.append({"stage": "freeze_or_descendants", "type": type(exc).__name__, "message": str(exc)})
++                problems.append({"stage": "freeze_or_descendants", "error": exact_error(exc)})
+             # A descendant observation failure does not skip stopping the known
+             # direct parent; actual adoptees are then reconciled independently.
+             try:
+                 stop_record(record, end)
+             except BaseException as exc:
+                 STOP = True
+-                problems.append({"stage": "exact_parent_stop_reap", "type": type(exc).__name__, "message": str(exc)})
++                problems.append({"stage": "exact_parent_stop_reap", "error": exact_error(exc)})
+         # Only actually enumerated direct adopted generations are waited. An
+         # already reaped descendant is never given an invented wait4 usage.
+         rounds = 0
+@@ -1452,6 +1553,12 @@
+     evidence[label + "_sha256"] = hashlib.sha256(raw).hexdigest()
+     evidence[label + "_eof"] = item["eof"]
+     evidence[label + "_overflow"] = item.get("overflow", False)
++    pending = item.get("pending_chunk")
++    if pending is not None:
++        evidence[label + "_pending_raw_base64"] = base64.b64encode(pending).decode("ascii")
++        evidence[label + "_pending_raw_bytes"] = len(pending)
++        evidence[label + "_pending_raw_sha256"] = hashlib.sha256(pending).hexdigest()
++        evidence[label + "_pending_append_outcome"] = "UNCONFIRMED_NOT_FULLRAW_PROOF"
+     # Normal JSON and the stock traceback use <=2x string escaping. Retain
+     # every exceptional returned byte losslessly without an unbounded escape
+     # expansion, while refusing to treat it as an ordinary ASCII receipt.
+@@ -1478,11 +1585,13 @@
+                 admit_request(bucket, request)
+                 try:
+                     require_lease(item["fd"])
+-                    data = os.read(item["fd"], request)
++                    item["pending_chunk"] = os.read(item["fd"], request)
++                    data = item["pending_chunk"]
+                 except BlockingIOError:
+                     break
+                 charge_returned(bucket, request, len(data))
+                 item["data"].extend(data)
++                item["pending_chunk"] = None
+                 if not data:
+                     item["eof"] = True
+                     capture_pipe(item, evidence)
+@@ -1530,6 +1639,10 @@
+ 
+ def launch(case, receipt, end):
+     global ACTIVE, CHILD_READ_RESERVE, PROC_PHASE, STOP, OBSERVATION_END
++    launch_owner = {"primary": None, "primary_tb": None,
++                    "capture_errors": [None, None], "close_error": None,
++                    "pipes": None, "receipt": receipt}
++    LAUNCH_OWNERS.append(launch_owner)
+     require(not CLEANUP_ATTEMPTED, "cannot fork after the single final cleanup")
+     PROC_PHASE = "launch"
+     verifier_control = case == "verifier-entry-fd7"
+@@ -1572,6 +1685,7 @@
+     gate = allocate_pipe("launch-gate")
+     pipe_pairs = []
+     pipes = []
++    launch_owner["pipes"] = pipes
+     null = None
+     gate_end = min(end, now() + 5000000000)
+     OBSERVATION_END = gate_end
+@@ -1579,7 +1693,8 @@
+         for label, cap in (("stdout", STDOUT_CAP), ("stderr", STDERR_CAP)):
+             pair = allocate_pipe("launch-pipe:" + label)
+             pipe_pairs.append(pair)
+-            pipes.append({"fd": pair[0], "label": label, "cap": cap, "data": bytearray(), "eof": False})
++            pipes.append({"fd": pair[0], "label": label, "cap": cap, "data": bytearray(),
++                          "pending_chunk": None, "eof": False})
+         null = allocate_owned(os.open, "launch-null", "null",
+             os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=component("/dev"))
+         ns = os.fstat(null)
+@@ -1603,6 +1718,7 @@
+                             os._exit(125)
+                         if number in closed_child:
+                             return
++                        closed_child.add(number)  # prospective before native close
+                         try:
+                             os.close(number)
+                         except OSError as exc:
+@@ -1611,7 +1727,6 @@
+                                 return
+                             uncertain_child.add(number)
+                             raise
+-                        closed_child.add(number)
+ 
+                     child_close_once(gate[1])  # child fork table only; parent lease stays for parent retirement
+                     while now() < gate_end:
+@@ -1725,28 +1840,38 @@
+                 receipt["own_control_private_name_absent_after"] = True
+             else:
+                 uncertain("own control name unexpectedly present; never delete")
+-    except BaseException:
++    except BaseException as primary_exc:
+         # Running admission cannot consume the independent cleanup/terminal
+         # buckets. Stop/reap while readers are still held, then observe all
+         # admitted remaining bytes/EOF before their descriptors are closed.
+         STOP = True
++        launch_owner["primary"], launch_owner["primary_tb"] = primary_exc, primary_exc.__traceback__
++        receipt["launch_firstfault"] = exact_error(primary_exc)
+         PROC_PHASE = "close"
+         if not CLEANUP_ATTEMPTED:
+             try:
+                 settle_owned()
+             except BaseException as exc:
+-                receipt["cleanup_failure"] = {"type": type(exc).__name__, "message": str(exc)}
++                receipt["cleanup_failure"] = exact_error(exc)
+         try:
+             drain_pipes(pipes, receipt, DEADLINE - 15000000000, complete=True)
+         except BaseException as exc:
+-            receipt["closure_transport_failure"] = {"type": type(exc).__name__, "message": str(exc)}
++            receipt["closure_transport_failure"] = exact_error(exc)
+         raise
+     finally:
+         # Complete data remain in the case record even if parsing, wait4,
+         # postexit telemetry or custody later refuses. No digest replaces them.
+-        for item in pipes:
+-            capture_pipe(item, receipt)
+-        receipt["transport_complete"] = bool(pipes) and all(x["eof"] and not x.get("overflow") for x in pipes)
++        first_capture_error = None
++        for index, item in enumerate(pipes):
++            try:
++                capture_pipe(item, receipt)
++            except BaseException as exc:
++                STOP = True
++                launch_owner["capture_errors"][index] = exc
++                receipt[item["label"] + "_capture_error"] = exact_error(exc)
++                first_capture_error = first_capture_error or exc
++        receipt["transport_complete"] = bool(pipes) and all(x["eof"] and not x.get("overflow")
++                and x.get("pending_chunk") is None for x in pipes) and first_capture_error is None
+         receipt["exit_code"] = record["evidence"]["exit_code"]
+         receipt["raw_wait4_rusage"] = record["evidence"]["raw_wait4_rusage"]
+         if receipt["raw_wait4_rusage"] is None:
+@@ -1757,7 +1882,17 @@
+         extra_copy = null = None
+         for pair in pipe_pairs:
+             pair[:] = [None, None]
+-        close_batch(final_aliases)
++        try:
++            close_batch(final_aliases)
++        except BaseException as exc:
++            STOP = True
++            launch_owner["close_error"] = exc
++            receipt["launch_close_secondary_error"] = exact_error(exc)
++        if launch_owner["primary"] is None:
++            if first_capture_error is not None:
++                raise first_capture_error
++            if launch_owner["close_error"] is not None:
++                raise launch_owner["close_error"]
+ 
+ 
+ def numeric_mm(item, cap):
+@@ -1845,13 +1980,51 @@
+     return sup_peak
+ 
+ 
++def validate_fullraw_layers(outer, inner):
++    # Bothside consumer: full bytes, not counters/hash-only records.
++    for name in ("stdout", "stderr"):
++        cell = outer["output"][name]
++        if cell["encoding"] == "same-inner-json-preimage":
++            require(name == "stdout" and cell["raw_base64"] is None,
++                    "same original stdout preimage required")
++            raw = canonical_object_bytes(inner) + b"\n"
++        else:
++            require(cell["encoding"] == "base64", "full supervisor raw encoding")
++            raw = base64.b64decode(cell["raw_base64"], validate=True)
++        require(cell["partial"] is False and not cell["pending_raw_base64"] and
++                len(raw) == cell["bytes"] == cell["produced_bytes"] and
++                hashlib.sha256(raw).hexdigest() == cell["sha256"],
++                "complete terminal supervisor raw/count/SHA required")
++    total = 0
++    require(inner["aggregate_gpg_output_charge_unknown"] is False,
++            "unknown GPG production is not zero")
++    for call in inner["calls"]:
++        require(call["capture_complete"] is True and call["output_charge_unknown"] is False,
++                "complete all-prefix inner raw capture required")
++        for cell in [call[k] for k in ("stdout", "stderr", "status")] + call["written_data"]:
++            if cell["encoding"] == "utf-8":
++                raw = cell["text"].encode("utf-8", "strict")
++            else:
++                require(cell["encoding"] == "base64" and cell["text"] is None,
++                        "original lossless output encoding")
++                raw = base64.b64decode(cell["raw_base64"], validate=True)
++            require(cell["retained"] is True and cell["partial"] is False and
++                    cell["bytes"] == cell["produced_bytes"] == cell["output_charge_bytes"] == len(raw)
++                    and hashlib.sha256(raw).hexdigest() == cell["sha256"] and
++                    cell["identity_before"] == cell["identity_after"],
++                    "complete inner raw/custody/count/charge mismatch")
++            total += len(raw)
++    require(total == inner["aggregate_gpg_output_bytes_including_written_key_and_body"],
++            "aggregate original raw production/count mismatch")
++
++
+ def validate_canonical(case, receipt):
+     outer = strict_json(receipt["stdout_text"].encode("ascii"), True)
+     receipt["full_supervisor_receipt"] = outer  # retained before any qualifier
+     if type(outer.get("inner_complete_evidence")) is dict:
+         receipt["full_verifier_receipt"] = outer["inner_complete_evidence"]
+     require(receipt["stderr_text"] == "" and receipt["exit_code"] == 0 and
+-            outer["schema"] == "friday.e4.node.actual-supervisor.a172.v1" and
++            outer["schema"] == "friday.e4.node.actual-supervisor.sol060.v1" and
+             outer["assignment"] == "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048"
+             and type(outer["generation"]) is int and outer["generation"] == 1 and
+             outer["qualified"] is True and outer["mode"] == case,
+@@ -1861,7 +2034,8 @@
+             "canonical terminal failure cannot qualify")
+     inner = outer["inner_complete_evidence"]
+     receipt["full_verifier_receipt"] = inner
+-    require(inner["schema"] == "friday.e4.node.bounded-verifier.a172.v1" and
++    validate_fullraw_layers(outer, inner)
++    require(inner["schema"] == "friday.e4.node.bounded-verifier.sol060.v1" and
+             inner["assignment"] == outer["assignment"] and inner["generation"] == 1,
+             "complete current verifier receipt required")
+     require(outer["actual_launch"]["argv"][11:] == inner["reviewed_invocation"]["argv"] and
+@@ -1968,7 +2142,7 @@
+         outer = strict_json(receipt["stdout_text"].encode("ascii"), True)
+         receipt["full_supervisor_receipt"] = outer
+         require(receipt["exit_code"] == 2 and receipt["stderr_text"] == "" and
+-                outer["schema"] == "friday.e4.node.actual-supervisor.a172.v1" and
++                outer["schema"] == "friday.e4.node.actual-supervisor.sol060.v1" and
+                 outer["failure"] == {"type": "Refusal", "message": "unknown bootstrap inherited descriptor"} and
+                 outer["status"] == "NOT_PROVEN" and outer["qualified"] is False and
+                 outer["fork_state"] == "NOT_ATTEMPTED" and outer["process_history"] == [] and
+@@ -1990,17 +2164,88 @@
+     return total
+ 
+ 
++def canonical_object_bytes(value):
++    return json.dumps(value, ensure_ascii=True, allow_nan=False,
++                      separators=(",", ":")).encode("ascii")
++
++
++def case_raw_stdout(case):
++    if case.get("stdout_text") is not None:
++        return case["stdout_text"].encode("ascii", "strict")
++    require(type(case.get("stdout_raw_base64")) is str,
++            "complete raw stdout preimage absent")
++    return base64.b64decode(case["stdout_raw_base64"], validate=True)
++
++
++def wire_receipt(record):
++    wire = dict(record)
++    cases = [dict(case) for case in record["cases"]]
++    wire["cases"] = cases
++    wire["raw_preimage_schema"] = "friday.sol060.same-raw-object.v1"
++    for original, case in zip(record["cases"], cases):
++        if "full_supervisor_receipt" not in original:
++            continue
++        raw = case_raw_stdout(original)
++        require(len(raw) == original["stdout_bytes"] and
++                hashlib.sha256(raw).hexdigest() == original["stdout_sha256"],
++                "full stdout reference identity/count/SHA mismatch")
++        full = original["full_supervisor_receipt"]
++        require(canonical_object_bytes(full) + b"\n" == raw,
++                "parsed full supervisor has no exact canonical raw preimage")
++        case["full_supervisor_receipt"] = {
++            "$same_raw": "stdout-json", "bytes": len(raw),
++            "sha256": original["stdout_sha256"]}
++        if "full_verifier_receipt" in original:
++            require(full.get("inner_complete_evidence") is original["full_verifier_receipt"],
++                    "full verifier is not the original same-object inner subtree")
++            case["full_verifier_receipt"] = {"$same_raw": "supervisor-inner"}
++    return wire
++
++
++def recover_wire_receipt(wire):
++    # Existing caller is also the complete codec consumer: no new role/provider.
++    # Only the SAME case's complete existing raw bytes are admissible references.
++    require(wire["raw_preimage_schema"] == "friday.sol060.same-raw-object.v1",
++            "exact current fullraw reference grammar required")
++    record = dict(wire)
++    del record["raw_preimage_schema"]
++    cases = [dict(case) for case in wire["cases"]]
++    record["cases"] = cases
++    for case in cases:
++        full = case.get("full_supervisor_receipt")
++        if type(full) is not dict or "$same_raw" not in full:
++            continue
++        require(set(full) == {"$same_raw", "bytes", "sha256"} and
++                full["$same_raw"] == "stdout-json", "full supervisor reference grammar")
++        raw = case_raw_stdout(case)
++        require(len(raw) == full["bytes"] == case["stdout_bytes"] and
++                hashlib.sha256(raw).hexdigest() == full["sha256"] == case["stdout_sha256"],
++                "same raw preimage count/SHA mismatch")
++        parsed = strict_json(raw, True)
++        require(canonical_object_bytes(parsed) + b"\n" == raw,
++                "lossless parsed preimage canonical equality required")
++        case["full_supervisor_receipt"] = parsed
++        inner = case.get("full_verifier_receipt")
++        if type(inner) is dict and "$same_raw" in inner:
++            require(inner == {"$same_raw": "supervisor-inner"} and
++                    type(parsed.get("inner_complete_evidence")) is dict,
++                    "exact original full inner subtree required")
++            case["full_verifier_receipt"] = parsed["inner_complete_evidence"]
++    return record
++
++
+ def public_partition_bytes():
+     # This is a byte partition, NOT a shortened output or a placeholder copy.
+     # Container punctuation and each key/colon belong to metadata. Only the six
+     # explicitly named whole case payload VALUES belong to that case's cell.
+     # Every other whole value belongs to metadata, including all error branches.
+     # The cells therefore cover the normal complete JSON exactly and disjointly.
+-    fixed = 2 + max(0, len(R) - 1)
++    projected = wire_receipt(R)
++    fixed = 2 + max(0, len(projected) - 1)
+     payloads = [0] * len(CASES)
+     require(type(R.get("cases")) is list and len(R["cases"]) == len(CASES),
+             "complete original all-six publication rows required")
+-    for key, value in R.items():
++    for key, value in projected.items():
+         fixed += public_value_bytes(key) + 1
+         if key != "cases":
+             fixed += public_value_bytes(value)
+@@ -2030,7 +2275,7 @@
+     require(not any(payloads[index:]), "future case payload already present before fork")
+     # Observed fixed bytes are inside the ONE whole metadata allowance, never
+     # added a second time. Only past payloads are present; only future cells are
+-    # reserved. No arbitrary subtraction, raw/parsed dedup, or field removal.
++    # reserved. Only exact reversible preimage sharing, never raw field removal.
+     future = sum(PUBLIC_CASE_PAYLOAD_BOUNDS[index:])
+     require(PUBLIC_FIXED_RESERVE + sum(payloads[:index]) + future + 1 <= PUBLIC_CAP,
+             "complete future serialization reserve unavailable before fork")
+@@ -2050,7 +2295,7 @@
+                 settle_owned()
+             except BaseException as exc:
+                 STOP = True
+-                problems.append({"stage": "known_own_cleanup", "type": type(exc).__name__, "message": str(exc)})
++                problems.append({"stage": "known_own_cleanup", "error": exact_error(exc)})
+         elif R.get("owned_cleanup_complete") is not True:
+             STOP = True
+             problems.append({"stage": "known_own_cleanup", "type": "Refusal",
+@@ -2068,7 +2313,7 @@
+                     prepare_proc_retirement(record)
+         except BaseException as exc:
+             STOP = True
+-            problems.append({"stage": "terminal_own_observation", "type": type(exc).__name__, "message": str(exc)})
++            problems.append({"stage": "terminal_own_observation", "error": exact_error(exc)})
+         try:
+             require(SELECT_META is not None and set(HELD) == set(FIXED) | set(LOCAL),
+                     "full nineteen held inputs unavailable; partial custody cannot qualify")
+@@ -2076,13 +2321,13 @@
+             R["terminal_full_nineteen_SHA_confirmed"] = True
+         except BaseException as exc:
+             STOP = True
+-            problems.append({"stage": "terminal_full_custody", "type": type(exc).__name__, "message": str(exc)})
++            problems.append({"stage": "terminal_full_custody", "error": exact_error(exc)})
+         try:
+             sample_outer("terminal")
+             R["terminal_current_memory_observed"] = True
+         except BaseException as exc:
+             STOP = True
+-            problems.append({"stage": "terminal_current_resources", "type": type(exc).__name__, "message": str(exc)})
++            problems.append({"stage": "terminal_current_resources", "error": exact_error(exc)})
+         R["terminal_once"] = {"attempted": True, "problems": problems,
+                               "cleanup_attempted_once": CLEANUP_ATTEMPTED,
+                               "complete": not problems and R.get("owned_cleanup_complete") is True}
+@@ -2132,7 +2377,7 @@
+     take_budget("expectations_body", HELD["expectations"]["size"] + 1)
+     data = read_at(HELD["expectations"]["fd"], HELD["expectations"]["size"] + 1, 0)
+     expectations = strict_json(data, data.endswith(b"\n"))
+-    require(expectations["schema"] == "friday.e4.node.ordinary-case-expectations.a172.v1" and
++    require(expectations["schema"] == "friday.e4.node.ordinary-case-expectations.sol060.v1" and
+             expectations["case_order"] == list(CASES) and expectations["authority"] == "NONE_ORDINARY_DATA",
+             "current complete ordinary case DATA required")
+     require(expectations.get("lifetime_memory_source_contract") == LIFETIME_MEMORY_CONTRACT,
+@@ -2173,7 +2418,7 @@
+             validate_canonical(case, receipt) if index < 3 else validate_entry(case, receipt)
+             qualified_case = True
+         except BaseException as exc:
+-            receipt["failure"] = {"type": type(exc).__name__, "message": str(exc)}
++            receipt["failure"] = exact_error(exc)
+             if ("read budget unavailable" in str(exc) or
+                     "read capacity unavailable" in str(exc) or
+                     str(exc) == "outer cumulative read ceiling exceeded"):
+@@ -2191,7 +2436,7 @@
+                     settle_owned()
+                 except BaseException as cleanup_exc:
+                     globals()["STOP"] = True
+-                    receipt["cleanup_failure"] = {"type": type(cleanup_exc).__name__, "message": str(cleanup_exc)}
++                    receipt["cleanup_failure"] = exact_error(cleanup_exc)
+             # A stopped/incomplete supervisor is not a product-only red result.
+             if receipt.get("full_supervisor_receipt", {}).get("status") == "STOP_UNCONFIRMED":
+                 globals()["STOP"] = True
+@@ -2204,7 +2449,7 @@
+         except BaseException as exc:
+             globals()["STOP"] = True
+             qualified_case = False
+-            receipt["completion_resource_failure"] = {"type": type(exc).__name__, "message": str(exc)}
++            receipt["completion_resource_failure"] = exact_error(exc)
+         if qualified_case and not STOP:
+             receipt["status"] = "CAUSE_CONFIRMED" if case != "verify-node" else "QUALIFIED_NODE_PUBLISHER_CHAIN_ONLY"
+     finish_terminal()
+@@ -2214,6 +2459,7 @@
+ 
+ 
+ def close_final():
++    global FD_CLOSE_ATTEMPTS, FD_CLOSE_SUCCESSES
+     closed = []
+     for fd in sorted(list(OWN.values()), key=int, reverse=True):
+         try:
+@@ -2222,19 +2468,52 @@
+         except BaseException as exc:
+             R.setdefault("descriptor_closure_errors", []).append({"fd": int(fd),
+                 "lease_generation":fd.lease_generation,"errno":getattr(exc,"errno",None),
+-                "type":type(exc).__name__})
++                "type":type(exc).__name__, "error": exact_error(exc)})
+             globals()["STOP"] = True
++    # A failed wrapper/map/fstat must not erase an already returned allocation.
++    # These never-published records are exact original native returns, not guessed
++    # integer slots and not admitted input/proc leases with relaxed identity.
++    for record in FD_ALLOCATION_HISTORY:
++        lease = record["lease"]
++        if record["state"] != "RETURNED" or record["attempted"]:
++            continue
++        if lease is not None and OWN.get(int(lease)) is lease:
++            continue  # previous identity refusal is sticky; not a retry bypass
++        saved = signal.pthread_sigmask(signal.SIG_BLOCK, MASK)
++        try:
++            record["attempted"], record["state"] = True, "RETIRE_UNKNOWN"
++            if lease is not None:
++                lease.retired = True
++            FD_CLOSE_ATTEMPTS += 1
++            os.close(record["number"])
++            record["state"] = "CONFIRMED_CLOSED"
++            FD_CLOSE_SUCCESSES += 1
++        except BaseException as exc:
++            record["error_object"] = exc
++            record["error"] = exact_error(exc)
++            FD_CLOSE_FAILURES.append({"fd": record["number"], "role": record["role"],
++                                      "unpublished_returned_allocation": True,
++                                      "error": record["error"]})
++            globals()["STOP"] = True
++        finally:
++            signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+     # fd3 is a caller-selected ordinary input. It is known and accepted above,
+     # and may be closed only if its identity was actually registered.
+     if SELECT_META is not None:
+         try:
+             require(full9(os.fstat(3)) == SELECT_META, "known selected DATA identity changed before closure")
++            require(not SELECT_CLOSE["attempted"], "selected DATA once-close already attempted")
++            SELECT_CLOSE["attempted"], SELECT_CLOSE["state"] = True, "RETIRE_UNKNOWN"
+             os.close(3)
++            SELECT_CLOSE["state"] = "CONFIRMED_CLOSED"
+             closed.append(3)
+         except BaseException as exc:
+-            R["selected_DATA_closure_failure"] = {"type": type(exc).__name__, "message": str(exc)}
++            SELECT_CLOSE["error_object"] = exc
++            R["selected_DATA_closure_failure"] = exact_error(exc)
+             globals()["STOP"] = True
+     R["known_owned_fds_closed"] = closed
++    R["selected_DATA_onceclose"] = {"attempted": SELECT_CLOSE["attempted"],
++                                    "state": SELECT_CLOSE["state"]}
+     R["fd_lease_closure"] = {"allocations":FD_LEASE_GENERATION,
+         "close_attempts":FD_CLOSE_ATTEMPTS,"successful_closes":FD_CLOSE_SUCCESSES,
+         "unconfirmed_closes":list(FD_CLOSE_FAILURES),"remaining_leases":len(OWN),
+@@ -2244,13 +2523,19 @@
+         "clock_calls":CLOCK_CALLS,"natural_ending_attempts":NATURAL_EXIT_ATTEMPTS,
+         "implicit_IO":"UNKNOWN_NOT_ZERO"}
+     R["all_known_owned_fds_closed"] = (len(OWN) == 0 and not FD_CLOSE_FAILURES
+-        and SELECT_META is not None and 3 in closed)
++        and SELECT_META is not None and 3 in closed
++        and all(r["state"] in ("PLANNED", "CONFIRMED_CLOSED") for r in FD_ALLOCATION_HISTORY))
++    R["descriptor_allocation_history"] = [{k:r[k] for k in
++        ("role", "number", "state", "attempted", "error")} for r in FD_ALLOCATION_HISTORY]
+ 
+ 
+ def encode_complete():
+     public_plan_fits(len(CASES))
+     blocks, total = [], 0
+-    for part in json.JSONEncoder(ensure_ascii=True, allow_nan=False, separators=(",", ":")).iterencode(R):
++    projected = wire_receipt(R)
++    restored = recover_wire_receipt(projected)
++    require(restored == R, "lossless complete original receipt round-trip failed")
++    for part in json.JSONEncoder(ensure_ascii=True, allow_nan=False, separators=(",", ":")).iterencode(projected):
+         due()
+         block = part.encode("ascii")
+         total += len(block)
+@@ -2282,7 +2567,7 @@
+     try:
+         main()
+     except BaseException as exc:
+-        R["failure"] = {"type": type(exc).__name__, "message": str(exc)}
++        R["failure"] = exact_error(exc)
+         R["qualified_node_only"] = False
+     finally:
+         if DEADLINE > 0:
+@@ -2290,7 +2575,7 @@
+                 finish_terminal()
+             except BaseException as exc:
+                 STOP = True
+-                R["terminal_failure"] = {"type": type(exc).__name__, "message": str(exc)}
++                R["terminal_failure"] = exact_error(exc)
+         close_final()
+     R["explicit_reads"]["outer_actual_content_bytes"] = READS
+     R["explicit_reads"]["own_child_bootstrap_upper_debit_bytes"] = CHILD_READ_RESERVE
+--- LAB863/supervisor.py
++++ SOL060/supervisor.py
+@@ -3,6 +3,7 @@
+ are independently trusted and pinned by the host, before bootstrap Python.
+ That trust is not created by this program or a hash receipt. No invocation now.
+ """
++import base64
+ import datetime
+ import fcntl
+ import hashlib
+@@ -18,13 +19,13 @@
+ import time
+ 
+ ASSIGNMENT = "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048"
+-PREFIX = "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure"
++PREFIX = "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure"
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+ EXPECTED = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ ARCHIVE_SHA = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+-SOURCE_SHA = "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9"
+-CONTRACT_SHA = "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418"
++SOURCE_SHA = "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e"
++CONTRACT_SHA = "ed4c5043e0c2fbb6022f15b4998dd142cc14eafe3846666f38070f21d27396ff"
+ ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+ SUP_AS, PARENT_AS, GPG_AS = 33554432, 117440512, 67108864
+ STREAM, OUTPUT = 32768, 65536
+@@ -39,8 +40,6 @@
+ REGISTRATION_SIGNALS = set(signal.valid_signals()) - {signal.SIGKILL, signal.SIGSTOP}
+ LAUNCH_RESERVE = {"null": None, "copies": [None, None, None, None],
+                   "gate": [None, None], "probe": None, "gate_identity": None}
+-CLOSED_NUMBERS = set()
+-UNCERTAIN_NUMBERS = set()
+ EMPTY_PRE_FORK = False
+ CLEANUP_END = None
+ CONTRACT_HASH_BINDING = {"fixed_binding": "sealed_contract_full_sha256",
+@@ -50,7 +49,7 @@
+ HOME = {"state": "NOT_PLANNED", "name": None, "parent_identity": None,
+         "prelaunch_absent": None, "postexit_absent": None}
+ STOP = False
+-R = {"schema": "friday.e4.node.actual-supervisor.a172.v1", "assignment": ASSIGNMENT,
++R = {"schema": "friday.e4.node.actual-supervisor.sol060.v1", "assignment": ASSIGNMENT,
+      "generation": 1, "status": "NOT_PROVEN", "scope": "exact Node publisher byte chain only",
+      "qualified_trust": "Independently admitted installed bootstrap/verifier Python, stdlib/libc, prlimit, GPG/gpgv, loaders/libraries, Linux/proc/pidfd/subreaper and unprivileged exclusive host assumptions; source and receipts do not establish that trust.",
+      "custody": {}, "resources": {},
+@@ -62,8 +61,8 @@
+ PINS = {
+     "prlimit": ("/usr/bin/prlimit", 27616, "cb28811cb3902773c1a0f3ac0ea554c7a1e232724e9d4cae055ede54b65a7bc4", 65536, True),
+     "python": ("/usr/bin/python3.14", 7477160, "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41", 8388608, True),
+-    "source": (PREFIX + "/verifier.py", 62097, SOURCE_SHA, 262144, False),
+-    "contract": (PREFIX + "/launch-contract.json", 48250, CONTRACT_SHA, 262144, False),
++    "source": (PREFIX + "/verifier.py", 71834, SOURCE_SHA, 262144, False),
++    "contract": (PREFIX + "/launch-contract.json", 48583, CONTRACT_SHA, 262144, False),
+     "gpg": ("/usr/bin/gpg", 1186456, "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754", 2097152, True),
+     "gpgv": ("/usr/bin/gpgv", 302296, "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d", 1048576, True),
+     "bill": ("/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json", 466956, "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2", 1048576, False),
+@@ -94,6 +93,200 @@
+     raise Refusal("STOP_UNCONFIRMED: " + why)
+ 
+ 
++
++FD_HISTORY = []
++FD_GENERATION = 0
++FD_SIGNALS = set(signal.valid_signals()) - {signal.SIGKILL, signal.SIGSTOP}
++ERROR_OBJECTS = []
++
++
++def exact_error(exc):
++    # Original native Python objects/tracebacks stay in the same owner lifetime.
++    # Lossless stock value graph includes UnicodeDecodeError's original bytes.
++    ERROR_OBJECTS.append(exc)
++    objects, nodes, values, cells = [exc], [], [], []
++    def ref(value):
++        if value is None:
++            return None
++        for i, old in enumerate(objects):
++            if old is value:
++                return i
++        objects.append(value)
++        return len(objects) - 1
++    def val(value):
++        if type(value) in (type(None), bool, int, str):
++            return {"literal": value}
++        if type(value) is float:
++            # Exact binary floating value, no JSON NaN or lossy decimal inference.
++            return {"float_hex": value.hex()}
++        for i, old in enumerate(values):
++            if old is value:
++                return {"value_ref": i}
++        require(type(value) in (bytes, bytearray, list, tuple, dict),
++                "unsupported native error value; original object retained, not proof")
++        values.append(value)
++        return {"value_ref": len(values) - 1}
++    i = 0
++    while i < len(objects):
++        obj = objects[i]
++        frames, tb = [], obj.__traceback__
++        while tb is not None:
++            frames.append({"file": tb.tb_frame.f_code.co_filename,
++                           "function": tb.tb_frame.f_code.co_name,
++                           "line": tb.tb_lineno, "lasti": tb.tb_lasti})
++            tb = tb.tb_next
++        nodes.append({"id": i, "module": type(obj).__module__,
++            "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
++            "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
++            "filename": val(getattr(obj, "filename", None)),
++            "filename2": val(getattr(obj, "filename2", None)),
++            "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
++            "cause": ref(obj.__cause__), "context": ref(obj.__context__),
++            "suppress_context": obj.__suppress_context__,
++            "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
++        i += 1
++    i = 0
++    while i < len(values):
++        obj = values[i]
++        if type(obj) in (bytes, bytearray):
++            cell = {"id": i, "kind": type(obj).__name__,
++                    "bytes": len(obj), "sha256": hashlib.sha256(obj).hexdigest(),
++                    "base64": base64.b64encode(obj).decode("ascii")}
++        elif type(obj) in (list, tuple):
++            cell = {"id": i, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
++        else:
++            cell = {"id": i, "kind": "dict", "pairs": [[val(k), val(v)] for k, v in obj.items()]}
++        cells.append(cell)
++        i += 1
++    return {"schema": "friday.sol060.error-graph.v2", "root": 0,
++            "nodes": nodes, "values": cells, "native_object_reconstruction": "NOT_QUALIFIED"}
++
++
++class AllocationFD(int):
++    def __new__(cls, record):
++        result = int.__new__(cls, record["number"])
++        result.allocation = record
++        return result
++
++
++def reserve_allocation(where):
++    global FD_GENERATION
++    FD_GENERATION += 1
++    record = {"generation": FD_GENERATION, "where": where, "number": None,
++              "state": "PLANNED", "attempted_once": False,
++              "acquire_error_object": None, "close_error_object": None,
++              "close_error": None, "token": None}
++    # History/record exist before native effect. There is no post-close add/set.
++    FD_HISTORY.append(record)
++    return record
++
++
++def publish_allocation(record, number):
++    record["number"] = number  # native return is owned before wrapper allocation
++    record["state"] = "RETURNED"
++    require(type(number) is int and number >= 0, "invalid exact returned FD")
++    require(not any(old is not record and old["number"] == number and
++                old["state"] in ("RETURNED", "RETIRE_UNKNOWN") for old in FD_HISTORY),
++            "returned FD conflicts with retained allocation; never guess close")
++    token = AllocationFD(record)
++    record["token"] = token
++    return token
++
++
++def acquire_owned(operation, where, *args, **kwargs):
++    record = reserve_allocation(where)
++    saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
++    try:
++        record["state"] = "ACQUIRE_UNKNOWN"
++        number = operation(*args, **kwargs)
++        return publish_allocation(record, number)
++    except BaseException as exc:
++        record["acquire_error_object"] = exc
++        raise
++    finally:
++        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
++
++
++def acquire_pipe(where):
++    records = [reserve_allocation(where + ":read"), reserve_allocation(where + ":write")]
++    tokens = [None, None]
++    saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
++    try:
++        for record in records:
++            record["state"] = "ACQUIRE_UNKNOWN"
++        numbers = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
++        # BOTH numbers known before ANY wrapper/validation can fail.
++        records[0]["number"], records[1]["number"] = numbers
++        records[0]["state"] = records[1]["state"] = "RETURNED"
++        tokens[0] = publish_allocation(records[0], numbers[0])
++        tokens[1] = publish_allocation(records[1], numbers[1])
++        return tokens
++    except BaseException as exc:
++        for record in records:
++            record["acquire_error_object"] = exc
++        raise
++    finally:
++        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
++
++
++def adopt_exact_fd(number, where):
++    # Only independently verified initial inherited/runtime roles call this.
++    return publish_allocation(reserve_allocation(where), number)
++
++
++def retire_record(record):
++    global STOP
++    if record["attempted_once"]:
++        require(record["state"] == "CONFIRMED_CLOSED",
++                "earlier allocation close unconfirmed; NEVER retry")
++        return
++    require(record["state"] == "RETURNED" and record["number"] is not None,
++            "unknown acquisition is not a known returned allocation")
++    record["attempted_once"] = True
++    record["state"] = "RETIRE_UNKNOWN"  # prospective, sticky before native close
++    try:
++        os.close(record["number"])
++    except BaseException as exc:
++        STOP = True
++        record["close_error_object"] = exc  # stored before fallible projection
++        record["close_error"] = exact_error(exc)
++        raise
++    record["state"] = "CONFIRMED_CLOSED"
++
++
++def close_allocation(fd, where):
++    if fd is None:
++        return
++    require(isinstance(fd, AllocationFD), "unregistered numeric close refused")
++    saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
++    try:
++        return retire_record(fd.allocation)
++    finally:
++        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
++
++
++def finish_allocations():
++    global STOP
++    first = None
++    # Finite same-owner graph. Do not reclose retired old aliases or reuse ints.
++    for record in FD_HISTORY:
++        if record["state"] == "RETURNED" and not record["attempted_once"]:
++            try:
++                retire_record(record)
++            except BaseException as exc:
++                first = first or exc
++    unresolved = [record for record in FD_HISTORY if record["state"] not in
++                  ("PLANNED", "CONFIRMED_CLOSED")]
++    R["descriptor_allocation_history"] = [{k: r[k] for k in
++        ("generation", "where", "number", "state", "attempted_once", "close_error")}
++        for r in FD_HISTORY]
++    if unresolved:
++        STOP = True
++    if first is not None:
++        raise first
++    require(not unresolved, "same-owner acquisition/retirement outcomes unresolved")
++
++
+ def due(reserve=5):
+     require(time.monotonic_ns() < DEADLINE - reserve * 1000000000,
+             "host wall deadline/reserve exceeded")
+@@ -120,12 +313,12 @@
+         return DIRS[path][0]
+     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+     if path == "/":
+-        fd = os.open("/", flags)
++        fd = acquire_owned(os.open, "open", "/", flags)
+     else:
+         parent, name = os.path.split(path)
+         require(name not in ("", ".", ".."), "bad fixed component")
+         pfd = component(parent or "/")
+-        fd = os.open(name, flags, dir_fd=pfd)
++        fd = acquire_owned(os.open, "open", name, flags, dir_fd=pfd)
+         try:
+             require(ident(os.stat(name, dir_fd=pfd, follow_symlinks=False), True)
+                     == ident(os.fstat(fd), True), "component open race")
+@@ -133,7 +326,7 @@
+             try:
+                 close_taken(fd, "component_unpublished")
+             except BaseException:
+-                STOP = True
++                globals()["STOP"] = True
+             raise
+     DIRS[path] = (fd, ident(os.fstat(fd), True))
+     return fd
+@@ -142,7 +335,7 @@
+ def regular(path):
+     parent, name = os.path.split(path)
+     pfd = component(parent)
+-    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=pfd)
++    fd = acquire_owned(os.open, "open", name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=pfd)
+     try:
+         before = os.fstat(fd)
+         require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+@@ -201,28 +394,28 @@
+                     and digest(item["fd"], size, cap) == expected
+                     and digest(fd, size, cap) == expected, "post/launch full-byte drift: " + name)
+         finally:
+-            os.close(fd)
++            close_allocation(fd, "lexical_close")
+     R["custody_" + phase] = True
+ 
+ 
+ def kernel_file(path, cap=16384):
+-    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
++    fd = acquire_owned(os.open, "open", path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+     try:
+         data = os.read(fd, cap + 1)
+         require(len(data) <= cap, "kernel observation exceeds cap")
+         return data
+     finally:
+-        os.close(fd)
++        close_allocation(fd, "lexical_close")
+ 
+ 
+ def kernel_at(procfd, name, cap=16384):
+-    fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=procfd)
++    fd = acquire_owned(os.open, "open", name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=procfd)
+     try:
+         data = os.read(fd, cap + 1)
+         require(len(data) <= cap, "held proc observation exceeds cap")
+         return data
+     finally:
+-        os.close(fd)
++        close_allocation(fd, "lexical_close")
+ 
+ 
+ def proc(pid, procfd=None):
+@@ -345,7 +538,7 @@
+ 
+ 
+ def open_proc(pid):
+-    return os.open("/proc/" + str(pid), os.O_RDONLY | os.O_DIRECTORY
++    return acquire_owned(os.open, "open", "/proc/" + str(pid), os.O_RDONLY | os.O_DIRECTORY
+                    | os.O_CLOEXEC | os.O_NOFOLLOW)
+ 
+ 
+@@ -414,7 +607,7 @@
+             TRACKED.append(record)
+             R["process_history"].append(evidence)
+             record["procfd"], LAUNCH_RESERVE["probe"] = probe, None
+-            record["pidfd"] = os.pidfd_open(pid, 0)
++            record["pidfd"] = acquire_owned(os.pidfd_open, "pidfd", pid, 0)
+             after = starttime(pid, record["procfd"])
+             require(before == after and pidfd_number(record["pidfd"]) == pid,
+                     "new held pidfd/proc generation was not stable")
+@@ -558,14 +751,44 @@
+         require(0 <= size <= STREAM, "kernel transport slot cap exceeded")
+         while item["offset"] < size:
+             due()
+-            chunk = os.pread(item["fd"], min(4096, size - item["offset"]), item["offset"])
++            item["pending_chunk"] = os.pread(item["fd"], min(4096, size - item["offset"]), item["offset"])
++            chunk = item["pending_chunk"]
+             require(bool(chunk), "short owned transport")
+             item["data"].extend(chunk)
+             item["offset"] += len(chunk)
++            item["pending_chunk"] = None
+         require(sum(len(x["data"]) for x in TRANSPORT) <= OUTPUT, "aggregate transport cap")
+-    R["output"] = {item["label"]: {"bytes": len(item["data"]),
+-                                   "sha256": hashlib.sha256(item["data"]).hexdigest()}
+-                   for item in TRANSPORT}
++    R["output"] = {item["label"]: transport_projection(item) for item in TRANSPORT}
++
++
++def transport_projection(item):
++    raw = bytes(item["data"])
++    inner = R.get("inner_complete_evidence")
++    same_inner = (item["label"] == "stdout" and type(inner) is dict and
++                  json.dumps(inner, ensure_ascii=True, allow_nan=False,
++                             separators=(",", ":")).encode("ascii") + b"\n" == raw)
++    return {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
++            "raw_base64": None if same_inner else base64.b64encode(raw).decode("ascii"),
++            "encoding": "same-inner-json-preimage" if same_inner else "base64",
++            "produced_bytes": item.get("produced_bytes"),
++            "partial": bool(item.get("partial")),
++            "pending_raw_base64": base64.b64encode(item.get("pending_chunk") or b"").decode("ascii"),
++            "retain_error": item.get("retain_error")}
++
++
++def restore_transport_raw(record, cell):
++    if cell["encoding"] == "same-inner-json-preimage":
++        require(cell["raw_base64"] is None and type(record.get("inner_complete_evidence")) is dict,
++                "original same inner preimage absent")
++        raw = json.dumps(record["inner_complete_evidence"], ensure_ascii=True,
++                         allow_nan=False, separators=(",", ":")).encode("ascii") + b"\n"
++    else:
++        require(cell["encoding"] == "base64" and type(cell["raw_base64"]) is str,
++                "full transport raw encoding required")
++        raw = base64.b64decode(cell["raw_base64"], validate=True)
++    require(len(raw) == cell["bytes"] and hashlib.sha256(raw).hexdigest() == cell["sha256"],
++            "recovered full transport byte/count/SHA mismatch")
++    return raw
+ 
+ 
+ def take_reserved(key, index=None):
+@@ -579,26 +802,7 @@
+ 
+ 
+ def close_taken(fd, where):
+-    if fd is None:
+-        return
+-    number = int(fd)
+-    if number in UNCERTAIN_NUMBERS:
+-        raise Refusal("earlier descriptor close unconfirmed; no retry")
+-    if number in CLOSED_NUMBERS:
+-        return
+-    try:
+-        os.close(number)
+-    except BaseException as exc:
+-        global STOP
+-        STOP = True
+-        UNCERTAIN_NUMBERS.add(number)
+-        bucket = R.setdefault("close_uncertain", [])
+-        if len(bucket) < 64:
+-            bucket.append({"where": where, "fd": number, "type": type(exc).__name__,
+-                           "errno": getattr(exc, "errno", None)})
+-        raise
+-    CLOSED_NUMBERS.add(number)
+-
++    return close_allocation(fd, where)
+ 
+ def close_launch_reserve():
+     saved = signal.pthread_sigmask(signal.SIG_BLOCK, REGISTRATION_SIGNALS)
+@@ -623,7 +827,8 @@
+             size = os.fstat(item["fd"]).st_size
+         except BaseException as exc:
+             item["partial"] = True
+-            item["retain_error"] = type(exc).__name__
++            item["retain_error_object"] = exc
++            item["retain_error"] = exact_error(exc)
+             size = None
+         item["produced_bytes"] = size
+         if size is None:
+@@ -633,10 +838,12 @@
+             if room <= 0:
+                 break
+             try:
+-                chunk = os.pread(item["fd"], room, item["offset"])
++                item["pending_chunk"] = os.pread(item["fd"], room, item["offset"])
++                chunk = item["pending_chunk"]
+             except BaseException as exc:
+                 item["partial"] = True
+-                item["retain_error"] = type(exc).__name__
++                item["retain_error_object"] = exc
++                item["retain_error"] = exact_error(exc)
+                 break
+             if not chunk:
+                 item["partial"] = True
+@@ -644,17 +851,14 @@
+                 break
+             item["data"].extend(chunk)
+             item["offset"] += len(chunk)
++            item["pending_chunk"] = None
+             total += len(chunk)
+         if item["offset"] < size:
+             item["partial"] = True
+-        current = R.setdefault("output", {}).get(item["label"])
+-        if item.get("partial") or not isinstance(current, dict):
+-            R["output"][item["label"]] = {
+-                "bytes": len(item["data"]),
+-                "sha256": hashlib.sha256(bytes(item["data"])).hexdigest(),
+-                "produced_bytes": size,
+-                "partial": bool(item.get("partial")),
+-            }
++        elif item.get("pending_chunk") is None and item.get("retain_error") is None:
++            # Completion is about the settled exact producer AND full stable FD.
++            item["partial"] = not (CHILD is not None and CHILD["reaped"])
++        R["output"][item["label"]] = transport_projection(item)
+ 
+ 
+ def register_parent(origin):
+@@ -668,7 +872,7 @@
+     require(before[0] == os.getpid(), "created verifier is not our actual direct child")
+     CHILD["start_ticks"] = before[1]
+     if CHILD["pidfd"] is None:
+-        CHILD["pidfd"] = os.pidfd_open(pid, 0)
++        CHILD["pidfd"] = acquire_owned(os.pidfd_open, "pidfd", pid, 0)
+     require(starttime(pid, CHILD["procfd"]) == before
+             and pidfd_number(CHILD["pidfd"]) == pid,
+             "created verifier held pidfd/proc generation not stable")
+@@ -800,17 +1004,20 @@
+     else:
+         raise Refusal("supervisor private name already exists; never launch/delete")
+     for label in ("stdout", "stderr"):
+-        fd = os.memfd_create("A048-supervised-" + label, os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+-        TRANSPORT.append({"label": label, "fd": fd, "offset": 0, "data": bytearray()})
++        item = {"label": label, "fd": None, "offset": 0, "data": bytearray(),
++                "pending_chunk": None, "retain_error_object": None, "retain_error": None,
++                "produced_bytes": None, "partial": True}
++        TRANSPORT.append(item)
++        item["fd"] = acquire_owned(os.memfd_create, "memfd", "A048-supervised-" + label, os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+     devparent = component("/dev")
+-    LAUNCH_RESERVE["null"] = os.open("null", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=devparent)
++    LAUNCH_RESERVE["null"] = acquire_owned(os.open, "open", "null", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=devparent)
+     nullfd = LAUNCH_RESERVE["null"]
+     nullstat = os.fstat(nullfd)
+     require(stat.S_ISCHR(nullstat.st_mode) and nullstat.st_rdev == os.makedev(1, 3)
+             and nullstat.st_uid == 0, "trusted /dev/null device mismatch")
+     for index, tool in enumerate(("prlimit", "python", "source", "contract")):
+-        LAUNCH_RESERVE["copies"][index] = fcntl.fcntl(HELD[tool]["fd"], fcntl.F_DUPFD_CLOEXEC, 16)
+-    LAUNCH_RESERVE["gate"][:] = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
++        LAUNCH_RESERVE["copies"][index] = acquire_owned(fcntl.fcntl, "launch_copy", HELD[tool]["fd"], fcntl.F_DUPFD_CLOEXEC, 16)
++    LAUNCH_RESERVE["gate"][:] = acquire_pipe("launch_gate")
+     gate = os.fstat(LAUNCH_RESERVE["gate"][0])
+     LAUNCH_RESERVE["gate_identity"] = {"dev": gate.st_dev, "ino": gate.st_ino, "mode": gate.st_mode}
+     as_bytes = CHILD["as_bytes"]
+@@ -931,10 +1138,12 @@
+     require(CHILD["samples"] > 0, "mandatory actual live verifier sample never obtained")
+ 
+ 
+-def cleanup_problem(why):
++def cleanup_problem(why, original=None):
+     global STOP
+     STOP = True
+     R.setdefault("owned_cleanup_problems", []).append(str(why))
++    if original is not None:
++        R.setdefault("owned_cleanup_original_errors", []).append(exact_error(original))
+ 
+ 
+ def terminate_owned():
+@@ -959,7 +1168,7 @@
+             try:
+                 recover_pending_fork(end)
+             except BaseException as exc:
+-                cleanup_problem("exact fork recovery failed: " + type(exc).__name__ + ": " + str(exc))
++                cleanup_problem("exact fork recovery failed: " + type(exc).__name__ + ": " + str(exc), exc)
+         elif FORK_STATE not in ("NOT_ATTEMPTED", "DEFINITELY_NOT_CREATED"):
+             cleanup_problem("fork state has no exact retained child PID")
+         close_launch_reserve()  # refused gate cannot admit child execution
+@@ -1023,7 +1232,7 @@
+                 # Preserve the problem and still perform safe known-parent
+                 # shutdown. Adopted enumeration below can establish newly seen
+                 # exact generations, but never erases sticky uncertainty.
+-                cleanup_problem("frozen child registration/stop failed: " + type(exc).__name__ + ": " + str(exc))
++                cleanup_problem("frozen child registration/stop failed: " + type(exc).__name__ + ": " + str(exc), exc)
+             finally:
+                 if not exited(CHILD["pidfd"]) and time.monotonic_ns() < end:
+                     signal.pidfd_send_signal(CHILD["pidfd"], signal.SIGKILL)
+@@ -1052,7 +1261,7 @@
+                 reaped_by_supervisor=True, reap_owner="confirmed subreaper adoption and exact wait4",
+                 exit_code=os.waitstatus_to_exitcode(status), raw_wait4_ru_maxrss_kib=usage.ru_maxrss)
+         except BaseException as exc:
+-            cleanup_problem("actual adopted generation cleanup failed: " + type(exc).__name__ + ": " + str(exc))
++            cleanup_problem("actual adopted generation cleanup failed: " + type(exc).__name__ + ": " + str(exc), exc)
+     for record in TRACKED:
+         if record["pidfd"] is None:
+             cleanup_problem("enumerated generation lacks its exact held pidfd")
+@@ -1125,7 +1334,7 @@
+ 
+ 
+ def validate_common_inner(inner, mode):
+-    require(inner["schema"] == "friday.e4.node.bounded-verifier.a172.v1"
++    require(inner["schema"] == "friday.e4.node.bounded-verifier.sol060.v1"
+             and type(inner["generation"]) is int and inner["generation"] == 1,
+             "complete current inner schema/generation required")
+     require(not any(key in inner for key in (
+@@ -1188,6 +1397,29 @@
+                 "actual aggregate supervisor+inner high-water exceeds256MiB")
+     output, scratch = (inner["aggregate_gpg_output_bytes_including_written_key_and_body"],
+                        inner["own_scratch_bytes_final_before_cleanup"])
++    require(inner.get("aggregate_gpg_output_charge_unknown") is False,
++            "unobserved produced output is not an observed zero")
++    total = 0
++    for call_item in inner["calls"]:
++        require(call_item.get("capture_complete") is True and
++                call_item.get("output_charge_unknown") is False and
++                call_item.get("failure") is None and not call_item.get("secondary_errors"),
++                "complete terminal raw/error-capture schema required")
++        cells = [call_item[name] for name in ("stdout", "stderr", "status")] + call_item["written_data"]
++        for cell in cells:
++            if cell["encoding"] == "utf-8":
++                raw = cell["text"].encode("utf-8", "strict")
++            else:
++                require(cell["encoding"] == "base64" and cell["text"] is None,
++                        "lossless original raw encoding required")
++                raw = base64.b64decode(cell["raw_base64"], validate=True)
++            require(cell["retained"] is True and cell["partial"] is False and
++                    cell["bytes"] == cell["produced_bytes"] == cell["output_charge_bytes"] == len(raw)
++                    and hashlib.sha256(raw).hexdigest() == cell["sha256"] and
++                    cell["identity_before"] == cell["identity_after"],
++                    "complete fullraw/count/SHA/custody/charge required")
++            total += len(raw)
++    require(total == output, "produced output aggregate differs from complete raw cells")
+     require(type(output) is int and 0 <= output <= OUTPUT
+             and type(scratch) is int and 0 <= scratch <= 16515072,
+             "actual inner aggregate output/scratch observation missing or noncompliant")
+@@ -1356,6 +1588,7 @@
+ FFI_PATH = "/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0"
+ FFI_SHA = "1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa"
+ FFI_SIZE = 64184
++INHERITED_OWNED = []
+ RUNTIME = None
+ RUNTIME_READS = 0
+ CHILD_RUNTIME_READS = 0  # distinct future child scope; never a copied parent debit
+@@ -1446,7 +1679,7 @@
+     fd = extra[0]
+     require(fd not in inherited and 6 <= fd < 128,
+             "new runtime descriptor collides with trusted bootstrap or escapes close window")
+-    RUNTIME = {"fd": fd, "own_new": True, "closed": False, "proven": False,
++    RUNTIME = {"fd": adopt_exact_fd(fd, "runtime"), "own_new": True, "closed": False, "proven": False,
+                "provenance": "ABSENT_AT_STRICT_INHERITED_ENTRY_NEW_DURING_STOCK_CALLBACK_PREPARATION"}
+     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+     require(fcntl.fcntl(fd, fcntl.F_GETFD) == fcntl.FD_CLOEXEC, "own runtime descriptor is not CLOEXEC")
+@@ -1534,6 +1767,8 @@
+     require(os.getresuid() == (1000, 1000, 1000) and os.getresgid() == (1000, 1000, 1000)
+             and dict(os.environ) == ENV, "unprivileged exact bootstrap ENV required")
+     prove_strict_inherited_before_ctypes()
++    global INHERITED_OWNED
++    INHERITED_OWNED = [adopt_exact_fd(fd, "inherited_low") for fd in (3, 4, 5)]
+     for kind, pair in ((resource.RLIMIT_AS, (SUP_AS, PARENT_AS)), (resource.RLIMIT_CPU, (120, 120)),
+                        (resource.RLIMIT_FSIZE, (STREAM, STREAM)), (resource.RLIMIT_NOFILE, (64, 128)),
+                        (resource.RLIMIT_CORE, (0, 0))):
+@@ -1573,6 +1808,10 @@
+ 
+ 
+ def encode(record):
++    if record is R:
++        for item in TRANSPORT:
++            require(restore_transport_raw(record, record["output"][item["label"]]) == bytes(item["data"]),
++                    "lossless complete raw transport preimage mismatch")
+     chunks, count = [], 0
+     for part in json.JSONEncoder(ensure_ascii=True, allow_nan=False,
+                                 separators=(",", ":")).iterencode(record):
+@@ -1604,7 +1843,7 @@
+     R["status"] = outcome
+     qualified = True
+ except BaseException as exc:
+-    R["failure"] = {"type": type(exc).__name__, "message": str(exc)}
++    R["failure"] = exact_error(exc)
+ finally:
+     # Every failure takes the same finite exact-owned shutdown and custody path.
+     for action, field in ((terminate_owned, "cleanup_failure"),
+@@ -1615,14 +1854,14 @@
+         except BaseException as exc:
+             qualified = False
+             STOP = True
+-            R[field] = {"type": type(exc).__name__, "message": str(exc)}
++            R[field] = exact_error(exc)
+     if CHILD is not None and CHILD["reaped"] and len(TRANSPORT) == 2:
+         try:
+             capture_inner_evidence()
+         except BaseException as exc:
+             qualified = False
+             R["inner_evidence_capture_failure"] = {
+-                "type": type(exc).__name__, "message": str(exc)}
++                "error": exact_error(exc)}
+     try:
+         retain_produced_transport()
+         for item in TRANSPORT:
+@@ -1657,7 +1896,7 @@
+         if RUNTIME is not None and RUNTIME.get("own_new") and not RUNTIME["closed"]:
+             RUNTIME["closed"] = True
+             close_taken(RUNTIME["fd"], "runtime")
+-        for fd in (3, 4, 5):
++        for fd in INHERITED_OWNED:
+             close_taken(fd, "inherited_low")
+         R["all_supervisor_owned_descriptors_closed"] = True
+         R["own_runtime_descriptor_closed"] = RUNTIME["closed"] if RUNTIME else None
+@@ -1668,7 +1907,14 @@
+     except BaseException as exc:
+         qualified = False
+         STOP = True
+-        R["descriptor_cleanup_failure"] = type(exc).__name__
++        R["descriptor_cleanup_failure"] = exact_error(exc)
++
++try:
++    finish_allocations()
++except BaseException as exc:
++    STOP = True
++    qualified = False
++    R["allocation_cleanup_failure"] = exact_error(exc)
+ 
+ try:
+     due(0)
+@@ -1687,31 +1933,11 @@
+     public = encode(R)
+ except BaseException as exc:
+     qualified = False
+-    # This is an explicitly incomplete refusal receipt, never a fitted/truncated
+-    # successful proof. Preserve exact known ownership/home states and histories.
+-    refusal = {"schema": "friday.e4.node.supervisor-incomplete-refusal.a048.v1",
+-               "assignment": ASSIGNMENT, "generation": 1, "qualified": False,
+-               "status": "STOP_UNCONFIRMED" if STOP else "NOT_PROVEN",
+-               "mandatory_evidence_complete": False,
+-               "failure": "complete outer serialization/deadline failed",
+-               "cause": type(exc).__name__, "home": HOME, "fork_state": FORK_STATE,
+-               "fork_registration": R["fork_registration"],
+-               "owned_parent_pid": CHILD["pid"] if CHILD is not None else None,
+-               "owned_parent_reaped": CHILD["reaped"] if CHILD is not None else None,
+-               "process_history": R["process_history"], "owned_cleanup": R.get("owned_cleanup"),
+-               "owned_cleanup_problems": R.get("owned_cleanup_problems"),
+-               "complete_source_sha256": SOURCE_SHA, "complete_contract_sha256": CONTRACT_SHA,
+-               "runtime_explicit_read_bytes": RUNTIME_READS,
+-               "runtime_read_reset_or_subtracted": False,
+-               "child_read_carry": R.get("child_read_carry"), "implicit_io": "UNKNOWN_NOT_ZERO",
+-               "inner_evidence_delivered": False, "inner_transport": R["output"]}
+-    try:
+-        public = json.dumps(refusal, ensure_ascii=True, allow_nan=False,
+-                            separators=(",", ":")).encode("ascii") + b"\n"
+-        if len(public) > OUTPUT:
+-            os._exit(3 if STOP else 2)  # no field removal to obtain a receipt
+-    except BaseException:
+-        os._exit(3 if STOP else 2)
++    # Keep original R/raw/cause graph. No shortened/hash-only receipt is proof.
++    ERROR_OBJECTS.append(exc)
++    R["publication_failure"] = exact_error(exc)
++    os._exit(3 if STOP else 2)  # full receipt fit CODE_OPEN, never new output cap
++
+ try:
+     emit(public)
+ except BaseException:
+--- LAB863/verifier.py
++++ SOL060/verifier.py
+@@ -90,7 +90,7 @@
+ VERIFIER_RUNTIME = None
+ 
+ ASSIGNMENT = "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048"
+-PREFIX = "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure"
++PREFIX = "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure"
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ EXPECTED = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+@@ -116,7 +116,9 @@
+ ACTIVE = None
+ STOP = False
+ TOTAL_OUTPUT = 0
+-R = {"schema": "friday.e4.node.bounded-verifier.a172.v1",
++OUTPUT_UNKNOWN = False
++CALL_OWNERS = []
++R = {"schema": "friday.e4.node.bounded-verifier.sol060.v1",
+      "assignment": ASSIGNMENT, "generation": 1, "status": "NOT_PROVEN",
+      "calls": [], "custody": {}, "resources": {}, "cleanup": {},
+      "resource_schema": "friday.e4.node.verifier-resources.a172.v1",
+@@ -146,6 +148,200 @@
+     raise Refusal("STOP_UNCONFIRMED: " + why)
+ 
+ 
++
++FD_HISTORY = []
++FD_GENERATION = 0
++FD_SIGNALS = set(signal.valid_signals()) - {signal.SIGKILL, signal.SIGSTOP}
++ERROR_OBJECTS = []
++
++
++def exact_error(exc):
++    # Original native Python objects/tracebacks stay in the same owner lifetime.
++    # Lossless stock value graph includes UnicodeDecodeError's original bytes.
++    ERROR_OBJECTS.append(exc)
++    objects, nodes, values, cells = [exc], [], [], []
++    def ref(value):
++        if value is None:
++            return None
++        for i, old in enumerate(objects):
++            if old is value:
++                return i
++        objects.append(value)
++        return len(objects) - 1
++    def val(value):
++        if type(value) in (type(None), bool, int, str):
++            return {"literal": value}
++        if type(value) is float:
++            # Exact binary floating value, no JSON NaN or lossy decimal inference.
++            return {"float_hex": value.hex()}
++        for i, old in enumerate(values):
++            if old is value:
++                return {"value_ref": i}
++        require(type(value) in (bytes, bytearray, list, tuple, dict),
++                "unsupported native error value; original object retained, not proof")
++        values.append(value)
++        return {"value_ref": len(values) - 1}
++    i = 0
++    while i < len(objects):
++        obj = objects[i]
++        frames, tb = [], obj.__traceback__
++        while tb is not None:
++            frames.append({"file": tb.tb_frame.f_code.co_filename,
++                           "function": tb.tb_frame.f_code.co_name,
++                           "line": tb.tb_lineno, "lasti": tb.tb_lasti})
++            tb = tb.tb_next
++        nodes.append({"id": i, "module": type(obj).__module__,
++            "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
++            "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
++            "filename": val(getattr(obj, "filename", None)),
++            "filename2": val(getattr(obj, "filename2", None)),
++            "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
++            "cause": ref(obj.__cause__), "context": ref(obj.__context__),
++            "suppress_context": obj.__suppress_context__,
++            "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
++        i += 1
++    i = 0
++    while i < len(values):
++        obj = values[i]
++        if type(obj) in (bytes, bytearray):
++            cell = {"id": i, "kind": type(obj).__name__,
++                    "bytes": len(obj), "sha256": hashlib.sha256(obj).hexdigest(),
++                    "base64": base64.b64encode(obj).decode("ascii")}
++        elif type(obj) in (list, tuple):
++            cell = {"id": i, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
++        else:
++            cell = {"id": i, "kind": "dict", "pairs": [[val(k), val(v)] for k, v in obj.items()]}
++        cells.append(cell)
++        i += 1
++    return {"schema": "friday.sol060.error-graph.v2", "root": 0,
++            "nodes": nodes, "values": cells, "native_object_reconstruction": "NOT_QUALIFIED"}
++
++
++class AllocationFD(int):
++    def __new__(cls, record):
++        result = int.__new__(cls, record["number"])
++        result.allocation = record
++        return result
++
++
++def reserve_allocation(where):
++    global FD_GENERATION
++    FD_GENERATION += 1
++    record = {"generation": FD_GENERATION, "where": where, "number": None,
++              "state": "PLANNED", "attempted_once": False,
++              "acquire_error_object": None, "close_error_object": None,
++              "close_error": None, "token": None}
++    # History/record exist before native effect. There is no post-close add/set.
++    FD_HISTORY.append(record)
++    return record
++
++
++def publish_allocation(record, number):
++    record["number"] = number  # native return is owned before wrapper allocation
++    record["state"] = "RETURNED"
++    require(type(number) is int and number >= 0, "invalid exact returned FD")
++    require(not any(old is not record and old["number"] == number and
++                old["state"] in ("RETURNED", "RETIRE_UNKNOWN") for old in FD_HISTORY),
++            "returned FD conflicts with retained allocation; never guess close")
++    token = AllocationFD(record)
++    record["token"] = token
++    return token
++
++
++def acquire_owned(operation, where, *args, **kwargs):
++    record = reserve_allocation(where)
++    saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
++    try:
++        record["state"] = "ACQUIRE_UNKNOWN"
++        number = operation(*args, **kwargs)
++        return publish_allocation(record, number)
++    except BaseException as exc:
++        record["acquire_error_object"] = exc
++        raise
++    finally:
++        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
++
++
++def acquire_pipe(where):
++    records = [reserve_allocation(where + ":read"), reserve_allocation(where + ":write")]
++    tokens = [None, None]
++    saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
++    try:
++        for record in records:
++            record["state"] = "ACQUIRE_UNKNOWN"
++        numbers = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
++        # BOTH numbers known before ANY wrapper/validation can fail.
++        records[0]["number"], records[1]["number"] = numbers
++        records[0]["state"] = records[1]["state"] = "RETURNED"
++        tokens[0] = publish_allocation(records[0], numbers[0])
++        tokens[1] = publish_allocation(records[1], numbers[1])
++        return tokens
++    except BaseException as exc:
++        for record in records:
++            record["acquire_error_object"] = exc
++        raise
++    finally:
++        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
++
++
++def adopt_exact_fd(number, where):
++    # Only independently verified initial inherited/runtime roles call this.
++    return publish_allocation(reserve_allocation(where), number)
++
++
++def retire_record(record):
++    global STOP
++    if record["attempted_once"]:
++        require(record["state"] == "CONFIRMED_CLOSED",
++                "earlier allocation close unconfirmed; NEVER retry")
++        return
++    require(record["state"] == "RETURNED" and record["number"] is not None,
++            "unknown acquisition is not a known returned allocation")
++    record["attempted_once"] = True
++    record["state"] = "RETIRE_UNKNOWN"  # prospective, sticky before native close
++    try:
++        os.close(record["number"])
++    except BaseException as exc:
++        STOP = True
++        record["close_error_object"] = exc  # stored before fallible projection
++        record["close_error"] = exact_error(exc)
++        raise
++    record["state"] = "CONFIRMED_CLOSED"
++
++
++def close_allocation(fd, where):
++    if fd is None:
++        return
++    require(isinstance(fd, AllocationFD), "unregistered numeric close refused")
++    saved = signal.pthread_sigmask(signal.SIG_BLOCK, FD_SIGNALS)
++    try:
++        return retire_record(fd.allocation)
++    finally:
++        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
++
++
++def finish_allocations():
++    global STOP
++    first = None
++    # Finite same-owner graph. Do not reclose retired old aliases or reuse ints.
++    for record in FD_HISTORY:
++        if record["state"] == "RETURNED" and not record["attempted_once"]:
++            try:
++                retire_record(record)
++            except BaseException as exc:
++                first = first or exc
++    unresolved = [record for record in FD_HISTORY if record["state"] not in
++                  ("PLANNED", "CONFIRMED_CLOSED")]
++    R["descriptor_allocation_history"] = [{k: r[k] for k in
++        ("generation", "where", "number", "state", "attempted_once", "close_error")}
++        for r in FD_HISTORY]
++    if unresolved:
++        STOP = True
++    if first is not None:
++        raise first
++    require(not unresolved, "same-owner acquisition/retirement outcomes unresolved")
++
++
+ def due(cleanup=False):
+     require(time.monotonic_ns() < (DEADLINE_NS if cleanup else MAIN_END_NS),
+             "whole-launch deadline or reserved cleanup boundary exceeded")
+@@ -175,12 +371,12 @@
+         return DIRECTORIES[path][0]
+     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+     if path == "/":
+-        fd = os.open("/", flags)
++        fd = acquire_owned(os.open, "open", "/", flags)
+     else:
+         parent, name = os.path.split(path)
+         require(name not in ("", ".", ".."), "bad directory component")
+         pfd = directory(parent or "/")
+-        fd = os.open(name, flags, dir_fd=pfd)
++        fd = acquire_owned(os.open, "open", name, flags, dir_fd=pfd)
+         try:
+             require(identity(os.stat(name, dir_fd=pfd, follow_symlinks=False), True)
+                     == identity(os.fstat(fd), True), "directory open race")
+@@ -188,7 +384,7 @@
+             try:
+                 close_once(fd, "directory_unpublished")
+             except BaseException:
+-                STOP = True
++                globals()["STOP"] = True
+             raise
+     s = os.fstat(fd)
+     require(stat.S_ISDIR(s.st_mode), "component is not a directory")
+@@ -212,7 +408,7 @@
+     parent, name = os.path.split(path)
+     require(path.startswith("/") and name not in ("", ".", ".."), "bad file path")
+     pfd = directory(parent)
+-    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=pfd)
++    fd = acquire_owned(os.open, "open", name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=pfd)
+     try:
+         s = os.fstat(fd)
+         require(stat.S_ISREG(s.st_mode) and s.st_nlink == 1, "not single-link regular file")
+@@ -302,14 +498,14 @@
+ def mm(pid="self"):
+     # /proc is kernel telemetry, not source/authority input. Missing child samples
+     # remain None; they are never reported as a zero measurement.
+-    fd = os.open("/proc/" + str(pid) + "/status", os.O_RDONLY | os.O_CLOEXEC)
++    fd = acquire_owned(os.open, "open", "/proc/" + str(pid) + "/status", os.O_RDONLY | os.O_CLOEXEC)
+     try:
+         _read_room(16385)
+         data = os.read(fd, 16385)
+         _charge_content(len(data))
+         require(len(data) <= 16384, "oversize /proc status")
+     finally:
+-        os.close(fd)
++        close_allocation(fd, "lexical_close")
+     answer = {}
+     for line in data.splitlines():
+         m = re.fullmatch(rb"(VmSize|VmRSS|VmHWM|VmPeak):\s+([0-9]+) kB", line)
+@@ -350,7 +546,7 @@
+ 
+ def new_mem(name, data=b"", sealed=False):
+     require(len(data) <= RAW, "own raw/body cap")
+-    fd = os.memfd_create("A048-" + name, os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
++    fd = acquire_owned(os.memfd_create, "memfd", "A048-" + name, os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+     OWN.add(fd)
+     pos = 0
+     while pos < len(data):
+@@ -368,104 +564,97 @@
+ 
+ 
+ def close_once(fd, where):
+-    if fd is None:
+-        return
+-    number = int(fd)
+-    if number in UNCERTAIN_FDS:
+-        stop("earlier owned descriptor close unconfirmed; no retry")
+-    if number in RETIRED_FDS:
++    return close_allocation(fd, where)
++
++def close_own(fd):
++    require(isinstance(fd, AllocationFD), "unregistered own close")
++    if fd.allocation["attempted_once"]:
++        return close_once(fd, "own")
++    require(fd in OWN, "close of an unowned allocation refused")
++    OWN.remove(fd)
++    return close_once(fd, "own")
++
++def raw_cell(name, fd=None):
++    return {"name": name, "fd": fd, "attempted_once": False,
++            "produced_bytes": None, "bytes": None, "sha256": None,
++            "partial": True, "retained": False, "encoding": None, "text": None,
++            "raw_base64": None, "output_charge_bytes": None,
++            "identity_before": None, "identity_after": None,
++            "capture_error": None, "decode_error": None,
++            "raw_object": {"parts": [], "pending": None, "tail": None,
++                           "capture_error_object": None, "decode_error_object": None}}
++
++
++def retain_cell(cell, quota, settled, written=False):
++    global TOTAL_OUTPUT, OUTPUT_UNKNOWN
++    if cell["attempted_once"]:
++        return  # no second physical read/charge, not a retry after an error
++    cell["attempted_once"] = True
++    owner = cell["raw_object"]
++    if cell["fd"] is None:
++        cell["capture_error"] = {"not_created_or_no_returned_fd": True}
++        OUTPUT_UNKNOWN = True
+         return
+     try:
+-        os.close(number)
++        before = identity(os.fstat(cell["fd"]))
++        cell["identity_before"] = before
++        produced = before["size"]
++        require(type(produced) is int and produced >= 0, "unknown produced size")
++        cell["produced_bytes"] = produced
++        cell["output_charge_bytes"] = produced
++        TOTAL_OUTPUT += produced  # actual observed production, not retained-prefix count
++        require(produced <= quota and TOTAL_OUTPUT <= OUTPUT,
++                "produced output exceeds original per-file/aggregate quota")
++        require(settled, "unsettled producer cannot supply terminal fullraw")
++        pos = 0
++        while pos < produced:
++            amount = min(65536, produced - pos)
++            _read_room(amount)
++            owner["pending"] = os.pread(cell["fd"], amount, pos)
++            _charge_content(len(owner["pending"]))
++            require(bool(owner["pending"]), "short produced output read")
++            owner["parts"].append(owner["pending"])
++            pos += len(owner["pending"])
++            owner["pending"] = None
++        _read_room(1)
++        owner["tail"] = os.pread(cell["fd"], 1, pos)
++        _charge_content(len(owner["tail"]))
++        cell["identity_after"] = identity(os.fstat(cell["fd"]))
++        require(not owner["tail"] and cell["identity_after"] == before,
++                "produced output EOF/fullidentity drift")
++        cell["partial"] = False
+     except BaseException as exc:
+-        UNCERTAIN_FDS.add(number)
+-        bucket = R.setdefault("close_uncertain", [])
+-        if len(bucket) < 64:
+-            bucket.append({"where": where, "fd": number, "type": type(exc).__name__,
+-                           "errno": getattr(exc, "errno", None)})
+-        raise
+-    RETIRED_FDS.add(number)
+-
+-
+-def close_own(fd):
+-    if fd in UNCERTAIN_FDS:
+-        stop("earlier owned descriptor close unconfirmed; no retry")
+-    require(fd in OWN, "close of an unowned numeric descriptor refused")
+-    OWN.remove(fd)
+-    close_once(fd, "own")
+-
+-
+-def retain_stream(item, name, fd, quota):
+-    global TOTAL_OUTPUT
+-    if isinstance(item.get(name), dict) and item[name].get("retained"):
+-        return
+-    parts = []
+-    partial = False
+-    reason = None
+-    produced = None
+-    try:
+-        before = identity(os.fstat(fd))
+-        produced = before["size"]
+-        if type(produced) is not int or produced < 0:
+-            partial = True
+-            reason = "unreadable size"
+-        else:
+-            want = produced if produced <= quota else quota
+-            if produced > quota:
+-                partial = True
+-            pos = 0
+-            while pos < want:
+-                amount = min(65536, want - pos)
+-                _read_room(amount)
+-                chunk = os.pread(fd, amount, pos)
+-                _charge_content(len(chunk))
+-                if not chunk:
+-                    partial = True
+-                    reason = "short read"
+-                    break
+-                parts.append(chunk)
+-                pos += len(chunk)
+-            if not partial:
+-                _read_room(1)
+-                tail = os.pread(fd, 1, pos)
+-                _charge_content(len(tail))
+-                if tail or identity(os.fstat(fd)) != before:
+-                    partial = True
+-                    reason = "length or identity changed"
+-    except BaseException as exc:
+-        partial = True
+-        reason = type(exc).__name__
++        owner["capture_error_object"] = exc  # native object held before projection
++        cell["capture_error"] = exact_error(exc)
++        OUTPUT_UNKNOWN = OUTPUT_UNKNOWN or cell["produced_bytes"] is None or not settled
++    # Every successful/partial returned chunk remains owned even if join/encode fails.
++    parts = owner["parts"] + ([owner["pending"]] if owner["pending"] is not None else [])
+     data = b"".join(parts)
+-    TOTAL_OUTPUT += len(data)
+-    record = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+-              "produced_bytes": produced, "partial": partial, "retained": True,
+-              "text": None, "encoding": None}
+-    if reason is not None:
+-        record["retain_error"] = reason
+-    item[name] = record
+-    try:
+-        record["text"] = data.decode("utf-8", "strict")
+-        record["encoding"] = "utf-8"
+-    except UnicodeError as exc:
+-        record["encoding"] = "base64"
+-        record["raw_base64"] = base64.b64encode(data).decode("ascii")
+-        record["decode_error"] = type(exc).__name__
+-
+-
+-def retain_writable(item, fd, quota):
+-    global TOTAL_OUTPUT
+-    produced = os.fstat(fd).st_size
+-    partial = type(produced) is not int or produced < 0 or produced > quota
+-    want = 0 if type(produced) is not int or produced < 0 else min(produced, quota)
+-    _read_room(want if want else 1)
+-    data = os.pread(fd, want, 0) if want else b""
+-    _charge_content(len(data))
+-    if len(data) != want:
+-        partial = True
+-    TOTAL_OUTPUT += len(data)
+-    item.setdefault("written_data", []).append({
+-        "fd": fd, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+-        "produced_bytes": produced, "partial": partial})
++    cell["bytes"] = len(data)
++    cell["sha256"] = hashlib.sha256(data).hexdigest()
++    cell["retained"] = not cell["partial"] and len(data) == cell["produced_bytes"]
++    # One lossless representation, never a hash-only writable snapshot.
++    if written:
++        cell["encoding"] = "base64"
++        cell["raw_base64"] = base64.b64encode(data).decode("ascii")
++    else:
++        try:
++            text = data.decode("utf-8", "strict")
++            escaped = len(json.dumps(text, ensure_ascii=True, separators=(",", ":")))
++            if escaped <= 2 * len(data) + 2:
++                cell["text"], cell["encoding"] = text, "utf-8"
++            else:
++                cell["raw_base64"], cell["encoding"] = base64.b64encode(data).decode("ascii"), "base64"
++        except UnicodeError as exc:
++            owner["decode_error_object"] = exc
++            cell["decode_error"] = exact_error(exc)
++            cell["raw_base64"], cell["encoding"] = base64.b64encode(data).decode("ascii"), "base64"
++
++
++def published_cell(cell):
++    # Raw object and original errors stay in this owner until native process end.
++    # JSON carries full reversible bytes + complete projected causal errors.
++    return {k: v for k, v in cell.items() if k != "raw_object"}
+ 
+ 
+ def armor(raw, label):
+@@ -549,42 +738,61 @@
+ 
+ 
+ def call(label, tool, args, inputs, writable=()):
+-    global ACTIVE, TOTAL_OUTPUT
+-    due()
+-    require(ACTIVE is None and len(R["calls"]) < 8, "child concurrency/call cap")
+-    custody()
+-    resources("before_call_" + str(len(R["calls"]) + 1))
+-    scratch()
+-    remaining = OUTPUT - TOTAL_OUTPUT
+-    quota = remaining // (3 + len(writable))
+-    require(quota > 0, "aggregate GPG output budget exhausted")
+-    streams = [new_mem(label + suffix) for suffix in ("-stdout", "-stderr", "-status")]
+-    out, err, statusfd = streams
+-    expanded = [str(statusfd) if value == "{STATUS}" else value for value in args]
+-    pfd, tfd = FILES["prlimit"]["fd"], FILES[tool]["fd"]
+-    limits = ["--as=67108864:67108864", "--cpu=20:20",
+-              "--fsize=" + str(quota) + ":" + str(quota),
+-              "--nofile=128:128", "--core=0:0", "--nproc=0:0"]
+-    command = ["prlimit"] + limits + ["--", "/proc/self/fd/" + str(tfd)] + expanded
+-    passed = tuple(sorted(set([pfd, tfd, statusfd] + list(inputs) + list(writable))))
+-    item = {"label": label, "executable": "/proc/self/fd/" + str(pfd),
+-            "argv": command, "tool_fd": tfd, "shell": False,
+-            "env": dict(ENV, HOME=HOME, GNUPGHOME=HOME), "pass_fds": list(passed),
+-            "preexec_hard_and_soft_as": AS_CHILD, "per_file_output_cap": quota,
+-            "all_output_slots": 3 + len(writable), "timeout_seconds": 30,
++    global ACTIVE
++    # Complete owner graph/slots before ANY call prefix, including constructor.
++    stream_cells = [raw_cell(name) for name in ("stdout", "stderr", "status")]
++    write_cells = [raw_cell("written", fd) for fd in writable]
++    streams = [None, None, None]
++    secondary_objects = []
++    item = {"label": label, "rc": None, "reaped": False, "pid": None,
++            "spawn_state": "NOT_ATTEMPTED", "failure": None,
++            "secondary_errors": [], "capture_complete": False,
++            "stdout": None, "stderr": None, "status": None, "written_data": [],
++            "output_charge_unknown": True, "elapsed_seconds": None,
+             "child_proc_status_sample": None,
+             "child_proc_status_missing_reason": "child not yet observed alive",
+-            "complete_child_samples": 0, "reaped": False}
++            "complete_child_samples": 0}
++    start, p, primary, primary_tb, quota = time.monotonic_ns(), None, None, None, None
+     R["calls"].append(item)
+-    start, p = time.monotonic_ns(), None
++    # Nonserialized exact objects are owned by a separate same-lifetime graph.
++    owner = {"record": item, "streams": stream_cells, "written": write_cells,
++             "primary": None, "primary_tb": None, "secondary": secondary_objects,
++             "popen": None}
++    CALL_OWNERS.append(owner)
+     try:
++        due()
++        require(ACTIVE is None and len(R["calls"]) <= 8, "child concurrency/call cap")
++        custody()
++        resources("before_call_" + str(len(R["calls"])))
++        scratch()
++        remaining = OUTPUT - TOTAL_OUTPUT
++        quota = remaining // (3 + len(writable))
++        require(quota > 0, "aggregate GPG output budget exhausted")
++        item.update(per_file_output_cap=quota, all_output_slots=3 + len(writable),
++                    timeout_seconds=30, preexec_hard_and_soft_as=AS_CHILD)
++        for i, suffix in enumerate(("-stdout", "-stderr", "-status")):
++            streams[i] = new_mem(label + suffix)
++            stream_cells[i]["fd"] = streams[i]
++        out, err, statusfd = streams
++        expanded = [str(statusfd) if value == "{STATUS}" else value for value in args]
++        pfd, tfd = FILES["prlimit"]["fd"], FILES[tool]["fd"]
++        limits = ["--as=67108864:67108864", "--cpu=20:20",
++                  "--fsize=" + str(quota) + ":" + str(quota),
++                  "--nofile=128:128", "--core=0:0", "--nproc=0:0"]
++        command = ["prlimit"] + limits + ["--", "/proc/self/fd/" + str(tfd)] + expanded
++        passed = tuple(sorted(set([pfd, tfd, statusfd] + list(inputs) + list(writable))))
++        item.update(executable="/proc/self/fd/" + str(pfd), argv=command,
++                    tool_fd=tfd, shell=False, env=dict(ENV, HOME=HOME, GNUPGHOME=HOME),
++                    pass_fds=list(passed))
++        item["spawn_state"] = "UNKNOWN_BEFORE_POPEN"
+         p = subprocess.Popen(command, executable="/proc/self/fd/" + str(pfd),
+                              env=item["env"], stdin=subprocess.DEVNULL,
+                              stdout=out, stderr=err, pass_fds=passed,
+                              close_fds=True, shell=False,
+                              preexec_fn=lambda: child_limits(quota))
++        owner["popen"] = p
+         ACTIVE = p
+-        item["pid"] = p.pid
++        item["pid"], item["spawn_state"] = p.pid, "RETURNED_EXACT_POPEN"
+         while p.poll() is None:
+             due()
+             require(time.monotonic_ns() - start < 30000000000, "GPG child wall timeout")
+@@ -593,8 +801,6 @@
+                 item["child_proc_status_sample"] = sample
+                 item["child_proc_status_missing_reason"] = None
+                 item["complete_child_samples"] += 1
+-                # supervisor32MiB + verifier112MiB + fork112MiB =256MiB;
+-                # after child preexec:32+112+64=208MiB. All four are real.
+                 require(all(sample[k] <= AS_PARENT // 1024 for k in
+                             ("VmSize_kib", "VmRSS_kib", "VmHWM_kib", "VmPeak_kib")),
+                         "child transient memory budget exceeded")
+@@ -608,41 +814,55 @@
+             item["child_proc_status_missing_reason"] = "child exited before any complete live sample; kernel caps and actual child high-water remain separate"
+         item["rc"], item["reaped"] = p.returncode, True
+         ACTIVE = None
+-        for name, fd in zip(("stdout", "stderr", "status"), streams):
+-            retain_stream(item, name, fd, quota)
+-        item["written_data"] = []
+-        for fd in writable:
+-            retain_writable(item, fd, min(quota, RAW))
+-        require(TOTAL_OUTPUT <= OUTPUT, "aggregate output cap")
+-        require(all(isinstance(item.get(name), dict) and item[name].get("encoding") == "utf-8"
+-                    and not item[name].get("partial")
+-                    for name in ("stdout", "stderr", "status")),
+-                "complete utf-8 stream required on the normal return")
+-        scratch()
+-        custody()
+-        return item
++    except BaseException as exc:
++        primary, primary_tb = exc, exc.__traceback__
++        owner["primary"], owner["primary_tb"] = primary, primary_tb
++        item["failure"] = exact_error(exc)
+     finally:
+-        try:
+-            if p is not None and not item["reaped"]:
++        if p is not None and not item["reaped"]:
++            try:
+                 reap(p)
+-                item["reaped"] = True
+-            item["elapsed_seconds"] = (time.monotonic_ns() - start) / 1e9
+-            for name, fd in zip(("stdout", "stderr", "status"), streams):
+-                if not (isinstance(item.get(name), dict) and item[name].get("retained")):
+-                    retain_stream(item, name, fd, quota)
+-            seen = {row.get("fd") for row in item.get("written_data") or [] if isinstance(row, dict)}
+-            item.setdefault("written_data", [])
+-            for fd in writable:
+-                if fd in seen:
+-                    continue
+-                try:
+-                    retain_writable(item, fd, min(quota, RAW))
+-                except BaseException as exc:
+-                    item["written_data"].append({"fd": int(fd), "partial": True,
+-                                                 "retain_error": type(exc).__name__})
+-        finally:
+-            for fd in streams:
++                item["rc"], item["reaped"] = p.returncode, True
++            except BaseException as exc:
++                secondary_objects.append(exc)
++                item["secondary_errors"].append(exact_error(exc))
++        elif item["spawn_state"] == "NOT_ATTEMPTED":
++            item["reaped"] = True  # no creation attempt, not a fabricated child rc
++        item["elapsed_seconds"] = (time.monotonic_ns() - start) / 1e9
++        # EVERY prefix captures ALL existing buffers before ANY stream firstclose.
++        for cell in stream_cells + write_cells:
++            try:
++                if cell["fd"] is not None:
++                    retain_cell(cell, quota if quota is not None else 0,
++                                item["reaped"], written=cell["name"] == "written")
++            except BaseException as exc:
++                secondary_objects.append(exc)
++                item["secondary_errors"].append(exact_error(exc))
++        for name, cell in zip(("stdout", "stderr", "status"), stream_cells):
++            item[name] = published_cell(cell)
++        item["written_data"] = [published_cell(cell) for cell in write_cells]
++        cells = stream_cells + write_cells
++        item["capture_complete"] = all(c["retained"] and not c["partial"] for c in cells)
++        item["output_charge_unknown"] = any(c["output_charge_bytes"] is None for c in cells)
++        for fd in streams:
++            if fd is None:
++                continue
++            try:
+                 close_own(fd)
++            except BaseException as exc:
++                secondary_objects.append(exc)
++                item["secondary_errors"].append(exact_error(exc))
++    if primary is not None:
++        raise primary.with_traceback(primary_tb)  # original firstfault, not cleanup replacement
++    if secondary_objects:
++        raise secondary_objects[0]
++    require(item["capture_complete"] and not item["output_charge_unknown"] and not OUTPUT_UNKNOWN,
++            "complete actual output/count/charge required")
++    require(all(item[name]["encoding"] == "utf-8" for name in ("stdout", "stderr", "status")),
++            "complete utf-8 stream required on the normal return")
++    scratch()
++    custody()
++    return item
+ 
+ 
+ def statuses(c):
+@@ -783,7 +1003,7 @@
+         stop("private mkdir outcome unknown at exact held parent/name")
+     HOME_INTENT["state"] = "CONFIRMED_CREATED"
+     try:
+-        HOME_FD = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
++        HOME_FD = acquire_owned(os.open, "open", name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                           dir_fd=pfd)
+         before = identity(os.fstat(HOME_FD), True)
+         HOME_INTENT["created_identity"] = before
+@@ -860,7 +1080,7 @@
+     if VERIFIER_RUNTIME is not None and VERIFIER_RUNTIME.get("own_new") and not VERIFIER_RUNTIME["closed"]:
+         VERIFIER_RUNTIME["closed"] = True
+         close_once(VERIFIER_RUNTIME["fd"], "runtime")
+-    for fd in (3, 4, 5, 6):
++    for fd in INHERITED_OWNED:
+         close_once(fd, "inherited_role")
+     R["own_runtime_descriptor_closed"] = VERIFIER_RUNTIME["closed"] if VERIFIER_RUNTIME else None
+     R["cleanup"] = {"exact_owned_child_reaped": True,
+@@ -939,7 +1159,7 @@
+     require(len(extra) == 1, "unknown descriptor opened beside own stock ffi")
+     fd = extra[0]
+     require(fd not in pre and 7 <= fd < 128, "verifier runtime descriptor collides with canonical roles")
+-    VERIFIER_RUNTIME = {"fd": fd, "own_new": True, "closed": False}
++    VERIFIER_RUNTIME = {"fd": adopt_exact_fd(fd, "runtime"), "own_new": True, "closed": False}
+     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+     require(fcntl.fcntl(fd, fcntl.F_GETFD) == fcntl.FD_CLOEXEC, "own runtime descriptor is not CLOEXEC")
+     require(flags & os.O_ACCMODE == os.O_RDONLY and not flags & (os.O_PATH | os.O_APPEND),
+@@ -983,6 +1203,9 @@
+     R["runtime_fd"] = record
+     R["runtime_explicit_read_bytes"] = RUNTIME_READS
+     R["runtime_read_reset_or_subtracted"] = False
++
++INHERITED_OWNED = [adopt_exact_fd(fd, "inherited_role") for fd in (3, 4, 5, 6)]
++
+ 
+ def main():
+     global DEADLINE_NS, MAIN_END_NS
+@@ -1110,7 +1333,7 @@
+     # negative. Only our retained writer can change this owned same-size memfd.
+     writer = new_mem("same-path-signed-input", raw)
+     fcntl.fcntl(writer, fcntl.F_ADD_SEALS, fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK)
+-    reader = os.open("/proc/self/fd/" + str(writer), os.O_RDONLY | os.O_CLOEXEC)
++    reader = acquire_owned(os.open, "open", "/proc/self/fd/" + str(writer), os.O_RDONLY | os.O_CLOEXEC)
+     OWN.add(reader)
+     require(identity(os.fstat(reader)) == identity(os.fstat(writer)), "owned memfd reader custody")
+     verify_args = keyed + ["--status-fd", "{STATUS}", "--verify", "/proc/self/fd/" + str(reader)]
+@@ -1194,7 +1417,7 @@
+ try:
+     verified = main()
+ except BaseException as exc:
+-    R["failure"] = {"type": type(exc).__name__, "message": str(exc)}
++    R["failure"] = exact_error(exc)
+ finally:
+     try:
+         # Failure also checks every held byte/path before closing. Reserve 20s
+@@ -1203,51 +1426,43 @@
+         R["final_custody_confirmed"] = True
+     except BaseException as exc:
+         verified = False
+-        R["custody_failure"] = {"type": type(exc).__name__, "message": str(exc)}
++        R["custody_failure"] = exact_error(exc)
+     try:
+         R["own_scratch_bytes_final_before_cleanup"] = scratch()
+         resources("before_cleanup")
+     except BaseException as exc:
+         verified = False
+-        R["resource_failure"] = {"type": type(exc).__name__, "message": str(exc)}
++        R["resource_failure"] = exact_error(exc)
+     try:
+         cleanup()
+     except BaseException as exc:
+         STOP = True
+         verified = False
+-        R["cleanup_failure"] = {"type": type(exc).__name__, "message": str(exc)}
++        R["cleanup_failure"] = exact_error(exc)
++
++try:
++    finish_allocations()
++except BaseException as exc:
++    STOP = True
++    verified = False
++    R["allocation_cleanup_failure"] = exact_error(exc)
+ 
+ try:
+     due(True)
+     finalize_read_accounting()
+     R["aggregate_gpg_output_bytes_including_written_key_and_body"] = TOTAL_OUTPUT
++    R["aggregate_gpg_output_charge_unknown"] = OUTPUT_UNKNOWN
+     R["completed_msk"] = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).isoformat()
+     R["status"] = ("STOP_UNCONFIRMED" if STOP else
+                    "QUALIFIED_NODE_RAW_PUBLISHER_CHAIN_PROVEN" if verified else "NOT_PROVEN")
+     data = encode_bounded(R)
+ except BaseException as exc:
+     verified = False
+-    produced = []
+-    for call_item in list(R.get("calls") or []):
+-        summary = {"label": call_item.get("label"), "reaped": call_item.get("reaped")}
+-        for name in ("stdout", "stderr", "status"):
+-            slot = call_item.get(name)
+-            if isinstance(slot, dict):
+-                summary[name] = {"bytes": slot.get("bytes"), "sha256": slot.get("sha256"),
+-                                 "partial": slot.get("partial"), "encoding": slot.get("encoding")}
+-        produced.append(summary)
+-    R = {"assignment": ASSIGNMENT, "generation": 1,
+-         "status": "STOP_UNCONFIRMED" if STOP else "NOT_PROVEN",
+-         "failure": "deadline or bounded whole public serialization failed",
+-         "cause": type(exc).__name__, "private_home_intent": HOME_INTENT,
+-         "owned_child_pid": ACTIVE.pid if ACTIVE is not None else None,
+-         "all_recorded_owned_children_reaped": all(c["reaped"] for c in R["calls"]) if False else all(item.get("reaped") for item in (R.get("calls") or [])),
+-         "produced_stream_summaries": produced,
+-         "runtime_explicit_read_bytes": RUNTIME_READS,
+-         "runtime_read_reset_or_subtracted": False,
+-         "explicit_read_accounting": R.get("explicit_read_accounting"),
+-         "known_whole_content_charge_bytes": WHOLE_READS, "implicit_io": "UNKNOWN_NOT_ZERO"}
+-    data = json.dumps(R, ensure_ascii=True, separators=(",", ":")).encode("ascii") + b"\n"
++    # Original R/fullraw/errors remain owned. No hash-only smaller replacement.
++    ERROR_OBJECTS.append(exc)
++    R["publication_failure"] = exact_error(exc)
++    os._exit(3 if STOP else 2)  # CODE_OPEN: cannot emit full raw within32KiB
++
+ try:
+     emit(data)
+     due(True)
+--- LAB863/launch-contract.json
++++ SOL060/launch-contract.json
+@@ -1,14 +1,14 @@
+ {
+-  "schema": "friday.e4.node.supervised-launch-contract.a172.v1",
++  "schema": "friday.e4.node.supervised-launch-contract.sol060.v1",
+   "assignment": "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048",
+   "generation": 1,
+   "disposition": "INERT_CONNECTED_SOURCE_PENDING_WHOLE_REVIEW_AND_NEW_ROOT_ADMISSION",
+-  "error_raw_onceclose": "Owned numeric slots are cleared before os.close on supervisor, verifier and caller paths. A failed close is sticky and is not retried, so a recycled number is not closed as the old owner. Verifier call retains stdout, stderr, status and writable count, sha256 and either complete utf-8 text or raw base64 before those memfds close, including timeout, live-resource, read, decode and cleanup prefixes. Partial output stays partial. Supervisor transport bytes already produced are retained with count and sha256 before the terminal close. No new role, budget, GPG route, or extended end.",
++  "error_raw_onceclose": "SOL060 prospective same-owner allocation records, no numeric retired cache, UNKNOWN before native firstclose; raw stdout/stderr/status/writable preowned captured once with full reversible bytes/count/SHA/custody/rc/production charges before stream close; original+secondary causal graphs held. Exact canonical same-object raw preimages avoid redundant wire copies. ALL resource/end/GPG roles unchanged. Mandatory full prefix/producer/error/history bounds and actual complete inner32KiB/supervisor64KiB fit remain CODE_OPEN; no previous review/qualification transferred.",
+   "execution_authority": "NONE in A048. SOURCE ONLY. Independent source review, independent trust admission of host bootstrap/dependencies and a separate finite execution assignment are mandatory.",
+   "source": {
+-    "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
+-    "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
+-    "bytes": 62097,
++    "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/verifier.py",
++    "sha256": "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e",
++    "bytes": 71834,
+     "mode": "0600",
+     "nlink": 1,
+     "generated_source_executed_compiled_imported_or_tested": false
+@@ -104,12 +104,12 @@
+         "sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+       },
+       "5": {
+-        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
+-        "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
+-        "bytes": 62097
++        "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/verifier.py",
++        "sha256": "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e",
++        "bytes": 71834
+       },
+       "6": {
+-        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/launch-contract.json",
++        "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/launch-contract.json",
+         "sha256_binding": {
+           "fixed_binding": "sealed_contract_full_sha256",
+           "provider": "supervisor.CONTRACT_SHA",
+@@ -140,7 +140,7 @@
+       "-B",
+       "/proc/self/fd/5",
+       "--reviewed-source-sha256",
+-      "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
++      "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e",
+       "--reviewed-contract-sha256",
+       {
+         "fixed_binding": "sealed_contract_full_sha256",
+@@ -489,7 +489,7 @@
+     "only_new_exact_source_contract_result_files": true
+   },
+   "supervisor": {
+-    "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/supervisor.py",
++    "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/supervisor.py",
+     "whole_byte_pin_authority": "Acyclic exact chain: full verifier bytes -> this full contract -> literal SOURCE_SHA/CONTRACT_SHA plus sizes in full supervisor -> RESULT and independent review exact supervisor pin. No own SHA literal is embedded in its own file; all binding objects are non-overridable fixed rules resolved by the real launcher, never caller-provided placeholders.",
+     "bootstrap_pre_python_profile": {
+       "executable": "held /usr/bin/prlimit fd3",
+@@ -726,6 +726,7 @@
+     "held_proc_lease": "NEW Root independently qualifies acquired dev/ino/mode retained across exact detached pidfd exit, terminal ALL9 owner pair acquired or root0:0; no token for immutable byte inputs",
+     "resources": "all original caps and all6 retained; new performing source sizes, schema, all output/error bounds and full19 custody must be independently qualified",
+     "GPG": "Exact pinned stock no-keyring semantics for show/dearmor and explicit sealed ring for checks/verification under unchanged0500 home, actualrc/fingerprint/six calls mandatory",
+-    "complete_error_values": "No message slicing in caller/supervisor/verifier. Independently qualify full factory plus source-prefix bounds and all normal/error receipt shapes under original32/64KiB producer and2MiB whole caps."
++    "complete_error_values": "No message slicing in caller/supervisor/verifier. Independently qualify full factory plus source-prefix bounds and all normal/error receipt shapes under original32/64KiB producer and2MiB whole caps.",
++    "SOL060": "Different-author WHOLE exact Source6/new19/error/fullraw/reference grammar/finite histories+all35 shapes+bounds; actual new receiver binding required before original all6 authorized effects. SOURCE_READY/ROOT_ADMISSION/GO remain false; no incomplete capture or failed full serialization is acceptance."
+   }
+ }
+--- LAB863/expectations.json
++++ SOL060/expectations.json
+@@ -1,9 +1,9 @@
+ {
+-  "schema": "friday.e4.node.ordinary-case-expectations.a172.v1",
++  "schema": "friday.e4.node.ordinary-case-expectations.sol060.v1",
+   "authority": "NONE_ORDINARY_DATA",
+   "lifetime_memory_source_contract": {
+     "schema": "friday.sol042.retained-lease-natural-ending.v1",
+-    "materialization_path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure",
++    "materialization_path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure",
+     "numeric_slot_is_not_allocation_lease": true,
+     "retire_launch_aliases_at_first_close": true,
+     "tracked_leases_retained_through_terminal": true,
+@@ -25,25 +25,25 @@
+     "execution_authority": false
+   },
+   "publication_source_contract": {
+-    "schema": "friday.a131.disjoint-complete-publication.v1",
++    "schema": "friday.sol060.lossless-raw-preimage-publication.v1",
+     "fixed_metadata_bound_bytes": 489472,
+     "case_payload_bound_bytes": [
+-      294948,
+-      294948,
+-      294948,
+-      262180,
+-      262180,
++      196644,
++      196644,
++      196644,
++      196644,
++      196644,
+       196644
+     ],
+-    "all_case_payload_bound_bytes": 1605848,
+-    "complete_bound_with_newline_bytes": 2095321,
++    "all_case_payload_bound_bytes": 1179864,
++    "complete_bound_with_newline_bytes": 1669337,
+     "inner_complete_producer_cap_bytes": 32768,
+     "every_raw_stdout_and_stderr_reserved": true,
+     "overflow_byte_reserved_on_every_stream": true,
+     "whole_metadata_reserved_once": true,
+     "past_payloads_measured_future_payloads_reserved": true,
+     "field_removal_or_peak_subtraction": false,
+-    "fixed_producer_encoding": "same stock compact finite ensure_ascii JSON; parsed full inner remains duplicated",
++    "fixed_producer_encoding": "full raw once; exact canonical same-object preimage refs, checked reversible before emission",
+     "execution_authority": false
+   },
+   "case_order": [
+@@ -231,5 +231,14 @@
+   "resource_receipt_schemas": {
+     "supervisor": "friday.e4.node.supervisor-resources.a172.v1",
+     "verifier": "friday.e4.node.verifier-resources.a172.v1"
++  },
++  "sol060_raw_error_reference_qualification": {
++    "schema": "friday.sol060.same-raw-object.v1",
++    "new_error_graph": "friday.sol060.error-graph.v2",
++    "mandatory_fullraw": true,
++    "raw_truncation_or_hashonly_proof": false,
++    "closed_all35_metadata_and_history_bound": "CODE_OPEN",
++    "inner32KiB_and_supervisor64KiB_fit": "CODE_OPEN",
++    "old_A175_bound_transfer": false
+   }
+ }

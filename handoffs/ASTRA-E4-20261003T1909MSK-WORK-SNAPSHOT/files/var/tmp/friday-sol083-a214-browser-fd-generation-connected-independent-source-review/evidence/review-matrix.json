@@ -1,0 +1,134 @@
+{
+  "schema": "friday.sol083.changed-context-review.v1",
+  "assignment": "ASTRA-E4-A214-BROWSER-FD-GENERATION-CONNECTED-NONAUTHOR-REVIEW-SOL083",
+  "generation": 1,
+  "authorship_boundary": "First non-author Root A214 four-file correction. Sol081 predecessor author is Sol; no independent whole acceptance of own baseline.",
+  "decision": "CREDIT_SCOPED_E03_FRESH_FD_GENERATION_CONNECTED_CORRECTION_NOT_WHOLE_ACCEPTED",
+  "credits": [
+    {
+      "id": "C01-E03-FDGEN",
+      "state": "CREDIT_SCOPED_SOURCE",
+      "invariant": "Fresh final retained-readback descriptor receives a new same-run acquisition token before fstat/read/close; a previous close of the same number is not current proof.",
+      "sites": [
+        "A071-EXECUTOR.py:918-920",
+        "A071-EXECUTOR.py:87-104",
+        "A071-EXECUTOR.py:167-177",
+        "A071-EXECUTOR.py:285"
+      ],
+      "evidence": "Exact unique 133-byte old os.open expression replaced by 178-byte existing fd_journal(run).acquire(lambda: os.open(...)) expression. New prospective record appended before operation; returned fd replaces current[fd] before fstat. No new closer/journal/grant/service, no native body replacement. Current mapping is used by actual loaded R4 close_fd alias.",
+      "limit": "Ordinary local source relation only; not syscall execution, resource fit, concurrency/raw alias/native-owner proof."
+    },
+    {
+      "id": "C02-E03-CLOSE-ERROR",
+      "state": "CREDIT_SCOPED_SOURCE",
+      "sites": [
+        "A071-EXECUTOR.py:106-141",
+        "A071-EXECUTOR.py:933-934",
+        "A071-EXECUTOR.py:963-1047",
+        "A025-G1-R4.py:215-242"
+      ],
+      "evidence": "Actual read/hash/identity branch has finally need(r.close_fd(fd,run) is True). Journal marks close_attempted before syscall, retains original errors, never retries ambiguous close; hook error and close error both prevent true. Open failure has no acquired fd; fstat failure closes the recorded fresh acquisition before original raise. Hash/identity failures still enter the same finally. Exception/uncertainty/cleanup/deadline failure demotes final stream to None and receipts to unqualified CANDIDATE before return.",
+      "limit": "Conditional branch reasoning, not executed failure/negative-control or proof of all implicit allocation failures."
+    },
+    {
+      "id": "C03-E03-BOTH-RECEIVERS",
+      "state": "CREDIT_CHANGED_CONTEXT_SOURCE",
+      "sites": [
+        "A025-G1-R4.py:575-605",
+        "A071-EXECUTOR.py:907-938",
+        "A071-EXECUTOR.py:1016-1047",
+        "A071-SUPERVISOR.py:445-510/610-651/956",
+        "A087-PUBLIC-DRIVER.py:146-211/311-353/357-363"
+      ],
+      "evidence": "Physical stream snapshot remains finite_end_confirmed=false; only final ordinary caller without reason/uncertainty qualifies after cleanup. BOTH exact stream_join functions are byte-equal 4178B/fed5f645a3995f8800b8052cd305b63cab4f5a3c29592f766a3631ec0b6c5890. Actual receiver guards call them, require matching bytes/SHA/identity9, exact material/launch/child PID+route/retained set, and reject standalone or failed qualification. Meaningful reaped positive body prefixes remain allowed only as unqualified enclosing negative, no terminal/body/native acceptance inferred.",
+      "limit": "Both ordinary parsing paths only; BOTH actual outside native finite ends remain CODE."
+    },
+    {
+      "id": "C04-METADATA",
+      "state": "CREDIT_EXACT_STATIC_REJOIN",
+      "evidence": "12 full gapless pieces cover both EOF of four before/after files. Executor only +45 bytes. ABI and Build each change 2 current Executor pin objects; A118 changes 3 Executor, 1 ABI, 1 Build. Exact 9 semantic pin substitutions, no other JSON semantic changes, historical branches unchanged. Source15 4 changed/11 equal; current209 4 changed/205 equal; aux3 0 changed/3 equal. All212 unique current physical pins SHA/identity9 verified.",
+      "limit": "Static proposed Source pin closure, not installation/load/admission or compiler ABI proof."
+    },
+    {
+      "id": "C05-E01-E02-E04",
+      "state": "PRESERVE_PRIOR_NARROW_CREDITS",
+      "sites": [
+        "A071-EXECUTOR.py:53-59/261-288",
+        "A071-OWNER.py:20-79/107-157",
+        "A025-G1-R4.py:648-681",
+        "A071-CONTROLS.py:954-976"
+      ],
+      "evidence": "Loader retains all17 selected helpers and seeded namespace, actual R4 close alias rejoined. Actual owner intention precedes ordinary body/pipe/config, keeps native-intention PID and does not adopt native pidfd into Python closer. BOTH material/stream/child routes intact. Physical durable writes still guarded_write(...receipt_write,True), with original finite clock/deadline selector. These bytes lie in equal partitions or equal complete dependency pins.",
+      "limit": "Preserved actual-context source credits only; no whole own baseline acceptance or executed positives/negatives."
+    }
+  ],
+  "rejected_overclaims": [
+    {
+      "id": "R01-NATIVE",
+      "state": "REJECT_WHOLE_NATIVE_CREDIT",
+      "reason": "New ordinary FD registration/identity labels/Python close are not native owner grant, full stock/raw/pre-encode body custody/alias, or BOTH outside native finite-end acceptance. Original required CODE obligations retained, not fabricated from unavailable future ABI."
+    },
+    {
+      "id": "R02-COST",
+      "state": "UNKNOWN_NOT_ZERO",
+      "reason": "45-byte delta, syscall count, manifest bounds and narrow descriptor cap cannot establish full inclusive implicit IO/copy/cumulative/state-memory/peak resource fit. No product fit proof or zero bill."
+    },
+    {
+      "id": "R03-WHOLE",
+      "state": "REJECT_WHOLE_SOURCE_GO",
+      "reason": "Static changed-context review is not independent acceptance of Sol081 own baseline, compiler ABI, runtime, original216 controls or full required gates. No Source execution allowed; no failure reproducer used."
+    }
+  ],
+  "branch_matrix": [
+    {
+      "case": "ordinary open success and reused numeric fd",
+      "source_relation": "new token/current[fd] replaces old record before body; actual loaded closer consults fresh current generation",
+      "status": "SOURCE_CREDIT_NOT_RUN"
+    },
+    {
+      "case": "open syscall fails",
+      "source_relation": "prospective fd=None record stores original; no new fd to close; execute_core catch sets reason and final stream None",
+      "status": "SOURCE_CREDIT_NOT_RUN"
+    },
+    {
+      "case": "acquire fstat fails after open",
+      "source_relation": "fresh fd/current mapping exists before fstat; catch closes that generation once then raises original; outer failure blocks qualification",
+      "status": "SOURCE_CREDIT_NOT_RUN"
+    },
+    {
+      "case": "guarded_digest/file_stat/stream identity join fails",
+      "source_relation": "actual finally requires same current-generation true close; outer error blocks ordinary qualification",
+      "status": "SOURCE_CREDIT_NOT_RUN"
+    },
+    {
+      "case": "cleanup hook fails, syscall close succeeds",
+      "source_relation": "hook_error persists and close_boolean false; explicit need fails; no terminal qualification",
+      "status": "SOURCE_CREDIT_NOT_RUN"
+    },
+    {
+      "case": "actual close fails or uncertain",
+      "source_relation": "close_attempted set before syscall; uncertainty sticky before reporting; false result; no syscall retry and final stream None",
+      "status": "SOURCE_CREDIT_NOT_RUN"
+    },
+    {
+      "case": "generation lost",
+      "source_relation": "old token cannot close current number; records OWNED_FD_GENERATION_LOST with sticky uncertainty",
+      "status": "SOURCE_CREDIT_NOT_RUN"
+    },
+    {
+      "case": "later ordinary cleanup/deadline/cancel failure",
+      "source_relation": "reason/uncertain demotion after finally preserves body-only prefixes but invalidates stream and terminal receipts",
+      "status": "SOURCE_CREDIT_NOT_RUN"
+    }
+  ],
+  "original_obligations": "Original216/all29/all6/all9/Source19/C01-C08/M01/capsule848/packet96/child32, required meaningful positives/negatives, caps/scenarios and full final gates unchanged and NOT_RUN. Unsafe TWO HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false.",
+  "whole_accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "Source_execution": 0,
+  "AST_compile_import_tests": "NOT_RUN",
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN"
+}

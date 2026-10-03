@@ -1,0 +1,1180 @@
+{
+  "schema": "friday.sol087.original-obligations.v1",
+  "assignment": "ASTRA-E4-PUBLISHER-C04-EARLY-PREFIX-BOTH-END-CONNECTED-SAFE-SOURCE-SOL087",
+  "immutable_prior_obligations": {
+    "schema": "friday.sol086.current-original-obligations.v1",
+    "assignment": "ASTRA-E4-PUBLISHER-C04-PREPARED-FULL-BODY-BOTH-FORK-AND-FINAL-SOL086",
+    "prior_evidence_pin": {
+      "path": "/var/tmp/friday-sol085-publisher-lossless-history-primary-connected-source/manifest.json",
+      "bytes": 286894,
+      "sha256": "670ceabf3f5d471269f7b8b41b6ff73ecdf7c3343b6aabaf760fadb1dd0ff17f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227160",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "286894",
+        "1791004570185538971",
+        "1791004570275544128"
+      ],
+      "stable9": true
+    },
+    "historical_records_are_provenance_not_execution_credit": true,
+    "all69_exact_six_fields": [
+      {
+        "id": "ubuntu_known_pin_absent_tool",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "ubuntu_receipt",
+        "cause": "verifier_material_absent",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "ubuntu_tool_flag_before_attestation",
+        "scenario": "CAPABILITY_INVENTORY_FAILURE_CLOSURE",
+        "stage": "ubuntu_receipt",
+        "cause": "tool_flag_without_result",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "ubuntu_fingerprint_mismatch",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "ubuntu_receipt",
+        "cause": "fingerprint_mismatch",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "ubuntu_candidate_signer_refused",
+        "scenario": "CAPABILITY_INVENTORY_FAILURE_CLOSURE",
+        "stage": "ubuntu_receipt",
+        "cause": "candidate_signer",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "node_signer_unproven",
+        "scenario": "NODE_RAW_SIGNED_CHECKSUM_CHAIN",
+        "stage": "node_receipt",
+        "cause": "node_signer_unproven",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "node_nodesource_fingerprint_refused",
+        "scenario": "NODE_RAW_SIGNED_CHECKSUM_CHAIN",
+        "stage": "node_receipt",
+        "cause": "nodesource_not_this_archive",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "clearsign_sha512_structural",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "algorithm",
+        "cause": "sha512_correspondence",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "clearsign_trailing_refused",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "algorithm",
+        "cause": "clearsign_trailing_material",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "clearsign_unknown_hash",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "algorithm",
+        "cause": "unsupported_hash",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "deb822_continuation_preserved",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "deb822",
+        "cause": "continuation_preserved",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "deb822_orphan_continuation_refused",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "deb822",
+        "cause": "orphan_continuation",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "release_uses_sha256_member",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "release",
+        "cause": "release_member",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "release_wrong_suite_refused",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "release",
+        "cause": "suite_mismatch",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "packages_unknown_field_kept",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "package_fields",
+        "cause": "unknown_field_preserved",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "schema_bool_not_integer",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "ingress",
+        "cause": "integer",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "schema_extra_key_refused",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "ingress",
+        "cause": "exact_keys",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "projection_not_repr",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "projection",
+        "cause": "projection_digest",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "issuer_absent_not_proven",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "trust",
+        "cause": "external_approval_absent",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "issuer_self_mint_refused",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "trust",
+        "cause": "producer_minted_approval",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "issuer_generation_mismatch_refused",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "trust",
+        "cause": "generation_mismatch",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "binding_set_mismatch_refused",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "binding",
+        "cause": "binding_set",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "binding_false_match_claim_refused",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "binding",
+        "cause": "evidence_issuer",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "binding_abi_mismatch_refused",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "binding",
+        "cause": "binding_field",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "recipe_closed_effects_refused",
+        "scenario": "ROOTFS_NATIVE_DATA_RECIPE",
+        "stage": "plan",
+        "cause": "source_phase",
+        "status": "PLANNED_EFFECTS_UNAVAILABLE",
+        "match": "return"
+      },
+      {
+        "id": "recipe_image_sha_not_mandatory",
+        "scenario": "ROOTFS_NATIVE_DATA_RECIPE",
+        "stage": "image",
+        "cause": "image_sha_optional",
+        "status": "PLANNED_EFFECTS_UNAVAILABLE",
+        "match": "return"
+      },
+      {
+        "id": "unrar_gap_explicit",
+        "scenario": "ROOTFS_NATIVE_DATA_RECIPE",
+        "stage": "unrar",
+        "cause": "unrar",
+        "status": "BLOCKED_PUBLISHER_GAP",
+        "match": "return"
+      },
+      {
+        "id": "browser_attribution_not_proven",
+        "scenario": "ROOTFS_NATIVE_DATA_RECIPE",
+        "stage": "browser",
+        "cause": "browser_attribution",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "effect_denied",
+        "scenario": "CAPABILITY_INVENTORY_FAILURE_CLOSURE",
+        "stage": "effect",
+        "cause": "source_phase_denial",
+        "status": "DENIED",
+        "match": "return"
+      },
+      {
+        "id": "expected_digest_not_replaced",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "retain",
+        "cause": "host_bytes_differ",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "synthetic_algorithm_not_publisher",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "ubuntu_receipt",
+        "cause": "receipt_credit",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "dependency_bound_claim_refused",
+        "scenario": "CAPABILITY_INVENTORY_FAILURE_CLOSURE",
+        "stage": "ubuntu_receipt",
+        "cause": "unproven_dependency_claim",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "project_trust_untrusted_without_issuer",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "trust",
+        "cause": "external_approval_absent",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "sha512_receipt_consumer",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "algorithm",
+        "cause": "sha512_correspondence",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "sha256_receipt_consumer",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "algorithm",
+        "cause": "sha256_correspondence",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "sha512_body_width_refused",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "ubuntu_receipt",
+        "cause": "signed_body_width",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "result_metadata_without_bytes",
+        "scenario": "CAPABILITY_INVENTORY_FAILURE_CLOSURE",
+        "stage": "ubuntu_receipt",
+        "cause": "verification_bytes_absent",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "result_body_mismatch",
+        "scenario": "CAPABILITY_INVENTORY_FAILURE_CLOSURE",
+        "stage": "ubuntu_receipt",
+        "cause": "result_binding",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "dependency_inventory_empty_refused",
+        "scenario": "CAPABILITY_INVENTORY_FAILURE_CLOSURE",
+        "stage": "ubuntu_receipt",
+        "cause": "dependency_inventory_empty",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "node_archive_byte_match",
+        "scenario": "NODE_RAW_SIGNED_CHECKSUM_CHAIN",
+        "stage": "probe",
+        "cause": "archive_bound",
+        "status": "STRUCTURALLY_BOUND",
+        "match": "return"
+      },
+      {
+        "id": "node_archive_checksum_mismatch",
+        "scenario": "NODE_RAW_SIGNED_CHECKSUM_CHAIN",
+        "stage": "probe",
+        "cause": "archive_checksum_mismatch",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "node_authoritative_absent",
+        "scenario": "NODE_RAW_SIGNED_CHECKSUM_CHAIN",
+        "stage": "probe",
+        "cause": "authoritative_checksum_absent",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "noncanonical_json_refused",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "ingress",
+        "cause": "not_canonical",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "release_integer_text_refused",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "release",
+        "cause": "integer_text",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "dash_unescape_identity",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "dash",
+        "cause": "dash_unescape",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "receipt_missing_before_projection",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "ingress",
+        "cause": "exact_keys",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "broker_envelope_absent_approval",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "trust",
+        "cause": "broker_envelope",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "broker_fixture_not_release_trust",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "release_trust",
+        "cause": "release_untrusted",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "compatibility_mismatch_refused",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "binding",
+        "cause": "compatibility_mismatch",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "null_material_refused",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "binding",
+        "cause": "material_incomplete",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "bill_recompute_ubuntu",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "bill",
+        "cause": "ubuntu_projection",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "bill_mutated_row_refused",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "bill",
+        "cause": "ubuntu_projection",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "wheel_tag_acquired",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "wheel",
+        "cause": "wheel_tag",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "wheel_not_acquired_filename",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "wheel",
+        "cause": "wheel_filename",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "unlinked_index_refused",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "bill",
+        "cause": "index_link",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "member_dotdot_refused",
+        "scenario": "ROOTFS_NATIVE_DATA_RECIPE",
+        "stage": "plan",
+        "cause": "member_path",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "symlink_escape_refused",
+        "scenario": "ROOTFS_NATIVE_DATA_RECIPE",
+        "stage": "plan",
+        "cause": "link_escape",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "venv_site_flag",
+        "scenario": "ROOTFS_NATIVE_DATA_RECIPE",
+        "stage": "venv",
+        "cause": "venv_site",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "missing_operation_refused",
+        "scenario": "ROOTFS_NATIVE_DATA_RECIPE",
+        "stage": "plan",
+        "cause": "recipe_operations",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "canonical_ingress_refused",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "ingress",
+        "cause": "not_canonical",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "unrelated_cause_not_substituted",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "plan",
+        "cause": "member_path",
+        "status": "CAUSE_MISMATCH",
+        "match": "unrelated"
+      },
+      {
+        "id": "s21_result_decision_consumed",
+        "scenario": "CAPABILITY_INVENTORY_FAILURE_CLOSURE",
+        "stage": "ubuntu_receipt",
+        "cause": "result_decision_unproven",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "s21_algorithm_cross_refused",
+        "scenario": "UBUNTU_RAW_SIGNATURE_CHAIN",
+        "stage": "algorithm",
+        "cause": "algorithm_correspondence",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "s21_presented_absent",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "plan",
+        "cause": "source_phase",
+        "status": "PLANNED_EFFECTS_UNAVAILABLE",
+        "match": "return"
+      },
+      {
+        "id": "s21_self_bind_refused",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "binding",
+        "cause": "expected_bound_to_itself",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "s21_schema_descriptor_admitted",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "schema",
+        "cause": "schema_descriptor_admitted",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "s21_root_issuer_reachable",
+        "scenario": "INPUT_AND_EXTERNAL_AUTHORITY",
+        "stage": "trust",
+        "cause": "approval_result_absent",
+        "status": "NOT_PROVEN",
+        "match": "return"
+      },
+      {
+        "id": "s21_dag_cycle_refused",
+        "scenario": "ROOTFS_NATIVE_DATA_RECIPE",
+        "stage": "plan",
+        "cause": "operation_dependency",
+        "status": "REFUSED",
+        "match": "refuse"
+      },
+      {
+        "id": "s21_requires_python_normalization",
+        "scenario": "MATERIAL_PLATFORM_COMPATIBILITY",
+        "stage": "requires_python",
+        "cause": "requires_python_normalization",
+        "status": "ACCEPTED",
+        "match": "return"
+      },
+      {
+        "id": "s21_effects_stay_denied",
+        "scenario": "CAPABILITY_INVENTORY_FAILURE_CLOSURE",
+        "stage": "plan",
+        "cause": "source_phase",
+        "status": "PLANNED_EFFECTS_UNAVAILABLE",
+        "match": "return"
+      }
+    ],
+    "fresh_catalog_causal_prior_all69_equal": true,
+    "all69_count": 69,
+    "all15": [
+      "authenticate-ubuntu-indexes",
+      "authenticate-ubuntu-archives",
+      "authenticate-node-archive",
+      "hold-unrar-publisher-gap",
+      "authenticate-wheels",
+      "map-cpython-venv",
+      "map-lib-dynload",
+      "map-native-loader",
+      "map-browser-resources",
+      "map-data-closure",
+      "bind-candidate",
+      "bind-golden",
+      "assemble-members",
+      "write-final-manifest",
+      "external-custody"
+    ],
+    "all15_count": 15,
+    "all15_Source_admission_unchanged": true,
+    "schema20": [
+      {
+        "name": "consumer/schemas/effect-capability.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/effect-capability.v1.json",
+          "bytes": 629,
+          "sha256": "df1ffec408e70975cc58db061244e401741f878d5708745c472b2c64bf6e5d28",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225499",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "629",
+            "1790953748244332087",
+            "1790953748244332087"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "df1ffec408e70975cc58db061244e401741f878d5708745c472b2c64bf6e5d28",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/external-issuer-approval.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/external-issuer-approval.v1.json",
+          "bytes": 1968,
+          "sha256": "51d9f5d39a77cab459b20a4bdae8e882a34a8d69c95c040928cf9529ed79f2c6",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225506",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1968",
+            "1790953748250089507",
+            "1790953748250089507"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "51d9f5d39a77cab459b20a4bdae8e882a34a8d69c95c040928cf9529ed79f2c6",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab820.approval-result.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab820.approval-result.v1.json",
+          "bytes": 1893,
+          "sha256": "d2f5a56e40161fe5105c7e3d8ca1265fea2a38c11d42c7f08a8922106df4760d",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225492",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1893",
+            "1790953748239331801",
+            "1790953748239331801"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "d2f5a56e40161fe5105c7e3d8ca1265fea2a38c11d42c7f08a8922106df4760d",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab820.authority-ingress.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab820.authority-ingress.v1.json",
+          "bytes": 1131,
+          "sha256": "e2dc4586cdc3f28294b5ad4fde0aa646de235a6c3ab27797b1d4c913536948b1",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225498",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1131",
+            "1790953748243332030",
+            "1790953748243332030"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "e2dc4586cdc3f28294b5ad4fde0aa646de235a6c3ab27797b1d4c913536948b1",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab820.evidence.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab820.evidence.v1.json",
+          "bytes": 657,
+          "sha256": "0bee9250a87028dc825587a01a81c2604d6c0d84a58fff97d59a468719b50d12",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225496",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "657",
+            "1790953748242251556",
+            "1790953748242251556"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "0bee9250a87028dc825587a01a81c2604d6c0d84a58fff97d59a468719b50d12",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab820.expected-bill.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab820.expected-bill.v1.json",
+          "bytes": 8297,
+          "sha256": "9b0dcff71f76a0be8c27df3348ed6f26a35ca8efa05ecfc3df668df0034556f9",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225502",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "8297",
+            "1790953748246332201",
+            "1790953748246332201"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "9b0dcff71f76a0be8c27df3348ed6f26a35ca8efa05ecfc3df668df0034556f9",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab820.node-authoritative.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab820.node-authoritative.v1.json",
+          "bytes": 554,
+          "sha256": "3b6a85b1c1df5ee7bda72d5696fed98fc57984b9f21902eef0268976ba6c9ec5",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225491",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "554",
+            "1790953748238331744",
+            "1790953748238331744"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "3b6a85b1c1df5ee7bda72d5696fed98fc57984b9f21902eef0268976ba6c9ec5",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab820.package-row.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab820.package-row.v1.json",
+          "bytes": 523,
+          "sha256": "37c67ee85c58d68b10f313cb03e98bc81f90c53ece15ba956e884cfd4c3f343c",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225493",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "523",
+            "1790953748240245441",
+            "1790953748240245441"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "37c67ee85c58d68b10f313cb03e98bc81f90c53ece15ba956e884cfd4c3f343c",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab820.presented-observation.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab820.presented-observation.v1.json",
+          "bytes": 37158,
+          "sha256": "850e0bcb7c2ee6644af4294774602c833940a97ddcfad7546d06c6f6d42f33e5",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225503",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "37158",
+            "1790953748247332259",
+            "1790953748247332259"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "850e0bcb7c2ee6644af4294774602c833940a97ddcfad7546d06c6f6d42f33e5",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab820.release-member.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab820.release-member.v1.json",
+          "bytes": 490,
+          "sha256": "26ecf48102d33ccd2c933f236cde8d23905f93d1785b3001f6f1a3c493112b53",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225494",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "490",
+            "1790953748240331858",
+            "1790953748240331858"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "26ecf48102d33ccd2c933f236cde8d23905f93d1785b3001f6f1a3c493112b53",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab820.resource.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab820.resource.v1.json",
+          "bytes": 1057,
+          "sha256": "92fcb73114a38a3c4bca58877615b24dc8f932bc8869ab1d239c6df7c6cdbe98",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225504",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1057",
+            "1790953748248332316",
+            "1790953748248332316"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "92fcb73114a38a3c4bca58877615b24dc8f932bc8869ab1d239c6df7c6cdbe98",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/friday.lab824.independent-trust-context.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/friday.lab824.independent-trust-context.v1.json",
+          "bytes": 26008,
+          "sha256": "563343895326b3f0f89d7f1381225398fa27074ba406f7c2a47fb4c31c02ed36",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225497",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "26008",
+            "1790953748242331973",
+            "1790953748242331973"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "563343895326b3f0f89d7f1381225398fa27074ba406f7c2a47fb4c31c02ed36",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/material-provenance.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/material-provenance.v1.json",
+          "bytes": 2651,
+          "sha256": "883b493876cc2842a303ce3286989fd02cc545e20a671222b540b08c8626725c",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225489",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "2651",
+            "1790953748237331686",
+            "1790953748237331686"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "883b493876cc2842a303ce3286989fd02cc545e20a671222b540b08c8626725c",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/producer-consumer-binding.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/producer-consumer-binding.v1.json",
+          "bytes": 1680,
+          "sha256": "9680069f44ba9eeaa12c8cae0a38f6956ca4950abf2f99ea7b5cca09f1bbcd82",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225501",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1680",
+            "1790953748245332144",
+            "1790953748245332144"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "9680069f44ba9eeaa12c8cae0a38f6956ca4950abf2f99ea7b5cca09f1bbcd82",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/raw-publisher-receipt.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/raw-publisher-receipt.v1.json",
+          "bytes": 4486,
+          "sha256": "1fe2fac28b0736f21a7638f9bce362d3fb67fe7a80c4b6b2e8ee4f823005b5ee",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225500",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "4486",
+            "1790953748245212727",
+            "1790953748245212727"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "1fe2fac28b0736f21a7638f9bce362d3fb67fe7a80c4b6b2e8ee4f823005b5ee",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/rootfs-construction-recipe.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/rootfs-construction-recipe.v1.json",
+          "bytes": 1325,
+          "sha256": "ab10052e9a6dccebf715ac80321f725d71d268d1bc6324cc3ee165c1e3129e7b",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225488",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1325",
+            "1790953748236331629",
+            "1790953748236331629"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "ab10052e9a6dccebf715ac80321f725d71d268d1bc6324cc3ee165c1e3129e7b",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/snapshot-manifest.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/snapshot-manifest.v1.json",
+          "bytes": 3148,
+          "sha256": "219f59cb178e17b4cd311afc65d1a8444775a6ecd5e16eae37878d1a3f633b72",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225507",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "3148",
+            "1790953748250332430",
+            "1790953748250332430"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "219f59cb178e17b4cd311afc65d1a8444775a6ecd5e16eae37878d1a3f633b72",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/trusted-root-projection.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/trusted-root-projection.v1.json",
+          "bytes": 1414,
+          "sha256": "c7580eef2cd7fd255ccf013670784b140d826841154a3d9b6e9dc7b4e00351c3",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225495",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1414",
+            "1790953748241331915",
+            "1790953748241331915"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "c7580eef2cd7fd255ccf013670784b140d826841154a3d9b6e9dc7b4e00351c3",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/verification-result.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/verification-result.v1.json",
+          "bytes": 1704,
+          "sha256": "c91bd65d4676c9355f7516b5aee0e76e06a88771af2a4b53acff44b65aa3ff06",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225490",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1704",
+            "1790953748238327831",
+            "1790953748238327831"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "c91bd65d4676c9355f7516b5aee0e76e06a88771af2a4b53acff44b65aa3ff06",
+        "complete_bytes_equal": true
+      },
+      {
+        "name": "consumer/schemas/verifier-capability.v1.json",
+        "current_pin": {
+          "path": "/var/tmp/friday-lab872-a190-lab869-publisher-whole15-all134-all69-all9-connected-source-closure/consumer/schemas/verifier-capability.v1.json",
+          "bytes": 2673,
+          "sha256": "e7d2d438839d74274ae40df09ce11e0551ae947ff1b9372effc394790f7b1717",
+          "identity9_decimal_strings": [
+            "2050",
+            "4225505",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "2673",
+            "1790953748249369965",
+            "1790953748249369965"
+          ],
+          "stable9": true
+        },
+        "historical_declared_original_sha256": "e7d2d438839d74274ae40df09ce11e0551ae947ff1b9372effc394790f7b1717",
+        "complete_bytes_equal": true
+      }
+    ],
+    "schema20_count": 20,
+    "current_physical_schema20_hash9_verified_via_current134": true,
+    "schema20_original_full_bytes_SHA_equal": true,
+    "all9": [
+      "P33-01",
+      "P33-02",
+      "P33-03",
+      "P33-04",
+      "P33-05",
+      "P33-06",
+      "P33-07",
+      "P33-08",
+      "P33-09"
+    ],
+    "all27": [
+      202,
+      203,
+      204,
+      205,
+      206,
+      207,
+      208,
+      209,
+      210,
+      211,
+      212,
+      213,
+      214,
+      215,
+      216,
+      217,
+      218,
+      219,
+      220,
+      221,
+      222,
+      223,
+      224,
+      225,
+      226,
+      227,
+      228
+    ],
+    "all5": [
+      "A122-R1",
+      "A122-R2",
+      "A122-R3",
+      "A122-R4",
+      "A122-R5"
+    ],
+    "all_original_F0_F11": "ALL_ORIGINAL_REQUIRED_NOT_RUN_NO_WAIVER",
+    "two_full_positives": "REQUIRED_NOT_RUN_NOT_AUTHOR_GOLDENS",
+    "full58_full22_original11_ABI128": "PRESERVED_REQUIRED_NOT_RUN; not re-executed or independently whole accepted",
+    "unsafe": {
+      "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    "original_controls_execution_credit": "ALL_REQUIRED_NOT_RUN_NO_OLD_EXECUTION_TRANSFER",
+    "case_history_caps_reduced": false,
+    "new_fixture_created": false,
+    "Sol077_D2": {
+      "native_Source_byte_unchanged": {
+        "path": "/var/tmp/friday-sol085-publisher-lossless-history-primary-connected-source/source/native.py",
+        "bytes": 36392,
+        "sha256": "b62fc156f1fe0019ccbbb617134c25bc82770ceda75daa1d7d82ce4667fb2ff7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227070",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "36392",
+          "1791003733111604323",
+          "1791003766068491585"
+        ],
+        "stable9": true
+      },
+      "root_initial_terminal_calls_retained": true,
+      "shared_strict_failure_exact8fields_three_actual_roots_retained": true,
+      "new_primary_projection_must_be_independently_reviewed": true
+    },
+    "A186_C01_C02_C04_C05_C06_C09": "REQUIRED AND RETAINED; H1/H2 source proposal does not erase arena/native/resource residuals.",
+    "Source_changed": [
+      "source/actor_bootstrap.py",
+      "source/capacity.py",
+      "source/common.py",
+      "source/custody.py",
+      "source/launcher.py",
+      "source/lifetime.py",
+      "source/native.py",
+      "source/observer.py",
+      "source/root_tool_adapter.py"
+    ],
+    "Source_execution": 0,
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false,
+    "changed_original_control_relations": "No catalog/cause/stage/status/match change or reduced case. Each original byte/bytearray/body/FD/close/error/frame/bootstrap/final/partial exhaustion control remains required on the new exact carrier; original schema20 bytes unchanged."
+  },
+  "original_unchanged_obligations_not_execution_credit": true,
+  "Source_changed_from_SOL086": [
+    "source/actor_bootstrap.py",
+    "source/common.py",
+    "source/lifetime.py",
+    "source/native.py",
+    "source/observer.py",
+    "source/root_tool_adapter.py"
+  ],
+  "all69_exact_six_fields_preserved": true,
+  "all15_preserved": true,
+  "current134_and_schema20_full_pin_provenance": "evidence/current134.json",
+  "additional_required": [
+    "stream128",
+    "all30",
+    "full58",
+    "full22",
+    "original11",
+    "ABI128",
+    "all27",
+    "all5",
+    "all9",
+    "all_original_F0_F11",
+    "both full positives and meaningful negative cases"
+  ],
+  "all_required_execution": "REQUIRED_NOT_RUN",
+  "Sol077_D2_note": "Original actual BOTH failure schema and receiver remain source-text dependencies; new native.py bytes are CHANGED and are not old D2 execution credit. Original pin is provenance only.",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false,
+    "physical_bodies_or_reproduction": false
+  },
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

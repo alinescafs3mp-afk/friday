@@ -1,0 +1,129 @@
+{
+  "schema": "friday.e4.a214.browser.fd-generation.author-result.v1",
+  "assignment": "ASTRA-E4-A214-SOL081-BROWSER-FINAL-READBACK-FD-GENERATION-CONNECTED-CLOSURE",
+  "generation": 1,
+  "owner": "Astra active Lead Architect epoch4",
+  "accepted_msk": "2026-10-03T06:25:51.696177+03:00",
+  "completed_source_utc": "2026-10-03 03:51:50 UTC",
+  "decision": "AUTHORED_CONNECTED_FRESH_FD_READBACK_JOURNAL_AND_EXACT_ACTIVE_SOURCE_PINS_NOT_INDEPENDENTLY_ACCEPTED",
+  "scope": "Original SOL080-E03 actual retained readback producer/owned generation/close/certificate; actual stream receiver interfaces unchanged. Not a helper-only certification or native-body repair.",
+  "changed_source_files": 4,
+  "safe_Python_source_files_changed": 1,
+  "Python_bytes_added": 45,
+  "metadata_current_pin_references_updated": 9,
+  "full_before_after_gapless_parts": 12,
+  "currentSource15": {
+    "changed": 4,
+    "equal": 11
+  },
+  "current209": {
+    "changed": 4,
+    "equal": 205
+  },
+  "aux3": {
+    "changed": 0,
+    "equal": 3
+  },
+  "baseline": {
+    "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/manifest.json",
+    "bytes": 14366,
+    "sha256": "a5d86fe006d6f8162de01b01fbf7827e9e42dc62d4ed7ac5462f0f301b42ba48",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226892",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "14366",
+      "1790997925914585955",
+      "1790997944518652281"
+    ],
+    "stable9": true
+  },
+  "baseline_received": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL081-BROWSER-CONNECTED-SOURCE-RESULT-RECEIVED-20261003.json",
+    "bytes": 63865,
+    "sha256": "9cf49ea42d186b66d9ff4d862bd1ad330fe34319153808ea63df035927e603b4",
+    "identity9_decimal_strings": [
+      "2050",
+      "8531922",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "63865",
+      "1790998249661141968",
+      "1790998249714145005"
+    ],
+    "stable9": true
+  },
+  "independent_root_rejection": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A214-SOL081-BROWSER-CONNECTED-NONAUTHOR-SOURCE-REVIEW-20261003.json",
+    "bytes": 19386,
+    "sha256": "f63b8eb0f22735e3fd87a3bfae9e1271d34214ad5f42b74c3ca4aa9591b588bc",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532102",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "19386",
+      "1790998980259017307",
+      "1790998980312020345"
+    ],
+    "stable9": true
+  },
+  "plan": {
+    "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/plan.json",
+    "bytes": 25615,
+    "sha256": "49f4b7bdd8d05d600406949b26a083d21f03b2d89e1ad01021c8b971aaf908d0",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226935",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "25615",
+      "1790999277073029656",
+      "1790999277133033095"
+    ],
+    "stable9": true
+  },
+  "full_source_proof": {
+    "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/evidence/full-connected-source-proof.json",
+    "bytes": 39420,
+    "sha256": "3d2718c5631ef8e9860f4b8bb74793bcf0d0751afb3bd82b76b4bacad05d154b",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226936",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "39420",
+      "1790999394758774995",
+      "1790999394818993555"
+    ],
+    "stable9": true
+  },
+  "not_changed": "Actual stream schema/decoder/receiver/oracles, original FD/resource bounds, native4 source, capsule848/packet96/child32, original216/29/all6/all9/Source19/C01-C08/M01 and historical evidence. No Source/Git/index/config/roles/providers/guard/lock change to originals.",
+  "remaining": {
+    "independent_changed_scope": "REQUIRED_NOT_RUN",
+    "ordinary_scope": "Fresh-generation author implementation not yet independently accepted; original positive/negative controls NOT_RUN",
+    "native_body_BOTH_outside_ends": "CODE_OPEN",
+    "complete_costs_fit": "UNKNOWN_NOT_ZERO",
+    "compiler_ABI": "NOT_RUN",
+    "runtime_gates": "NOT_RUN"
+  },
+  "author_accepts_own_source": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "Source_execution": 0,
+  "Source_AST_import_compile_tests": "NOT_RUN",
+  "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false",
+  "Sol075": "No denied operation continuation/retry/rephrase/delegation/native body implementation."
+}

@@ -1,0 +1,91 @@
+{
+  "causes": [
+    {
+      "id": "SOL057-1",
+      "cause": "normal public caller/table/typed-producer missing165",
+      "attempt": "all216 literal table now active; original51 fixed routes, exact original remaining consumer allowlist -> a171_actual; same canonical Root119 data; both input validators equal text; selected unsupported domains explicitly refuse",
+      "code_locations": {
+        "caller": {
+          "byte_offset": 43660,
+          "line": 605,
+          "anchor": "def whole216_producer_for(",
+          "method": "bounded literal byte search, not AST or supplied execution"
+        },
+        "typed_input": {
+          "byte_offset": 175044,
+          "line": 790,
+          "anchor": "def a171_validate_input(",
+          "method": "bounded literal byte search, not AST or supplied execution"
+        },
+        "producer": {
+          "byte_offset": 159076,
+          "line": 565,
+          "anchor": "def whole216_producer(",
+          "method": "bounded literal byte search, not AST or supplied execution"
+        }
+      },
+      "status": "ACTUAL_DISPATCH_SOURCE_WRITTEN_UNREVIEWED_NOT_RUN"
+    },
+    {
+      "id": "SOL057-2",
+      "cause": "synthetic flag reducers/no original operation or owned body/custody",
+      "attempt": "LAB858 reducers removed by rebuilding from A158 actual51; actual original x/s/G1/R4 calls with Root-selected owned files, fd/tree/output/CA/runtime/cgroup/held/sink domains; no sha-matches/target-exists/result-flags reducers",
+      "code_locations": {
+        "operations": {
+          "byte_offset": 188905,
+          "line": 1051,
+          "anchor": "def a171_perform(",
+          "method": "bounded literal byte search, not AST or supplied execution"
+        },
+        "fault_calls": {
+          "byte_offset": 178965,
+          "line": 854,
+          "anchor": "def a171_called(",
+          "method": "bounded literal byte search, not AST or supplied execution"
+        },
+        "fd_cleanup": {
+          "byte_offset": 181816,
+          "line": 916,
+          "anchor": "def a171_close(",
+          "method": "bounded literal byte search, not AST or supplied execution"
+        }
+      },
+      "status": "65_NEW_ACTUAL_DOMAIN_CANDIDATES_100_SPECIFIC_CODE_RESIDUALS_NEW_CREDIT0"
+    },
+    {
+      "id": "SOL057-3",
+      "cause": "29 names treated as unsafe and waived",
+      "attempt": "exact29 per-ID independent review retained; all benign functional obligations mandatory; one actual local CA parser route written;28 original target child domains exact CODE residuals; genuinely dangerous historical mechanisms abstract only",
+      "status": "NAME_BASED_WAIVER_REMOVED_NO_OBLIGATION_CLOSED_BY_ABSTRACTION"
+    },
+    {
+      "id": "SOL057-4",
+      "cause": "actual resource first-fault and256vs192 contradictions",
+      "attempt": "immutable G1 actual resource call retained with physically original observer; mandatory resource control gap marker prevents expected incidental leaf shortfall becoming pass; original production_resources/caps and full oracle retained",
+      "status": "HONEST_SPECIFIC_CODE_GAP_NO_RESOURCE_DOMAIN_RESOLUTION_GRANTED"
+    },
+    {
+      "id": "SOL057-5",
+      "cause": "full original oracle and coordinator+3 target children versus producer count/authority",
+      "attempt": "both separate original controller and external A087 now validate original state/stage/starts/hash cardinality/consumer calls/target child count/actual first fault/full raw hash/phase/custody; no expected state/child count assignment; native mode1 still coordinator+one selected producer; original three-target operation refused instead of extra child or authority reset",
+      "code_locations": {
+        "full_oracle": {
+          "byte_offset": 209086,
+          "line": 1344,
+          "anchor": "def a171_validate_observation(",
+          "method": "bounded literal byte search, not AST or supplied execution"
+        },
+        "target_gap": {
+          "byte_offset": 189269,
+          "line": 1056,
+          "anchor": "if spec[\"expected\"][\"owned_children\"]:",
+          "method": "bounded literal byte search, not AST or supplied execution"
+        }
+      },
+      "status": "FULL_ORACLE_SOURCE_WRITTEN_ORIGINAL_TARGET_TOPOLOGY_MANDATORY_CODE_GAP"
+    }
+  ],
+  "all_five_attempted_together": true,
+  "complete_resolution": false,
+  "new_source_gate_permission": false
+}

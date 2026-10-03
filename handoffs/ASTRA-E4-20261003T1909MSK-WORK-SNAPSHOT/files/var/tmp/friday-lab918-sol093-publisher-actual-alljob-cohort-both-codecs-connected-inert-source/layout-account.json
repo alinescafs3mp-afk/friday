@@ -1,0 +1,78 @@
+{
+  "caps_changed": false,
+  "ceiling_floor_historical_design": 36005644,
+  "ceiling_floor_used": false,
+  "enrolled_group_bytes": [
+    196791,
+    121139,
+    189406,
+    218357,
+    277589,
+    118611
+  ],
+  "enrolled_raw_byte_sum": 1121893,
+  "enrolled_raw_copied": false,
+  "enrolled_raw_duplication": {
+    "fits": false,
+    "have_allocation": 16004096,
+    "have_hash": 8000000,
+    "have_output": 11264667,
+    "have_reads": 14521142,
+    "job_index": 4,
+    "live": 739429,
+    "metadata_width": 808,
+    "need_allocation": 16582779,
+    "need_hash": 2035652,
+    "need_output": 278397,
+    "need_reads": 2314049,
+    "selected": 6674735,
+    "shortfall": 578683,
+    "width": 278397
+  },
+  "files_per_job": [
+    "primary-meta",
+    "primary-body",
+    "late-meta",
+    "late-body-store"
+  ],
+  "historical_shortfall": 2451212,
+  "immutable_store_fd": "late-body",
+  "jobs": [
+    "admission-signature",
+    "original-actor",
+    "node-version",
+    "python-version",
+    "loader-list",
+    "browser-version"
+  ],
+  "live": 583992,
+  "packet_room": 16094,
+  "refusal_uncommitted": 4096,
+  "row_allocation": 16004096,
+  "row_hash": 8000000,
+  "row_output": 12004096,
+  "row_output_remaining": 11420104,
+  "row_reads": 16000000,
+  "row_reads_remaining": 14832016,
+  "schema": "friday.lab918.layout-account.v1",
+  "selected": 8043432,
+  "shared_payload": true,
+  "stages": [
+    8,
+    14,
+    19,
+    24,
+    29,
+    34
+  ],
+  "store_regions": [
+    "primary-body image",
+    "primary-meta image",
+    "late-meta image"
+  ],
+  "store_width": 48666,
+  "streams_counted_once": true,
+  "third_fd_added": false,
+  "unit": 16222,
+  "whole_output_cap": 33554432
+}

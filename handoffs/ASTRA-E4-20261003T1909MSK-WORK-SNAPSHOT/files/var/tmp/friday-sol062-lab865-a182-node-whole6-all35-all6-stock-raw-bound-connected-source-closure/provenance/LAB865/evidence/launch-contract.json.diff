@@ -1,0 +1,54 @@
+--- launch-contract.json
++++ launch-contract.json
+@@ -3,12 +3,12 @@
+   "assignment": "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048",
+   "generation": 1,
+   "disposition": "INERT_CONNECTED_SOURCE_PENDING_WHOLE_REVIEW_AND_NEW_ROOT_ADMISSION",
+-  "error_raw_onceclose": "SOL060 prospective same-owner allocation records, no numeric retired cache, UNKNOWN before native firstclose; raw stdout/stderr/status/writable preowned captured once with full reversible bytes/count/SHA/custody/rc/production charges before stream close; original+secondary causal graphs held. Exact canonical same-object raw preimages avoid redundant wire copies. ALL resource/end/GPG roles unchanged. Mandatory full prefix/producer/error/history bounds and actual complete inner32KiB/supervisor64KiB fit remain CODE_OPEN; no previous review/qualification transferred.",
++  "error_raw_onceclose": "SOL060 prospective same-owner allocation records, no numeric retired cache, UNKNOWN before native firstclose; raw stdout/stderr/status/writable preowned captured once with full reversible bytes/count/SHA/custody/rc/production charges before stream close; original+secondary causal graphs held. Exact canonical same-object raw preimages avoid redundant wire copies. ALL resource/end/GPG roles unchanged. Mandatory full prefix/producer/error/history bounds and actual complete inner32KiB/supervisor64KiB fit remain CODE_OPEN; no previous review/qualification transferred. LAB865 consumers recompute original stock type/message from error-graph.v2 nodes[root]; startup and supervisor-entry oracles stay the original Refusal messages.",
+   "execution_authority": "NONE in A048. SOURCE ONLY. Independent source review, independent trust admission of host bootstrap/dependencies and a separate finite execution assignment are mandatory.",
+   "source": {
+-    "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/verifier.py",
+-    "sha256": "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e",
+-    "bytes": 71834,
++    "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/verifier.py",
++    "sha256": "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60",
++    "bytes": 73847,
+     "mode": "0600",
+     "nlink": 1,
+     "generated_source_executed_compiled_imported_or_tested": false
+@@ -104,12 +104,12 @@
+         "sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+       },
+       "5": {
+-        "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/verifier.py",
+-        "sha256": "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e",
+-        "bytes": 71834
++        "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/verifier.py",
++        "sha256": "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60",
++        "bytes": 73847
+       },
+       "6": {
+-        "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/launch-contract.json",
++        "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/launch-contract.json",
+         "sha256_binding": {
+           "fixed_binding": "sealed_contract_full_sha256",
+           "provider": "supervisor.CONTRACT_SHA",
+@@ -140,7 +140,7 @@
+       "-B",
+       "/proc/self/fd/5",
+       "--reviewed-source-sha256",
+-      "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e",
++      "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60",
+       "--reviewed-contract-sha256",
+       {
+         "fixed_binding": "sealed_contract_full_sha256",
+@@ -489,7 +489,7 @@
+     "only_new_exact_source_contract_result_files": true
+   },
+   "supervisor": {
+-    "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/supervisor.py",
++    "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/supervisor.py",
+     "whole_byte_pin_authority": "Acyclic exact chain: full verifier bytes -> this full contract -> literal SOURCE_SHA/CONTRACT_SHA plus sizes in full supervisor -> RESULT and independent review exact supervisor pin. No own SHA literal is embedded in its own file; all binding objects are non-overridable fixed rules resolved by the real launcher, never caller-provided placeholders.",
+     "bootstrap_pre_python_profile": {
+       "executable": "held /usr/bin/prlimit fd3",

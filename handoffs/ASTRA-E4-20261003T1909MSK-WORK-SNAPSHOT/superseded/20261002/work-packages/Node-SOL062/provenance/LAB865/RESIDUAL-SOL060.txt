@@ -1,0 +1,71 @@
+Mandatory CODE_OPEN after actual connected Source attempt
+
+C01 FINITE PREFUNDED HISTORY/ERROR/RAW ALLOCATION AND NEW COMPLETE SHAPES.
+  Prospective records keep returned FDs even when wrapping/maps/fstat fail, and
+  attempted-once retirement precedes close. But FD_HISTORY/FD_ALLOCATION_HISTORY,
+  ERROR_OBJECTS, framing/value graph/chunks/codec/capture/secondary arrays remain
+  dynamically allocated. A finite native deadline/read cap is NOT a complete
+  fixed arena or disjoint whole-memory/error/output proof. A metadata/projection
+  failure in cleanup can still interrupt later capture/cleanup/reporting. Full
+  original35 roots, default, partial constructors, all optional fields, aliases,
+  causal/frame widths and shared900 stock factories need final whole closure.
+  Failed unreturned acquisitions conservatively remain ACQUIRE_UNKNOWN; this
+  is not a native leak/close claim or permission to retry/reclassify them.
+
+C02 COMPLETE INNER32KiB / SUPERVISOR64KiB PREFIX PUBLICATION.
+  Aggregate allowed GPG65536 can require 87384 base64 bytes alone, before all
+  call metadata, raw writable cells, full errors/history and repeated decode-
+  error byte preimages. Therefore general complete inner32KiB fit is NOT proven.
+  Normal exact raw preimage sharing improves connected outer wire fit, not the
+  inner producer bound. There is no independently admitted out-of-band fullraw
+  custody/receiver. Full encoding failure now emits no smaller substitute; raw
+  objects are still owned only until native process end. Such refusal is honest
+  but cannot recover required original bytes after process end. Root is blocked
+  by CODE, not only by missing future execution permission.
+
+C03 INCOMPLETE/UNKNOWN RAW AND TERMINAL SETTLEMENT PREFIXES.
+  Captured full bounded streams/writable buffers are retained losslessly.
+  Unsettled child, unknown fstat, short/drifting read, quota overproduction,
+  pending/partially appended buffers or capture/encoding failure remain partial
+  with original raw/error owners; unread produced bytes are NOT captured fullraw.
+  Known finite cleanup may close an incomplete buffer, losing unread data; no
+  unbounded parking, retry, guessed zero or hash-only qualification resolves it.
+  Popen's internal partial native creation/implicit IO and interpreter startup,
+  fork/preexec/exec error prefixes, inherited/implicit native acquisitions and
+  final native teardown are not certified by Python references/returned rc.
+  No supplied actor/runtime was executed to claim actual closure.
+
+C04 COMPLETE CAUSAL/ALIAS/NATIVE-LIFETIME RECONSTRUCTION.
+  v2 projections preserve stock byte/container graph and exception links/full
+  traceback coordinates. Full raw exception/frame-local/C heap/custom/native
+  values, exact tuple-cycle reconstruction, decoder/native cause equivalence,
+  complete secondary capture under failures of its own projection and external
+  last-FD/last-byte retirement still require connected closure/qualification.
+  Original objects held until exit are not durable full native acceptance.
+
+C05 NEW BOUNDS/FACTORIES AND ACTUAL BOTH-SIDE COST QUALIFICATION.
+  Old A175 2095321/margin1831 is NOT applied to the new graph. Outer raw-only
+  case reservations plus original489472 metadata reserve algebraically total
+  1669337 <=2097152, leaving427815. That is a proposed partition, NOT a proven
+  new full metadata/history/error shape bound or producer fit. Each35 original
+  message<=900 ASCII/type32/native32/path160/clock32 and original2-byte escapes
+  must be rejoined to actual new catch/default/raw/causal bodies. No clipping,
+  compressed/hash-only body, cap increase or allowance transfer is allowed.
+  Updated explicit Source19/read subset fixed+running arithmetic follows actual
+  new sizes; it is not whole implicit/native IO/RAM/CPU/FD or live fit evidence.
+  Every full original all6/all30/F0..F11/gate/live obligation remains NOT_RUN.
+
+FUTURE FACTS, NOT FALSELY SOURCE BUGS:
+  New genuine authorized finite Root scope/clock; actual exact numeric int9
+  selected19 body, new Source/image/loader/ENV3/namespace/cache/alias/stock32/path/
+  native factory binding; actual Linux owned terminal-proc relation; all four
+  LAB861 readonly home/agent/trustdb/common.conf behaviors; actual original all6
+  native run with full rc/raw/resource/proc/once cleanup under unchanged limits.
+  Historical A169 stays RED, all6 invoked, ten pre-close Refusals/errno-null,
+  unconfirmed native-close list empty, original missing fstat-field cause UNKNOWN.
+  Root cleanup is not Source GREEN. A172's typed-resource/no-keyring first2/
+  explicit-keyring other4/terminal-proc joins are preserved Source credits only.
+  A178 final was not delivered as same-generation INFO in this turn; intake
+  partial findings remain source references, not transfer of a whole verdict.
+  Dangerous historical obligations: ABSTRACT_REQUIRED_NOT_RUN; no operational
+  payload, fixture, generator, reproduction, exploitation or waiver.

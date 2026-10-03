@@ -1,0 +1,278 @@
+{
+  "schema": "friday.astra.a200.node.lab880.connected-precheck.v1",
+  "assignment": "ASTRA-E4-A200-LAB880-NODE-ACTUAL-RECEIVERS-BOUNDS-AND-FINITE-END-PRECHECK",
+  "generation": 1,
+  "author": "Astra authorized non-author of LAB880",
+  "scope": "Bounded actual changed source caller/supervisor/verifier connected precheck; NOT whole-source review/acceptance or another project audit",
+  "baseline_received": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB880-NODE-SOURCE-RESULT-RECEIVED-20261003.json",
+    "bytes": 22319,
+    "sha256": "34ee0229605f31d194bfebf280f38c42c3675f2024ae05308588277ec8177162",
+    "identity9_decimal_strings": [
+      "2050",
+      "8522135",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "22319",
+      "1790975261136444772",
+      "1790975261215449312"
+    ],
+    "stable9": true
+  },
+  "baseline_manifest": {
+    "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/seal/manifest.json",
+    "bytes": 2743,
+    "sha256": "dfdc69d86bcd0776c0611fb276d7ae7be52ee1dd36ff47aa0bb4ac345310fd42",
+    "identity9_decimal_strings": [
+      "2050",
+      "4225923",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "2743",
+      "1790974791803474322",
+      "1790974791803474322"
+    ],
+    "stable9": true
+  },
+  "current6": [
+    {
+      "name": "caller.py",
+      "pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/caller.py",
+        "bytes": 160495,
+        "sha256": "c55272828f5f1100ec057a9fcfc3e984014d210ade6979415bfa7a42b8539def",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225907",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "160495",
+          "1790974791802330684",
+          "1790974791802330684"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "expectations.json",
+      "pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/expectations.json",
+        "bytes": 11522,
+        "sha256": "412b8c793206a24ece6e78f16a333dac57e598e5d34a3a6f728fcc02cb7f0922",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225911",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11522",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "launch-contract.json",
+      "pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/launch-contract.json",
+        "bytes": 50081,
+        "sha256": "c13d260aeed62fb6143513ad56900a25f9f9910ec090aab6077fbcb3bff95683",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225910",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "50081",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "supervisor.py",
+      "pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/supervisor.py",
+        "bytes": 127537,
+        "sha256": "a8eb16fd7164f4afb2541ff90c3686130e30ed306fe8b4fc919b056d2a217051",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225908",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "127537",
+          "1790974791802330684",
+          "1790974791802330684"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "verifier.py",
+      "pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/verifier.py",
+        "bytes": 99683,
+        "sha256": "3eee3d7b74eab52e87b7dd211e8796c77e5c5ec35a6da28810b12870b3ecb4fe",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225909",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "99683",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "ordinary-surplus.txt",
+      "pin": {
+        "path": "/var/tmp/friday-lab880-lab875-node-caller-supervisor-verifier-finite-end-raw-body-connected-closure/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225912",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790974791802474265",
+          "1790974791802474265"
+        ],
+        "stable9": true
+      }
+    }
+  ],
+  "completed_msk": "2026-10-03T00:16:00+03:00",
+  "scoped_credits": [
+    "Actual regular-file receiver writes complete framed bytes to original parent-held inode then reads exact bytes and size. Genuine conditional byte-retention path, not proof original full native/error graph or every pipe/failure endpoint.",
+    "Actual LAB880 replaces explicit second encode/emit _exit with commit_existing_receiver call; preserves original B04 confirmed-close live256 reclamation, B05 nonpropagating emergency handling and actual LAB875 pre-projection UNSETTLED custody. Do not reapply A191 old lifetime accounting.",
+    "All15 owned Source/evidence/auxiliary leaves now bound; Root full19/current6 5changed1equal byte-SHA9 verified. Source19 actual new image still NOT qualified."
+  ],
+  "connected_roots": [
+    {
+      "id": "R02",
+      "class": "harness",
+      "invariant": "Original full raw/error/value/native/FD/lease/secondary graph received before final original private owner loss on ordinary encoding/transport/retirement failure.",
+      "actual_path": "caller __main__ second encode_complete() and commit_existing_receiver(frame), supervisor second encode(R) and commit_existing_receiver(public); pipe send/pwrite/pread/fstat/clock failure can still propagate to interpreter end with original private tail/errors not held outside.",
+      "sites": {
+        "caller": [
+          {
+            "line": 3127,
+            "text": "def commit_existing_receiver(frame):"
+          },
+          {
+            "line": 3213,
+            "text": "        frame = encode_complete()"
+          },
+          {
+            "line": 3220,
+            "text": "        frame = encode_complete()"
+          },
+          {
+            "line": 3221,
+            "text": "    commit_existing_receiver(frame)"
+          },
+          {
+            "line": 3222,
+            "text": "    os._exit(0 if R[\"qualified_node_only\"] else 3 if STOP else 2)"
+          }
+        ],
+        "supervisor": [
+          {
+            "line": 2357,
+            "text": "def commit_existing_receiver(frame):"
+          },
+          {
+            "line": 2512,
+            "text": "    public = encode(R)"
+          },
+          {
+            "line": 2521,
+            "text": "    public = encode(R)"
+          },
+          {
+            "line": 2523,
+            "text": "commit_existing_receiver(public)"
+          },
+          {
+            "line": 2524,
+            "text": "os._exit(0 if qualified and not STOP else 3 if STOP else 2)"
+          }
+        ],
+        "verifier": [
+          {
+            "line": 1641,
+            "text": "def commit_existing_receiver(frame):"
+          },
+          {
+            "line": 2049,
+            "text": "commit_existing_receiver(data)"
+          }
+        ]
+      },
+      "state": "CODE_OPEN_CURRENT_ACTUAL_ORDINARY_PATH; NOT_NEW_ROOT",
+      "next": "Original permitted preowned outside-parent body/error custody BEFORE first fallible publication, actual both receiver/full stock/native alias/end/cost relation. No universal SIGKILL/hostile kernel theorem/new role/infinite observer or invented private artifact.",
+      "owner": "Astra"
+    },
+    {
+      "id": "R01/R04",
+      "class": "harness",
+      "invariant": "Finite original actual factories/default/catch/cleanup/error/native/body/copy bounds fit original32768/65536/2097152 before effects.",
+      "actual_path": "derived_stock_bounds uses call_sites6/per_cell160/per_call480 and graph_budget6058; error budgets/structural_graph_bytes are not proved full original native/frames/value graph upper. retain_emergency beyond108 returns last prior marker without storing extra original; actual extra original disappears after caller except frame unless full reachable catch bound proves branch unreachable.",
+      "state": "CONNECTED_PROSPECTIVE_FACTORIES_AND_CATCH_REACHABILITY_OPEN_NOT_NEW_ROOT",
+      "next": "Derive actual original reachable per-field/factory/codec/escaped text/catch loop/multiplicity/secondary/error/cleanup upper or implement complete original receiver; preserve original cases/caps, actual beyond-history originals not prior-marker credit.",
+      "owner": "Astra/Sol/Grok compatible next connected Source task"
+    },
+    {
+      "id": "R03",
+      "class": "harness",
+      "invariant": "Actual unread fstat/read/short/EOF/projection/once-close body prefix and native end remain owned.",
+      "state": "REAL_PRE_PROJECTION_HOLD_CREDIT_RETAINED_NOT_WHOLE_ACCEPTED",
+      "next": "Rejoin current caller/receiver backing and both finite ends without blind once-close retry; current open R02 prevents whole acceptance.",
+      "owner": "Astra"
+    },
+    {
+      "id": "NODE-CURRENT-IMAGE-ABI-GPG-GRANTS-CLOCKS",
+      "class": "environment",
+      "state": "MANDATORY_QUALIFICATION_NOT_RUN_NOT_CODE_BY_ITSELF",
+      "next": "After necessary independently accepted Source exact actual current6+deps/source19/image/nativeABI/GPG/provider/grants/resources/finite clocks."
+    },
+    {
+      "id": "NODE-WHOLE-RAM-IO",
+      "class": "environment",
+      "state": "UNKNOWN_NOT_ZERO",
+      "next": "Separate prospective actual full source-bound fit from later measured original whole RAM/IO/CPU; never use sealer RSS as product measurement."
+    },
+    {
+      "id": "NODE-RUNTIME-GATES",
+      "class": "evidence",
+      "state": "NOT_RUN",
+      "next": "Fresh authorized exact candidate stable diagnostics then unchanged canonical final release conjunction."
+    }
+  ],
+  "new_product_defects": 0,
+  "whole_roots_independently_closed": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "source_execution": 0,
+  "do_not_resubmit_known_incompatible_whole_review": true
+}

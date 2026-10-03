@@ -1,0 +1,229 @@
+{
+  "schema": "friday.a061.owned-source-manifest.v1",
+  "assignment": "ASTRA-E4-BROWSER-WHOLE-CONTROL-NATIVE-SOURCE-CLOSURE-A061",
+  "generation": 1,
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "sealed_MSK": "2026-10-01T12:16:35+03:00",
+  "directory": {
+    "path": "/var/tmp/friday-astra-browser-whole-control-native-a061-g1",
+    "mode": "0700",
+    "uid": 1000,
+    "gid": 1000
+  },
+  "actual_member_count": 23,
+  "actual_member_bytes": 435818,
+  "members": [
+    {
+      "name": "A061-ABI-MAPPING.json",
+      "bytes": 2238,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "aec6724c05c20882450acf0c0e14592b0225a324a8d906fb6603c51053269ff3"
+    },
+    {
+      "name": "A061-BILL.json",
+      "bytes": 104731,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "488e8dc7e16d6aded4d082301f4a7e8ebf8575452a584eb7a9f70d897f7ce650"
+    },
+    {
+      "name": "A061-BOOTSTRAP.c",
+      "bytes": 23717,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "7641f18ca0e9fbe67ed0bab6d70454aace4014c2b7ce6a63dcabf411767fd03e"
+    },
+    {
+      "name": "A061-BUILD-RECIPE.json",
+      "bytes": 3373,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2c8d0f32fc7eeefea73f5fce4d24d6b2c91b06ad53716b0439fcc8411395c19d"
+    },
+    {
+      "name": "A061-COMMON.c",
+      "bytes": 13215,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "9524b0ac2461b824b9c206501911fb0aec3fb55a572acfc5fbc4cf8b2012086f"
+    },
+    {
+      "name": "A061-CONTRACT.py",
+      "bytes": 19703,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "09e0f328547a3bc937c297fa9bc0dfbf4871633fe7ecd6dd3b90fb8d4526fc88"
+    },
+    {
+      "name": "A061-CONTROL-MATRIX.json",
+      "bytes": 3052,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "ac63be0ab49795fe9d0d20b3ab212c567ba34b7ef2cc7a3986673a1d46418805"
+    },
+    {
+      "name": "A061-CONTROLS.py",
+      "bytes": 78027,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb"
+    },
+    {
+      "name": "A061-EXECUTOR.py",
+      "bytes": 46214,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "92a641025cb078b01418f7ec9e1701181c0d6d680ef5dbf1089279df688753c3"
+    },
+    {
+      "name": "A061-FULL-CONTROLS.py",
+      "bytes": 23060,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf"
+    },
+    {
+      "name": "A061-NATIVE.h",
+      "bytes": 4278,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "5f269a4494ef7e7c1c2377242b9c407068b6af29abca85c36ff199a3899def17"
+    },
+    {
+      "name": "A061-OWNED.c",
+      "bytes": 10649,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "638d84391b4351f06499c1ad5aaa2966e9cc42cdfaf658a2148d25bf264d9290"
+    },
+    {
+      "name": "A061-OWNER.py",
+      "bytes": 7369,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155"
+    },
+    {
+      "name": "A061-PRODUCER.py",
+      "bytes": 12182,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2e7fd79e1754588364a76975ffbf9ff1ca7dacf38dbef30659151c241b8e364e"
+    },
+    {
+      "name": "A061-RUNTIME.c",
+      "bytes": 7457,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "50ad41fa45923515433ca153c33199e21c8e704db4163861dd35a0e065e1f26f"
+    },
+    {
+      "name": "A061-SCHEMA.json",
+      "bytes": 6074,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "c8e2d4a30f559c58f121ae0928564809b52c33237924f7f0a834a605c137a96c"
+    },
+    {
+      "name": "A061-SUPERVISOR.py",
+      "bytes": 49225,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "4b6ad763b0883310445d625414fc178e76b28e36c66ca617a8f92b4a71d3d85f"
+    },
+    {
+      "name": "A061-WORKER.py",
+      "bytes": 7958,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2da91ef0254d5b92aa82e12f2c049ce1ad3940da1a2ae54f0750658cec1b6d66"
+    },
+    {
+      "name": "BENIGN-FIXTURES.json",
+      "bytes": 1573,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "64e93fb9fc3f93e3420ad1fb03007416aaffeaea0195532811c4ac380074da4c"
+    },
+    {
+      "name": "INDEX.md",
+      "bytes": 1647,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "855d5daade942ae4b1cae99ddf1479fc8e47f7f3fa6f998fb0b7a9c8db8b4239"
+    },
+    {
+      "name": "READ-LEDGER.tsv",
+      "bytes": 2517,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "41fee460f7d563c6d882040e716153ebc4443da6d8e6f6bb1e0ac9d68edc04eb"
+    },
+    {
+      "name": "RESULT.json",
+      "bytes": 5703,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "439f93fe5dbb590928acbc91794ba5a84101a849e01d6066d0382c8892ae0ea9"
+    },
+    {
+      "name": "REVIEW-REQUEST.md",
+      "bytes": 1856,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "e3c87c5e4481dd543d111565998e140b348a2437270bb0bbc749d29fe322c31a"
+    }
+  ],
+  "excluded": [
+    "MANIFEST.json self; external terminal registry records its exact hash"
+  ],
+  "scope": "All actual regular source/docs/result members. No binary/runtime-image/capsule/root authority/test observation included.",
+  "integrity": "Actual owned stat/hash seal, not compile/import/review acceptance"
+}

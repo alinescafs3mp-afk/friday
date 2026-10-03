@@ -1,0 +1,545 @@
+{
+  "schema": "friday.astra.sol093.result.received.v1",
+  "recorded_utc": "2026-10-03 15:17:43 UTC",
+  "assignment": "ASTRA-E4-PUBLISHER-LAB916-SAME-POOL-TOTAL-LAYOUT-CONNECTED-CLOSURE-SOL093",
+  "generation": 1,
+  "event": "SOL-SOL093-R1",
+  "queued_id": "01a10252-e536-7c20-b254-f83789237b06",
+  "result": {
+    "pin": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL093-RESULT.json",
+      "bytes": 1902,
+      "sha256": "ac37eee02ee5cc668b0ab0414dbfb636d4fec7b0fee91b337963cc64c2661032",
+      "identity9_decimal_strings": [
+        "2050",
+        "8534285",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1902",
+        "1791040347922875779",
+        "1791040348010880887"
+      ],
+      "stable9": true
+    },
+    "value": {
+      "schema": "friday.sol093.result.v1",
+      "assignment": "ASTRA-E4-PUBLISHER-LAB916-SAME-POOL-TOTAL-LAYOUT-CONNECTED-CLOSURE-SOL093",
+      "generation": 1,
+      "event_id": "SOL-SOL093-R1",
+      "classification": "EXACT_CURRENT_LAYOUT_CONFLICT_INERT_ATTEMPT",
+      "manifest": {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/manifest.json",
+        "bytes": 53697,
+        "sha256": "bc20b224a1bce05110804d9d7b1f85a88fc7ca1c4832f002b3b36a1eb4c4c7ed",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371826",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "53697",
+          "1791040298771023074",
+          "1791040298771023074"
+        ],
+        "stable9": true
+      },
+      "files": 17,
+      "total_bytes": 1117963,
+      "current_source49": 49,
+      "current134": 134,
+      "own_python": 2,
+      "external_source": 47,
+      "N2_SOL092_exact_unchanged": true,
+      "summary": "Full all15:6 distinct primary/late pairs.12 metadata files24,001,536 +12 minimum body bytes +six original stream promises12,000,000 +4096 =36,005,644 >whole33,554,432 by2,451,212 before other work. Reservation conflict, not reached-output witness/all-codecs theorem; retained-consumer not claimed impossible.",
+      "attempt": "Root early prospective proposal; actual known-mode validate_complete_capacity joins exact Refused. Old first helper can refuse before new predicate. No local cap edit/first-effect closure claimed.",
+      "residuals": "Self-cohort B+metadata2,000,128>B; cached2 slots not all jobs. Exact same-role cohort/codec/BOTH raw readers/alias finite ends required. N1/N4/native/raw full cost CODE/UNKNOWN.",
+      "finite_scope_done": true,
+      "implementation_complete": false,
+      "independent_acceptance": false,
+      "Source_execution": 0,
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false,
+      "C1": "CODE",
+      "C2": "UNKNOWN_NOT_ZERO",
+      "image_ABI_runtime_gates": "REQUIRED_NOT_RUN",
+      "all_original_controls_required": true,
+      "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false",
+      "accepted_msk": "2026-10-03 17:58:14 MSK",
+      "completed_msk": "2026-10-03 18:12:27 MSK",
+      "elapsed_sec": 853
+    }
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/manifest.json",
+    "bytes": 53697,
+    "sha256": "bc20b224a1bce05110804d9d7b1f85a88fc7ca1c4832f002b3b36a1eb4c4c7ed",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371826",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "53697",
+      "1791040298771023074",
+      "1791040298771023074"
+    ],
+    "stable9": true
+  },
+  "TASK": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL093-TASK-20261003.txt",
+    "bytes": 1679,
+    "sha256": "07cc81c69727b9488b03c63f8421e2bcc41243f54bc90053a9a5e397aeed966c",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534235",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1679",
+      "1791039377938760862",
+      "1791039378027765967"
+    ],
+    "stable9": true
+  },
+  "INPUT": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL093-INPUT-20261003.json",
+    "bytes": 377135,
+    "sha256": "b926d7546adce3b0c99d0e3b01fcaa72aa13d647b4dde40a34394c6601fbf090",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534233",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "377135",
+      "1791039333240196867",
+      "1791039333389205414"
+    ],
+    "stable9": true
+  },
+  "compact": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL093-PRE-TASK-COMPACT-20261003.json",
+    "bytes": 3044,
+    "sha256": "01ff702311d3481471a6a1fbe34e10dff6ced2a7e22d832792db6f72fa199655",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534238",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3044",
+      "1791039487236030384",
+      "1791039487300034055"
+    ],
+    "stable9": true
+  },
+  "physical": {
+    "files": [
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/README.txt",
+        "bytes": 2528,
+        "sha256": "996caa8e1478e7330880cc264bed9fae8664e7f898909209123785877d8641d0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371818",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2528",
+          "1791040189647460570",
+          "1791040249671173382"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/code-conflicts.json",
+        "bytes": 6472,
+        "sha256": "fb4e1e7231fdba84bfac4591195c93ef297b53b4699fc3e34108cd6c74e47f01",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371812",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6472",
+          "1791040131600320701",
+          "1791040249671173382"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/connected-relations.json",
+        "bytes": 2629,
+        "sha256": "5d293ab16c7ec483df899e1bef66ea39263d6e0f1d1f431404ae8aae41b4e579",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371813",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2629",
+          "1791040131621321920",
+          "1791040249671173382"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/current134-source-map.json",
+        "bytes": 416465,
+        "sha256": "b0bd30917643272f2d9bb65a0a52da3858fe684455b2856cf0dbc8417f21c2a0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371815",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "416465",
+          "1791040131710327086",
+          "1791040249671173382"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/current49-source-map.json",
+        "bytes": 77987,
+        "sha256": "397fed9e8033e8860f6a29a2351eb5b8d7dc204d426c4af67a17f3a23f71cc10",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371814",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "77987",
+          "1791040131647323429",
+          "1791040249671173382"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/data-integrity.json",
+        "bytes": 166646,
+        "sha256": "6200d6fb269468fc060cfd6a484926cff85294fbeedb423e278f2b832b59e9aa",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371824",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "166646",
+          "1791040217763321493",
+          "1791040249672173441"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/full-gapless-partitions.json",
+        "bytes": 211478,
+        "sha256": "f0b63df980bbc620aaec1a09c693243ca97da1aba0fd1707cd7604f491fb31b7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371816",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "211478",
+          "1791040131776330916",
+          "1791040249672173441"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/numerical-layout-conflict.json",
+        "bytes": 5294,
+        "sha256": "5abd17d93004fd96db9d0992c0a6c3e19e2e2f090ea83ad6f934bd2a87f3d9f0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371811",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5294",
+          "1791040131579775041",
+          "1791040249672173441"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/original-obligations.json",
+        "bytes": 38970,
+        "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371819",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "38970",
+          "1791040131858335677",
+          "1791040249672173441"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/qualification-and-costs.json",
+        "bytes": 2153,
+        "sha256": "77bf24f186dc7923f27dfb0ea1cafa0fdab935721359829b0b9489d08b2bbcc8",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371823",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2153",
+          "1791040217720318998",
+          "1791040249672173441"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/source-byte-materialization.json",
+        "bytes": 2032,
+        "sha256": "b97caf5d68deddbdbf80ff835a9691f9c9ab2203eef3fdc02bd7e80ff08b64d6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371798",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2032",
+          "1791039897167714557",
+          "1791039897224717865"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence/validation-plan.json",
+        "bytes": 5836,
+        "sha256": "261f0922804ce34d00239880c4177e11af4ccd8a0395ca4bf272923c27eaa340",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371817",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5836",
+          "1791040131812333007",
+          "1791040249672173441"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/pathset.json",
+        "bytes": 840,
+        "sha256": "a33a539cf34815c7a8baee8b7805f090fe62048bfacce5898831f4c3ffbf5c3a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371825",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "840",
+          "1791040249607169668",
+          "1791040249672173441"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/received.json",
+        "bytes": 1683,
+        "sha256": "5a909c568c9ea850d48b2e2178b7ab060d2481a754b9504f7e26d9a1ebbe32c2",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371793",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1683",
+          "1791040163215155583",
+          "1791040163215155583"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/source/capacity.py",
+        "bytes": 21935,
+        "sha256": "cf8e05d90afc8c9b58c9554c3f8abf7a33c0938144a3a3712b630b0132e161be",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371795",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21935",
+          "1791039897108711132",
+          "1791039897224717865"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/source/observer.py",
+        "bytes": 101318,
+        "sha256": "91079a58bd43109c348c0381be89f23bbc04dd65cd44ce36daaf0395ac513ae3",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371796",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "101318",
+          "1791039897136712758",
+          "1791039897224717865"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/manifest.json",
+        "bytes": 53697,
+        "sha256": "bc20b224a1bce05110804d9d7b1f85a88fc7ca1c4832f002b3b36a1eb4c4c7ed",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371826",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "53697",
+          "1791040298771023074",
+          "1791040298771023074"
+        ],
+        "stable9": true
+      }
+    ],
+    "directories": [
+      {
+        "name": ".",
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371792",
+          "16832",
+          "1000",
+          "1000",
+          "4",
+          "4096",
+          "1791040249608169726",
+          "1791040249608169726"
+        ]
+      },
+      {
+        "name": "evidence",
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/evidence",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371797",
+          "16832",
+          "1000",
+          "1000",
+          "2",
+          "4096",
+          "1791040217763321493",
+          "1791040217763321493"
+        ]
+      },
+      {
+        "name": "source",
+        "path": "/var/tmp/friday-sol093-publisher-lab916-same-pool-total-layout-connected-inert-source/source",
+        "identity9_decimal_strings": [
+          "2050",
+          "4371794",
+          "16832",
+          "1000",
+          "1000",
+          "2",
+          "4096",
+          "1791039897136712758",
+          "1791039897219717575"
+        ]
+      }
+    ],
+    "bytes": 1117963,
+    "external_shapes": [
+      {
+        "name": "evidence/data-integrity.json",
+        "keys": [
+          "schema",
+          "external",
+          "external_count",
+          "own_Source",
+          "N2_current_Source2",
+          "Source2_expected_literal_equal",
+          "original44_and_current49_gapless_partitions",
+          "current134_count",
+          "baseline63_tree",
+          "compact",
+          "complete_SHA9_data_integrity_is_not_Source_parse_execution_semantic_or_native_credit",
+          "Source_execution"
+        ],
+        "types": {
+          "schema": "str",
+          "external": "list",
+          "external_count": "int",
+          "own_Source": "list",
+          "N2_current_Source2": "list",
+          "Source2_expected_literal_equal": "bool",
+          "original44_and_current49_gapless_partitions": "bool",
+          "current134_count": "int",
+          "baseline63_tree": "dict",
+          "compact": "dict",
+          "complete_SHA9_data_integrity_is_not_Source_parse_execution_semantic_or_native_credit": "bool",
+          "Source_execution": "int"
+        }
+      }
+    ],
+    "external287_verified": true
+  },
+  "decision": "RECEIVED_FINITE_CURRENT_LAYOUT_ATTEMPT_NOT_INDEPENDENT_ACCEPTANCE",
+  "actual_conflict": {
+    "known_mode_join": "actual validate_complete_capacity -> new require_publisher_whole_layout; complete performing all15 reservation cannot fit; exact detail Refused",
+    "early_root": "sameRoot prospectively records exact proposed total before store/helper effects; first-effect qualification false, no invented signed admission or local cap raise",
+    "current_earlier_refusal": "LAB916 initial row still refuses before known-mode predicate may run; no bypass/local reserve growth/false runtime observation",
+    "numbers": {
+      "whole_output_cap": 33554432,
+      "necessary_terminal_output_floor": 36005644,
+      "shortfall": 2451212,
+      "minimum_job_pairs": 6,
+      "minimum_metadata_files": 12,
+      "metadata_file_width": 2000128,
+      "minimum_metadata_output": 24001536,
+      "minimum_bodies": 12,
+      "terminal_six_streams": 12000000,
+      "refusal4096": 4096
+    },
+    "scope": "Current full positive all15 bank+six stream promise layout only, not universal impossibility of all lossless codecs nor retained-consumer branch; cap declarations not simultaneous reached witness",
+    "minimum_cohort_conflict": "same self body B + own metadata2000128 > B, original complete raw mapping path",
+    "same_role_alternatives": "evidence/code-conflicts.json exact functions/requirements/actual minimum existing-role cohort/codec/both-receiver/alias-retirement alternatives",
+    "remaining_output_read_hash_RAM_FD_native_cost": "REQUIRED UNKNOWN_NOT_ZERO; no whole upper bound"
+  },
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

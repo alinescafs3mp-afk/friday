@@ -1,0 +1,56 @@
+{
+  "schema": "friday.sol091.actual-connected-producer-readers.v1",
+  "Source44": 44,
+  "Source21": 21,
+  "consumer23": 23,
+  "current134": 134,
+  "prior_dependencies4": 4,
+  "new_dependency": "source/selected_owned_values.py",
+  "all_texts49": 49,
+  "changed_from_SOL090": [
+    "source/actor_bootstrap.py",
+    "source/custody.py",
+    "source/lifetime.py",
+    "source/native.py",
+    "source/observer.py",
+    "source/root_tool_adapter.py",
+    "source/existing_root_caller.py",
+    "native/publisher_owned_custody.h",
+    "native/publisher_owned_custody.c",
+    "source/owned_prefix_bank.py",
+    "source/selected_owned_values.py"
+  ],
+  "relations": [
+    {
+      "producer": "OwnedMappingBirth.create/cut",
+      "callers": "PrefixBodyMailbox preparation in RootToolAdapter.launch and Native._run before fork",
+      "receivers": "shared full-value v7 validation, NativeMemoryBody/PreparedFullBody/PrefixBodyMailbox reader",
+      "alias": "actual own mapping/exact original row-credit/backing9/full raw/position",
+      "end": "stable cut -> actual receiver snapshot -> one mapping close -> backing row close; residuals remain"
+    },
+    {
+      "producer": "ForkOwner.emit_late_failure",
+      "callers": "actor/native export-error branches after primary publication/ACK",
+      "receivers": "same receive_preowned_fork_failure/shared full reader on BOTH parent paths",
+      "alias": "distinct same-parent preowned late body/meta, exact raw/three roots/original G/A/B",
+      "end": "no second primary publication; no end on newer unrepresented late error"
+    },
+    {
+      "producer": "FridayPublisherOwnedInvoke preowned actual original run prefix",
+      "caller": "same performing native bridge, no main/service",
+      "receiver": "prefix_envelope -> NativeRootReceiver.complete_prefix -> full v7",
+      "end": "module-allocation-cut full accepted body/end missing: N1 CODE"
+    },
+    {
+      "producer": "native document write/fsync/one final-close scalar/error cell",
+      "receiver": "consume_native_after_document -> verify_native_error_snapshot -> actual same native receiver/full v7",
+      "alias": "same original error triple+immutable v2 document+actual last rc/errno",
+      "end": "accepted body not outside end; original non-final prepared table absent"
+    }
+  ],
+  "current_v2_four_fields_preserved": true,
+  "original_roles_pools_schema20_requirements_preserved": true,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

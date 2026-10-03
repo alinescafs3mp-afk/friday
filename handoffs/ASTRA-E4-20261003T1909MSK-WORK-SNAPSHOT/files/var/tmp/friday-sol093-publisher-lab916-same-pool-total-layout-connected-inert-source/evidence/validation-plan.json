@@ -1,0 +1,152 @@
+{
+  "schema": "friday.sol093.abstract-required-validation.v1",
+  "controls": [
+    {
+      "id": "NORMAL_FULL_ALL15_CURRENT_LAYOUT",
+      "requirement": "Six mandatory jobs12 banks, no reused identity: exact36,005,644 declaration >whole32MiB, conflict not PASS; original full positive remains required",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "RETAINED_CONSUMER_NORMAL",
+      "requirement": "Do not apply four performing runtime jobs to retained-consumer branch; existing mode preserved, whole fit still UNKNOWN",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "ONE_PAIR_LOCAL_LAYOUT",
+      "requirement": "12,004,096 vs16,000,256 is real local deficiency only; do not infer original whole32MiB grant immutable12M or missing owner authority",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "ALL_JOBS_AND_SLOTS",
+      "requirement": "Next helper after primary/late must not reset prefix_bank_slot2 or silently create new2-bank plan/newtoken",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "SHARED_TERMINAL_DOUBLE_COUNT",
+      "requirement": "six stream envelopes once, terminal_tail category once; metadata per distinct physical job, cumulative output no refund",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "FULL_STREAM_AND_ERROR_CEILINGS",
+      "requirement": "No shrinking six streams/2M metadata/body raw controls to obtain green",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "SELF_BODY_AND_META_COHORT",
+      "requirement": "B+2,000,128>B exact required raw image path, no recursive widen/hashing shortcut",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "RAW_COHORT_NOT_SELECTED",
+      "requirement": "Do not extend conditional self-cohort counterexample to branch not selecting these maps or to every alternative encoding",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "BEFORE_EFFECT_PLAN",
+      "requirement": "Root earliest proposal attached; constructorNone not invented signed grant; late known-mode predicate not first-effect closure",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "WHOLE_REMAINING_OUTPUT",
+      "requirement": "Installed/copies/typed/pack/auth/selectors/bundle/RPC/generated/consumer/implicit categories remain required UNKNOWN_NOT_ZERO",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "READ_HASH_RAM",
+      "requirement": "Count actual reads separate from additive memory hash; retain full graph/metadata/bank/parser/error/raw recipient overlap before allocation;8GiB unchanged",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "FD128_WORKERS4_CLOCKS4200",
+      "requirement": "No numericFD128 cap mistake; total FD/history/cells/allnames actual, original workers/4200/600 boundaries unchanged",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "SAME_PRIMARY_ORDINARY_BOTH_READERS",
+      "requirement": "Full exact8fields3roots/schema/value/span/history/actual bindings before any ACK; publication!=receipt",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "LATE_ACK_WRITE_FAILURE_BOTH_READERS",
+      "requirement": "Original single primary attempt; separate late cut/errors, unknown close no retry, both ACK/end not exit/wait4",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "N2_EXACT_UNCHANGED",
+      "requirement": "G917 N2 packet Source2 exact unchanged with same original channel/token/argv4/parent/fork/physical9",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "NATIVE_PUBLIC_N1_N4",
+      "requirement": "Public cut/private raw/full native bank/last-error ends/C1CODE; no grant/header/address/callback substitute",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    },
+    {
+      "id": "MALFORMED_LAYOUT_TYPES",
+      "requirement": "No bool/int confusion, missing actual caller work, foreign token/FD/supplier, claimed post-retirement refund",
+      "status": "ABSTRACT_REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false
+    }
+  ],
+  "original_obligations": {
+    "name": "evidence/original-obligations.json",
+    "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/evidence/original-obligations.json",
+    "bytes": 38970,
+    "sha256": "a13feb01123cd6a71ff2b7781fbcac15e570b726a53f24737d496992efb4e27f",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371734",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "38970",
+      "1791022108009371618",
+      "1791022242519576230"
+    ],
+    "stable9": true
+  },
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  },
+  "original69_exact6_all15_schema20_all134": true,
+  "all30_F0F11_full58_full22_ABI128_original11_all27_all9_all5": true,
+  "two_full_original_positives_and_negatives": "REQUIRED_NOT_RUN_NO_WAIVER",
+  "old_execution_transferred": false,
+  "Source_execution": 0
+}

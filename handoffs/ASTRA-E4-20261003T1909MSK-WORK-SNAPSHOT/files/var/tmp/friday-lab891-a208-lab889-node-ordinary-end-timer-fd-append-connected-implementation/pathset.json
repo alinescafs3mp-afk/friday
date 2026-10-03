@@ -1,0 +1,50 @@
+{
+  "files": [
+    {
+      "bytes": 191129,
+      "path": "caller.py",
+      "sha256": "5c47c9b2cf13f4e002f7c06cf1f7f99ed56b0ab54e6e42bfc86597e70c45217d"
+    },
+    {
+      "bytes": 3394,
+      "path": "evidence/findings.json",
+      "sha256": "5d308163efab475d426ea525d7666517311723a709e2e9a5ef6aae5d582af69b"
+    },
+    {
+      "bytes": 65020,
+      "path": "evidence/partitions.json",
+      "sha256": "5d57e186310a793c3cc41b6f980ece10ab4426b4873c944643a825cfe775ef0b"
+    },
+    {
+      "bytes": 6192,
+      "path": "evidence/pin-checks.json",
+      "sha256": "014063425d3a37f958b4e5896be3182b42ca73844b4653eab27bb3a61a76dbb2"
+    },
+    {
+      "bytes": 12120,
+      "path": "expectations.json",
+      "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb"
+    },
+    {
+      "bytes": 51517,
+      "path": "launch-contract.json",
+      "sha256": "a9745e8b13656d1fda2f1229962ccb1f1cb94109197c9e916cfc71140ac4f1de"
+    },
+    {
+      "bytes": 158,
+      "path": "ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    {
+      "bytes": 155024,
+      "path": "supervisor.py",
+      "sha256": "660477909be790ceb9f7872c2dbe57d2d2646470823f4f210fe30f6dec209607"
+    },
+    {
+      "bytes": 124618,
+      "path": "verifier.py",
+      "sha256": "a9cf2df726de2eff7fbd7ce77759540686467ea4761f91e1bed7af8244c33c39"
+    }
+  ],
+  "schema": "friday.e4.lab891.a208.pathset.v1"
+}

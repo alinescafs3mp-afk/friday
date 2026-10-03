@@ -1,0 +1,186 @@
+{
+  "schema": "friday.sol078.review-manifest.v1",
+  "assignment": "ASTRA-E4-LAB891-NODE-ORDINARY-END-TIMER-TYPED-FD-APPEND-INDEPENDENT-REVIEW-SOL078",
+  "generation": 1,
+  "accepted_msk": "2026-10-03T04:47:00+03:00",
+  "completed_review_msk": "2026-10-03T04:55:01.393978+03:00",
+  "elapsed_review_seconds": 481.394,
+  "decision": "REJECT_CONNECTED_ORDINARY_CLOSURE_WITH_SCOPED_CREDITS",
+  "files": [
+    {
+      "path": "evidence/effect-and-author-accounting.json",
+      "bytes": 1745,
+      "sha256": "2ba311986326d36bcdd5176586a6a937bb435c4317697c80650d3adabb9ac803",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226769",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1745",
+        "1790992478179149093",
+        "1790992478179149093"
+      ]
+    },
+    {
+      "path": "evidence/final-external-snapshot.json",
+      "bytes": 117347,
+      "sha256": "88e5e61d11ba0fcd63d3340595a24799d923471ae75a29b2d188c5bb825bd977",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226771",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "117347",
+        "1790992449080481563",
+        "1790992478243152761"
+      ]
+    },
+    {
+      "path": "evidence/independent-census-and-partitions.json",
+      "bytes": 4599,
+      "sha256": "1dc9f8526f815991ec7da008fe63a1096cfe42501547a95b4f906f55d5b51373",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226754",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4599",
+        "1790992223868575556",
+        "1790992418234713910"
+      ]
+    },
+    {
+      "path": "evidence/intake.json",
+      "bytes": 12588,
+      "sha256": "41088e99bb1c63016770d495857ebef2a07baf9f856877cc53672541462da463",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226753",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12588",
+        "1790992065207468788",
+        "1790992065266472180"
+      ]
+    },
+    {
+      "path": "evidence/literal-source-site-pins.json",
+      "bytes": 10958,
+      "sha256": "071aee0884e5814beebb1e5ccfa9e0b20a62093b09c3138de04ff4d773cbf867",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226770",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10958",
+        "1790992418167710071",
+        "1790992418234713910"
+      ]
+    },
+    {
+      "path": "evidence/original-controls-current-binding-and-method-rejoin.json",
+      "bytes": 33027,
+      "sha256": "b0fb5ab5c8dc2adede0f85706d5ae3d6231af3b89b2f89d5a661afb829e3afc7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226756",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "33027",
+        "1790992302040055256",
+        "1790992418233713853"
+      ]
+    },
+    {
+      "path": "evidence/original-pins-and-obligations.json",
+      "bytes": 124993,
+      "sha256": "30e5631d85e5bab4d47f4788ca30c777569da5893ca5b529fc93f78b572d93ca",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226755",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124993",
+        "1790992223868575556",
+        "1790992418233713853"
+      ]
+    },
+    {
+      "path": "evidence/required-controls-and-actual-routes.json",
+      "bytes": 4144,
+      "sha256": "59766cee03932bd4b4905d76d523771ddcead420d62e75ad8c7a10404dd1a03c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226768",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4144",
+        "1790992448862863181",
+        "1790992448862863181"
+      ]
+    },
+    {
+      "path": "findings.json",
+      "bytes": 13281,
+      "sha256": "651f566baccb45ed02a5dd836b25f48883fa8d8ce7c1b4df4f0a8f2326dce854",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226767",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13281",
+        "1790992389492066792",
+        "1790992418234713910"
+      ]
+    },
+    {
+      "path": "received.json",
+      "bytes": 970,
+      "sha256": "55a09829536cc8713b2634e6f4a5f662d78abf42207141e23ce8145324615d95",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226751",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "970",
+        "1790992065206468731",
+        "1790992065266472180"
+      ]
+    }
+  ],
+  "tree_bytes_excluding_manifest": 323652,
+  "exact_pathset": true,
+  "Source_execution": 0,
+  "model_children": 0,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "whole_accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "unsafe": {
+    "handling": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

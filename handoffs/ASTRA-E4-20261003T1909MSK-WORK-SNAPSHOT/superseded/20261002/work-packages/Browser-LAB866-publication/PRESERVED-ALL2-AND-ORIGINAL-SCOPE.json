@@ -1,0 +1,329 @@
+{
+  "original_independent_review": {
+    "all2": [
+      {
+        "id": "A156-01",
+        "verdict": "REPAIRED_CURRENT_FIRST_RESOURCE_GUARD_SOURCE_NOT_RUN",
+        "FULL": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-FULL-CONTROLS.py",
+            "bytes": 65233,
+            "sha256": "6efe9b3bb6a14678b2d82d1952a5fd42e80b23b2544abf396e5704cb4482a3cb",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978882",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "65233",
+              "1790921254749627442",
+              "1790921254749627442"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            260,
+            442
+          ]
+        },
+        "A079": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A079-NATIVE-PUBLIC-DRIVER.py",
+            "bytes": 23943,
+            "sha256": "73474e892116959f56f8a67caf3bb4f919269a503bc5c561d1b25e3c7620edbc",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978883",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "23943",
+              "1790921254770628644",
+              "1790921254770628644"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            135,
+            317
+          ]
+        }
+      },
+      {
+        "id": "A156-02",
+        "verdict": "REPAIRED_CURRENT_FULL_RAW_BEFORE_SEMANTICS_SUCCESS_REFUSAL_SOURCE_NOT_RUN",
+        "FULL": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-FULL-CONTROLS.py",
+            "bytes": 65233,
+            "sha256": "6efe9b3bb6a14678b2d82d1952a5fd42e80b23b2544abf396e5704cb4482a3cb",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978882",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "65233",
+              "1790921254749627442",
+              "1790921254749627442"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            442,
+            521
+          ]
+        },
+        "A079": {
+          "source_pin": {
+            "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A079-NATIVE-PUBLIC-DRIVER.py",
+            "bytes": 23943,
+            "sha256": "73474e892116959f56f8a67caf3bb4f919269a503bc5c561d1b25e3c7620edbc",
+            "identity9_decimal_strings": [
+              "2050",
+              "6978883",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "23943",
+              "1790921254770628644",
+              "1790921254770628644"
+            ],
+            "stable9": true
+          },
+          "lines": [
+            317,
+            396
+          ]
+        }
+      }
+    ],
+    "original216_maps_values_order": "EXACT_VERIFIED",
+    "full8": [
+      {
+        "id": "full_positive",
+        "exact_current_contract": {
+          "caller": "A071-FULL-CONTROLS.py:run_held -> run_pair -> _run_held",
+          "consumer": "native --held-a061 -> supervisor.main -> execute_core -> NativeOwner.wave -> fr_own_spawn -> same G1.worker",
+          "fixture": "prepare_fixture",
+          "state": "FULL_BENIGN_BODY_NO_ADMISSION",
+          "cause": null,
+          "roles": 3,
+          "bytes": "exact PAYLOADS, six files, three dirs, exact3 body hashes",
+          "resource_contract": "180s wall/10s reserve; same64+192MiB, aggregate256MiB",
+          "observed": "NOT_RUN",
+          "complete_oracle": true,
+          "independent_positive_required": false
+        },
+        "disposition": "PRESERVED_WITH_ONLY_HISTORICAL_CALLER_NAME_REBIND",
+        "runtime": "NOT_RUN"
+      },
+      {
+        "id": "full_partial_write",
+        "exact_current_contract": {
+          "caller": "A071-FULL-CONTROLS.py:run_held -> run_pair -> _run_held",
+          "consumer": "native --held-a061 -> supervisor.main -> execute_core -> NativeOwner.wave -> fr_own_spawn -> same G1.worker",
+          "fixture": "prepare_fixture",
+          "state": "FULL_BENIGN_BODY_NO_ADMISSION",
+          "cause": null,
+          "roles": 3,
+          "bytes": "exact PAYLOADS, six files, three dirs, exact3 body hashes",
+          "resource_contract": "180s wall/10s reserve; same64+192MiB, aggregate256MiB",
+          "observed": "NOT_RUN",
+          "complete_oracle": true,
+          "independent_positive_required": true
+        },
+        "disposition": "PRESERVED_WITH_ONLY_HISTORICAL_CALLER_NAME_REBIND",
+        "runtime": "NOT_RUN"
+      },
+      {
+        "id": "full_capsule_pin",
+        "exact_current_contract": {
+          "caller": "A071-FULL-CONTROLS.py:run_held -> run_pair -> _run_held",
+          "consumer": "native --held-a061 -> supervisor.main -> execute_core -> NativeOwner.wave -> fr_own_spawn -> same G1.worker",
+          "fixture": "prepare_fixture",
+          "state": "REFUSED",
+          "cause": "ROOT_CAPSULE",
+          "roles": 0,
+          "bytes": "no completed body credit",
+          "resource_contract": "180s wall/10s reserve; same64+192MiB, aggregate256MiB",
+          "observed": "NOT_RUN",
+          "complete_oracle": true,
+          "independent_positive_required": true
+        },
+        "disposition": "PRESERVED_WITH_ONLY_HISTORICAL_CALLER_NAME_REBIND",
+        "runtime": "NOT_RUN"
+      },
+      {
+        "id": "full_http404",
+        "exact_current_contract": {
+          "caller": "A071-FULL-CONTROLS.py:run_held -> run_pair -> _run_held",
+          "consumer": "native --held-a061 -> supervisor.main -> execute_core -> NativeOwner.wave -> fr_own_spawn -> same G1.worker",
+          "fixture": "prepare_fixture",
+          "state": "CONTOUR_ABORTED",
+          "cause": "HTTP_STATUS_404",
+          "roles": 3,
+          "bytes": "Exact first-two benign payload bytes/hashes; third empty except truncated full inert payload. Exact partial file/dir state, three launches/reaps, accounting charges, actual resource bounds.",
+          "resource_contract": "180s wall/10s reserve; same64+192MiB, aggregate256MiB",
+          "observed": "NOT_RUN",
+          "complete_oracle": true,
+          "independent_positive_required": true,
+          "meaning": "Source oracle written, NOT observed or accepted"
+        },
+        "disposition": "PRESERVED_WITH_ONLY_HISTORICAL_CALLER_NAME_REBIND",
+        "runtime": "NOT_RUN"
+      },
+      {
+        "id": "full_certificate",
+        "exact_current_contract": {
+          "caller": "A071-FULL-CONTROLS.py:run_held -> run_pair -> _run_held",
+          "consumer": "native --held-a061 -> supervisor.main -> execute_core -> NativeOwner.wave -> fr_own_spawn -> same G1.worker",
+          "fixture": "prepare_fixture",
+          "state": "CONTOUR_ABORTED",
+          "cause": "SSLCertVerificationError",
+          "roles": 3,
+          "bytes": "Exact first-two benign payload bytes/hashes; third empty except truncated full inert payload. Exact partial file/dir state, three launches/reaps, accounting charges, actual resource bounds.",
+          "resource_contract": "180s wall/10s reserve; same64+192MiB, aggregate256MiB",
+          "observed": "NOT_RUN",
+          "complete_oracle": true,
+          "independent_positive_required": true,
+          "meaning": "Source oracle written, NOT observed or accepted"
+        },
+        "disposition": "PRESERVED_WITH_ONLY_HISTORICAL_CALLER_NAME_REBIND",
+        "runtime": "NOT_RUN"
+      },
+      {
+        "id": "full_protocol",
+        "exact_current_contract": {
+          "caller": "A071-FULL-CONTROLS.py:run_held -> run_pair -> _run_held",
+          "consumer": "native --held-a061 -> supervisor.main -> execute_core -> NativeOwner.wave -> fr_own_spawn -> same G1.worker",
+          "fixture": "prepare_fixture",
+          "state": "CONTOUR_ABORTED",
+          "cause": "TLS_EVIDENCE",
+          "roles": 3,
+          "bytes": "Exact first-two benign payload bytes/hashes; third empty except truncated full inert payload. Exact partial file/dir state, three launches/reaps, accounting charges, actual resource bounds.",
+          "resource_contract": "180s wall/10s reserve; same64+192MiB, aggregate256MiB",
+          "observed": "NOT_RUN",
+          "complete_oracle": true,
+          "independent_positive_required": true,
+          "meaning": "Source oracle written, NOT observed or accepted"
+        },
+        "disposition": "PRESERVED_WITH_ONLY_HISTORICAL_CALLER_NAME_REBIND",
+        "runtime": "NOT_RUN"
+      },
+      {
+        "id": "full_truncated",
+        "exact_current_contract": {
+          "caller": "A071-FULL-CONTROLS.py:run_held -> run_pair -> _run_held",
+          "consumer": "native --held-a061 -> supervisor.main -> execute_core -> NativeOwner.wave -> fr_own_spawn -> same G1.worker",
+          "fixture": "prepare_fixture",
+          "state": "CONTOUR_ABORTED",
+          "cause": "BODY_TRUNCATED",
+          "roles": 3,
+          "bytes": "Exact first-two benign payload bytes/hashes; third empty except truncated full inert payload. Exact partial file/dir state, three launches/reaps, accounting charges, actual resource bounds.",
+          "resource_contract": "180s wall/10s reserve; same64+192MiB, aggregate256MiB",
+          "observed": "NOT_RUN",
+          "complete_oracle": true,
+          "independent_positive_required": true,
+          "meaning": "Source oracle written, NOT observed or accepted"
+        },
+        "disposition": "PRESERVED_WITH_ONLY_HISTORICAL_CALLER_NAME_REBIND",
+        "runtime": "NOT_RUN"
+      },
+      {
+        "id": "full_short_write",
+        "exact_current_contract": {
+          "caller": "A071-FULL-CONTROLS.py:run_held -> run_pair -> _run_held",
+          "consumer": "native --held-a061 -> supervisor.main -> execute_core -> NativeOwner.wave -> fr_own_spawn -> same G1.worker",
+          "fixture": "prepare_fixture",
+          "state": "CONTOUR_ABORTED",
+          "cause": "SHORT_WRITE",
+          "roles": 3,
+          "bytes": "Exact first-two benign payload bytes/hashes; third empty except truncated full inert payload. Exact partial file/dir state, three launches/reaps, accounting charges, actual resource bounds.",
+          "resource_contract": "180s wall/10s reserve; same64+192MiB, aggregate256MiB",
+          "observed": "NOT_RUN",
+          "complete_oracle": true,
+          "independent_positive_required": true,
+          "meaning": "Source oracle written, NOT observed or accepted"
+        },
+        "disposition": "PRESERVED_WITH_ONLY_HISTORICAL_CALLER_NAME_REBIND",
+        "runtime": "NOT_RUN"
+      }
+    ],
+    "limits_and_outer_supervision": "EXACT_ORIGINAL_VERIFIED",
+    "remaining_mandatory": {
+      "modes": 4,
+      "HTTP": 5,
+      "full63": {
+        "pin": 19,
+        "seal": 18,
+        "OS": 9,
+        "image": 17
+      },
+      "current_runtime_DATA": 9,
+      "same_runtime_manifest": 117,
+      "same_image": 111,
+      "ordinary_receiving": 45,
+      "A087": 44,
+      "positive_FIRST_families": 3,
+      "original_source_names": 208,
+      "current_names": 209,
+      "F0_F11": "REQUIRED_NOT_RUN",
+      "complete_gates": "REQUIRED_NOT_RUN"
+    },
+    "old_A1164_A1523_A0992": "GENUINE_CURRENT_SOURCE_PARTIAL_CREDIT_STATIC_RECHECK_NOT_RUNTIME_TRANSFER",
+    "separate_nonselected_legacy16384_prefix_caller": "NOT_QUALIFIED_FOR_WHOLE216",
+    "compiler_ELF_ABI": "NOT_RUN",
+    "GO": false
+  },
+  "actual_FINAL_invariant_checks": {
+    "original216_values_and_order": true,
+    "original_bill_limits": true,
+    "original_G1_R4_SHA_pins": true,
+    "original_build_steps_flags_env_bounds_ABI": true,
+    "A071_FULL_CONTROLS_and_A079_DRIVER_byte_equal": true,
+    "original_native_bootstrap_owned_byte_equal": true
+  },
+  "helper_pins": {
+    "G1": {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1.py",
+      "bytes": 46980,
+      "sha256": "ba70d584ab4b145195283456b17d98a8ff129a8f7bb3be3595c711fe97d6c223",
+      "identity9_decimal_strings": [
+        "2050",
+        "9176708",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46980",
+        "1790809499402626239",
+        "1790809499402626239"
+      ],
+      "stable9": true
+    },
+    "R4": {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1-R4.py",
+      "bytes": 38388,
+      "sha256": "a68f62ce16883f108992a8f237b9614d964ff0141d9002b5e714fdc2887b414c",
+      "identity9_decimal_strings": [
+        "2050",
+        "9176754",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "38388",
+        "1790814359154276295",
+        "1790814359154276295"
+      ],
+      "stable9": true
+    }
+  },
+  "Source_execution": "NOT_RUN",
+  "old_current51_source_credits_not_new_runtime_credit": true
+}

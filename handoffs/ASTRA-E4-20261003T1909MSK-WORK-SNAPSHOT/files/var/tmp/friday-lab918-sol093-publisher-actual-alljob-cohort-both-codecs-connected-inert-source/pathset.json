@@ -1,0 +1,75 @@
+{
+  "files": [
+    {
+      "bytes": 188,
+      "name": "README.txt",
+      "sha256": "0f2904b6abeb9366eca816bd7f780c66c45dc1adc7fa639ee9ccf82d2fed01a4"
+    },
+    {
+      "bytes": 780,
+      "name": "analysis.json",
+      "sha256": "8c7168dc10f74f6d5804bb58f00b16a0d4710250162a01d6632d699eacaf734a"
+    },
+    {
+      "bytes": 313,
+      "name": "bound.json",
+      "sha256": "bebc98d298ce1b883d26c85f03d7faef35aaba9e3a83d36906601d021416a4b2"
+    },
+    {
+      "bytes": 627,
+      "name": "bound.txt",
+      "sha256": "95c2275db5cdc9bf95dce5e492685ae197e28934ccdbcf6b4c91d59116744c4f"
+    },
+    {
+      "bytes": 481,
+      "name": "current-partitions.json",
+      "sha256": "277cce09b006c65626616171aff5ef78daf340ec3edd867e32051ab61b673110"
+    },
+    {
+      "bytes": 1667,
+      "name": "layout-account.json",
+      "sha256": "dda99dc91685a3d8c4bc90b6cf53a01784af691ffae42320d5f29d138a45fbd3"
+    },
+    {
+      "bytes": 351404,
+      "name": "pin-checks.json",
+      "sha256": "728a996fff4ee65b2b40d7f92e6a9ad9134e52f9638ced20bc60a5a258302b05"
+    },
+    {
+      "bytes": 631,
+      "name": "relation.json",
+      "sha256": "3257cbc8562c95223da278eb3e1c347011728c494895c7d5a9464477927f3039"
+    },
+    {
+      "bytes": 5947,
+      "name": "result.json",
+      "sha256": "5a099334b9752faf1d744218dc63890e73b0c0db420434740c7911d004362aed"
+    },
+    {
+      "bytes": 8511,
+      "name": "source/alljob_cohort.py",
+      "sha256": "ab0c37220fefa86c3c52fa931b131fe83be322623c02c9afec3154a49212275b"
+    },
+    {
+      "bytes": 22216,
+      "name": "source/capacity.py",
+      "sha256": "37edc25fbbf4e59f5df503ab72ea0993e0554cddfdcefa15a13e6bd8d0406b93"
+    },
+    {
+      "bytes": 101377,
+      "name": "source/observer.py",
+      "sha256": "9237bb8a7d04e322a7f2d7fa372ed40376bc38dbfe7cab51c9ea0e82d25df8fb"
+    },
+    {
+      "bytes": 15246,
+      "name": "source/owned_prefix_bank.py",
+      "sha256": "cf7fa7889721ba8cef6002d24f157aa8e824060a1932bbb7d9660d16fa8256cf"
+    },
+    {
+      "bytes": 393,
+      "name": "validation-plan.txt",
+      "sha256": "c7222b746d68b026de30d657015c75acaa90c07cb68edc7be3ea97ad95a620f7"
+    }
+  ],
+  "schema": "friday.lab918.pathset.v1"
+}

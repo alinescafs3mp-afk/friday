@@ -1,0 +1,3793 @@
+[
+  {
+    "file": "controls/catalog.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/controls/catalog.json",
+      "bytes": 12103,
+      "sha256": "a3a2c499df062b6d9c048416dc8c2dbf3aa4638b23bc47cfe5c5c219bfaa63e2",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980065",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12103",
+        "1790935795378776365",
+        "1790935795378776365"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "controls/independent-contract.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/controls/independent-contract.json",
+      "bytes": 1484,
+      "sha256": "0c45acead7156172974dbf89d8a7044fe90bc420724638501d86f7f927942ca0",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980066",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1484",
+        "1790935795378870471",
+        "1790935795378870471"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "controls/whole-closure.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/controls/whole-closure.json",
+      "bytes": 21559,
+      "sha256": "8208d4bc540dce0c0b7eabbd149d14ddc8686a68af851d8b6af22bad048aeced",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980067",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21559",
+        "1790935795378943175",
+        "1790935795378943175"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "data/all202-identity-map.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/all202-identity-map.json",
+      "bytes": 298123,
+      "sha256": "ffddb01d39713c2464856b717b7512733e7d2e68da58250cfc3ff599ea552529",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980059",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "298123",
+        "1790935795378232334",
+        "1790935795378232334"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "data/c55-admission.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/c55-admission.json",
+      "bytes": 159,
+      "sha256": "c276309c7b4ce03626eca641e2bba42bc79036b5f63247ae0c2787eb6e61d5da",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980060",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "159",
+        "1790935795378444946",
+        "1790935795378444946"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "data/c55-expected-output.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/c55-expected-output.json",
+      "bytes": 356,
+      "sha256": "7ba0a58769f20b0c69d20d66f578ceb3d25b047d96e5103cd8c51101427db126",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980061",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "356",
+        "1790935795378515550",
+        "1790935795378515550"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "data/c55-held.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/c55-held.json",
+      "bytes": 63,
+      "sha256": "ff7f06af5898b00d8fb17b129906516807ef744f2595a0c0fa0317a18a78b012",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980062",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "63",
+        "1790935795378585855",
+        "1790935795378585855"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "data/c55-index.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/data/c55-index.json",
+      "bytes": 772,
+      "sha256": "fedcc9aab0857e605f54ea869919a855eebdcab077c035df536fa8882ad9fff0",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980063",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "772",
+        "1790935795378657458",
+        "1790935795378657458"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "future-scan-plan/plan.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/future-scan-plan/plan.json",
+      "bytes": 16241,
+      "sha256": "083fd2a22e468ab2adcced2a55e33225a6785b1c5dcb0362f139731c28b8f59c",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980071",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16241",
+        "1790935795379263994",
+        "1790935795379263994"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "input-index/index.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/input-index/index.json",
+      "bytes": 238293,
+      "sha256": "41781d9297176e57c5b222a3692c737e8953cae175eec17e2477af9a48a31197",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980069",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "238293",
+        "1790935795379066082",
+        "1790935795379066082"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "native/source_owner.c",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/native/source_owner.c",
+      "bytes": 106973,
+      "sha256": "ed128b2cf7319541eded32e1907330452514c3921ccc367e4be6a1960e2a337a",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980042",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "106973",
+        "1790938180135107597",
+        "1790938180135107597"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 138,
+        "text": "static int consume_native_packets(void);"
+      },
+      {
+        "line": 139,
+        "text": "static int retire_native_slots(void);"
+      },
+      {
+        "line": 158,
+        "text": "static uint64_t original_absolute_end(void) {"
+      },
+      {
+        "line": 168,
+        "text": "static void own_current_caller_error(const char *operation) {"
+      },
+      {
+        "line": 176,
+        "text": "static uint64_t terminal_wall_ms(void) {"
+      },
+      {
+        "line": 184,
+        "text": "static int emit_final_native_metrics(int finalized) {"
+      },
+      {
+        "line": 230,
+        "text": "static void hard_deadline(int signal_number) {"
+      },
+      {
+        "line": 254,
+        "text": "static void existing_parent_deadline(int signal_number) {"
+      },
+      {
+        "line": 275,
+        "text": "static void original_interpreter_work_cutoff(int signal_number) {"
+      },
+      {
+        "line": 315,
+        "text": "static int origin_refusal_to(int output_fd,const char *file,int line,const char *operation,const char *message,int saved_errno) {"
+      },
+      {
+        "line": 329,
+        "text": "static const char label[]=\"; line=\";syscall(SYS_write,output_fd,label,sizeof(label)-1);"
+      },
+      {
+        "line": 337,
+        "text": "static uint64_t now_ns(void) {"
+      },
+      {
+        "line": 342,
+        "text": "static int deadline(void) {"
+      },
+      {
+        "line": 350,
+        "text": "static size_t aligned(size_t n) {"
+      },
+      {
+        "line": 354,
+        "text": "static void *arena_alloc(struct arena *a,size_t n) {"
+      },
+      {
+        "line": 378,
+        "text": "static struct arena *belongs(void *p) {"
+      },
+      {
+        "line": 437,
+        "text": "static void *py_malloc(void *ctx,size_t n) {(void)ctx;return friday_malloc(n);}"
+      },
+      {
+        "line": 438,
+        "text": "static void *py_calloc(void *ctx,size_t n,size_t s) {(void)ctx;return friday_calloc(n,s);}"
+      },
+      {
+        "line": 439,
+        "text": "static void *py_realloc(void *ctx,void *p,size_t n) {(void)ctx;return friday_realloc(p,n);}"
+      },
+      {
+        "line": 440,
+        "text": "static void py_free(void *ctx,void *p) {(void)ctx;friday_free(p);}"
+      },
+      {
+        "line": 441,
+        "text": "static void *py_arena(void *ctx,size_t n) {(void)ctx;return friday_malloc(n);}"
+      },
+      {
+        "line": 442,
+        "text": "static void py_arena_free(void *ctx,void *p,size_t n) {(void)ctx;(void)n;friday_free(p);}"
+      },
+      {
+        "line": 444,
+        "text": "static int register_fd(int fd) {"
+      },
+      {
+        "line": 455,
+        "text": "static int inventory_inherited(void) {"
+      },
+      {
+        "line": 490,
+        "text": "static int retire_fd(int fd) {"
+      },
+      {
+        "line": 508,
+        "text": "static int fd_reserve(int count,int *slots) {"
+      },
+      {
+        "line": 523,
+        "text": "static void fd_finish(int slot,int fd) {"
+      },
+      {
+        "line": 610,
+        "text": "static int poll_io_until(int fd,short events,uint64_t selected_end) {"
+      },
+      {
+        "line": 631,
+        "text": "static int packet_end_live(uint64_t selected_end) {"
+      },
+      {
+        "line": 635,
+        "text": "static int poll_io(int fd,short events) {return poll_io_until(fd,events,0);}"
+      },
+      {
+        "line": 636,
+        "text": "static int io_before(uint64_t amount,int output) {"
+      },
+      {
+        "line": 691,
+        "text": "static PyObject *receive_packet(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 769,
+        "text": "static int consume_native_packets(void) {"
+      },
+      {
+        "line": 782,
+        "text": "static PyObject *received_history(PyObject *self,PyObject *ignored) {"
+      },
+      {
+        "line": 811,
+        "text": "static PyObject *lock_canonical_slot(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 829,
+        "text": "static int retire_native_slots(void) {"
+      },
+      {
+        "line": 859,
+        "text": "static PyObject *unlock_canonical_slots(PyObject *self,PyObject *ignored) {"
+      },
+      {
+        "line": 871,
+        "text": "static PyObject *canonical_slot_history(PyObject *self,PyObject *ignored) {"
+      },
+      {
+        "line": 896,
+        "text": "static PyObject *send_packet(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 910,
+        "text": "static PyObject *close_owned(PyObject *self,PyObject *arg) {"
+      },
+      {
+        "line": 915,
+        "text": "static PyObject *snapshot(PyObject *self,PyObject *ignored) {"
+      },
+      {
+        "line": 985,
+        "text": "static PyObject *begin_terminal(PyObject *self,PyObject *ignored) {"
+      },
+      {
+        "line": 988,
+        "text": "static PyObject *send_root_completion(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 1004,
+        "text": "static PyObject *capture_root_ledger(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 1029,
+        "text": "static PyObject *direct_source_wait(PyObject *self,PyObject *ignored) {"
+      },
+      {
+        "line": 1060,
+        "text": "static PyObject *direct_root_wait(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 1089,
+        "text": "static int wait_owned_child_before_original_end(int child,int pidfd,int *reaped,"
+      },
+      {
+        "line": 1113,
+        "text": "static int retire_owned_children_before_original_end(void) {"
+      },
+      {
+        "line": 1162,
+        "text": "static PyObject *retire_direct_children(PyObject *self,PyObject *ignored) {"
+      },
+      {
+        "line": 1175,
+        "text": "static PyObject *spawn_source(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 1274,
+        "text": "static PyObject *claim_existing_parent_custody(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 1293,
+        "text": "static PyObject *accept_existing_parent_delivery(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 1304,
+        "text": "static PyObject *bind_original_consumer_end(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 1330,
+        "text": "static PyObject *accept_existing_parent_result(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 1344,
+        "text": "static PyObject *bind_observed_root(PyObject *self,PyObject *args) {"
+      },
+      {
+        "line": 1391,
+        "text": "static int initialize_native_owner(int parent_entry) {"
+      },
+      {
+        "line": 1479,
+        "text": "int friday_existing_parent_preinitialize(void) {"
+      },
+      {
+        "line": 1483,
+        "text": "static int native_caller_destruct(int error_end) {"
+      },
+      {
+        "line": 1543,
+        "text": "int friday_existing_parent_finalize(void) {"
+      },
+      {
+        "line": 1549,
+        "text": "int friday_existing_parent_error_end(int original_error) {"
+      },
+      {
+        "line": 1559,
+        "text": "static int initialize_interpreter(void) {"
+      },
+      {
+        "line": 1578,
+        "text": "static void *run_original_interpreter_execution(void *ignored) {"
+      },
+      {
+        "line": 1617,
+        "text": "static int wait_original_execution_before(uint64_t end,int work_phase) {"
+      },
+      {
+        "line": 1643,
+        "text": "static int native_cold_original_caller_consume(void) {"
+      },
+      {
+        "line": 1679,
+        "text": "static int run_selected_existing_caller(int (*selected_root_entry)(void),int observer_kind,"
+      },
+      {
+        "line": 1770,
+        "text": "int friday_existing_parent_run(int (*selected_root_entry)(void),uint64_t original_start,uint64_t original_end,uint64_t generation) {"
+      },
+      {
+        "line": 1773,
+        "text": "int friday_existing_observer_run(int (*selected_observer_entry)(void),uint64_t original_start,uint64_t original_end,uint64_t generation,int child,int held_pidfd) {"
+      },
+      {
+        "line": 1776,
+        "text": "int friday_existing_final_caller_run(int (*selected_final_entry)(void),uint64_t original_start,uint64_t original_end,uint64_t generation,int child,int held_pidfd) {"
+      }
+    ],
+    "catches": []
+  },
+  {
+    "file": "schemas/archive-expectation.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/archive-expectation.v1.json",
+      "bytes": 989,
+      "sha256": "75ad747bd30f63ce624d10c789c1a27003e7f8ea38dba0b83a958709d2a67427",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980044",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "989",
+        "1790935795377069867",
+        "1790935795377069867"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/broker-material-provenance.v1.keys.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/broker-material-provenance.v1.keys.json",
+      "bytes": 1919,
+      "sha256": "16239396207f90a3ab78158ebdd9abd58db304c3bc3061a081fba18d33489503",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980045",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1919",
+        "1790935795377162773",
+        "1790935795377162773"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/broker-snapshot-manifest.v1.keys.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/broker-snapshot-manifest.v1.keys.json",
+      "bytes": 8823,
+      "sha256": "0038a130fc6cfc212180ec82f932f8ddd4d4d25ceeda27dda64713e4cf0755fc",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980046",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8823",
+        "1790935795377203575",
+        "1790935795377203575"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/custody-record.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/custody-record.v1.json",
+      "bytes": 705,
+      "sha256": "4a8d71b72af9ff8fcef74f1de7a29fb20b94087975b347037080a70eedccee16",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980047",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "705",
+        "1790935795377304881",
+        "1790935795377304881"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/deb-member-observation.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/deb-member-observation.v1.json",
+      "bytes": 7833,
+      "sha256": "45924c3191e3197fc94373566bd3d244b2b61d070c580515cbd73989ebf3d0f3",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980048",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7833",
+        "1790935795377381585",
+        "1790935795377381585"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/future-scan-manifest.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/future-scan-manifest.v1.json",
+      "bytes": 8050,
+      "sha256": "671cbc38574acfd4bc05ac74f7c8f0eec7b95fda6ebea39faecb5477655b9f32",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980049",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8050",
+        "1790935795377506392",
+        "1790935795377506392"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/held-custody.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/held-custody.v1.json",
+      "bytes": 2990,
+      "sha256": "ac77bd4881f968bc58c24198afe0a4eb5befa1d7c0fe2665c2ef5ee7c55ec9b1",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980050",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2990",
+        "1790935795377580797",
+        "1790935795377580797"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/input-index.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/input-index.v1.json",
+      "bytes": 6332,
+      "sha256": "8eff7af829f21acc44705e580339bc76ce678fca0dc5475e86a1ed35acefa839",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980051",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6332",
+        "1790935795377653301",
+        "1790935795377653301"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/member-record.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/member-record.v1.json",
+      "bytes": 17438,
+      "sha256": "a40f2d7feecdd4298065b879c2c73ce49a3f2d081c1be683a1fdd7fe7e976708",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980052",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17438",
+        "1790935795377727605",
+        "1790935795377727605"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/scan-admission.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/scan-admission.v1.json",
+      "bytes": 7772,
+      "sha256": "88c1e2caa20b29c4fe242510b1d59e956c34e8dfd16b11d5a2756f6dd86b1ac7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980053",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7772",
+        "1790935795377803409",
+        "1790935795377803409"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/scan-index.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/scan-index.v1.json",
+      "bytes": 966,
+      "sha256": "fee19bd2e81076c01d25479a0144fdfd3f4192c14e66892bd20e9084478a9c85",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980054",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "966",
+        "1790935795377876214",
+        "1790935795377876214"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/scan-resource.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/scan-resource.v1.json",
+      "bytes": 39747,
+      "sha256": "d70d4914ce82272338b3f3972ed258f651743cb56087567e2d2673e6a6b889e4",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980055",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "39747",
+        "1790935795377947918",
+        "1790935795377947918"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/scan-result.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/scan-result.v1.json",
+      "bytes": 11609,
+      "sha256": "d1f40916d2b2e36c077b28888f9c4dd9712bc7a70b2e5c17c2699bbfd84c31cb",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980056",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11609",
+        "1790935795378030322",
+        "1790935795378030322"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "schemas/wheel-metadata-observation.v1.json",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/schemas/wheel-metadata-observation.v1.json",
+      "bytes": 17439,
+      "sha256": "5ac922c318c18ab9d3a562bd25c6cac28488a749fbd82b84feaeeaaa421bd875",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980057",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17439",
+        "1790935795378104827",
+        "1790935795378104827"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "source/__init__.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/__init__.py",
+      "bytes": 211,
+      "sha256": "d27706191c919459d23e8b27f17066132d4ee7311cd0d9630f75a3c1cb179bda",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980013",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "211",
+        "1790935795374496219",
+        "1790935795374496219"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "source/bounds.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/bounds.py",
+      "bytes": 18197,
+      "sha256": "4b1df743798a5f3b7c53617fb6d62bb5a73d75e848e67f0730550813f019c6b5",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980014",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18197",
+        "1790935795374611926",
+        "1790935795374611926"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 59,
+        "text": "def _hex64(value):"
+      },
+      {
+        "line": 65,
+        "text": "def performing_requested(resources):"
+      },
+      {
+        "line": 73,
+        "text": "def admission_cause(resources):"
+      },
+      {
+        "line": 133,
+        "text": "def reserve(resources, meter, **delta):"
+      },
+      {
+        "line": 138,
+        "text": "def release_live(meter, amount):"
+      },
+      {
+        "line": 143,
+        "text": "def bootstrap_reserve(meter, size):"
+      },
+      {
+        "line": 152,
+        "text": "def charge_output(resources, meter, document):"
+      },
+      {
+        "line": 177,
+        "text": "def new_meter():"
+      },
+      {
+        "line": 212,
+        "text": "def terminal_meter(meter):"
+      },
+      {
+        "line": 246,
+        "text": "def reserve_terminal_causal(resources, meter, primary):"
+      },
+      {
+        "line": 289,
+        "text": "def _sample_host(resources, meter):"
+      },
+      {
+        "line": 312,
+        "text": "def charge(resources, meter, **delta):"
+      },
+      {
+        "line": 402,
+        "text": "def clock_cause(resources):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 171,
+        "text": "finally:"
+      }
+    ]
+  },
+  {
+    "file": "source/broker_map.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/broker_map.py",
+      "bytes": 18753,
+      "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980015",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18753",
+        "1790935795374697731",
+        "1790935795374697731"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 68,
+        "text": "def _hex64(value):"
+      },
+      {
+        "line": 72,
+        "text": "def _member_document(member,resources=None,meter=None):"
+      },
+      {
+        "line": 169,
+        "text": "def _pinned_keys(envelope, expected,resources=None,meter=None):"
+      },
+      {
+        "line": 184,
+        "text": "def _express_candidate(candidate):"
+      },
+      {
+        "line": 218,
+        "text": "def project_snapshot(members, materials_projection=None, created_utc=None, snapshot_id=None, candidate=None, facts=None, resources=None, meter=None, created_directories=None,supplemental_bindings=None):"
+      },
+      {
+        "line": 337,
+        "text": "def project_provenance(artifacts, manifest_sha256=None, recipe_sha256=None, facts=None,resources=None,meter=None):"
+      }
+    ],
+    "catches": []
+  },
+  {
+    "file": "source/canonical.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/canonical.py",
+      "bytes": 9119,
+      "sha256": "2b59ad703c0649cf108cc27c48147337779aa71269992b4777a72d82125ffb5f",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980016",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9119",
+        "1790935795374775535",
+        "1790935795374775535"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 6,
+        "text": "def canonical_bytes(obj):"
+      },
+      {
+        "line": 17,
+        "text": "class _BoundExceeded(Exception):"
+      },
+      {
+        "line": 21,
+        "text": "def canonical_resource_bound(obj):"
+      },
+      {
+        "line": 33,
+        "text": "def string(value):"
+      },
+      {
+        "line": 41,
+        "text": "def walk(value,depth):"
+      },
+      {
+        "line": 76,
+        "text": "def canonical_bytes_bounded(obj, limit, resources=None, meter=None):"
+      },
+      {
+        "line": 85,
+        "text": "def allocate(amount, work=0):"
+      },
+      {
+        "line": 93,
+        "text": "def free(amount):"
+      },
+      {
+        "line": 100,
+        "text": "def emit(chunk):"
+      },
+      {
+        "line": 106,
+        "text": "def string(value):"
+      },
+      {
+        "line": 119,
+        "text": "def walk(value):"
+      },
+      {
+        "line": 190,
+        "text": "def canonical_sha256(obj):"
+      },
+      {
+        "line": 196,
+        "text": "def canonical_sha256_metered(obj, resources, meter):"
+      },
+      {
+        "line": 216,
+        "text": "def _walk(obj, depth, max_depth):"
+      },
+      {
+        "line": 236,
+        "text": "def canonical_loads(data, max_bytes=1048576, max_depth=32):"
+      },
+      {
+        "line": 244,
+        "text": "def pairs(items):"
+      },
+      {
+        "line": 250,
+        "text": "def reject_constant(name):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 67,
+        "text": "finally: active.remove(ident)"
+      },
+      {
+        "line": 71,
+        "text": "except (ValueError,RecursionError): return None"
+      },
+      {
+        "line": 114,
+        "text": "finally:"
+      },
+      {
+        "line": 136,
+        "text": "finally:"
+      },
+      {
+        "line": 162,
+        "text": "finally:"
+      },
+      {
+        "line": 178,
+        "text": "except _BoundExceeded:"
+      },
+      {
+        "line": 180,
+        "text": "finally:"
+      },
+      {
+        "line": 207,
+        "text": "except DigestStop as stop:"
+      },
+      {
+        "line": 209,
+        "text": "finally:"
+      }
+    ]
+  },
+  {
+    "file": "source/causes.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/causes.py",
+      "bytes": 10492,
+      "sha256": "843b97da1b47be3a9f97852d80d4b0c5b5d99da7e46c207d1679a348ad58deae",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980017",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10492",
+        "1790935795374863240",
+        "1790935795374863240"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 14,
+        "text": "def enter_phase(meter, stage, operation, subject=None):"
+      },
+      {
+        "line": 169,
+        "text": "def pack(status, cause, observation=None, detail=None, stage=None):"
+      },
+      {
+        "line": 187,
+        "text": "def causal_refusal(primary, cause, meter, stage=None, failure_detail=None,"
+      },
+      {
+        "line": 212,
+        "text": "def exception_detail(exc):"
+      },
+      {
+        "line": 220,
+        "text": "def filename(value):"
+      },
+      {
+        "line": 222,
+        "text": "def visit(error):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 188,
+        "text": "exception_class=None, cleanup_causes=None):"
+      }
+    ]
+  },
+  {
+    "file": "source/compression.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/compression.py",
+      "bytes": 18572,
+      "sha256": "b259dc51e53fa5c8450d9dd86f6b30dac741a29f91231a59e5de294b9afe6c9a",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980018",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18572",
+        "1790935795374915343",
+        "1790935795374915343"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 8,
+        "text": "class BudgetStop(Exception):"
+      },
+      {
+        "line": 9,
+        "text": "def __init__(self, cause):"
+      },
+      {
+        "line": 13,
+        "text": "def find_capability(capabilities, method, implementation):"
+      },
+      {
+        "line": 28,
+        "text": "def _feed_chunks(decoder,payload,bound,protocol,resources,meter):"
+      },
+      {
+        "line": 98,
+        "text": "class DecodedReader:"
+      },
+      {
+        "line": 103,
+        "text": "def __init__(self,chunks,resources,meter,keep_control=False):"
+      },
+      {
+        "line": 109,
+        "text": "def _fill(self):"
+      },
+      {
+        "line": 121,
+        "text": "def read_exact(self,size):"
+      },
+      {
+        "line": 140,
+        "text": "def observe(self,size,keep=False,zlib=None):"
+      },
+      {
+        "line": 180,
+        "text": "def zero_tail(self):"
+      },
+      {
+        "line": 191,
+        "text": "def close(self):"
+      },
+      {
+        "line": 197,
+        "text": "def _stored_chunks(payload,resources,meter):"
+      },
+      {
+        "line": 210,
+        "text": "def stream_reader(method,payload,capabilities,limit,resources,meter,keep_control=False):"
+      },
+      {
+        "line": 215,
+        "text": "def decode_admitted(method,payload,capabilities,limit,resources=None,meter=None):"
+      },
+      {
+        "line": 255,
+        "text": "def _decode_chunks_admitted(method, payload, capabilities, limit, resources=None, meter=None):"
+      },
+      {
+        "line": 364,
+        "text": "def decode_deflate(payload, capabilities, limit, resources=None, meter=None):"
+      },
+      {
+        "line": 368,
+        "text": "def decode_gzip(payload, capabilities, limit, resources=None, meter=None):"
+      },
+      {
+        "line": 372,
+        "text": "def decode_xz(payload, capabilities, limit, resources=None, meter=None):"
+      },
+      {
+        "line": 376,
+        "text": "def decode_zstd(payload, capabilities, limit, resources=None, meter=None):"
+      },
+      {
+        "line": 380,
+        "text": "def reject_external_tool(capabilities):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 87,
+        "text": "finally:"
+      },
+      {
+        "line": 93,
+        "text": "finally:"
+      },
+      {
+        "line": 114,
+        "text": "except StopIteration:"
+      },
+      {
+        "line": 134,
+        "text": "finally:"
+      },
+      {
+        "line": 163,
+        "text": "finally:"
+      },
+      {
+        "line": 173,
+        "text": "finally:"
+      },
+      {
+        "line": 205,
+        "text": "finally:"
+      },
+      {
+        "line": 239,
+        "text": "except BudgetStop as stop:"
+      },
+      {
+        "line": 243,
+        "text": "finally:"
+      },
+      {
+        "line": 248,
+        "text": "finally:"
+      },
+      {
+        "line": 342,
+        "text": "except (TypeError, ValueError, AttributeError):"
+      },
+      {
+        "line": 346,
+        "text": "except BudgetStop:"
+      },
+      {
+        "line": 348,
+        "text": "except ImportError:"
+      },
+      {
+        "line": 350,
+        "text": "except MemoryError:"
+      },
+      {
+        "line": 352,
+        "text": "except (TypeError, AttributeError):"
+      },
+      {
+        "line": 354,
+        "text": "except DigestStop as stop:"
+      },
+      {
+        "line": 356,
+        "text": "except Exception:"
+      },
+      {
+        "line": 358,
+        "text": "finally:"
+      }
+    ]
+  },
+  {
+    "file": "source/context.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/context.py",
+      "bytes": 20191,
+      "sha256": "81bb926f1355a44ea845f5ffcf1ae641cac4b05936dc238210f37591753bf6ae",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980019",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20191",
+        "1790935795375008949",
+        "1790935795375008949"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 14,
+        "text": "def _digest(value):"
+      },
+      {
+        "line": 18,
+        "text": "def _administrative(raw):"
+      },
+      {
+        "line": 21,
+        "text": "def pairs(items):"
+      },
+      {
+        "line": 28,
+        "text": "def reject(_value):"
+      },
+      {
+        "line": 35,
+        "text": "def _bill_matches(bill, rows):"
+      },
+      {
+        "line": 74,
+        "text": "def bind_stock(stock, admission, index_raw, rows, meter):"
+      },
+      {
+        "line": 302,
+        "text": "def bind_publisher_record(item, row, bill, resources, meter):"
+      },
+      {
+        "line": 334,
+        "text": "def bind_source_roster(roster, resources, meter):"
+      },
+      {
+        "line": 360,
+        "text": "def effects_cause(resources, meter):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 118,
+        "text": "except (ValueError, MemoryError, UnicodeError):"
+      },
+      {
+        "line": 296,
+        "text": "finally:"
+      },
+      {
+        "line": 323,
+        "text": "except (ValueError, TypeError, KeyError, IndexError):"
+      }
+    ]
+  },
+  {
+    "file": "source/contracts.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/contracts.py",
+      "bytes": 30961,
+      "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980020",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30961",
+        "1790935795375087553",
+        "1790935795375087553"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 13,
+        "text": "def validate_stock_roles(decoded,resources,meter):"
+      },
+      {
+        "line": 21,
+        "text": "def produce_stock_bodies(actual_raw_bodies,resources,meter):"
+      },
+      {
+        "line": 45,
+        "text": "def metered_identity(value,resources,meter):"
+      },
+      {
+        "line": 49,
+        "text": "def recipe_identity(recipe):"
+      },
+      {
+        "line": 57,
+        "text": "def bind_plan_roster(plan,roster,admission,rows,resources,meter):"
+      },
+      {
+        "line": 98,
+        "text": "def bind_loaded_implementation(stock,source,runtime,resources,meter):"
+      },
+      {
+        "line": 175,
+        "text": "def bind_loaded_source_graph(selected,declared,resources,meter):"
+      },
+      {
+        "line": 252,
+        "text": "def loaded_globals_cause(meter):"
+      },
+      {
+        "line": 278,
+        "text": "def bind_independent_output(output,input_binding,index_raw,held_raw,admission_raw,resources,meter):"
+      },
+      {
+        "line": 347,
+        "text": "def material_receipt_relations(result,resources,meter):"
+      },
+      {
+        "line": 372,
+        "text": "def installed_inventory(recipe,resources,meter):"
+      },
+      {
+        "line": 485,
+        "text": "def bind_held_scope(scope,rows,resources,meter):"
+      },
+      {
+        "line": 510,
+        "text": "def provenance_relations(snapshot,provenance,recipe,resources,meter):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 135,
+        "text": "finally:"
+      },
+      {
+        "line": 237,
+        "text": "finally:"
+      },
+      {
+        "line": 362,
+        "text": "finally:"
+      }
+    ]
+  },
+  {
+    "file": "source/controls.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/controls.py",
+      "bytes": 9556,
+      "sha256": "36a184d6dcf6b807f1b84c4848bf850a21eb0729817dfef4be5b6a7b3b960a7b",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980021",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9556",
+        "1790935795375172958",
+        "1790935795375172958"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 13,
+        "text": "def _load(relative,resources=None,meter=None):"
+      },
+      {
+        "line": 26,
+        "text": "def load_catalog(resources=None,meter=None):"
+      },
+      {
+        "line": 30,
+        "text": "def load_contract(resources=None,meter=None):"
+      },
+      {
+        "line": 34,
+        "text": "def dispatch_control(control_id):"
+      },
+      {
+        "line": 44,
+        "text": "def run_ordinary_census(index_raw, held_raw, admission_raw, independent_contract):"
+      },
+      {
+        "line": 66,
+        "text": "def produce_ordinary_contract(control_id,index_raw,held_raw,admission_raw,independent_output_raw,actual_selected_trace,custody_lifetime,independently_selected,resources,meter):"
+      },
+      {
+        "line": 93,
+        "text": "def run_ordinary_contract(index_raw,held_raw,admission_raw,stock_context,independent_contract):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 111,
+        "text": "except DigestStop as stop:"
+      },
+      {
+        "line": 113,
+        "text": "except (MemoryError,OSError,ValueError,KeyError,TypeError):"
+      }
+    ]
+  },
+  {
+    "file": "source/custody.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/custody.py",
+      "bytes": 55921,
+      "sha256": "6a6608d422097cd8fd76b283623b735b1a00b197e1244071f0a94d028d1a0270",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980022",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "55921",
+        "1790935795375251662",
+        "1790935795375251662"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 27,
+        "text": "def stat_identity9(st):"
+      },
+      {
+        "line": 32,
+        "text": "def retain_origin_failure(meter,exc,operation,path=None):"
+      },
+      {
+        "line": 56,
+        "text": "def record_close_uncertainty(meter, operation, fd, path, exc):"
+      },
+      {
+        "line": 77,
+        "text": "class RootHolderEndpoint:"
+      },
+      {
+        "line": 83,
+        "text": "def __init__(self,channel,selected_root_peer,generation):"
+      },
+      {
+        "line": 88,
+        "text": "def take(self):"
+      },
+      {
+        "line": 94,
+        "text": "class RootHolderClient:"
+      },
+      {
+        "line": 103,
+        "text": "def __init__(self,channel,selected_root_peer,generation,resources,meter,prepaid=False):"
+      },
+      {
+        "line": 142,
+        "text": "def _send(self,message):"
+      },
+      {
+        "line": 157,
+        "text": "def _receive(self,operation,limit,descriptor=False):"
+      },
+      {
+        "line": 209,
+        "text": "def borrow(self,path):"
+      },
+      {
+        "line": 229,
+        "text": "def prepare(self,payload_sha256):"
+      },
+      {
+        "line": 242,
+        "text": "def commit(self,blob):"
+      },
+      {
+        "line": 271,
+        "text": "def close(self):"
+      },
+      {
+        "line": 289,
+        "text": "class HeldRange:"
+      },
+      {
+        "line": 295,
+        "text": "def __init__(self,owner,start,size,resources,meter):"
+      },
+      {
+        "line": 299,
+        "text": "def __len__(self): return self.size"
+      },
+      {
+        "line": 301,
+        "text": "def part(self,start,stop):"
+      },
+      {
+        "line": 309,
+        "text": "def _check(self):"
+      },
+      {
+        "line": 314,
+        "text": "def read_part(self,start,size):"
+      },
+      {
+        "line": 335,
+        "text": "def chunks(self):"
+      },
+      {
+        "line": 346,
+        "text": "def __getitem__(self,key):"
+      },
+      {
+        "line": 354,
+        "text": "def startswith(self,prefix): return self[:len(prefix)]==prefix"
+      },
+      {
+        "line": 356,
+        "text": "def rfind(self,token,start=0,stop=None):"
+      },
+      {
+        "line": 362,
+        "text": "def owned_metadata_directory(path,expected_names,resources,meter):"
+      },
+      {
+        "line": 423,
+        "text": "def owned_metadata_bytes(path, limit, resources, meter):"
+      },
+      {
+        "line": 479,
+        "text": "def fd_mount_id(fd,resources,meter):"
+      },
+      {
+        "line": 516,
+        "text": "def selected_directory_cause(fd,path,resources,meter):"
+      },
+      {
+        "line": 541,
+        "text": "def _hex64(value):"
+      },
+      {
+        "line": 545,
+        "text": "def _record_cause(record):"
+      },
+      {
+        "line": 565,
+        "text": "def _index(records):"
+      },
+      {
+        "line": 580,
+        "text": "def plan_nofollow_read(relative_path):"
+      },
+      {
+        "line": 593,
+        "text": "def release_retained_fd(meter):"
+      },
+      {
+        "line": 636,
+        "text": "def read_nofollow_file(relative, limit, resources, meter):"
+      },
+      {
+        "line": 668,
+        "text": "def _open_charged(path, flags, dir_fd=None):"
+      },
+      {
+        "line": 683,
+        "text": "def _identity(fd, content_sha):"
+      },
+      {
+        "line": 833,
+        "text": "def compare_custody(before, after):"
+      },
+      {
+        "line": 874,
+        "text": "def seal_archive_custody(meter, data, expected_sha, resources=None):"
+      },
+      {
+        "line": 900,
+        "text": "def begin_archive(meter, expected, held):"
+      },
+      {
+        "line": 922,
+        "text": "def reserve_public_members(resources, meter, members):"
+      },
+      {
+        "line": 935,
+        "text": "def release_archive_live(meter):"
+      },
+      {
+        "line": 942,
+        "text": "def retain_public_observation(resources,meter,observation):"
+      },
+      {
+        "line": 978,
+        "text": "def retire_stream_owner(meter,fd):"
+      },
+      {
+        "line": 983,
+        "text": "def checked_named_identity(relative,resources,meter):"
+      },
+      {
+        "line": 994,
+        "text": "def opened(path,parent):"
+      },
+      {
+        "line": 1001,
+        "text": "def closed(fd,path):"
+      },
+      {
+        "line": 1031,
+        "text": "def complete_custody(resources, meter, release=True):"
+      },
+      {
+        "line": 1116,
+        "text": "def close_whole_custody(meter):"
+      },
+      {
+        "line": 1151,
+        "text": "def complete_material_output(observed, expected, resources, meter):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 50,
+        "text": "except BaseException as recorder_failure:"
+      },
+      {
+        "line": 138,
+        "text": "except BaseException:"
+      },
+      {
+        "line": 154,
+        "text": "finally:"
+      },
+      {
+        "line": 191,
+        "text": "finally:"
+      },
+      {
+        "line": 205,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 258,
+        "text": "finally: piece=None; release_live(self.meter,amount+64)"
+      },
+      {
+        "line": 280,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 329,
+        "text": "except BaseException:"
+      },
+      {
+        "line": 332,
+        "text": "finally:"
+      },
+      {
+        "line": 340,
+        "text": "finally:"
+      },
+      {
+        "line": 398,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 401,
+        "text": "finally:"
+      },
+      {
+        "line": 408,
+        "text": "except (MemoryError,OSError,ValueError,RuntimeError) as exc:"
+      },
+      {
+        "line": 411,
+        "text": "finally: retired=None"
+      },
+      {
+        "line": 412,
+        "text": "finally:"
+      },
+      {
+        "line": 417,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 433,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 464,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 467,
+        "text": "finally:"
+      },
+      {
+        "line": 473,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 501,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 504,
+        "text": "finally:"
+      },
+      {
+        "line": 510,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 620,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 623,
+        "text": "finally:"
+      },
+      {
+        "line": 627,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 677,
+        "text": "except OSError:"
+      },
+      {
+        "line": 732,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 776,
+        "text": "finally:"
+      },
+      {
+        "line": 792,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 797,
+        "text": "finally:"
+      },
+      {
+        "line": 803,
+        "text": "except (OSError,KeyError,TypeError) as exc:"
+      },
+      {
+        "line": 806,
+        "text": "finally:"
+      },
+      {
+        "line": 809,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 824,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 974,
+        "text": "finally:"
+      },
+      {
+        "line": 998,
+        "text": "except BaseException:"
+      },
+      {
+        "line": 1003,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 1018,
+        "text": "finally: closed(previous,previous_path)"
+      },
+      {
+        "line": 1026,
+        "text": "finally:"
+      },
+      {
+        "line": 1071,
+        "text": "finally:"
+      },
+      {
+        "line": 1088,
+        "text": "except (OSError, KeyError, TypeError,ValueError,RuntimeError) as exc:"
+      },
+      {
+        "line": 1093,
+        "text": "finally:"
+      },
+      {
+        "line": 1102,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 1134,
+        "text": "except (OSError,KeyError,ValueError,TypeError,RuntimeError) as exc:"
+      },
+      {
+        "line": 1139,
+        "text": "finally:"
+      },
+      {
+        "line": 1143,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 1206,
+        "text": "except DigestStop as stop:"
+      },
+      {
+        "line": 1210,
+        "text": "finally:"
+      },
+      {
+        "line": 1215,
+        "text": "except (OSError,KeyError,TypeError,ValueError,RuntimeError) as cleanup_exc:"
+      }
+    ]
+  },
+  {
+    "file": "source/deb_archive.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/deb_archive.py",
+      "bytes": 54731,
+      "sha256": "491df78e90ef4f99b51afc348e623689296eeb53759b416117486b8d703e5f46",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980023",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "54731",
+        "1790935795375343567",
+        "1790935795375343567"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 29,
+        "text": "def _field_text(field):"
+      },
+      {
+        "line": 41,
+        "text": "def _header_text(field):"
+      },
+      {
+        "line": 51,
+        "text": "def _octal(field):"
+      },
+      {
+        "line": 60,
+        "text": "def _ar_uint(field):"
+      },
+      {
+        "line": 78,
+        "text": "def _parse_ar(data, ceilings, resources=None, meter=None):"
+      },
+      {
+        "line": 204,
+        "text": "def _tar_checksum(header):"
+      },
+      {
+        "line": 214,
+        "text": "class _NumericUnsupported(Exception):"
+      },
+      {
+        "line": 218,
+        "text": "def _numeric(field):"
+      },
+      {
+        "line": 234,
+        "text": "def _pax_uint(value):"
+      },
+      {
+        "line": 250,
+        "text": "def _pax_mtime(value):"
+      },
+      {
+        "line": 265,
+        "text": "def _effective_pax(global_pax, local_pax):"
+      },
+      {
+        "line": 271,
+        "text": "def _gnu_text(payload):"
+      },
+      {
+        "line": 283,
+        "text": "def _merge_pax(state, records):"
+      },
+      {
+        "line": 291,
+        "text": "def _apply_pax(records, member):"
+      },
+      {
+        "line": 315,
+        "text": "def _parse_pax(payload):"
+      },
+      {
+        "line": 362,
+        "text": "def parse_tar_members(data, ceilings, resources=None, meter=None, framing=None):"
+      },
+      {
+        "line": 718,
+        "text": "def _terminal_regular(start_index):"
+      },
+      {
+        "line": 767,
+        "text": "def _decode_named(name, payload, capabilities, ceilings, resources=None, meter=None):"
+      },
+      {
+        "line": 804,
+        "text": "def _classify(name):"
+      },
+      {
+        "line": 813,
+        "text": "def _case_field(fields, name):"
+      },
+      {
+        "line": 821,
+        "text": "def _field_kind(key):"
+      },
+      {
+        "line": 844,
+        "text": "def _deb822(payload, resources=None, meter=None):"
+      },
+      {
+        "line": 942,
+        "text": "def _public_members(members, archive_sha, domain):"
+      },
+      {
+        "line": 966,
+        "text": "def _expected_cause(expected):"
+      },
+      {
+        "line": 985,
+        "text": "def _scan_deb(expected, held, resources, publisher_evidence=None, meter=None):"
+      },
+      {
+        "line": 1231,
+        "text": "def scan_deb(expected, held, resources, publisher_evidence=None, meter=None):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 74,
+        "text": "except (ValueError, OverflowError):"
+      },
+      {
+        "line": 126,
+        "text": "except UnicodeError:"
+      },
+      {
+        "line": 135,
+        "text": "except UnicodeError:"
+      },
+      {
+        "line": 163,
+        "text": "except ValueError:"
+      },
+      {
+        "line": 243,
+        "text": "except (ValueError, OverflowError):"
+      },
+      {
+        "line": 279,
+        "text": "except UnicodeError:"
+      },
+      {
+        "line": 329,
+        "text": "except ValueError:"
+      },
+      {
+        "line": 343,
+        "text": "except UnicodeError:"
+      },
+      {
+        "line": 407,
+        "text": "except ValueError:"
+      },
+      {
+        "line": 427,
+        "text": "except UnicodeError:"
+      },
+      {
+        "line": 442,
+        "text": "except _NumericUnsupported:"
+      },
+      {
+        "line": 444,
+        "text": "except ValueError:"
+      },
+      {
+        "line": 487,
+        "text": "except (ValueError, _NumericUnsupported):"
+      },
+      {
+        "line": 872,
+        "text": "except UnicodeError:"
+      },
+      {
+        "line": 1095,
+        "text": "except BudgetStop as stop:"
+      },
+      {
+        "line": 1098,
+        "text": "finally:"
+      },
+      {
+        "line": 1216,
+        "text": "finally:"
+      },
+      {
+        "line": 1241,
+        "text": "except DigestStop as stop:"
+      },
+      {
+        "line": 1244,
+        "text": "except (MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:"
+      },
+      {
+        "line": 1247,
+        "text": "finally:"
+      },
+      {
+        "line": 1259,
+        "text": "finally:"
+      }
+    ]
+  },
+  {
+    "file": "source/digests.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/digests.py",
+      "bytes": 3621,
+      "sha256": "b1dc18cb1acb587644bb0fb8d58b093c189dea4eccba62f3bee99f2717c266a9",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980024",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3621",
+        "1790935795375483876",
+        "1790935795375483876"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 6,
+        "text": "class DigestStop(Exception):"
+      },
+      {
+        "line": 7,
+        "text": "def __init__(self, cause):"
+      },
+      {
+        "line": 11,
+        "text": "def _chunks(data, resources, meter):"
+      },
+      {
+        "line": 42,
+        "text": "def content_sha256(data, resources=None, meter=None):"
+      },
+      {
+        "line": 66,
+        "text": "def record_digest(algorithm, content, resources=None, meter=None):"
+      },
+      {
+        "line": 95,
+        "text": "def crc32(data, resources=None, meter=None):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 21,
+        "text": "finally:"
+      },
+      {
+        "line": 36,
+        "text": "finally:"
+      },
+      {
+        "line": 56,
+        "text": "finally:"
+      },
+      {
+        "line": 60,
+        "text": "finally:"
+      },
+      {
+        "line": 84,
+        "text": "finally:"
+      },
+      {
+        "line": 88,
+        "text": "finally:"
+      },
+      {
+        "line": 102,
+        "text": "except ImportError:"
+      },
+      {
+        "line": 104,
+        "text": "except MemoryError:"
+      },
+      {
+        "line": 111,
+        "text": "except DigestStop as stop:"
+      },
+      {
+        "line": 113,
+        "text": "finally:"
+      }
+    ]
+  },
+  {
+    "file": "source/filename.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/filename.py",
+      "bytes": 1917,
+      "sha256": "12d9730bbacfbcf32896c448d9fbaa84c304b62a7b6d24210f3d3339bd2851f7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980025",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1917",
+        "1790935795375555880",
+        "1790935795375555880"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 6,
+        "text": "def pep503_name(name):"
+      },
+      {
+        "line": 12,
+        "text": "def expand_compressed_tag(python_tag, abi_tag, platform_tag):"
+      },
+      {
+        "line": 27,
+        "text": "def parse_wheel_filename(filename):"
+      }
+    ],
+    "catches": []
+  },
+  {
+    "file": "source/fixtures.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/fixtures.py",
+      "bytes": 1798,
+      "sha256": "baa60bba8f6bbb912663569e478d171f16c808ed6ccf9beb811cdd41c2a90762",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980026",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1798",
+        "1790935795375627984",
+        "1790935795375627984"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 9,
+        "text": "def build_zip(files, method=0):"
+      }
+    ],
+    "catches": []
+  },
+  {
+    "file": "source/guards.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/guards.py",
+      "bytes": 2031,
+      "sha256": "de34c880bd18b78d2e9b691008950809a31c466d581e3f232939b30d10969806",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980027",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2031",
+        "1790935795375700288",
+        "1790935795375700288"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 4,
+        "text": "def normalize_member_path(name, max_name_bytes, max_depth):"
+      },
+      {
+        "line": 31,
+        "text": "def casefold_collision(paths):"
+      },
+      {
+        "line": 43,
+        "text": "def duplicate_path(paths):"
+      },
+      {
+        "line": 52,
+        "text": "def symlink_escapes(member_path, target):"
+      }
+    ],
+    "catches": []
+  },
+  {
+    "file": "source/normalize.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/normalize.py",
+      "bytes": 1458,
+      "sha256": "91053cc6010512819788b5adf11af85286c74ec32f90cbc76721e280cc28a43c",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980028",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1458",
+        "1790935795375771492",
+        "1790935795375771492"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 10,
+        "text": "def normalize_requires_python(raw):"
+      },
+      {
+        "line": 20,
+        "text": "def requires_python_correspondence(bill_raw, metadata_raw):"
+      }
+    ],
+    "catches": []
+  },
+  {
+    "file": "source/pins.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/pins.py",
+      "bytes": 4553,
+      "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980029",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4553",
+        "1790935795375843796",
+        "1790935795375843796"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [],
+    "catches": []
+  },
+  {
+    "file": "source/public.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/public.py",
+      "bytes": 58489,
+      "sha256": "50d56d2c4c8a7108fc63fa6e12dcffed436f92898a0735aa4088687325f65f94",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980030",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "58489",
+        "1790935795375918901",
+        "1790935795375918901"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 33,
+        "text": "def _row_expected(row):"
+      },
+      {
+        "line": 73,
+        "text": "def _held_from_document(entry):"
+      },
+      {
+        "line": 87,
+        "text": "def _project_members(observed):"
+      },
+      {
+        "line": 108,
+        "text": "def _material_identity(expected_rows, recipe, resources=None, meter=None):"
+      },
+      {
+        "line": 154,
+        "text": "def _apply_assert(observed, expected_rows, mode, recipe_sha256=None, aggregate=None, resources=None, joins=None, meter=None):"
+      },
+      {
+        "line": 303,
+        "text": "def _final_link_graph(members, resources, meter):"
+      },
+      {
+        "line": 385,
+        "text": "def _class_missing(row):"
+      },
+      {
+        "line": 391,
+        "text": "def _component(expected):"
+      },
+      {
+        "line": 404,
+        "text": "def _json_preflight(raw, max_bytes, max_depth):"
+      },
+      {
+        "line": 439,
+        "text": "def _scan_rows(rows, held_entries, resources, publisher_evidence=None, mode=None, meter=None):"
+      },
+      {
+        "line": 559,
+        "text": "def _final_destination(join, member):"
+      },
+      {
+        "line": 662,
+        "text": "def scan_rows(rows, held_entries, resources, publisher_evidence=None, mode=None, meter=None):"
+      },
+      {
+        "line": 676,
+        "text": "def _held_json_cap(admission):"
+      },
+      {
+        "line": 680,
+        "text": "def _finish(result, resources=None, meter=None):"
+      },
+      {
+        "line": 688,
+        "text": "def refuse(cause,stage=None,detail=None):"
+      },
+      {
+        "line": 832,
+        "text": "def _scan_retained(index_raw, held_raw, admission_raw, stock_context, meter):"
+      },
+      {
+        "line": 923,
+        "text": "def scan_retained(index_raw, held_raw, admission_raw, stock_context=None):"
+      },
+      {
+        "line": 927,
+        "text": "def scan_retained_bytes(index_raw, held_raw, admission_raw, stock_context=None):"
+      },
+      {
+        "line": 932,
+        "text": "def _run_owned(index_raw, held_raw, admission_raw, stock_context=None):"
+      },
+      {
+        "line": 949,
+        "text": "def exception_owned_result(meter,exc):"
+      },
+      {
+        "line": 960,
+        "text": "def _with_origin_successor(result,meter):"
+      },
+      {
+        "line": 976,
+        "text": "def finish_owned(result,resources,meter):"
+      },
+      {
+        "line": 1022,
+        "text": "def _finish_exception_refusal(primary,resources,meter,exc):"
+      },
+      {
+        "line": 1079,
+        "text": "def load_retained_index(raw):"
+      },
+      {
+        "line": 1104,
+        "text": "def census_wheel_filenames(rows):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 671,
+        "text": "except (DigestStop,BudgetStop,MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:"
+      },
+      {
+        "line": 775,
+        "text": "except DigestStop as stop:"
+      },
+      {
+        "line": 853,
+        "text": "except ValueError as exc:"
+      },
+      {
+        "line": 875,
+        "text": "except ValueError as exc:"
+      },
+      {
+        "line": 941,
+        "text": "except (DigestStop,BudgetStop,MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:"
+      },
+      {
+        "line": 1017,
+        "text": "except (DigestStop,BudgetStop,MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:"
+      },
+      {
+        "line": 1041,
+        "text": "except (MemoryError,OSError,ValueError,KeyError,TypeError,RuntimeError) as cleanup_exc:"
+      },
+      {
+        "line": 1049,
+        "text": "except (MemoryError,OSError,ValueError,KeyError,TypeError,RuntimeError) as cleanup_exc:"
+      },
+      {
+        "line": 1083,
+        "text": "except ValueError as exc:"
+      }
+    ]
+  },
+  {
+    "file": "source/raw_relations.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/raw_relations.py",
+      "bytes": 28490,
+      "sha256": "470d3dca0d50088573907758b48f3581137692d0b94d56ddc11af084bb5fdfa4",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980031",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "28490",
+        "1790935795376005706",
+        "1790935795376005706"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 6,
+        "text": "def member_raw_cause(member,resources=None,meter=None):"
+      },
+      {
+        "line": 172,
+        "text": "def wheel_raw_cause(observation,resources=None,meter=None):"
+      },
+      {
+        "line": 282,
+        "text": "def tar_archive_cause(envelope,members,resources=None,meter=None):"
+      },
+      {
+        "line": 365,
+        "text": "def deb_raw_cause(observation,resources=None,meter=None):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 167,
+        "text": "except (ValueError,UnicodeError,KeyError,TypeError,IndexError,struct.error,_NumericUnsupported):"
+      },
+      {
+        "line": 277,
+        "text": "except (ValueError,UnicodeError,KeyError,TypeError,IndexError,struct.error):"
+      },
+      {
+        "line": 361,
+        "text": "except (ValueError,UnicodeError,KeyError,TypeError,IndexError,_NumericUnsupported):return 'schema_rejected'"
+      },
+      {
+        "line": 422,
+        "text": "except (ValueError,UnicodeError,KeyError,TypeError,IndexError):"
+      }
+    ]
+  },
+  {
+    "file": "source/schema_validate.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/schema_validate.py",
+      "bytes": 12038,
+      "sha256": "4b29fbe40e26f4145e7549953a369dacfc91370f5bf9155758504416b184474b",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980032",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12038",
+        "1790935795376087510",
+        "1790935795376087510"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 35,
+        "text": "def schema_directory():"
+      },
+      {
+        "line": 40,
+        "text": "def load_schemas(resources=None, meter=None):"
+      },
+      {
+        "line": 89,
+        "text": "def bind_schema_roster(roster, resources, meter):"
+      },
+      {
+        "line": 115,
+        "text": "def validate_role(role, document, resources, meter):"
+      },
+      {
+        "line": 126,
+        "text": "def _type_ok(value, expected):"
+      },
+      {
+        "line": 144,
+        "text": "def _bounds_ok(value, schema):"
+      },
+      {
+        "line": 170,
+        "text": "def _value_schema(value, schema, resources=None, meter=None):"
+      },
+      {
+        "line": 237,
+        "text": "def _check(document, schema, resources=None, meter=None,clauses_checked=False):"
+      },
+      {
+        "line": 273,
+        "text": "def validate_value(schema_name, document, resources=None, meter=None):"
+      },
+      {
+        "line": 285,
+        "text": "def validate_document(document, schema_name, resources=None, meter=None):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 153,
+        "text": "except re.error:"
+      }
+    ]
+  },
+  {
+    "file": "source/semantics.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/semantics.py",
+      "bytes": 3622,
+      "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980033",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3622",
+        "1790935795376163815",
+        "1790935795376163815"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 4,
+        "text": "def member_cause(member,resources=None,meter=None):"
+      },
+      {
+        "line": 39,
+        "text": "def deb_cause(observation,resources=None,meter=None):"
+      }
+    ],
+    "catches": []
+  },
+  {
+    "file": "source/zip_wheel.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/zip_wheel.py",
+      "bytes": 61724,
+      "sha256": "932734d4e3f068f958a1598940b6a259d4e908a0777f9b5355fca2ec4e75ee6d",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980034",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "61724",
+        "1790935795376237419",
+        "1790935795376237419"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 27,
+        "text": "def _u16(data, pos):"
+      },
+      {
+        "line": 31,
+        "text": "def _u32(data, pos):"
+      },
+      {
+        "line": 35,
+        "text": "def _u64(data, pos):"
+      },
+      {
+        "line": 39,
+        "text": "def _decode_name(raw, flags):"
+      },
+      {
+        "line": 45,
+        "text": "def _walk_extra(extra):"
+      },
+      {
+        "line": 63,
+        "text": "def _zip64_values(extra, need_size, need_csize, need_offset, need_disk=False):"
+      },
+      {
+        "line": 105,
+        "text": "def _find_eocd(data):"
+      },
+      {
+        "line": 121,
+        "text": "def _read_sizes(csize, usize, offset, extra, disk=0):"
+      },
+      {
+        "line": 147,
+        "text": "def parse_zip_members(data, ceilings, capabilities, resources=None, meter=None):"
+      },
+      {
+        "line": 212,
+        "text": "def _adopt(current, sentinel, updated, adopt_cause):"
+      },
+      {
+        "line": 378,
+        "text": "def _descriptor_end(start, signed):"
+      },
+      {
+        "line": 567,
+        "text": "def _header_map(text):"
+      },
+      {
+        "line": 610,
+        "text": "def _folded_items(headers, key):"
+      },
+      {
+        "line": 618,
+        "text": "def _one(headers, key):"
+      },
+      {
+        "line": 625,
+        "text": "def _present(headers, key):"
+      },
+      {
+        "line": 630,
+        "text": "def _values(headers, key):"
+      },
+      {
+        "line": 635,
+        "text": "def _ascii_size(text, limit):"
+      },
+      {
+        "line": 653,
+        "text": "def _strict_csv_rows(text, resources=None, meter=None):"
+      },
+      {
+        "line": 721,
+        "text": "def _parse_record(text, limit, resources=None, meter=None):"
+      },
+      {
+        "line": 745,
+        "text": "def _wheel_observation(members, expected, filename, ceilings, resources=None, meter=None):"
+      },
+      {
+        "line": 978,
+        "text": "def _hex64(value):"
+      },
+      {
+        "line": 982,
+        "text": "def _expected_cause(expected):"
+      },
+      {
+        "line": 1004,
+        "text": "def _publisher_cause(evidence, resources):"
+      },
+      {
+        "line": 1020,
+        "text": "def _held_present(held):"
+      },
+      {
+        "line": 1026,
+        "text": "def _decode_chunk(chunk):"
+      },
+      {
+        "line": 1037,
+        "text": "def _held_bytes(held, resources=None, meter=None):"
+      },
+      {
+        "line": 1083,
+        "text": "def _require_custody(held):"
+      },
+      {
+        "line": 1112,
+        "text": "def _adopt_reader_custody(held, meter):"
+      },
+      {
+        "line": 1135,
+        "text": "def _open_held(held, resources, meter):"
+      },
+      {
+        "line": 1158,
+        "text": "def _scan_wheel(expected, held, resources, publisher_evidence=None, meter=None):"
+      },
+      {
+        "line": 1282,
+        "text": "def scan_wheel(expected, held, resources, publisher_evidence=None, meter=None):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 170,
+        "text": "except struct.error:"
+      },
+      {
+        "line": 238,
+        "text": "except struct.error:"
+      },
+      {
+        "line": 310,
+        "text": "except UnicodeError:"
+      },
+      {
+        "line": 415,
+        "text": "except BudgetStop as stop:"
+      },
+      {
+        "line": 418,
+        "text": "finally:"
+      },
+      {
+        "line": 488,
+        "text": "except UnicodeError:"
+      },
+      {
+        "line": 644,
+        "text": "except (ValueError, OverflowError):"
+      },
+      {
+        "line": 646,
+        "text": "except MemoryError:"
+      },
+      {
+        "line": 716,
+        "text": "except MemoryError:"
+      },
+      {
+        "line": 770,
+        "text": "except UnicodeError:"
+      },
+      {
+        "line": 1030,
+        "text": "except (ValueError, binascii.Error):"
+      },
+      {
+        "line": 1267,
+        "text": "finally:"
+      },
+      {
+        "line": 1292,
+        "text": "except DigestStop as stop:"
+      },
+      {
+        "line": 1295,
+        "text": "except (MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:"
+      },
+      {
+        "line": 1298,
+        "text": "finally:"
+      },
+      {
+        "line": 1310,
+        "text": "finally:"
+      }
+    ]
+  },
+  {
+    "file": "tools/native_owner.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/native_owner.py",
+      "bytes": 90243,
+      "sha256": "c24609bb6ccef3976d1922659596a595e13f3dcfeeb8a55960fded47498239ac",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980036",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "90243",
+        "1790936068576118631",
+        "1790936068576118631"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 24,
+        "text": "def canonical(value):"
+      },
+      {
+        "line": 29,
+        "text": "class RootNativeOwner:"
+      },
+      {
+        "line": 37,
+        "text": "def __init__(self,permit,selected_permit,selection,resource_contract,launch):"
+      },
+      {
+        "line": 161,
+        "text": "def _check_source_bootstrap(self):"
+      },
+      {
+        "line": 187,
+        "text": "def _check_source_caps(self):"
+      },
+      {
+        "line": 203,
+        "text": "def _hash_selected(self,fd,identity,expected):"
+      },
+      {
+        "line": 219,
+        "text": "def _lease(self,fd,label):"
+      },
+      {
+        "line": 226,
+        "text": "def _close(self,label):"
+      },
+      {
+        "line": 231,
+        "text": "def _open(self,name,flags,parent,label):"
+      },
+      {
+        "line": 240,
+        "text": "def _deadline(self):"
+      },
+      {
+        "line": 246,
+        "text": "def _lock_slots(self):"
+      },
+      {
+        "line": 251,
+        "text": "def _put_source_in_original_memory_domain(self):"
+      },
+      {
+        "line": 272,
+        "text": "def launch_source(self):"
+      },
+      {
+        "line": 349,
+        "text": "def _take_pipe_piece(self,key):"
+      },
+      {
+        "line": 371,
+        "text": "def _observe_direct_exit(self):"
+      },
+      {
+        "line": 380,
+        "text": "def wait_protocol_readable(self):"
+      },
+      {
+        "line": 398,
+        "text": "def _drain_and_reap(self):"
+      },
+      {
+        "line": 413,
+        "text": "def _retain_final_source(self):"
+      },
+      {
+        "line": 461,
+        "text": "def _retain_native_metrics(self):"
+      },
+      {
+        "line": 481,
+        "text": "def complete_error_pipes(self):"
+      },
+      {
+        "line": 499,
+        "text": "def cancel_and_reap(self):"
+      },
+      {
+        "line": 556,
+        "text": "def _publish_bytes(self,name,raw):"
+      },
+      {
+        "line": 588,
+        "text": "def _completion_handoff(self,value):"
+      },
+      {
+        "line": 631,
+        "text": "def close(self):"
+      },
+      {
+        "line": 660,
+        "text": "def run_selected_source(permit,selected_permit,selection,resource_contract,launch,capsule=None):"
+      },
+      {
+        "line": 766,
+        "text": "def consume_selected_source_capsule(capsule):"
+      },
+      {
+        "line": 805,
+        "text": "class RootCompletionObserver:"
+      },
+      {
+        "line": 818,
+        "text": "def __init__(self,permit,selected_permit,selection,resource_contract):"
+      },
+      {
+        "line": 911,
+        "text": "def _remaining(self):"
+      },
+      {
+        "line": 916,
+        "text": "def operation_end_ns(self):"
+      },
+      {
+        "line": 920,
+        "text": "def _receive(self):"
+      },
+      {
+        "line": 1012,
+        "text": "def _accept_parent_handoff(self):"
+      },
+      {
+        "line": 1031,
+        "text": "def _accept_observer_handoff(self):"
+      },
+      {
+        "line": 1048,
+        "text": "def _pipe(self,key):"
+      },
+      {
+        "line": 1066,
+        "text": "def _direct_wait(self):"
+      },
+      {
+        "line": 1074,
+        "text": "def cancel_and_reap(self):"
+      },
+      {
+        "line": 1090,
+        "text": "def complete_error_pipes(self):"
+      },
+      {
+        "line": 1103,
+        "text": "def _verify_receipt(self):"
+      },
+      {
+        "line": 1139,
+        "text": "def finish(self):"
+      },
+      {
+        "line": 1246,
+        "text": "def observe_selected_root_completion(permit,selected_permit,selection,resource_contract,capsule=None):"
+      },
+      {
+        "line": 1267,
+        "text": "def consume_selected_observer_capsule(capsule):"
+      },
+      {
+        "line": 1351,
+        "text": "def retain_selected_final_caller_capsule(capsule):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 214,
+        "text": "finally: piece=None;self.budget.release('live_bytes',amount+64)"
+      },
+      {
+        "line": 235,
+        "text": "except BaseException:"
+      },
+      {
+        "line": 336,
+        "text": "except BaseException as protocol_failure:"
+      },
+      {
+        "line": 401,
+        "text": "except KeyError:pass"
+      },
+      {
+        "line": 442,
+        "text": "except BaseException as validation_failure:"
+      },
+      {
+        "line": 453,
+        "text": "except BaseException as metric_failure:"
+      },
+      {
+        "line": 491,
+        "text": "except KeyError:pass"
+      },
+      {
+        "line": 531,
+        "text": "except ProcessLookupError:"
+      },
+      {
+        "line": 548,
+        "text": "finally:"
+      },
+      {
+        "line": 550,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 572,
+        "text": "finally: self._close('publish:'+name)"
+      },
+      {
+        "line": 642,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 652,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 686,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 689,
+        "text": "finally:"
+      },
+      {
+        "line": 694,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 705,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 708,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 752,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 799,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 1136,
+        "text": "finally:self.budget.close_fd(fd,'Root.completed_terminal.read')"
+      },
+      {
+        "line": 1230,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 1256,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 1291,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 1346,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 1370,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 1381,
+        "text": "except BaseException as exc:"
+      }
+    ]
+  },
+  {
+    "file": "tools/native_support.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/native_support.py",
+      "bytes": 19421,
+      "sha256": "58061c224d8600c23f778a54e95cfae2659b27236db901d52c3eab524c66bb0b",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980037",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19421",
+        "1790938124500723676",
+        "1790938124500723676"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 11,
+        "text": "class NativeHandle(tuple):"
+      },
+      {
+        "line": 33,
+        "text": "def selected_owner():"
+      },
+      {
+        "line": 60,
+        "text": "def native_entry_cause(resources,meter):"
+      },
+      {
+        "line": 78,
+        "text": "def begin_terminal(meter):"
+      },
+      {
+        "line": 85,
+        "text": "class ResultOwner:"
+      },
+      {
+        "line": 93,
+        "text": "def __init__(self,meter):"
+      },
+      {
+        "line": 102,
+        "text": "def release(self):"
+      },
+      {
+        "line": 109,
+        "text": "class OwnedMap(dict):"
+      },
+      {
+        "line": 110,
+        "text": "def release(self):"
+      },
+      {
+        "line": 119,
+        "text": "class OwnedBytes(bytes):"
+      },
+      {
+        "line": 120,
+        "text": "def release(self):"
+      },
+      {
+        "line": 125,
+        "text": "def transfer_result(result,blob,meter):"
+      },
+      {
+        "line": 139,
+        "text": "def own_map(result,meter):"
+      },
+      {
+        "line": 145,
+        "text": "class RootRetainedCapsule:"
+      },
+      {
+        "line": 156,
+        "text": "def __init__(self,owner=None):"
+      },
+      {
+        "line": 171,
+        "text": "def attach(self,owner):"
+      },
+      {
+        "line": 179,
+        "text": "def retain(self,exc):"
+      },
+      {
+        "line": 192,
+        "text": "def complete(self,payload):"
+      },
+      {
+        "line": 198,
+        "text": "def begin_consume(self):"
+      },
+      {
+        "line": 203,
+        "text": "def consumed(self,receipt):"
+      },
+      {
+        "line": 210,
+        "text": "def retire(self):"
+      },
+      {
+        "line": 224,
+        "text": "class CallerRawOrigin:"
+      },
+      {
+        "line": 235,
+        "text": "class ExistingParentCaller:"
+      },
+      {
+        "line": 247,
+        "text": "def __init__(self,native,selection,resource_contract,topology=None):"
+      },
+      {
+        "line": 258,
+        "text": "def new_capsule(self):"
+      },
+      {
+        "line": 269,
+        "text": "def retain(self,exc):"
+      },
+      {
+        "line": 290,
+        "text": "def prepare_raw_origin(self,operation):"
+      },
+      {
+        "line": 297,
+        "text": "def capture_raw_origin(self,node,exc,capsule=None):"
+      },
+      {
+        "line": 305,
+        "text": "def record_uncertainty(self,budget,node,operation):"
+      },
+      {
+        "line": 314,
+        "text": "def accept(self,result):"
+      },
+      {
+        "line": 323,
+        "text": "def retire_before_native_end(self):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 187,
+        "text": "except BaseException as recorder:"
+      },
+      {
+        "line": 285,
+        "text": "except BaseException as recorder:"
+      },
+      {
+        "line": 310,
+        "text": "except BaseException as recorder:"
+      },
+      {
+        "line": 333,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 339,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 349,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 356,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 364,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 374,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 383,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 390,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 400,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 411,
+        "text": "except BaseException as exc:"
+      }
+    ]
+  },
+  {
+    "file": "tools/root_holder.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/root_holder.py",
+      "bytes": 32079,
+      "sha256": "640e8e48dd70089e373b6f49965d713820b9b2d0a7e6540c071105d9b0c2d266",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980038",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32079",
+        "1790938124504711706",
+        "1790938124504711706"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 25,
+        "text": "class HolderStop(Exception):"
+      },
+      {
+        "line": 29,
+        "text": "def full9(st):"
+      },
+      {
+        "line": 33,
+        "text": "class RootBudget:"
+      },
+      {
+        "line": 39,
+        "text": "def __init__(self,contract,terminal_prepaid=None,started_ns=None,terminal_wall_ms=0):"
+      },
+      {
+        "line": 67,
+        "text": "def begin_terminal(self):"
+      },
+      {
+        "line": 70,
+        "text": "def operation_end_ns(self):"
+      },
+      {
+        "line": 75,
+        "text": "def reserve(self,**delta):"
+      },
+      {
+        "line": 85,
+        "text": "def release(self,key,value):"
+      },
+      {
+        "line": 90,
+        "text": "def close_fd(self,fd,path):"
+      },
+      {
+        "line": 102,
+        "text": "def retain_origin(self,exc,operation,path=None):"
+      },
+      {
+        "line": 116,
+        "text": "class RootHolder:"
+      },
+      {
+        "line": 123,
+        "text": "def __init__(self,channel,selection,native_permit,selected_permit,resource_contract,"
+      },
+      {
+        "line": 176,
+        "text": "def bind_source_channel(self,channel,source_peer):"
+      },
+      {
+        "line": 194,
+        "text": "def _selected_directory(self,fd,path):"
+      },
+      {
+        "line": 219,
+        "text": "def _open(self,path,flags,parent=None):"
+      },
+      {
+        "line": 226,
+        "text": "def _directory(self,relative):"
+      },
+      {
+        "line": 248,
+        "text": "def _hash(self,fd,size):"
+      },
+      {
+        "line": 272,
+        "text": "def _acquire(self):"
+      },
+      {
+        "line": 306,
+        "text": "def verify_whole(self):"
+      },
+      {
+        "line": 328,
+        "text": "def _send(self,message,fd=None):"
+      },
+      {
+        "line": 343,
+        "text": "def _remaining(self):"
+      },
+      {
+        "line": 348,
+        "text": "def _request(self,limit):"
+      },
+      {
+        "line": 362,
+        "text": "def serve(self):"
+      },
+      {
+        "line": 434,
+        "text": "def close(self):"
+      },
+      {
+        "line": 458,
+        "text": "def existing_parent_source_entry(permit,selected_permit,selection,resource_contract,launch_contract):"
+      },
+      {
+        "line": 510,
+        "text": "def launch_selected_source(permit,selected_permit,selection,resource_contract,launch_contract):"
+      },
+      {
+        "line": 515,
+        "text": "def complete_selected_root(permit,selected_permit,selection,resource_contract):"
+      }
+    ],
+    "catches": [
+      {
+        "line": 93,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 112,
+        "text": "except BaseException as recorder_failure:"
+      },
+      {
+        "line": 214,
+        "text": "finally:"
+      },
+      {
+        "line": 222,
+        "text": "except BaseException:"
+      },
+      {
+        "line": 236,
+        "text": "except BaseException:"
+      },
+      {
+        "line": 244,
+        "text": "except BaseException:"
+      },
+      {
+        "line": 263,
+        "text": "finally:"
+      },
+      {
+        "line": 268,
+        "text": "finally:"
+      },
+      {
+        "line": 299,
+        "text": "finally:"
+      },
+      {
+        "line": 302,
+        "text": "except BaseException:"
+      },
+      {
+        "line": 322,
+        "text": "finally:"
+      },
+      {
+        "line": 339,
+        "text": "finally:"
+      },
+      {
+        "line": 428,
+        "text": "finally:"
+      },
+      {
+        "line": 450,
+        "text": "except OSError as exc:"
+      },
+      {
+        "line": 494,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 500,
+        "text": "except BaseException as recorder:caller.raw_recording_failure=recorder"
+      },
+      {
+        "line": 505,
+        "text": "except BaseException as accept_failure:"
+      },
+      {
+        "line": 555,
+        "text": "except BaseException as exc:"
+      },
+      {
+        "line": 558,
+        "text": "except BaseException as recorder:caller.raw_recording_failure=recorder"
+      },
+      {
+        "line": 563,
+        "text": "except BaseException as accept_failure:"
+      }
+    ]
+  },
+  {
+    "file": "tools/state_binding.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/state_binding.py",
+      "bytes": 15608,
+      "sha256": "932882386f0d5999baa3c7fdaee29a724d5e0050c4e3470e9453222986ae1c58",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980039",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15608",
+        "1790935795376699346",
+        "1790935795376699346"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 18,
+        "text": "def state_digest(value,native_cache_policy=None):"
+      },
+      {
+        "line": 20,
+        "text": "def visit(item):"
+      },
+      {
+        "line": 88,
+        "text": "def visit_order(item):"
+      },
+      {
+        "line": 97,
+        "text": "def source_state_cause(modules,expected):"
+      },
+      {
+        "line": 108,
+        "text": "def bind_native(contract,resources,meter):"
+      }
+    ],
+    "catches": []
+  },
+  {
+    "file": "tools/worker_entry.py",
+    "input": {
+      "path": "/var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/worker_entry.py",
+      "bytes": 5919,
+      "sha256": "112b2fa914daa0e7268945da5818c84b04d8e6240b4f008911331f3574bd8de5",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980040",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5919",
+        "1790935795376776851",
+        "1790935795376776851"
+      ],
+      "stable9": true
+    },
+    "complete_TEXT_read": true,
+    "definitions": [
+      {
+        "line": 17,
+        "text": "def selected_bootstrap():"
+      },
+      {
+        "line": 39,
+        "text": "def build_stock(boot):"
+      },
+      {
+        "line": 97,
+        "text": "def main():"
+      }
+    ],
+    "catches": []
+  }
+]

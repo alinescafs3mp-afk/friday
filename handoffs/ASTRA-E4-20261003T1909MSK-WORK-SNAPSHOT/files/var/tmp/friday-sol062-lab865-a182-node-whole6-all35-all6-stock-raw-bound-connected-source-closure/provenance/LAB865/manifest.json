@@ -1,0 +1,138 @@
+{
+  "schema": "friday.sol060.manifest.v1",
+  "assignment": "ASTRA-E4-SOL060-LAB863-NODE-WHOLE6-ALL35-ALL6-CONNECTED-ERROR-RAW-SOURCE-CLOSURE",
+  "generation": 1,
+  "root": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure",
+  "seal_pin": {
+    "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/seal.json",
+    "bytes": 35510,
+    "sha256": "e46a4ce0d281b4369d3e56bc746120f4abd30eb1ef9f65020eabcf306769238d",
+    "identity9_decimal_strings": [
+      "2050",
+      "5404506",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "35510",
+      "1790937952847092846",
+      "1790937952847092846"
+    ]
+  },
+  "current_source6": {
+    "caller.py": {
+      "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/caller.py",
+      "bytes": 132543,
+      "sha256": "708ed145bbf323edea7b2cf338a6b7c63b63e32b72ab8ec05cdeabc066141554",
+      "identity9_decimal_strings": [
+        "2050",
+        "5404500",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "132543",
+        "1790937952809090670",
+        "1790937952809090670"
+      ]
+    },
+    "supervisor.py": {
+      "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/supervisor.py",
+      "bytes": 101776,
+      "sha256": "49b507fbc2a4b99791908e92213979056ebaa1da4ddfe733c9eab86738e79d5c",
+      "identity9_decimal_strings": [
+        "2050",
+        "5404504",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101776",
+        "1790937952831182016",
+        "1790937952831182016"
+      ]
+    },
+    "verifier.py": {
+      "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/verifier.py",
+      "bytes": 73847,
+      "sha256": "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60",
+      "identity9_decimal_strings": [
+        "2050",
+        "5404505",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "73847",
+        "1790937952832091987",
+        "1790937952832091987"
+      ]
+    },
+    "launch-contract.json": {
+      "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/launch-contract.json",
+      "bytes": 48792,
+      "sha256": "f4af798566916c32ef504f95865faceffadd5e62e247e3c8e2ce64b4cd74bb7d",
+      "identity9_decimal_strings": [
+        "2050",
+        "5404502",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "48792",
+        "1790937952811090784",
+        "1790937952811090784"
+      ]
+    },
+    "expectations.json": {
+      "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/expectations.json",
+      "bytes": 10129,
+      "sha256": "a77ad81425bb7abd2ffc954bb3bdccb2784a5b4785ce98f658c649a2755a7b60",
+      "identity9_decimal_strings": [
+        "2050",
+        "5404501",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10129",
+        "1790937952810090727",
+        "1790937952810090727"
+      ]
+    },
+    "ordinary-surplus.txt": {
+      "path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "5404503",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790937952811090784",
+        "1790937952811090784"
+      ]
+    }
+  },
+  "leaf_count": 65,
+  "whole": "CODE_OPEN",
+  "changed6": 5,
+  "equal6": 1,
+  "all35": 35,
+  "all6": 6,
+  "all3": 3,
+  "F1_F2": "LAB865 stock-cause join authored; inner32KiB complete fit and native reconstruction remain CODE_OPEN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ELF_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "predecessor_root": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure",
+  "lab865_consumer_join": true,
+  "lab865_current6_changed": 5,
+  "lab865_current6_equal": 1
+}

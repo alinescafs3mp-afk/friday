@@ -1,0 +1,49 @@
+{
+  "schema": "friday.a172.source-author-effect-accounting.v1",
+  "accepted_msk": "2026-10-02 11:05:59 MSK",
+  "task_limits": {
+    "wall_seconds": 6600,
+    "seal_reserve_seconds": 600,
+    "explicit_read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 16777216,
+    "local": 4,
+    "children": 0,
+    "network": 0,
+    "retries": 0
+  },
+  "observed": {
+    "complete_pinned_stock_reader_bytes": 74173848,
+    "input_leaf_pin_count": 97,
+    "local_concurrent_tool_commands_max": 1,
+    "children": 0,
+    "network": 0,
+    "candidate_execution": 0,
+    "candidate_tests": 0,
+    "Root_calls": 0,
+    "GPG_calls": 0,
+    "Node_calls": 0,
+    "archive_parses": 0,
+    "changes_outside_output_and_named_terminal": 0
+  },
+  "additional_read_accounting": {
+    "direct_text_JSON_helper_copy_and_repeated_reads_conservative_reservation_bytes": 33554432,
+    "status": "Reservation, not observed zero or exact cumulative read instrumentation; complete raw stock pin reader count is exact. Seal reads accounted by external terminal.",
+    "implicit_IO": "UNKNOWN_NOT_ZERO"
+  },
+  "unknowns": {
+    "whole_task_CPU": "UNKNOWN_NOT_ZERO",
+    "whole_task_model_tool_cost": "UNKNOWN_NOT_ZERO",
+    "whole_task_peak_RSS_and_hostRAM": "UNKNOWN_NOT_ZERO; individual helpers bounded stock metadata only; do not claim authorRAM limit proves performing globalRAM",
+    "model_usage": "UNKNOWN_NOT_ZERO",
+    "implicit_input_and_reasoning_tokens": "UNKNOWN_NOT_ZERO"
+  },
+  "metadata_transport_failure": {
+    "count": 1,
+    "native_effects": 0,
+    "source_effects": 0,
+    "reason": "Oversized whole35 metadata patch display truncation rejected by JSON.parse before apply_patch; a separate compact complete commoncondition artifact was authored. No retry of Source/native effect.",
+    "native_retries": 0
+  },
+  "interpretation": "Actual elapsed/finished MSK, output measured bytes and decimalSHA9 final sealing are in external terminal. Author task limits never expand original performing roles/caps/grants."
+}

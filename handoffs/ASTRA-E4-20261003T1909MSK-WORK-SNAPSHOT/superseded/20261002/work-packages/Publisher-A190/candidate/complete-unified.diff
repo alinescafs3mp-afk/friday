@@ -1,0 +1,1327 @@
+--- A181/source/actor_bootstrap.py
++++ A190/source/actor_bootstrap.py
+@@ -85,8 +85,10 @@
+     bundle/parser/initial transport allocation before fork, and supplies the
+     exact live bundle hash token only in its sealed authenticated bundle.
+     """
+-    def __init__(self,outgoing,incoming):
++    def __init__(self,outgoing,incoming,owner_export_token=None):
+         self.outgoing,self.incoming=outgoing,incoming
++        self.owner_export_token=owner_export_token;self.last_raw=None
++        self.last_prepaid=False;self.prefix_attempted=False
+     def read(self):
+         def receive(size):
+             result=bytearray()
+@@ -95,7 +97,9 @@
+                 if not part:raise RuntimeError("bootstrap-control-eof")
+                 result.extend(part)
+             return bytes(result)
+-        size=struct.unpack(">Q",receive(8))[0]
++        header=struct.unpack('>Q',receive(8))[0]
++        self.last_prepaid=bool(header&(1<<63));size=header&((1<<63)-1)
++        if self.last_prepaid and self.owner_export_token is None:raise RuntimeError('bootstrap-prepaid-not-owned')
+         if size>2_000_000:raise RuntimeError("bootstrap-control-size")
+         def pairs(rows):
+             result={}
+@@ -103,7 +107,8 @@
+                 if key in result:raise RuntimeError("bootstrap-duplicate-key")
+                 result[key]=value
+             return result
+-        return json.loads(receive(size),object_pairs_hook=pairs,
++        self.last_raw=receive(size)
++        return json.loads(self.last_raw,object_pairs_hook=pairs,
+             parse_constant=lambda _: (_ for _ in ()).throw(RuntimeError("bootstrap-numeric")))
+     def commit_hash(self,token,size):
+         # Only this bounded fixed scalar request exists before Source admit.
+@@ -118,7 +123,40 @@
+                 if written<=0:raise RuntimeError("bootstrap-control-short")
+                 at+=written
+         response=self.read()
+-        if response.get("ok") is not True:raise RuntimeError("bootstrap-credit-refused")
++        if response.get('ok') is not True:
++            error=RuntimeError('bootstrap-credit-refused')
++            error.root_response=response;error.root_response_raw=self.last_raw
++            raise error
++    def fail_prefix(self,book,error,raw,value,launch):
++        if self.prefix_attempted or self.owner_export_token is None:raise RuntimeError('bootstrap-prefix-attempt')
++        self.prefix_attempted=True
++        # Stock serialization is available before any selected Source import.
++        # The Root already retains the actual sealed bundle/pre-exec packet.
++        # Actual traceback/local objects that stock JSON cannot carry remain
++        # explicit: this prefix is retained, never acknowledged as complete.
++        tb=error.__traceback__;frames=[]
++        while tb is not None:
++            frames.append({'filename':tb.tb_frame.f_code.co_filename,'name':tb.tb_frame.f_code.co_name,
++                'line':tb.tb_lineno,'locals_identity':str(id(tb.tb_frame.f_locals))})
++            tb=tb.tb_next
++        rows=[{k:v for k,v in row.items() if k not in ('journal','close_cell')} for row in book.rows]
++        packet={'type':'bootstrap-owner-prefix','owner_pid':os.getpid(),'prepaid_token':self.owner_export_token,
++            'schema':'friday.a190.stock-bootstrap-prefix.v1','rows':rows,
++            'raw_bundle':None if raw is None else raw.hex(),'decoded_bundle_present':value is not None,
++            'pre_exec_launch':launch,'root_response_raw':None if self.last_raw is None else self.last_raw.hex(),
++            'error':{'module':type(error).__module__,'class':type(error).__name__,'text':str(error)},
++            'traceback_frames':frames,'complete':False,'truncated':False}
++        wire=json.dumps(packet,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode('ascii')+b'\n'
++        if len(wire)>2_000_000:raise RuntimeError('bootstrap-complete-prefix-wire-bound-open')
++        for part in (struct.pack('>Q',len(wire)|(1<<63)),wire):
++            at=0
++            while at<len(part):
++                count=os.write(self.outgoing,memoryview(part)[at:])
++                if count<=0:raise RuntimeError('bootstrap-prefix-delivery')
++                at+=count
++        reply=self.read()
++        if reply.get('ok') is not True:raise RuntimeError('bootstrap-prefix-receiver-refused')
++        return reply['value']
+ 
+ 
+ class VerifiedSource(importlib.abc.MetaPathFinder,importlib.abc.Loader):
+@@ -154,9 +192,30 @@
+ 
+ 
+ def main():
+-    if len(sys.argv)!=4:raise RuntimeError("bootstrap-argv")
+-    bundle_fd,request_fd,response_fd=map(int,sys.argv[1:])
++    if len(sys.argv)!=5:raise RuntimeError("bootstrap-argv")
++    bundle_fd,request_fd,response_fd,export_token=map(int,sys.argv[1:])
+     child_book=StockChildJournal((bundle_fd,request_fd,response_fd))
++    stock=StockChannel(request_fd,response_fd,export_token)
++    raw=value=launch=loader=meter=consumer=channel=None
++    try:
++        return _perform_bootstrap(bundle_fd,request_fd,response_fd,export_token,child_book,stock)
++    except BaseException as primary:
++        # The broad stock boundary includes bind/admit/import/connect/configure
++        # and constructor failure, not just the ordinary consumer body.
++        frame=primary.__traceback__
++        while frame is not None:
++            if frame.tb_frame.f_code.co_name=='_perform_bootstrap':
++                held=frame.tb_frame.f_locals
++                raw=held.get('raw');value=held.get('value');launch=held.get('launch')
++                meter=held.get('meter')
++                break
++            frame=frame.tb_next
++        if meter is None or not meter.owner_export_attempted:
++            try:stock.fail_prefix(child_book,primary,raw,value,launch)
++            except BaseException as export_error:primary.owner_export_error=export_error
++        raise
++
++def _perform_bootstrap(bundle_fd,request_fd,response_fd,export_token,child_book,stock):
+     import fcntl
+     seals=fcntl.fcntl(bundle_fd,fcntl.F_GET_SEALS)
+     required=fcntl.F_SEAL_WRITE|fcntl.F_SEAL_GROW|fcntl.F_SEAL_SHRINK|fcntl.F_SEAL_SEAL
+@@ -172,22 +231,22 @@
+         raise RuntimeError("bundle-fields")
+     if value["parent_pid"]!=os.getppid():raise RuntimeError("bootstrap-parent")
+     loader=VerifiedSource(value["sources"])
+-    stock=StockChannel(request_fd,response_fd)
+     launch=stock.read()["launch_fact"]
+     child_book.bind(launch['bootstrap_child_ownership'],os.getpid())
+     loader.admit(stock,value["bootstrap_hash_token"])
+-    stock=None
+     sys.meta_path.insert(0,loader)
+     from launcher import actor_main, ControlChannel
+     from observer import MeterRPC
+     from consumer_bridge import HeldConsumerLoader
+     # One Root channel owns preparation/import admission as well as execution.
+-    channel=ControlChannel(request_fd,response_fd,child_book,value['owner_export_token'])
++    if value['owner_export_token']!=export_token:raise RuntimeError('bootstrap-export-token-drift')
++    channel=ControlChannel(request_fd,response_fd,child_book,export_token)
+     meter=MeterRPC(channel.call,value['owner_export_token'],channel.terminal_call)
+-    child_book.connect(meter)
+-    channel.configure(meter)
+-    consumer=HeldConsumerLoader(value["consumer_files"],meter)
++    consumer=None
+     try:
++        child_book.connect(meter)
++        channel.configure(meter)
++        consumer=HeldConsumerLoader(value["consumer_files"],meter)
+         consumer.acquire().enter()
+         actor_main(request_fd,response_fd,value["admission"],launch,value["ordinary"],consumer.module,
+                    initial_launch=launch,existing_channel=channel,existing_meter=meter)
+@@ -195,7 +254,8 @@
+         primary=sys.exc_info()[1]
+         if primary is not None:meter.retain_error_arena(primary)
+         cleanup_error=None
+-        try:consumer.close()
++        try:
++            if consumer is not None:consumer.close()
+         except BaseException as exc:
+             cleanup_error=exc;meter.retain_error_arena(exc)
+         child_book.close_one(bundle_fd)
+--- A181/source/capacity.py
++++ A190/source/capacity.py
+@@ -16,6 +16,41 @@
+ FD_HISTORY_FLOOR = 65536 * 8192
+ OWNER_WIRE_FLOOR = INPUT_MAX * 2 + 16
+ OWNER_RESIDENT_FLOOR = FD_HISTORY_FLOOR * 3 + INPUT_MAX * (560 * 2 + 260) + 131072 * 2
++
++def prospective_connected_costs(admission,enrollment,observer):
++    """Numeric actual-bank dimensions plus explicit open lifetime terms.
++
++    These are prospective declarations evaluated before the dependent actor
++    launch. They cannot turn later RSS, a finite floor, or an unsupported
++    callback/frame body into a complete original-cap upper-bound proof.
++    """
++    source=sum(r['bytes'] for r in enrollment['source_files'])
++    consumer=sum(r['bytes'] for r in enrollment['consumer_files'])
++    input_bank=sum(r['bytes'] for r in admission['inputs'].values())
++    member_bank=sum(r['size'] for rows in admission['members'].values() for r in rows if r['kind']=='regular')
++    fields=('fd','holder','credit','status','identity9_decimal_strings','slot','generation',
++        'attempted_close','close_history','acquisition_error','last_known_holder','last_known_credit',
++        'history_arena','close_policy','cancellation_acknowledged')
++    # Field names, punctuation and one-byte values only; not a generated row,
++    # fixture, observed reachability claim or complete payload width estimate.
++    row_key_minimum=sum(len(name)+5 for name in fields)+2
++    full_history_key_minimum=65536*row_key_minimum
++    return {'schema':'friday.a190.connected-prospective-dimensions.v1',
++        'actual_enrolled_text_bytes':{'Source':source,'consumer':consumer},
++        'actual_declared_input_bank_bytes':input_bank,'actual_member_bank_bytes':member_bank,
++        'bootstrap_raw_parser_copy_floor':INPUT_MAX*516+source*16+131072,
++        'Source_and_consumer_retained_text_floor':source*16+consumer*8+131072,
++        'same_PID_history_arena_once_per_domain':FD_HISTORY_FLOOR,
++        'Root_actor_native_distinct_history_floor':FD_HISTORY_FLOOR*3,
++        'full_history_field_name_minimum':full_history_key_minimum,
++        'single_wire_limit':INPUT_MAX,
++        'declared_history_maximum_fits_single_wire':full_history_key_minimum<=INPUT_MAX,
++        'original_workload_reachable_history_upper':None,
++        'complete_value_function_module_frame_native_alias_upper':None,
++        'complete_result_error_raw_transport_encode_parse_hash_copy_report_terminal_tail_fallback_upper':None,
++        'full_8GiB_read_output_time_upper_proof':'REQUIRED_NOT_CLOSED',
++        'actual_independent_RAM_IO_CPU':'REQUIRED_NOT_RUN_NOT_ZERO_NOT_PASS',
++        'reservations_are_observations':False,'caps_changed':False}
+ 
+ def validate_complete_capacity(admission,enrollment,observer,installed):
+     plan=exact(admission["capacity_plan"],("output_components","implicit_output_upper",
+@@ -57,5 +92,6 @@
+         "minimum_repeated_full_member_read_bytes":minimum_full_member_reads,
+         "new_owner_resident_floor":OWNER_RESIDENT_FLOOR,"new_owner_wire_floor":OWNER_WIRE_FLOOR,
+         "known_resident_overlap_minimum":known_resident,"declared":plan,"actual_RAM_IO":"REQUIRED_NOT_RUN",
++        'connected_owner_dimensions':prospective_connected_costs(admission,enrollment,observer),
+         "numeric_worst_case_graph_proof":"REQUIRED_NOT_CLOSED",
+         "reservations_are_observations":False,"GO":False}
+--- A181/source/common.py
++++ A190/source/common.py
+@@ -109,9 +109,13 @@
+         self.before_read(size);self.read_bytes+=size
+         if self.observer is not None:self.observer.explicit_read+=size
+     def release(self):
+-        if any(j.fds for j in self.journals):raise Refused("preobserver_owner_unconfirmed","terminal")
+-        self.journals.clear();self.closed=True
+-        if self.observer is not None:self.observer.release(self.token)
++        if self.closed:return True
++        if getattr(self,'fd_rows',{}) or any(j.fds for j in self.journals):return False
++        if self.observer is not None and self.observer.release(self.token) is not True:return False
++        # The descriptor domain retains complete histories until the actual
++        # final completion receipt; dropping the sampling list is not enough.
++        self.closed=True
++        return True
+     def commit(self, reads=0, output=0, hash_bytes=0):
+         if os.getpid() != self.pid:
+             raise Refused("observer_owner")
+--- A181/source/consumer_bridge.py
++++ A190/source/consumer_bridge.py
+@@ -43,6 +43,15 @@
+             original_checkpoint=module.checkpoint;original_hash=module.debit_hash
+             module.OUTER_STOCK_SAMPLE=self.meter.owned_sample
+             module.OUTER_FD_SCOPE=self.meter.owned_file
++            def outer_complete_call(roots):
++                if roots['owner_pid']!=os.getpid():raise Refused('consumer_call_owner','terminal')
++                # Existing same-Source observer owns complete actual values,
++                # histories and original errors under its already-live arena.
++                # No new ordinary reserve is requested on a refusal prefix.
++                if self.consumer_arena.closed:raise Refused('consumer_call_credit_retired','terminal')
++                self.meter.own_result(roots,self.consumer_arena)
++                return {'owner_pid':os.getpid(),'call_sequence':roots['call_sequence'],'actual_roots_received':True}
++            module.OUTER_COMPLETE_CALL=outer_complete_call
+             def outer_read(size):
+                 hold=self.meter.reserve("full-consumer-physical-read",reads=size)
+                 try:
+--- A181/source/lifetime.py
++++ A190/source/lifetime.py
+@@ -8,6 +8,7 @@
+ FD_ROW_ALLOCATION=8192
+ FD_HISTORY_ALLOCATION=FD_HISTORY_MAX*FD_ROW_ALLOCATION
+ _ACTIVE=frozenset(("ACQUIRED","HELD","UNKNOWN"))
++_OCCUPIED=_ACTIVE|frozenset(("PREOWNED",))
+ 
+ class FDState:
+     """Finite arena charged to the existing owner before any acquisition."""
+@@ -18,7 +19,19 @@
+     def unknown(self):
+         return any(r["status"]=="UNKNOWN" for b in self.journals for r in b.rows)
+     def pending(self):
+-        return sum(r["status"] in _ACTIVE for b in self.journals for r in b.rows if r["journal"] is b)
++        return sum(r["status"] in _OCCUPIED for b in self.journals for r in b.rows if r["journal"] is b)
++    def completion_ready(self):
++        return not any(r['status'] in _OCCUPIED for b in self.journals for r in b.rows if r['journal'] is b)
++    def retire_confirmed(self,completion):
++        # The native completion receiver first accepted the actual full roots.
++        # Closed descriptor facts alone never complete the attached histories.
++        if completion is None or not completion.completed or not self.completion_ready():return False
++        for book in self.journals:
++            if any(getattr(c,'fd_rows',{}) for c in book.grants.values()):return False
++        books=list(self.journals)
++        for book in books:
++            if not book.retire_history(completion):return False
++        self.journals.clear();self.count=0;self.generation=0;return True
+     def graph(self):
+         journals=[b.graph() for b in self.journals]
+         return {"arena_token":self.credit_token,"generation":self.generation,"history_count":self.count,
+@@ -66,18 +79,36 @@
+         c=self._slot(credit,count)
+         if self.state.count+count>FD_HISTORY_MAX:raise Refused("fd_history_capacity_before_effect")
+         cells=[]
+-        for _ in range(count):
+-            self.state.generation+=1;c.fd_serial+=1
++        # Build all cells before publishing any cell or calling a factory.
++        # Publication failure still leaves a locally acknowledged NO_RETURN
++        # history for every cell actually inserted; no descriptor is guessed.
++        for offset in range(1,count+1):
+             attempt={"attempt":1,"status":"NOT_ATTEMPTED","error":None}
+             row={"fd":None,"holder":holder,"credit":c.token,"status":"PREOWNED","identity9_decimal_strings":None,
+-                "slot":c.fd_serial,"generation":self.state.generation,"attempted_close":None,"close_history":[],
++                "slot":c.fd_serial+offset,"generation":self.state.generation+offset,"attempted_close":None,"close_history":[],
+                 "close_cell":attempt,"acquisition_error":None,"last_known_holder":holder,"last_known_credit":c.token,
+-                "journal":self,"history_arena":self.state.credit_token,"close_policy":None}
+-            # ALL fallible index/list insertion precedes return, for BOTH ends.
+-            self.rows.append(row);c.fd_rows[row["slot"]]=row;cells.append(row);self.state.count+=1
+-        self._changed();return c,cells
++                "journal":self,"history_arena":self.state.credit_token,"close_policy":None,
++                'cancellation_acknowledged':False}
++            cells.append(row)
++        self.state.generation+=count;c.fd_serial+=count
++        try:
++            for row in cells:
++                self.rows.append(row);self.state.count+=1
++                c.fd_rows[row['slot']]=row
++            self._changed()
++        except BaseException as exc:
++            self._cancel(c,cells)
++            exc.retained_journal=self
++            if self.meter is not None:self.meter.retain_error_arena(exc)
++            raise
++        return c,cells
+     def _cancel(self,c,cells):
+-        for r in cells:r["status"]="NO_RETURN";c.fd_rows.pop(r["slot"],None)
++        for r in cells:
++            r['status']='NO_RETURN'
++            r['cancellation_acknowledged']=True
++            if c.fd_rows.get(r['slot']) is r:c.fd_rows.pop(r['slot'])
++        # Histories are retained in the same arena until full completion.
++        # Cancellation is finite, allocation-free and never calls the factory.
+     def _bind(self,r,fd):
+         # Existing preowned fields only: no insert/allocation callback/fstat.
+         r["fd"]=fd;r["status"]="ACQUIRED"
+@@ -148,9 +179,12 @@
+         return {"journal_chunks":[rows[i:i+512] for i in range(0,len(rows),512)],"journal_count":len(rows),
+             "pending_fds":sorted(self.fds),"faults":list(self.faults),"history_arena":self.state.credit_token if self.state else None,
+             "truncated":False,"credits":[{"token":c.token,"slots":c.slots,"closed":c.closed} for c in self.grants.values()]}
+-    def retire_history(self):
+-        if self.fds:raise Refused("fd_history_owner_unconfirmed","terminal")
+-        self.rows.clear();self.grants.clear();self.faults.clear()
++    def retire_history(self,completion=None):
++        if completion is None or not completion.completed:return False
++        if any(r['status'] in _OCCUPIED for r in self.rows if r['journal'] is self):return False
++        if any(getattr(c,'fd_rows',{}) or not c.closed for c in self.grants.values()):return False
++        self.rows.clear();self.grants.clear();self.faults.clear();self.meter=None;self.state=None
++        return True
+ 
+ class ForkOwner:
+     """Prospective child table cells prepared in the same existing Root.
+@@ -164,6 +198,7 @@
+         self.credit=stock_credit;self.rows=[];self.parent_rows=[];self.faults=[]
+         self.state=None;self.grants={stock_credit.token:stock_credit}
+         self.export_attempted=False
++        self.final_failure_export_attempted=False
+         source={}
+         for book in observer.fd_state.journals:
+             for row in book.rows:
+@@ -248,8 +283,33 @@
+                 n=os.write(fd,memoryview(blob)[at:])
+                 if n<=0:raise Refused('child_owner_delivery','terminal')
+                 at+=n
+-
+-def receive_fork_owner(fd,hold,deadline,pid,parent_pid):
++    def retire_history(self,completion=None):
++        if completion is None or not completion.completed:return False
++        if self.fds or any(getattr(c,'fd_rows',{}) or not c.closed for c in self.grants.values()):return False
++        self.rows.clear();self.parent_rows.clear();self.faults.clear();self.grants.clear()
++        self.observer=self.parent_state=self.state=self.credit=None
++        return True
++
++    def emit_failure(self,fd,error):
++        # Pre-exec receipt does not represent later exec/configuration failure.
++        if self.final_failure_export_attempted:raise Refused('child_final_failure_attempted','terminal')
++        self.final_failure_export_attempted=True
++        from observer import full_value_arena
++        from common import canonical,INPUT_MAX
++        import struct
++        values=full_value_arena([error,self.graph(),self.state.graph() if self.state is not None else None])
++        graph={'schema':'friday.a190.fork-final-failure.v1','owner_pid':os.getpid(),
++            'parent_pid':self.parent_pid,'phase':'FINAL_FAILURE','values':values,
++            'error':error_fact(error,'terminal'),'complete':values['complete'],'truncated':False}
++        raw=canonical(graph,maximum=INPUT_MAX)
++        for blob in (struct.pack('>Q',len(raw)),raw):
++            at=0
++            while at<len(blob):
++                count=os.write(fd,memoryview(blob)[at:])
++                if count<=0:raise Refused('child_final_failure_delivery','terminal')
++                at+=count
++
++def receive_fork_owner(fd,hold,deadline,pid,parent_pid,final_failure=False,allow_eof=False):
+     """Only prepaid fixed framing/parse; not ordinary deadline admission."""
+     from common import parse,INPUT_MAX,json_preflight
+     import struct
+@@ -262,14 +322,23 @@
+                 selected.register(fd,selectors.EVENT_READ)
+                 if not selected.select(left):raise Refused('child_owner_deadline','terminal')
+             part=os.read(fd,min(65536,n-at))
+-            if not part:raise Refused('child_owner_eof','terminal')
++            if not part:
++                if allow_eof and at==0 and n==8:return None
++                raise Refused('child_owner_eof','terminal')
+             data[at:at+len(part)]=part;at+=len(part);hold.commit(reads=len(part))
+         return bytes(data)
+-    n=struct.unpack('>Q',receive(8))[0]
++    header=receive(8)
++    if header is None:return None
++    n=struct.unpack('>Q',header)[0]
+     if n>INPUT_MAX:raise Refused('child_owner_capacity','terminal')
+     raw=receive(n);value=parse(raw,maximum=INPUT_MAX)
+-    if value.get('schema')!='friday.a181.fork-owner-graph.v1' or value.get('owner_pid')!=pid or value.get('parent_pid')!=parent_pid or value.get('truncated') is not False:
++    failure=value.get('schema')=='friday.a190.fork-final-failure.v1'
++    schema='friday.a190.fork-final-failure.v1' if final_failure or failure else 'friday.a181.fork-owner-graph.v1'
++    if value.get('schema')!=schema or value.get('owner_pid')!=pid or value.get('parent_pid')!=parent_pid or value.get('truncated') is not False:
+         raise Refused('child_owner_identity','terminal')
++    if final_failure or failure:
++        if value.get('phase')!='FINAL_FAILURE' or type(value.get('values')) is not dict:
++            raise Refused('child_final_failure_schema','terminal')
+     hold.commit(output=n+8)
+     value['_receiver_resident_upper']=json_preflight(raw)+len(raw)*4+131072
+     return value
+--- A181/source/native.py
++++ A190/source/native.py
+@@ -151,7 +151,7 @@
+         metadata_owner={"invocation":None,"terminal":None}
+         self.observer.own_result(metadata_owner,metadata_hold)
+         child_owner_hold=self.observer.reserve("native-child-complete-owner-before-fork",
+-            reads=INPUT_MAX+8,output=INPUT_MAX+8,allocation=FD_HISTORY_ALLOCATION+INPUT_MAX*560+131072,
++            reads=2*(INPUT_MAX+8),output=2*(INPUT_MAX+8),allocation=FD_HISTORY_ALLOCATION+INPUT_MAX*1120+131072,
+             slots=stock_inherited_upper(self.observer)+4)
+         child_dup_hold=self.observer.reserve("native-child-stdio-cells-before-fork",allocation=131072,slots=2)
+         metadata_owner["child_owner_hold"]=child_owner_hold
+@@ -232,7 +232,7 @@
+                         os.execve(tool.fd,argv,env)
+                     except BaseException as exc:
+                         try:
+-                            if not child_owner.export_attempted:child_owner.emit(child_w)
++                            child_owner.emit_failure(child_w,exc)
+                         except BaseException:pass
+                         raw = (type(exc).__name__+":"+str(exc)).encode("utf-8","backslashreplace")
+                         try: os.write(2,raw[:profile["stderr_max"]])
+@@ -260,11 +260,15 @@
+                 child_packet=receive_fork_owner(child_r,child_owner_hold,deadline,pid,self.observer.owner_pid)
+                 invocation["child_owner_graph"]=child_packet
+                 metadata_owner["accepted_child_owner_graph"]=child_packet
++                if child_packet.get('schema')=='friday.a190.fork-final-failure.v1':
++                    metadata_owner['actual_child_final_failure']=child_packet
++                    raise Refused('native_child_bootstrap_failure','terminal',child_packet)
+                 os.write(gate_w,b"A");fds.close_one(gate_w);gate_w=-1
+                 with selectors.PollSelector() as sel:
+                     sel.register(out_r,selectors.EVENT_READ,("stdout",raw_out,profile["stdout_max"]))
+                     sel.register(err_r,selectors.EVENT_READ,("stderr",raw_err,profile["stderr_max"]))
+                     sel.register(pidfd,selectors.EVENT_READ,("pidfd",None,None))
++                    sel.register(child_r,selectors.EVENT_READ,('owner-final-failure',None,None))
+                     terminal_seen = False
+                     while sel.get_map():
+                         left = (deadline-mono())/1e9
+@@ -273,6 +277,15 @@
+                         ready = sel.select(min(left,0.1))
+                         for key,_ in ready:
+                             name,target,maximum = key.data
++                            if name=='owner-final-failure':
++                                packet=receive_fork_owner(child_r,child_owner_hold,deadline,pid,self.observer.owner_pid,
++                                    final_failure=True,allow_eof=True)
++                                metadata_owner['actual_child_final_failure']=packet
++                                if packet is not None:
++                                    invocation['actual_child_final_failure']=packet
++                                    invocation['child_actual_failure_graph_complete']=packet.get('complete') is True
++                                sel.unregister(child_r)
++                                continue
+                             if name == "pidfd":
+                                 terminal_seen=True;finished=mono()
+                                 try: self.observer.before_reap(pid)
+@@ -345,7 +358,11 @@
+                             if row.get('journal') is child_owner:child_owner_hold.fd_rows.pop(slot)
+                     child_owner_hold.retire_slots();child_dup_hold.release()
+                     if child_packet is not None:
+-                        self.observer.retain_allocation(child_owner_hold.token,child_packet['_receiver_resident_upper']+128*8192)
++                        packets=[child_packet]
++                        final_packet=metadata_owner.get('actual_child_final_failure')
++                        if final_packet is not None and final_packet is not child_packet:packets.append(final_packet)
++                        self.observer.retain_allocation(child_owner_hold.token,
++                            sum(packet['_receiver_resident_upper'] for packet in packets)+128*8192)
+         # Full stream preimages remain regular held files for A128 consumers.
+         capture["pid"]=pid
+         if pid in self.unconfirmed:self.unconfirmed[pid]["capture"]=capture
+@@ -369,11 +386,13 @@
+             raise
+         finally:
+             if pid not in self.unconfirmed and capture["retention_confirmed"]:
+-                self.capture_owners.pop(suffix,None)
+-                capture["stdout"]=capture["stderr"]=None;capture["preimages"].clear()
+-                raw_out.clear();raw_err.clear();metadata_owner["capture"]=None
+-                if not fds.fds:self.observer.retire_local_owner(fds)
+-                hold.release()
++                if not fds.fds and hold.release() is True:
++                    self.capture_owners.pop(suffix,None)
++                    capture['stdout']=capture['stderr']=None;capture['preimages'].clear()
++                    raw_out.clear();raw_err.clear();metadata_owner['capture']=None
++                    self.observer.retire_local_owner(fds)
++                else:
++                    self.observer.note_cleanup({'cause':'native_capture_credit_release_unconfirmed','token':hold.token})
+         record = {"pid":pid,"exit_code":os.waitstatus_to_exitcode(status) if status is not None else None,
+             "raw_wait_status":status,"started_ns":started,"finished_ns":finished or mono(),
+             "stdout":out,"stderr":err,"raw_error":raw_exec,"cleanup":cleanup,
+@@ -398,8 +417,8 @@
+         # Parent UNKNOWN FDs remain on their original live grant. Raw/cached/
+         # metadata aliases have transferred to the actual recipient arena.
+         if not capture['fds'].fds:
+-            capture['hold'].release();receipt['ordinary_native_grant_retirement_confirmed']=True
+-            self.observer.retire_local_owner(capture['fds'])
++            receipt['ordinary_native_grant_retirement_confirmed']=capture['hold'].release() is True
++            if receipt['ordinary_native_grant_retirement_confirmed']:self.observer.retire_local_owner(capture['fds'])
+         self.capture_owners.pop(capture_id)
+         graph=self.unconfirmed.get(pid)
+         if graph is not None:
+@@ -423,7 +442,9 @@
+             graph["status"]="FD_CLOSE_UNCONFIRMED"
+             self.observer.note_cleanup({"cause":"FD_CLOSE_UNCONFIRMED","pid":pid,"full_graph_retained":True})
+             return
+-        graph["stdout"].clear();graph["stderr"].clear();graph["hold"].release()
++        if graph['hold'].release() is not True:
++            graph['status']='CREDIT_RELEASE_UNCONFIRMED';return
++        graph['stdout'].clear();graph['stderr'].clear()
+         self.observer.pidfds.pop(pid,None)
+         self.unconfirmed.pop(pid)
+         self.observer.retire_local_owner(graph["fds"])
+--- A181/source/observer.py
++++ A190/source/observer.py
+@@ -8,11 +8,140 @@
+ import resource
+ import stat
+ import time
++import types
+ from common import (Refused, READ_MAX, OUTPUT_MAX, RAM_MAX, SLOTS_MAX,
+                     WORKERS_MAX, WALL_MAX, REFUSAL_RESERVE, mono, integer,
+                     canonical, parse, error_fact)
+ from custody import open_absolute, identity9
+ from lifetime import OwnedFDs, FDState, FD_HISTORY_ALLOCATION
++
++_SOURCE_OBJECT_MODULES=frozenset(('actor_context','admission','capacity','class_semantics','common',
++    'consumer_bridge','custody','extraction','fact_bridge','independent_selector','launcher','lifetime',
++    'native','normalization','observer','operations','retention','roles','root_tool_adapter','snapshot_producer',
++    'actor_bootstrap','authority','bill','body_scope','canonical','capability','contract','declared_controls',
++    'document_vector','document_windows','effects','fixtures','formats','ingress','material_literals',
++    'performing_contracts','pins','producer_consumer','receipt_chain','recipe_planner','resource_meter',
++    'runtime_consumer','schema_validate','semantics','whole_join'))
++
++def full_value_arena(roots):
++    """Actual bounded stock value preimages, preserving repeated identities.
++
++    Unsupported stock/Source objects remain explicit incompleteness. Their
++    identity is diagnostic and can never cause a complete receiver receipt.
++    No arbitrary interpreter heap is presumed enrolled by this encoder.
++    """
++    nodes=[];seen={};unsupported=[]
++    def ref(value):
++        key=id(value)
++        if key in seen:return seen[key]
++        index=len(nodes)
++        if index>=262144:raise Refused('full_value_node_capacity','terminal')
++        seen[key]=index;nodes.append(None)
++        t=type(value)
++        if value is None:row=['none',None]
++        elif t is bool:row=['bool',value]
++        elif t is int:row=['int',str(value)]
++        elif t is str:row=['str',value]
++        elif t in (bytes,bytearray):
++            row=['bytes' if t is bytes else 'bytearray',
++                [bytes(value[i:i+16384]).hex() for i in range(0,len(value),16384)]]
++        elif t in (list,tuple):row=['list' if t is list else 'tuple',[ref(v) for v in value]]
++        elif t is dict:row=['dict',[[ref(k),ref(v)] for k,v in value.items()]]
++        elif isinstance(value,BaseException):
++            row=['error',{'module':t.__module__,'class':t.__name__,'args':ref(value.args),
++                'attributes':ref(value.__dict__),'cause':ref(value.__cause__),
++                'context':ref(value.__context__),'suppress_context':value.__suppress_context__,
++                'traceback':ref(value.__traceback__)}]
++        elif t is types.TracebackType:
++            row=['traceback',{'next':ref(value.tb_next),'frame':ref(value.tb_frame),
++                'line':value.tb_lineno,'lasti':value.tb_lasti}]
++        elif t is types.FrameType:
++            # Globals are actual mutable frame aliases, not assumed immutable
++            # merely because their code came from a reviewed source snapshot.
++            row=['frame',{'filename':value.f_code.co_filename,'name':value.f_code.co_name,
++                'line':value.f_lineno,'locals':ref(value.f_locals),'globals':ref(value.f_globals)}]
++        elif t.__module__ in _SOURCE_OBJECT_MODULES and hasattr(value,'__dict__'):
++            # Every actual mutable instance field is included, including meter,
++            # parent_state, callbacks and owner backedges. Unknown callback or
++            # stock state is still explicit incompleteness, not a skipped alias.
++            row=['Source-object',{'module':t.__module__,'class':t.__name__,
++                'state':ref(value.__dict__)}]
++        elif t.__name__=='StockChildJournal' and t.__module__=='__main__' and hasattr(value,'__dict__'):
++            row=['Source-object',{'module':'actor_bootstrap','class':'StockChildJournal',
++                'state':ref(value.__dict__)}]
++        elif t is types.MethodType:
++            row=['bound-method',{'self':ref(value.__self__),'function':ref(value.__func__)}]
++        elif t is memoryview:
++            row=['memoryview',{'object':ref(value.obj),'full_bytes':ref(value.tobytes()),
++                'format':value.format,'shape':ref(value.shape),'strides':ref(value.strides),
++                'readonly':value.readonly}]
++        else:
++            unsupported.append({'identity':str(key),'module':t.__module__,'class':t.__name__})
++            row=['unsupported',str(key)]
++        nodes[index]=row
++        return index
++    selected=[ref(value) for value in roots]
++    return {'schema':'friday.a190.stock-full-value-arena.v1','roots':selected,
++        'node_count':len(nodes),'chunks':[nodes[i:i+512] for i in range(0,len(nodes),512)],
++        'unsupported':unsupported,'complete':not unsupported,'truncated':False}
++
++def validate_full_value_arena(arena):
++    """Independent nested acceptance of every body/index/count, not a label."""
++    from common import exact,integer
++    exact(arena,('schema','roots','node_count','chunks','unsupported','complete','truncated'),'full_value_arena')
++    if arena['schema']!='friday.a190.stock-full-value-arena.v1' or arena['truncated'] is not False or arena['complete'] is not True or arena['unsupported']!=[]:
++        raise Refused('full_value_arena_incomplete','terminal')
++    count=integer(arena['node_count'],262144)
++    nodes=[row for chunk in arena['chunks'] for row in chunk]
++    if len(nodes)!=count or any(type(chunk) is not list or len(chunk)>512 for chunk in arena['chunks']):raise Refused('full_value_arena_count','terminal')
++    def index(i):
++        if type(i) is not int or not 0<=i<count:raise Refused('full_value_arena_reference','terminal')
++    for i in arena['roots']:index(i)
++    for row in nodes:
++        if type(row) is not list or len(row)!=2:raise Refused('full_value_arena_row','terminal')
++        kind,body=row
++        if kind=='none':
++            if body is not None:raise Refused('full_value_arena_scalar','terminal')
++        elif kind=='bool':
++            if type(body) is not bool:raise Refused('full_value_arena_scalar','terminal')
++        elif kind=='int':
++            if type(body) is not str or str(int(body))!=body:raise Refused('full_value_arena_integer','terminal')
++        elif kind=='str':
++            if type(body) is not str:raise Refused('full_value_arena_scalar','terminal')
++        elif kind in ('bytes','bytearray'):
++            if type(body) is not list:raise Refused('full_value_arena_bytes','terminal')
++            for part in body:
++                if type(part) is not str or len(part)>32768 or len(part)%2 or any(c not in '0123456789abcdef' for c in part):raise Refused('full_value_arena_bytes','terminal')
++        elif kind in ('list','tuple'):
++            if type(body) is not list:raise Refused('full_value_arena_sequence','terminal')
++            for i in body:index(i)
++        elif kind=='dict':
++            if type(body) is not list:raise Refused('full_value_arena_dict','terminal')
++            for pair in body:
++                if type(pair) is not list or len(pair)!=2:raise Refused('full_value_arena_dict','terminal')
++                index(pair[0]);index(pair[1])
++        elif kind=='error':
++            exact(body,('module','class','args','attributes','cause','context','suppress_context','traceback'),'full_value_error')
++            for name in ('args','attributes','cause','context','traceback'):index(body[name])
++            if type(body['module']) is not str or type(body['class']) is not str or type(body['suppress_context']) is not bool:raise Refused('full_value_error_type','terminal')
++        elif kind=='traceback':
++            exact(body,('next','frame','line','lasti'),'full_value_traceback');index(body['next']);index(body['frame'])
++            if type(body['line']) is not int or type(body['lasti']) is not int:raise Refused('full_value_traceback','terminal')
++        elif kind=='frame':
++            exact(body,('filename','name','line','locals','globals'),'full_value_frame');index(body['locals']);index(body['globals'])
++            if type(body['filename']) is not str or type(body['name']) is not str or type(body['line']) is not int:raise Refused('full_value_frame','terminal')
++        elif kind=='Source-object':
++            exact(body,('module','class','state'),'full_value_Source_object')
++            if body['module'] not in _SOURCE_OBJECT_MODULES or type(body['class']) is not str:raise Refused('full_value_Source_type','terminal')
++            index(body['state'])
++        elif kind=='bound-method':
++            exact(body,('self','function'),'full_value_bound_method');index(body['self']);index(body['function'])
++        elif kind=='memoryview':
++            exact(body,('object','full_bytes','format','shape','strides','readonly'),'full_value_memoryview')
++            for name in ('object','full_bytes','shape','strides'):index(body[name])
++            if type(body['readonly']) is not bool or type(body['format']) is not str:raise Refused('full_value_memoryview','terminal')
++        else:raise Refused('full_value_arena_unsupported','terminal')
++    return nodes
+ 
+ 
+ def raw_file(path, maximum=65536, owner=None):
+@@ -294,6 +423,10 @@
+     def release(self, token):
+         """Retirement remains finite under exhaustion and preserves first error."""
+         self._owned()
++        for book in self.fd_state.journals:
++            credit=book.grants.get(token)
++            if credit is not None and getattr(credit,'fd_rows',{}):return False
++        if token==self.fd_state.credit_token and self.fd_state.journals and not getattr(self,'fd_history_completion_received',False):return False
+         row = self.pending.pop(token, None)
+         if row is None:
+             self.note_cleanup("unknown-reservation"); return False
+@@ -415,12 +548,15 @@
+ 
+     def result_owner_graph(self):
+         rows=[]
++        values=[]
+         for key,(value,holds) in self.owned_results.items():
++            values.append(value)
+             rows.append({"identity":str(key),"class":type(value).__name__,
+                 "size":len(value) if type(value) in (bytes,bytearray,str,list,dict,tuple) else None,
+                 "reservation_tokens":[h.token for h in holds],"cached_full_immutable_sha256":self.owned_digests.get(key),
+                 "immutable_bytes":type(value) is bytes})
+-        return {"count":len(rows),"chunks":[rows[i:i+512] for i in range(0,len(rows),512)],"truncated":False}
++        return {"count":len(rows),"chunks":[rows[i:i+512] for i in range(0,len(rows),512)],
++            'actual_values':full_value_arena(values),"truncated":False}
+ 
+     def complete_owner_graph(self):
+         locals=self.local_owner_graph();held=self.held_lease_graph()
+@@ -428,8 +564,9 @@
+             "owner_pid":os.getpid(),"local_count":len(locals),"local_chunks":[locals[i:i+512] for i in range(0,len(locals),512)],
+             "held_count":len(held),"held_chunks":[held[i:i+512] for i in range(0,len(held),512)],
+             "results":self.result_owner_graph(),"FD_domain":self.fd_state.graph(),
+-            "error_arenas":[{"identity":str(id(exc)),"error":error_fact(exc,"terminal"),
+-                "traceback_identity":str(id(exc.__traceback__))} for exc in getattr(self,"error_arenas",())],"truncated":False}
++            'local_values':full_value_arena([owner for _,owner in self.local_owners.values()]),
++            'held_values':full_value_arena(list(self.held_leases.values())),
++            "error_arenas":full_value_arena(getattr(self,'error_arenas',())),"truncated":False}
+ 
+     def retain_error_arena(self,exc):
+         # Exception, traceback frames, locals and chained causes remain actual
+@@ -467,11 +604,13 @@
+ 
+     def retire_result_id(self,key):
+         # Caller has first dropped every alias, passing only the object identity.
+-        self.owned_digests.pop(key, None)
+-        row=self.owned_results.pop(key,None)
+-        if row is None:return
+-        holds=row[1];row=None
+-        for hold in holds:hold.release()
++        row=self.owned_results.get(key)
++        if row is None:return True
++        if any(getattr(h,'fd_rows',{}) for h in row[1]):return False
++        for hold in row[1]:
++            if hold.release() is not True:return False
++        self.owned_digests.pop(key,None);self.owned_results.pop(key,None)
++        return True
+ 
+     def cached_digest(self, raw):
+         row = self.owned_results.get(id(raw))
+@@ -493,7 +632,9 @@
+         # Caller first discards every escaping parsed/body alias. This arena
+         # is NEVER retired while a child or unconfirmed owner can use it.
+         keys=list(self.owned_results)
+-        for key in keys:self.retire_result_id(key)
++        for key in keys:
++            if self.retire_result_id(key) is not True:return False
++        return True
+ 
+     def before_reap(self, pid):
+         """Read zombie/held-finish IO before direct wait4 removes /proc evidence."""
+@@ -596,8 +737,8 @@
+         self.call({"type":"grow","token":token,"allocation":allocation})
+     def release(self, token):
+         try:
+-            (self.terminal_call or self.call)({"type":"release","token":token})
+-            return True
++            response=(self.terminal_call or self.call)({"type":"release","token":token})
++            return response.get('released') is True
+         except BaseException as exc:
+             self.owner_publication_error=error_fact(exc,'terminal')
+             return False
+@@ -618,6 +759,7 @@
+     def __init__(self,owner):
+         self.owner=owner;self.owner_pid=os.getpid();self.generation=0
+         self.roots={};self.completed=False;self.attempted=False
++        self.receipt=None;self.receipt_owner=None
+     def capture(self):
+         if os.getpid()!=self.owner_pid:raise Refused('final_arena_owner','terminal')
+         self.generation+=1
+@@ -631,9 +773,86 @@
+         self.attempted=True;self.capture()
+         # Full raw captures, original exceptions/tracebacks and metadata remain
+         # strong here. No fresh ordinary reservation or decoder is required.
+-        result=consumer(self.roots)
+-        if result is not None:raise Refused('final_arena_escaping_callback_result','terminal')
++        try:result=consumer(self.roots)
++        except BaseException as exc:
++            observer=getattr(self.owner,'observer',None)
++            if observer is not None:observer.retain_error_arena(exc)
++            else:
++                if not hasattr(self.owner,'prefix_error_arenas'):self.owner.prefix_error_arenas=[]
++                self.owner.prefix_error_arenas.append(exc)
++            raise
++        # A descriptive token or arbitrary callback returning None cannot
++        # complete an actual value/body/alias receiver. The existing native
++        # owner must retain a full receipt and the exact actual roots itself.
++        # Native enrollment/cross-language durable qualification is still a
++        # separate obligation; this Source callback does not mint that fact.
++        if not isinstance(result,NativeCompletionReceipt):raise Refused('actual_native_completion_receipt_required','terminal')
++        result.require(self,self.roots)
++        self.receipt=result;self.receipt_owner=result.receiver
+         self.roots.clear();self.completed=True
+     def require_complete(self,owner):
+-        if owner is not self.owner or os.getpid()!=self.owner_pid or not self.completed or self.roots:
++        if owner is not self.owner or os.getpid()!=self.owner_pid or not self.completed or self.roots or self.receipt is None:
+             raise Refused('complete_native_caller_arena_required','terminal')
++        self.receipt.require_completed(self)
++    def detach_confirmed(self):
++        if not self.completed or self.roots:raise Refused('final_arena_unconfirmed','terminal')
++        receipt=self.receipt
++        if receipt is not None:
++            receipt.roots.clear();receipt.arena=None;receipt.receiver=None;receipt.qualification=None
++            receipt.durable_pin=None
++        self.owner=None;self.receipt=None;self.receipt_owner=None
++
++class NativeCompletionReceipt:
++    """Exact Source-side receipt correspondence, never external authority.
++
++    Qualification of receiver/retained receipt against the independently
++    enrolled native tool is REQUIRED before this protocol can be admitted.
++    A Python object alone cannot establish native durability or enrollment.
++    """
++    def __init__(self,receiver,arena,roots,durable_pin,qualification):
++        self.receiver=receiver;self.arena=arena;self.owner_pid=os.getpid()
++        self.generation=arena.generation;self.roots=roots.copy()
++        self.durable_pin=durable_pin;self.qualification=qualification
++        self.confirmed=False
++    def require(self,arena,roots):
++        from common import exact,sha,canonical,parse,INPUT_MAX
++        from custody import identity9,open_absolute
++        owner=arena.owner
++        if self.arena is not arena or self.owner_pid!=os.getpid() or self.generation!=arena.generation:
++            raise Refused('native_completion_identity','terminal')
++        if owner.qualification is None or self.qualification is not owner.qualification or owner.root_fact is None:
++            raise Refused('enrolled_native_full_completion_required','terminal')
++        if getattr(self.receiver,'owner_pid',None)!=self.owner_pid or getattr(self.receiver,'root_fact',None)!=owner.root_fact:
++            raise Refused('native_completion_existing_root','terminal')
++        accepted=getattr(self.receiver,'accepted_source_roots',None)
++        if type(accepted) is not dict or set(accepted)!=set(roots) or any(accepted[name] is not value for name,value in roots.items()):
++            raise Refused('native_completion_actual_roots','terminal')
++        if set(self.roots)!=set(roots) or any(self.roots[name] is not value for name,value in roots.items()):
++            raise Refused('native_completion_root_drift','terminal')
++        body=full_value_arena([roots])
++        validate_full_value_arena(body)
++        raw=canonical({'schema':'friday.a190.native-full-completion.v1','owner_pid':self.owner_pid,
++            'generation':self.generation,'body':body},maximum=INPUT_MAX)
++        pin=exact(self.durable_pin,('path','bytes','sha256','identity9_decimal_strings'),'native_completion_pin')
++        owner.check_owned_path(pin['path'])
++        if pin['bytes']!=len(raw) or pin['sha256']!=sha(raw,admitted=owner.observer.terminal_hold):
++            raise Refused('native_completion_complete_body_pin','terminal')
++        fd=open_absolute(pin['path'],journal=owner.fdjournal)
++        try:
++            if identity9(os.fstat(fd))!=pin['identity9_decimal_strings']:raise Refused('native_completion_pin_drift','terminal')
++            at=0
++            while at<len(raw):
++                part=os.pread(fd,min(65536,len(raw)-at),at)
++                owner.observer.terminal_hold.commit(reads=len(part))
++                if not part or part!=raw[at:at+len(part)]:raise Refused('native_completion_complete_body','terminal')
++                at+=len(part)
++            if identity9(os.fstat(fd))!=pin['identity9_decimal_strings'] or identity9(os.lstat(pin['path']))!=pin['identity9_decimal_strings']:
++                raise Refused('native_completion_pin_drift','terminal')
++        finally:owner.fdjournal.close_one(fd)
++        if fd in owner.fdjournal.fds:raise Refused('native_completion_FD_unconfirmed','terminal')
++        # Complete verified durable value preimages, not the graph's labels,
++        # allow the caller's exact same-owner roots to be dropped once.
++        accepted.clear();self.roots.clear();self.confirmed=True
++    def require_completed(self,arena):
++        if not self.confirmed or self.arena is not arena or self.owner_pid!=os.getpid() or self.generation!=arena.generation:
++            raise Refused('native_completion_not_confirmed','terminal')
+--- A181/source/root_tool_adapter.py
++++ A190/source/root_tool_adapter.py
+@@ -17,7 +17,7 @@
+                     exact, parse, canonical, domain, sha, mono, error_fact,
+                     bounded_refusal, bounded_tree_paths, PreObserverHash, Frame)
+ from custody import Held, OutputStore, open_absolute, identity9
+-from observer import RootObserver, proc_start, FinalArena
++from observer import RootObserver, proc_start, FinalArena, validate_full_value_arena
+ from admission import protected_enrollment, actual_root_tool, qualify, full_snapshot, ALL15
+ from native import RootNative, child_guard,actor_sandbox
+ from normalization import RootNormalizer
+@@ -62,6 +62,7 @@
+         self.delivery_retire_attempted=False;self.delivery_pins=None
+         self.stream_cache={}
+         self.owner_export_hold=None;self.actor_fork_owner=None;self.actor_fork_graph=None;self.actor_fork_hold=None
++        self.actor_ownership_complete=False;self.bootstrap_prefix_graph=None
+ 
+     def prepare(self):
+         self.pre_hash=PreObserverHash()
+@@ -420,8 +421,73 @@
+             self.add_page(physical,pin["kind"],pin["path"])
+         return chosen
+ 
++    def _validate_actor_completion(self,graph):
++        def chunks(value,count,cause):
++            if type(count) is not int or count<0 or type(value) is not list or len(value)>512:
++                raise Refused(cause,'terminal')
++            if any(type(part) is not list or len(part)>512 for part in value):raise Refused(cause,'terminal')
++            rows=[r for part in value for r in part]
++            if len(rows)!=count:raise Refused(cause,'terminal')
++            return rows
++        local=chunks(graph['local_chunks'],graph['local_count'],'actor_local_count')
++        held=chunks(graph['held_chunks'],graph['held_count'],'actor_held_count')
++        for key,count in (('local_values',len(local)),('held_values',len(held))):
++            validate_full_value_arena(graph[key])
++            if len(graph[key]['roots'])!=count:raise Refused('actor_value_owner_correspondence','terminal')
++        results=exact(graph['results'],('count','chunks','actual_values','truncated'),'actor_result_body')
++        if results['truncated'] is not False:raise Refused('actor_result_body','terminal')
++        rows=chunks(results['chunks'],results['count'],'actor_result_count')
++        values=validate_full_value_arena(results['actual_values'])
++        if len(results['actual_values']['roots'])!=len(rows):raise Refused('actor_result_body_count','terminal')
++        for row,root in zip(rows,results['actual_values']['roots']):
++            exact(row,('identity','class','size','reservation_tokens','cached_full_immutable_sha256','immutable_bytes'),'actor_result_row')
++            if any(token not in self.observer.pending for token in row['reservation_tokens']):raise Refused('actor_result_credit','terminal')
++            kind,body=values[root]
++            if row['immutable_bytes'] is not (kind=='bytes'):raise Refused('actor_result_immutability','terminal')
++            if kind in ('bytes','bytearray','str','list','tuple','dict'):
++                size=sum(len(part)//2 for part in body) if kind in ('bytes','bytearray') else len(body)
++                if row['size']!=size:raise Refused('actor_result_body_size','terminal')
++        validate_full_value_arena(graph['error_arenas'])
++        domain=exact(graph['FD_domain'],('arena_token','generation','history_count','history_max','journal_count','journal_chunks','truncated'),'actor_FD_domain')
++        if domain['truncated'] is not False or domain['arena_token']!=self.owner_export_hold.token or domain['history_max']!=65536:
++            raise Refused('actor_FD_domain_identity','terminal')
++        books=chunks(domain['journal_chunks'],domain['journal_count'],'actor_FD_journal_count')
++        actual=[];identities=set()
++        for book in books:
++            if book.get('truncated') is not False:raise Refused('actor_FD_journal_truncated','terminal')
++            history=chunks(book['journal_chunks'],book['journal_count'],'actor_FD_history_count')
++            for row in history:
++                key=(row['credit'],row['slot'],row['generation'])
++                if key in identities:raise Refused('actor_FD_history_duplicate','terminal')
++                identities.add(key);actual.append(row)
++                if row['credit'] not in self.observer.pending:raise Refused('actor_FD_history_credit','terminal')
++                if row['status']=='PREOWNED':raise Refused('actor_FD_cancellation_unconfirmed','terminal')
++            active=sorted(row['fd'] for row in history if row['status'] in ('ACQUIRED','HELD','UNKNOWN','ROOT_PREOWNED_BIND_PENDING'))
++            if active!=book['pending_fds']:raise Refused('actor_FD_status_correspondence','terminal')
++        if len(actual)!=domain['history_count']:raise Refused('actor_FD_history_complete_count','terminal')
++        # Descriptive local/held journals cannot introduce a different actual
++        # credit/history/status than the complete FD-domain primary rows.
++        primary={(r['credit'],r['slot'],r['generation']):r for r in actual}
++        for record in local+held:
++            journal=record.get('journal')
++            if journal is not None:
++                for part in journal['journal_chunks']:
++                    for row in part:
++                        if primary.get((row['credit'],row['slot'],row['generation']))!=row:
++                            raise Refused('actor_complete_journal_alias','terminal')
++        self.actor_ownership_complete=True
++
+     def _control(self,request):
+         kind=request["type"]
++        if kind=='bootstrap-owner-prefix':
++            if request.get('owner_pid')!=self.actor_pid or request.get('prepaid_token')!=self.owner_export_hold.token or not self.frame.last_prepaid:
++                raise Refused('bootstrap_prefix_owner','terminal')
++            if request.get('schema')!='friday.a190.stock-bootstrap-prefix.v1' or request.get('complete') is not False or request.get('truncated') is not False:
++                raise Refused('bootstrap_prefix_schema','terminal')
++            if self.bootstrap_prefix_graph is not None:raise Refused('bootstrap_prefix_duplicate','terminal')
++            self.bootstrap_prefix_graph=request
++            self.actor_ownership_complete=False
++            return {'retained':True,'complete':False,'ownership_retired':False}
+         if kind=="actor-owner-state":
+             exact(request,("type","sequence","owner_pid","graph","prepaid_token"),"actor_owner_state")
+             if request["owner_pid"]!=self.actor_pid or type(request["sequence"]) is not int or request["sequence"]<=self.actor_local_sequence:
+@@ -429,10 +495,13 @@
+             if self.owner_export_hold is None or request['prepaid_token']!=self.owner_export_hold.token or not self.frame.last_prepaid:
+                 raise Refused('actor_owner_prepaid_identity','terminal')
+             graph=request['graph']
+-            exact(graph,('schema','owner_pid','local_count','local_chunks','held_count','held_chunks','results','FD_domain','error_arenas','truncated'),'complete_actor_owner_graph')
++            exact(graph,('schema','owner_pid','local_count','local_chunks','held_count','held_chunks','results','FD_domain','error_arenas','local_values','held_values','truncated'),'complete_actor_owner_graph')
+             if graph['schema']!='friday.a181.complete-actor-owner-graph.v1' or graph['owner_pid']!=self.actor_pid or graph['truncated'] is not False:
+                 raise Refused('complete_actor_owner_graph_identity','terminal')
+-            self.actor_local_sequence=request["sequence"];self.actor_local_graph=request["graph"]
++            # Retain the exact received body even when nested completion
++            # refuses. Never replace the full earlier graph with an ACK label.
++            self.actor_local_sequence=request['sequence'];self.actor_local_graph=graph
++            self._validate_actor_completion(graph)
+             return {"retained":True,"sequence":self.actor_local_sequence,"complete":True}
+         if kind=="material-acquire":
+             exact(request,("type","name"),"material_acquire")
+@@ -475,7 +544,7 @@
+         if kind=="grow":
+             exact(request,("type","token","allocation"));self.observer.grow(request["token"],request["allocation"]);return {}
+         if kind=="release":
+-            exact(request,("type","token"));self.observer.release(request["token"]);return {}
++            exact(request,("type","token"));return {'released':self.observer.release(request['token']) is True}
+         if kind=="partial":
+             exact(request,("type","path","size"));self.check_owned_path(request["path"]);self.observer.note_partial(request["path"],request["size"]);return {}
+         if kind=="cleanup":
+@@ -661,7 +730,7 @@
+             err_r,err_w=self.fdjournal.pair(os.O_CLOEXEC|os.O_NONBLOCK,credit=self.actor_graph_hold)
+             gate_r,gate_w=self.fdjournal.pair(os.O_CLOEXEC,credit=self.actor_graph_hold)
+             self.actor_fork_hold=self.observer.reserve('actor-child-table-and-accepted-stock-bootstrap-before-fork',
+-                reads=INPUT_MAX+8,output=INPUT_MAX+8,allocation=FD_HISTORY_ALLOCATION+INPUT_MAX*560+131072,
++                reads=2*(INPUT_MAX+8),output=2*(INPUT_MAX+8),allocation=FD_HISTORY_ALLOCATION+INPUT_MAX*1120+131072,
+                 slots=stock_inherited_upper(self.observer)+4)
+             child_r,child_w=self.fdjournal.pair(os.O_CLOEXEC,credit=self.actor_fork_hold)
+             child_dup_hold=self.observer.reserve('actor-child-stdio-before-fork',allocation=131072,slots=2)
+@@ -669,7 +738,7 @@
+             self.capture_fds={out_r:self.capture_out,err_r:self.capture_err}
+             self.actor_started_ns=mono()
+             self.actor_argv=[self.admission["image"]["launcher_virtual_path"],"-I","-S","-B","/proc/self/fd/"+str(bootstrap.fd),
+-                             str(bundle_fd),str(req_w),str(rsp_r)]
++                             str(bundle_fd),str(req_w),str(rsp_r),str(self.owner_export_hold.token)]
+             pid=os.fork()
+             if pid==0:
+                 try:
+@@ -696,7 +765,7 @@
+                     os.execve(executable.fd,self.actor_argv,self.actor_env)
+                 except BaseException as exc:
+                     try:
+-                        if not self.actor_fork_owner.export_attempted:self.actor_fork_owner.emit(child_w)
++                        self.actor_fork_owner.emit_failure(child_w,exc)
+                     except BaseException:pass
+                     try:os.write(2,(type(exc).__name__+":"+str(exc)).encode("utf-8","backslashreplace"))
+                     except BaseException:pass
+@@ -725,6 +794,9 @@
+             self.frame=Frame(req_r,rsp_w,self.observer.deadline,self.observer,journal=self.fdjournal,owner_hold=self.owner_export_hold)
+             os.write(gate_w,b"G")
+             self.actor_fork_graph=receive_fork_owner(child_r,self.actor_fork_hold,self.observer.reserve_deadline,pid,self.observer.owner_pid)
++            if self.actor_fork_graph.get('schema')=='friday.a190.fork-final-failure.v1':
++                self.bootstrap_prefix_graph=self.actor_fork_graph
++                raise Refused('actor_child_bootstrap_failure','terminal',self.actor_fork_graph)
+             self.actual_launch_fact['bootstrap_child_ownership']=self.actor_fork_graph
+             os.write(gate_w,b'A');self.fdjournal.close_one(gate_w)
+             self.frame.send({"launch_fact":self.actual_launch_fact})
+@@ -735,6 +807,7 @@
+                     sel.register(out_r,selectors.EVENT_READ,"stdout")
+                     sel.register(err_r,selectors.EVENT_READ,"stderr")
+                     sel.register(self.actor_pidfd,selectors.EVENT_READ,"terminal")
++                    sel.register(child_r,selectors.EVENT_READ,'fork-final-failure')
+                     terminal=False
+                     while not terminal:
+                         if first_error is None:
+@@ -744,6 +817,16 @@
+                         left=((self.observer.deadline if first_error is not None else self.observer.reserve_deadline)-mono())/1e9
+                         if left<=0:raise Refused("launcher_deadline","execution")
+                         for key,_ in sel.select(min(left,0.1)):
++                            if key.data=='fork-final-failure':
++                                packet=receive_fork_owner(child_r,self.actor_fork_hold,self.observer.deadline,pid,self.observer.owner_pid,
++                                    final_failure=True,allow_eof=True)
++                                if packet is not None:
++                                    self.bootstrap_prefix_graph=packet;self.actor_ownership_complete=False
++                                    if first_error is None:
++                                        first_error=Refused('actor_child_exec_failure','terminal',packet)
++                                        self.observer.retain_error_arena(first_error)
++                                sel.unregister(child_r)
++                                continue
+                             if key.data in ("stdout","stderr"):
+                                 raw=os.read(key.fd,65536)
+                                 if not raw:sel.unregister(key.fd);continue
+@@ -757,7 +840,7 @@
+                                 self.verify_actual_actor_image()
+                                 request=self.frame.receive(force_prepaid=first_error is not None)
+                                 try:
+-                                    if first_error is not None and request['type'] not in ('actor-owner-state','release','cleanup','failure','commit'):
++                                    if first_error is not None and request['type'] not in ('actor-owner-state','bootstrap-owner-prefix','release','cleanup','failure','commit'):
+                                         raise first_error
+                                     reply={"ok":True,"value":self._control(request)}
+                                 except BaseException as exc:
+@@ -839,8 +922,9 @@
+         self.fdjournal.close_one(self.actor_pidfd);self.observer.pidfds.pop(pid,None)
+         # All performer reservations retire without re-entering the exhausted
+         # budget. Parent-owned native and terminal reservations remain owned.
+-        for token,row in list(self.observer.pending.items()):
+-            if row.get("owner_pid")==pid:self.observer.release(token)
++        if self.actor_ownership_complete:
++            for token,row in list(self.observer.pending.items()):
++                if row.get('owner_pid')==pid:self.observer.release(token)
+         if self.actor_fork_owner is not None and self.actor_fork_hold is not None:
+             for slot,row in list(getattr(self.actor_fork_hold,'fd_rows',{}).items()):
+                 if row.get('journal') is self.actor_fork_owner:self.actor_fork_hold.fd_rows.pop(slot)
+@@ -851,7 +935,9 @@
+             endpoints=(self.frame.incoming,self.frame.outgoing)
+             faults.extend(self.frame.close())
+         self.actor_local_graph={"status":"OWNER_TERMINATED_WAIT4_CONFIRMED","pid":pid,
+-            "raw_wait_status":self.actor_status,"last_actor_journal":self.actor_local_graph}
++            "raw_wait_status":self.actor_status,"last_actor_journal":self.actor_local_graph,
++            'actual_body_acceptance_complete':self.actor_ownership_complete,
++            'bootstrap_prefix_graph':self.bootstrap_prefix_graph}
+         self.actor_pidfd=-1
+         # Pipe/bundle journals may still contain a failed-close descriptor.
+         # Their Root lifetime credit retires only at the complete close boundary.
+@@ -1083,8 +1169,8 @@
+                 else:
+                     self.observer.cleanup_faults.extend(lease.retire(confirmed=True))
+             if self.observer is not None and not self.fdjournal.fds-retained:
+-                if self.bundle_hold is not None:self.bundle_hold.release();self.bundle_hold=None
+-                if self.actor_graph_hold is not None:self.actor_graph_hold.release();self.actor_graph_hold=None
++                if self.bundle_hold is not None and self.bundle_hold.release() is True:self.bundle_hold=None
++                if self.actor_graph_hold is not None and self.actor_graph_hold.release() is True:self.actor_graph_hold=None
+         held=self.observer.held_leases if self.observer is not None else {}
+         store_open=False
+         if self.store is not None:
+@@ -1140,52 +1226,78 @@
+             return {"status":"FD_CLOSE_UNCONFIRMED","actual_held_handoff":self.existing_owner_handoff(),"ownership_retired":False,"GO":False}
+         self.tail_fd=-1
+         self.observer.cleanup_faults.extend(self.fdjournal.faults)
+-        # Drop ALL Root metadata/body/module aliases before retiring their
+-        # owner arena; native caller already persisted terminal + actual tail.
+         faults=list(self.observer.cleanup_faults)
+-        self.case=self.admission=self.enrollment=self.snapshot=self.qualification=None
+-        self.authentication={};self.generated_plans={};self.legacy_closures={}
+-        self.retained_receipts=[];self.selector_receipts=[];self.operation_windows={}
+-        self.page_files=[];self.page_sequence=[];self.packed={};self.stream_cache={};self.normalizer=None
+-        self.capture_out.clear();self.capture_err.clear();self.frame=self.consumer=None
+-        if self.loader is not None:self.loader.retire_lifetime()
+-        self.loader=self.native=self.store=None;self.finished=None;self.actor_exec_leases=[]
+-        self.final_binding=self.final_public_pin=self.full_output_pin=None
+-        self.capacity=None;self.phase_ordinary=None;self.actor_local_graph=None
+-        self.actual_launch_fact=None;self.actor_exe_fact=None;self.actor_argv=[];self.errors=[]
+-        self.delivery_pins=None;self.capture_fds={};self.retained_journals=[]
+-        self.observer.role_schema_cache=None
+-        self.observer.local_owners.clear()
+-        self.observer.error_arenas=[];self.observer.accepted_captures={}
+-        self.observer.retire_results()
+-        for hold in self.validation_holds:
+-            if not hold.closed:hold.release()
+-        self.validation_holds=[]
+-        for hold in self.fdjournal.grants.values():
+-            if not hold.closed:hold.release()
+-        self.forward_hold.release();self.observer.terminal_hold.release()
+-        self.pre_hash.release();self.pre_hash=None
+-        # Remove BOTH exact registrations only after the complete graph has
+-        # retired. A foreign collision is a refusal, never an overwritten key.
++        root_fact=self.root_fact
++        if not self._settle_complete_source_graph(completion):
++            return {'status':'CREDIT_HISTORY_OR_ALIAS_COMPLETION_UNCONFIRMED',
++                'actual_held_handoff':self.existing_owner_handoff(),'ownership_retired':False,'GO':False}
++        return {'schema':'friday.a190.actual-existing-root-delivery-completion.v1',
++            'status':'ACTUAL_DELIVERY_FD_CLOSE_AND_COMPLETE_SOURCE_RETIREMENT_CONFIRMED',
++            'ownership_retired':True,'owner_key':owner_key,'root_fact':root_fact,
++            'terminal_pin':terminal_pin,'cleanup_tail_pin':tail_pin,
++            'actual_final_close_faults':faults,'caller_must_durably_retain_this_actual_completion':True,'GO':False}
++
++    def _settle_complete_source_graph(self,completion):
++        """One same-Source end transaction, after actual full receiver receipt.
++
++        Retain all roots on any unresolved row or failed credit release. No
++        registration/history is erased just because OS child termination was
++        confirmed; settlement covers all actually attached Source aliases.
++        """
++        from observer import Reservation
++        from common import PreObserverHash
++        from lifetime import _OCCUPIED
++        completion.require_complete(self)
++        if self.actor_pid>0 and not self.actor_ownership_complete:return False
++        seen=set();todo=[self];grants={};books=[];states=[]
++        modules={'root_tool_adapter','observer','common','lifetime','custody','consumer_bridge',
++            'native','normalization','extraction','independent_selector','actor_context'}
++        while todo:
++            value=todo.pop();key=id(value)
++            if key in seen:continue
++            seen.add(key)
++            if len(seen)>262144:return False
++            if isinstance(value,(Reservation,PreObserverHash)):
++                prior=grants.get(value.token)
++                if prior is not None and prior is not value and not prior.closed and not value.closed:return False
++                if prior is None or prior.closed:grants[value.token]=value
++            if isinstance(value,OwnedFDs) or isinstance(value,ForkOwner):books.append(value)
++            if type(value).__name__=='FDState' and type(value).__module__=='lifetime':states.append(value)
++            if type(value) is dict:todo.extend(value.keys());todo.extend(value.values())
++            elif type(value) in (list,tuple,set):todo.extend(value)
++            elif type(value).__module__ in modules:todo.extend(value.__dict__.values())
++        for book in books:
++            if any(row.get('journal') is book and row['status'] in _OCCUPIED for row in book.rows):return False
++        if any(getattr(hold,'fd_rows',{}) for hold in grants.values()):return False
++        observer=self.observer
++        if observer is not None and any(token not in grants for token in observer.pending):return False
+         for registered in self.owner_keys:
+-            if RETAINED_ROOT_OWNERS.get(registered) is not self:raise Refused("Root_owner_retirement_collision","terminal")
+-        for registered in self.owner_keys:RETAINED_ROOT_OWNERS.pop(registered)
+-        self.owner_keys.clear()
+-        self.enrollment_pin=None
+-        self.pre_hash=None
+-        self.fdjournal.retire_history()
+-        observer=self.observer
+-        observer.processes.clear();observer.pidfds.clear();observer.final_io.clear();observer.waits.clear()
+-        observer.events.clear();observer.errors.clear();observer.partial.clear();observer.cleanup_faults.clear()
+-        observer.held_leases.clear();observer.owned_results.clear();observer.owned_digests.clear()
+-        observer.before=None;observer.root_io_before=None;observer.admission=None
+-        observer.observation_credit=None
+-        self.observer=None
+-        return {"schema":"friday.sol053.actual-existing-root-delivery-completion.v1",
+-            "status":"ACTUAL_DELIVERY_FD_CLOSE_CONFIRMED","ownership_retired":True,
+-            "owner_key":owner_key,"root_fact":self.root_fact,
+-            "terminal_pin":terminal_pin,"cleanup_tail_pin":tail_pin,"actual_final_close_faults":faults,
+-            "caller_must_durably_retain_this_actual_completion":True,"GO":False}
++            if RETAINED_ROOT_OWNERS.get(registered) is not self:return False
++        # No clearing occurs before every exact actual credit is confirmed.
++        # A failed release remains visible with the surviving full owner tree.
++        if observer is not None:observer.fd_history_completion_received=True
++        for hold in grants.values():
++            if hold.release() is not True:return False
++        if observer is not None and (observer.pending or observer.live_alloc or observer.live_slots):return False
++        for state in states:
++            if not state.retire_confirmed(completion):return False
++        for book in books:
++            if book.rows and not book.retire_history(completion):return False
++        # Explicitly detach every known cross-root pointer and then clear the
++        # complete adapter namespace, including fork/export holds and aliases.
++        for hold in grants.values():
++            if isinstance(hold,Reservation):hold.meter=None
++            elif isinstance(hold,PreObserverHash):
++                hold.observer=None;hold.journals.clear();hold.fd_state=None
++        if observer is not None:
++            observer.__dict__.clear()
++        keys=list(self.owner_keys)
++        completion.detach_confirmed()
++        self.__dict__.clear()
++        for registered in keys:
++            if RETAINED_ROOT_OWNERS.get(registered) is self:RETAINED_ROOT_OWNERS.pop(registered)
++        self.delivery_retire_attempted=True
++        return True
+ 
+     def retire_prefix(self,owner_key,completion=None):
+         """Finite same-Root retirement of a confirmed preparation refusal.
+@@ -1213,28 +1325,11 @@
+             if RETAINED_ROOT_OWNERS.get(registered) is not self:raise Refused("Root_owner_retirement_collision","terminal")
+         faults=list(self.errors)
+         if self.observer is not None:faults.extend(self.observer.cleanup_faults)
+-        if self.loader is not None:self.loader.retire_lifetime()
+-        self.capacity=None;self.case=self.enrollment=self.admission=self.snapshot=self.qualification=None
+-        self.loader=self.consumer=self.store=self.native=self.normalizer=None
+-        self.finished=self.phase_ordinary=None;self.errors=[];self.retained_journals=[]
+-        self.authentication={};self.generated_plans={};self.legacy_closures={}
+-        self.page_files=[];self.page_sequence=[];self.packed={};self.stream_cache={}
+-        self.retained_receipts=[];self.selector_receipts=[];self.operation_windows={}
+-        self.capture_out.clear();self.capture_err.clear();self.frame=None
+-        if self.observer is not None:
+-            self.observer.local_owners.clear();self.observer.retire_results()
+-        for hold in self.validation_holds:
+-            if not hold.closed:hold.release()
+-        self.validation_holds=[]
+-        for hold in self.fdjournal.grants.values():
+-            if not hold.closed:hold.release()
+-        if hasattr(self,"pre_hash") and not self.pre_hash.closed:self.pre_hash.release()
+-        self.pre_hash=None;self.fdjournal.retire_history()
+-        self.observer=None;self.enrollment_pin=None
+-        for registered in self.owner_keys:RETAINED_ROOT_OWNERS.pop(registered)
+-        self.owner_keys.clear()
+-        return {"status":"ACTUAL_PREFIX_OWNER_RETIREMENT_CONFIRMED","ownership_retired":True,
+-            "owner_key":owner_key,"actual_final_close_faults":faults,"GO":False}
++        if not self._settle_complete_source_graph(completion):
++            return {'ownership_retired':False,'status':'CREDIT_HISTORY_OR_ALIAS_COMPLETION_UNCONFIRMED',
++                'actual_held_handoff':self.existing_owner_handoff(),'GO':False}
++        return {'status':'ACTUAL_PREFIX_COMPLETE_SOURCE_RETIREMENT_CONFIRMED','ownership_retired':True,
++            'owner_key':owner_key,'actual_final_close_faults':faults,'GO':False}
+ 
+ 
+ def retire_existing_root_delivery(owner_key,terminal_pin,tail_pin,completion=None):
+--- A181/consumer/source/recipe_planner.py
++++ A190/consumer/source/recipe_planner.py
+@@ -2111,7 +2111,7 @@
+     whole = WholeMeter() if current() is None else current()
+     try:
+         with (whole if current() is None else nullcontext(whole)):
+-            return _bounded_public_plan(authority_raw,expected_raw,presented_raw,context_raw,streams)
++            return whole.bind_result(_bounded_public_plan(authority_raw,expected_raw,presented_raw,context_raw,streams))
+     except ContractError as exc:
+         attach_refusal(exc, whole)
+         raise
+@@ -2126,7 +2126,7 @@
+             wire=canonical_bytes(outcome)
+             if len(wire)>MAX_OUTPUT_BYTES:raise ContractError('whole_output')
+             whole.check()
+-            return wire
++            return whole.bind_result(wire)
+     except ContractError as exc:
+         attach_refusal(exc,whole)
+         raise
+--- A181/consumer/source/resource_meter.py
++++ A190/consumer/source/resource_meter.py
+@@ -15,6 +15,7 @@
+ 
+ _CURRENT = contextvars.ContextVar('publisher_resource_meter', default=None)
+ _STOCK_FD_DOMAINS={}
++_STOCK_CALL_SEQUENCE=0
+ _RSS_LIMIT = 8 * 1024**3
+ _ALLOCATION_LIMIT = 16 * 1024**3
+ _WALL_NS = 4200 * 10**9
+@@ -83,13 +84,19 @@
+         self.cleanup_fault = False
+         # Complete standalone descriptor history belongs to this same call.
+         # This added prospective cost does not change either original cap.
+-        self.allocation_bytes+=65536*8192
+         domain=_STOCK_FD_DOMAINS.get(os.getpid())
+         if domain is None:
+-            domain={'history':[],'generation':0,'unknown':False,'active':0,'owners':[]}
++            domain={'history':[],'generation':0,'unknown':False,'active':0,'owners':{},
++                'history_allocation_reservation':65536*8192,'history_charge_owner':None}
+             _STOCK_FD_DOMAINS[os.getpid()]=domain
+-        self.fd_domain=domain;domain['owners'].append(self)
++            self.allocation_bytes+=domain['history_allocation_reservation']
++        global _STOCK_CALL_SEQUENCE
++        _STOCK_CALL_SEQUENCE+=1;self.call_sequence=_STOCK_CALL_SEQUENCE
++        self.fd_domain=domain;domain['owners'][self.call_sequence]=self
++        if domain['history_charge_owner'] is None:domain['history_charge_owner']=self.call_sequence
+         self.fd_history=domain['history']
++        self.completion_result=None;self.completion_error=None
++        self.completion_attempted=False;self.completion_received=False
+     def __enter__(self):
+         if current() is not None:
+             raise ContractError('resource_reentry')
+@@ -100,12 +107,55 @@
+             _CURRENT.reset(self.token)
+             self.token=None
+             if type(exc) is ContractError: attach_refusal(exc, self)
++            self.finish_call(exc)
+             raise
+         return self
+     def __exit__(self, *args):
+         if self.token is not None:
+             _CURRENT.reset(self.token)
+             self.token = None
++        self.finish_call(args[1] if len(args)>1 else None)
++    def bind_result(self,value):
++        self.completion_result=value
++        return value
++    def completion_roots(self):
++        domain=self.fd_domain
++        rows=tuple(row for row in domain['history'] if row.get('call_sequence')==self.call_sequence)
++        # Exact actual returned value and exception, including error frames,
++        # are strong receiver roots; an error_fact label does not replace them.
++        return {'owner_pid':os.getpid(),'call_sequence':self.call_sequence,
++            'whole':self,'rows':rows,'result':self.completion_result,'error':self.completion_error,
++            'domain':domain,'history_allocation_reservation':domain['history_allocation_reservation']}
++    def finish_call(self,error=None):
++        if self.completion_attempted:return self.completion_received
++        self.completion_attempted=True;self.completion_error=error
++        receiver=globals().get('OUTER_COMPLETE_CALL')
++        if receiver is None:
++            # The unchanged direct five-argument caller has no enrolled finite
++            # completion receiver. Keep the exact graph visible, not a fake
++            # successful free or permanent unacknowledged "retired" owner.
++            self.cleanup_fault=bool(error) or self.cleanup_fault
++            return False
++        try:receipt=receiver(self.completion_roots())
++        except BaseException as secondary:
++            self.completion_receiver_error=secondary;self.cleanup_fault=True
++            if error is not None:error.completion_receiver_error=secondary
++            return False
++        if type(receipt) is not dict or receipt!={'owner_pid':os.getpid(),
++            'call_sequence':self.call_sequence,'actual_roots_received':True}:
++            self.cleanup_fault=True;return False
++        domain=self.fd_domain
++        rows=[row for row in domain['history'] if row.get('call_sequence')==self.call_sequence]
++        if any(row['status'] not in ('CLOSED','NO_RETURN') for row in rows):
++            self.cleanup_fault=True;return False
++        domain['owners'].pop(self.call_sequence,None)
++        domain['history'][:]=[row for row in domain['history'] if row.get('call_sequence')!=self.call_sequence]
++        # The exact row objects now live at the accepted same-owner recipient;
++        # removing a PID registration never erases those accepted histories.
++        self.completion_received=True
++        if not domain['owners'] and not domain['history'] and not domain['active'] and not domain['unknown']:
++            if _STOCK_FD_DOMAINS.get(os.getpid()) is domain:_STOCK_FD_DOMAINS.pop(os.getpid())
++        return True
+     def configure(self, fact):
+         if fact is None:
+             return
+@@ -240,7 +290,8 @@
+     domain['generation']+=1
+     attempt={'status':'NOT_ATTEMPTED','error':None}
+     row={'fd':None,'generation':domain['generation'],'status':'PREOWNED','identity9':None,
+-         'path':path,'credit':'same-call-prepaid-FD-arena','attempt':attempt}
++         'path':path,'credit':'same-call-prepaid-FD-arena','attempt':attempt,
++         'call_sequence':whole.call_sequence}
+     # The owning cell is in the call arena before open; no fallible insert
+     # happens between return and binding either acquired descriptor value.
+     whole.fd_history.append(row)

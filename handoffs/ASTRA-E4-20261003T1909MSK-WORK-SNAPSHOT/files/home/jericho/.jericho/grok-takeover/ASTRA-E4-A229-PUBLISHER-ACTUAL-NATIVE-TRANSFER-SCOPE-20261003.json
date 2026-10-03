@@ -1,0 +1,68 @@
+{
+  "schema": "friday.astra.a229.publisher.actual-native-transfer.scope.v1",
+  "recorded_utc": "2026-10-03 15:05:54 UTC",
+  "assignment": "ASTRA-E4-A229-PUBLISHER-ACTUAL-NATIVE-CALLER-BANK-TRANSFER-AND-END",
+  "owner": "Astra epoch4",
+  "source_base": {
+    "path": "/var/tmp/friday-sol091-publisher-sol090-connected-selected-mmap-public-stock-late-error-both-ends-inert-source/manifest.json",
+    "bytes": 457860,
+    "sha256": "689764de3aef2930e9b777464cd0ea8dc9107f2ed2ce599f891da1cf04967f2b",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371743",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "457860",
+      "1791022743452312531",
+      "1791022743452312531"
+    ],
+    "stable9": true
+  },
+  "current_N2": {
+    "path": "/var/tmp/friday-sol092-publisher-sol091-n2-before-argv-existing-channel-connected-inert-source/manifest.json",
+    "bytes": 69499,
+    "sha256": "f0d15d2ad0e549838d3065c4b03f7ad7d1e559ae07ac5a4039fde089ec0bfc83",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371774",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "69499",
+      "1791036967962743097",
+      "1791036967962743097"
+    ],
+    "stable9": true
+  },
+  "preserve_current_Sol093": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL093-INPUT-20261003.json",
+    "bytes": 377135,
+    "sha256": "b926d7546adce3b0c99d0e3b01fcaa72aa13d647b4dde40a34394c6601fbf090",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534233",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "377135",
+      "1791039333240196867",
+      "1791039333389205414"
+    ],
+    "stable9": true
+  },
+  "write_scope": "NEW own inert native/publisher_owned_custody.c/.h and source/existing_root_caller.py; exact Source copies only; no original writes.",
+  "actual_invariant": "Original same-process native caller owns all full bank bytes/raw aliases/roots and error bodies BEFORE native Run reference retirement; ownership_retired never established before actual cleanup/accepted original-role transfer.",
+  "actual_path": "Source finish_outside creates true before Release; Invoke clears active_run and returns without actual Release. read_bank requires active context. Run Release decrefs bank/receiver roots without an explicit complete caller packet.",
+  "direction": "Actual Invoke joins prospectively charged full owned-bank/raw/alias+all Run-root tuple packet -> actual existing receiver validation -> explicit same caller retained packet -> actual allocation-free Run reference retirement -> returned caller packet with final retirement status. Source finish_outside remains pre-retirement/ownership-transferred only. Existing bindings/table/current enrollment remain real authority; no new pointer/role/grant/service/private heap.",
+  "retained": "No N1 early-error/fullimage/native table or N3 wholelayout/public-native/factory/C2 acceptance. No SourceReady/Root/runtime/ABI/gates. Full N4 is not claimed by this scoped package.",
+  "forbidden": "No Source parser/import/compile/preprocess/eval/exec/tests/native/Root effects, scanning/private/foreign memory/offensive controls, network/install/live/heavy/model or rejected Scanner operation retry/rephrase/delegation/route.",
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "nonoverlap": "Sol093 keeps actual N3 prepare/attach_late/layout/producers/both readers, launch/bootstrap SOL092 exact. Astra reserves C/H + existing_root_caller.py only; if Sol needs one of these, record exact hunk/interface instead of parallel patch."
+}

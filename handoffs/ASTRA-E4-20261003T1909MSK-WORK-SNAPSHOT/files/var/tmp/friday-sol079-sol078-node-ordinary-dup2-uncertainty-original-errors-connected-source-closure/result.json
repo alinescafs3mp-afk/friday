@@ -1,0 +1,105 @@
+{
+  "schema": "friday.sol079.connected-source-author-result.v1",
+  "assignment": "ASTRA-E4-SOL078-NODE-ORDINARY-DUP2-UNCERTAINTY-ORIGINAL-ERRORS-CONNECTED-CLOSURE-SOL079",
+  "generation": 1,
+  "event": "SOL-SOL079-R1",
+  "accepted_msk": "2026-10-03T05:05:27+03:00",
+  "decision": "SCOPED_AUTHORED_E01_E02_CONNECTED_SOURCE_NOT_WHOLE_ACCEPTED",
+  "author_package_complete": true,
+  "task_done": false,
+  "whole_accepted": false,
+  "current6": [
+    {
+      "name": "caller.py",
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/caller.py",
+      "bytes": 196772,
+      "sha256": "cca5c0c2ae075ff732390d8d83c8c7737c63bc11ca52870f213c617db050951d",
+      "changed": true,
+      "partitions": 49
+    },
+    {
+      "name": "expectations.json",
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/expectations.json",
+      "bytes": 12120,
+      "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+      "changed": false,
+      "partitions": 1
+    },
+    {
+      "name": "launch-contract.json",
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/launch-contract.json",
+      "bytes": 51549,
+      "sha256": "41b34c9a72de8d60d986ec5cf1eff09c0d6829140f24ff7bb794305bc29a0144",
+      "changed": true,
+      "partitions": 11
+    },
+    {
+      "name": "ordinary-surplus.txt",
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "changed": false,
+      "partitions": 1
+    },
+    {
+      "name": "supervisor.py",
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/supervisor.py",
+      "bytes": 160864,
+      "sha256": "b0afe12983e920053bdd7adaedf98cefe28cff938dc021ed3429ec8eba821cab",
+      "changed": true,
+      "partitions": 53
+    },
+    {
+      "name": "verifier.py",
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/verifier.py",
+      "bytes": 130328,
+      "sha256": "cc555050158effe62096a6d7452ad74094893cfce641865fdad46cfe03591b33",
+      "changed": true,
+      "partitions": 49
+    }
+  ],
+  "current6_changed": 4,
+  "current6_equal": 2,
+  "gapless_partitions": 164,
+  "contract_leaf_changes": 9,
+  "authored_roots": [
+    "S078-E01 prospective exact typeddup acquisition state plus error/cleanup joins",
+    "S078-E02 original primary/reached-secondary first-store/TB plus actual transport/both full decoders/terminal flags"
+  ],
+  "retained_code": [
+    "C1 original native/stock/private body, actual outside readonly original consumer, BOTH finite native ends CODE_OPEN",
+    "C2 original all6/all35/all3 factory/catch/full costs CODE_OPEN UNKNOWN_NOT_ZERO"
+  ],
+  "controls": "original35/all6/all3/GPG6/F1F2D1D2/current19 integer9/caps/topology/clocks unchanged; REQUIRED_NOT_RUN no waiver",
+  "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false",
+  "source_execution": 0,
+  "AST_compiler_tests": "NOT_RUN",
+  "children": 0,
+  "network": 0,
+  "native_live_gates": "NOT_RUN",
+  "independent_acceptance": "REQUIRED_NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "resources": {
+    "wall_seconds": 4200,
+    "seal_reserve_seconds": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 16777216,
+    "local_workers": 4,
+    "children": 0
+  },
+  "known_external_hash_read_lower_bound_bytes": 169905230,
+  "remaining_full_IO_RAM_output_peak": "UNKNOWN_NOT_ZERO, not a whole-fit assertion",
+  "evidence": [
+    "findings.json",
+    "evidence/current6-connected-checks.json",
+    "evidence/connected-root-and-bounds-map.json",
+    "evidence/original-obligations-preserved.json",
+    "evidence/original-pins-rejoin.json",
+    "evidence/final-external-snapshot.json",
+    "evidence/effects-and-costs.json"
+  ],
+  "next": "Non-author changed-context Source review by Astra/authorized reviewer, then original C1/C2 exact independent qualification and mandatory real gates; no own acceptance/repeat/goal/wait."
+}

@@ -1,0 +1,41 @@
+{
+  "files": [
+    {
+      "bytes": 1679,
+      "name": "bound.json",
+      "sha256": "629c90f2be77579a7104ad0b00c54cc5bc81a5ab5fbef1d7a03f2b03488e4a17"
+    },
+    {
+      "bytes": 712,
+      "name": "bound.txt",
+      "sha256": "98dc6562c935492a00eed53506ca209b6928850b37bb1a0be8cd49c6fab75d1b"
+    },
+    {
+      "bytes": 991,
+      "name": "pathset.json",
+      "sha256": "83a409f8bc22826c3796486287e28d5273430eea5d604bcf2156e507e84f4fb6"
+    },
+    {
+      "bytes": 80493,
+      "name": "pin-checks.json",
+      "sha256": "9c4d6560a7395e7c815afeb7a2955cc070a68f4f4182eb87c6c600ebc3c6fde5"
+    },
+    {
+      "bytes": 8821,
+      "name": "relation.json",
+      "sha256": "8ac8b9135e16135bacbd6e621664c6b73d4536d47f92de4cac84040870c23aad"
+    },
+    {
+      "bytes": 12006,
+      "name": "result.json",
+      "sha256": "283d5cd796f25e4f74731bf8423812d66c52bf4231f1e72e8165960c5b50d7b1"
+    },
+    {
+      "bytes": 1668,
+      "name": "validation-plan.txt",
+      "sha256": "e015395154ee21d2358ff6174e5785d97b2c308d54593d65a631b07250c62994"
+    }
+  ],
+  "job_id": "job_ac3f73b4245b467c99aebe467c74a40d",
+  "schema": "friday.astra.lab910.sol089.stock-operand.connected-nonauthor.run.v1"
+}

@@ -1,0 +1,19 @@
+{
+  "schema": "friday.sol078.received.v1",
+  "event": "ASTRA-SOL078-T1",
+  "assignment": "ASTRA-E4-LAB891-NODE-ORDINARY-END-TIMER-TYPED-FD-APPEND-INDEPENDENT-REVIEW-SOL078",
+  "generation": 1,
+  "accepted_msk": "2026-10-03T04:47:00+03:00",
+  "task_ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL078-TASK-20261003.txt",
+  "task_sha256": "4082442f175dd68bdb360d10f62d19647dcd98abd999a2c510dd932e42edb6c5",
+  "input_ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL078-INPUT-20261003.json",
+  "input_sha256": "cd0d5fa0136b1f98433097c16e7f98a74d390f1aeeddef933e6b7713737a2c2e",
+  "compact_ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL078-PRE-TASK-COMPACT-20261003.json",
+  "compact_verified": "same TUI/thread, generation1, completed contextCompaction error null, strict idle queue0",
+  "effects": "SAFE_INERT_SOURCE_STATIC_REVIEW_ONLY",
+  "source_execution": 0,
+  "children": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

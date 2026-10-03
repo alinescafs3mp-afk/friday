@@ -1,0 +1,49 @@
+{
+  "schema": "friday.sol091.received.v1",
+  "assignment": "ASTRA-E4-PUBLISHER-SOL090-CONNECTED-N1N4-REMAINING-CLOSURE-SOL091",
+  "generation": 1,
+  "event": "ASTRA-E4-SOL091-TASK",
+  "accepted": {
+    "msk": "2026-10-03T12:45:07+03:00",
+    "epoch_ms": 1791020707000
+  },
+  "TASK": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL091-TASK-20261003.txt",
+    "sha256": "ee2f3d444a687846bfc23f199923694cf87c26a97132373ff1c7ca0a7d61b2d2"
+  },
+  "INPUT": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL091-INPUT-20261003.json",
+    "sha256": "5049e6187b5b79ae1923503b7cd15e84bfb50e7f49ce672c2b34a8a675daecd7"
+  },
+  "pre_task_compact": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL091-PRE-TASK-COMPACT-20261003.json",
+    "completed_msk": "2026-10-03T12:41:51.312373+03:00",
+    "contextCompaction_completedAtMs": 1791020403944,
+    "same_TUI": true,
+    "once": true
+  },
+  "pins_verified": 240,
+  "pinned_read_bytes": 8890871,
+  "epochs": {
+    "astra": "acba5992-6a22-4e73-b141-30f35bb631a7",
+    "sol": "d5afa5e1-60d7-457b-931b-fd12001a35a4"
+  },
+  "queue": [],
+  "queue_consumption": "NONE_EMPTY_EXACT_QUEUE",
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "resources": {
+    "deadline_sec": 4200,
+    "seal_sec": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 33554432,
+    "local": 4,
+    "children": 0,
+    "network": 0,
+    "retry": 0,
+    "friday": 0
+  }
+}

@@ -1,0 +1,1118 @@
+{
+  "count": 29,
+  "all_original_order_expectations_preserved": true,
+  "exact_unsafe_operational_ID_classifier_established": false,
+  "safe_functional_waiver": false,
+  "rows": [
+    {
+      "position": 35,
+      "id": "whole3_actual_G1_worker_positive",
+      "original_expected": {
+        "cause": null,
+        "consumer": "execute_core/R4.run_wave/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "exact3",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "network_schedule",
+        "started_routes": 3,
+        "state": "BROWSER3_FETCH_FINISHED_WITH_EXPLICIT_ACCEPTANCE_GAPS"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 36,
+      "id": "whole3_redirect",
+      "original_expected": {
+        "cause": "THREE_BODY_RECEIPTS",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 37,
+      "id": "whole3_http404",
+      "original_expected": {
+        "cause": "THREE_BODY_RECEIPTS",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 38,
+      "id": "whole3_tls_certificate",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:SSLCertVerificationError",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 39,
+      "id": "whole3_tls_protocol",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 40,
+      "id": "whole3_encoding",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:CONTENT_ENCODING",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 41,
+      "id": "whole3_framing",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:HTTP_FRAMING",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 42,
+      "id": "whole3_duplicate_length",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:HTTP_FRAMING",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 43,
+      "id": "whole3_length_cap",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:DECLARED_BODY_SIZE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 44,
+      "id": "whole3_truncated",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:BODY_TRUNCATED",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 45,
+      "id": "whole3_hostname",
+      "original_expected": {
+        "cause": "TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 46,
+      "id": "whole3_verify_mode",
+      "original_expected": {
+        "cause": "TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 47,
+      "id": "whole3_verified_type",
+      "original_expected": {
+        "cause": "TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 48,
+      "id": "whole3_cert_digest",
+      "original_expected": {
+        "cause": "TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 49,
+      "id": "whole3_accounting",
+      "original_expected": {
+        "cause": "WORKER_ACCOUNTING_DRIFT",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 50,
+      "id": "whole3_digest",
+      "original_expected": {
+        "cause": "WORKER_ACCOUNTING_DRIFT",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 51,
+      "id": "whole3_acceptance",
+      "original_expected": {
+        "cause": "UNPINNED_ACCEPTANCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 52,
+      "id": "whole3_unknown_final",
+      "original_expected": {
+        "cause": "WORKER_RECEIPT_INCOMPLETE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 53,
+      "id": "whole3_duplicate_final",
+      "original_expected": {
+        "cause": "EVENT_COUNT",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 55,
+      "id": "aggregate_RSS",
+      "original_expected": {
+        "cause": "RSS_CAP",
+        "consumer": "R4.run_wave/G1.process_status",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "network_schedule",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 93,
+      "id": "actual_CA_parse",
+      "original_expected": {
+        "cause": "NO_CERTIFICATE_OR_CRL_FOUND",
+        "consumer": "ca_context/SSLContext.load_verify_locations",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 0,
+        "stage": "ca_preflight",
+        "started_routes": 0,
+        "state": "REFUSED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Authentic existing a171_actual through whole216_perform/a171_perform; scoped prior ca findings/credits retained on matching unchanged dependencies, not runtime acceptance",
+      "current_route": "delegated136",
+      "code_findings": [
+        "SOL063-C02",
+        "SOL063-C03"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 101,
+      "id": "whole3_bounded_header",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:HEADERS_OR_CHUNK_FRAMING_CAP",
+        "consumer": "G1.worker/BoundedResponse/HeaderReader",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 120,
+      "id": "connect15_unconnected",
+      "original_expected": {
+        "cause": "REQUEST_TIMEOUT",
+        "consumer": "R4.run_wave/stop_child",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 121,
+      "id": "request300_connected",
+      "original_expected": {
+        "cause": "REQUEST_TIMEOUT",
+        "consumer": "R4.run_wave/stop_child",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 124,
+      "id": "work1140_active",
+      "original_expected": {
+        "cause": "WALL_TIMEOUT:network_schedule",
+        "consumer": "R4.run_wave/Run.guard",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "network_schedule",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Generic historical body abstraction; legitimate original benign operation still required and missing",
+      "current_route": "coordinator_abstract31",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C07"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 125,
+      "id": "body_eof_at_cap",
+      "original_expected": {
+        "cause": null,
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "exact3",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "state": "BROWSER3_FETCH_FINISHED_WITH_EXPLICIT_ACCEPTANCE_GAPS"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Actual existing G1.write_all via x.m symbol on small owned pipe and EOF; not original G1.worker/BoundedResponse/full3 body and hash relation",
+      "current_route": "coordinator_body4",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C05",
+        "SOL063-C07",
+        "SOL063-C08"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 126,
+      "id": "body_cap_without_eof",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:CAP_REACHED_WITHOUT_EOF",
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Actual existing G1.write_all via x.m symbol on small owned pipe and EOF; not original G1.worker/BoundedResponse/full3 body and hash relation",
+      "current_route": "coordinator_body4",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C05",
+        "SOL063-C07",
+        "SOL063-C08"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 127,
+      "id": "body_short_write",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:SHORT_WRITE",
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Actual existing G1.write_all via x.m symbol on small owned pipe and EOF; not original G1.worker/BoundedResponse/full3 body and hash relation",
+      "current_route": "coordinator_body4",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C05",
+        "SOL063-C07",
+        "SOL063-C08"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    },
+    {
+      "position": 128,
+      "id": "body_partial_write",
+      "original_expected": {
+        "cause": null,
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "exact3",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "state": "BROWSER3_FETCH_FINISHED_WITH_EXPLICIT_ACCEPTANCE_GAPS"
+      },
+      "independent_classification": "BENIGN_FUNCTIONAL_OBLIGATION_REMAINS_REQUIRED; no dangerousness inferred from name/consumer/cause",
+      "historical_operational_mechanisms": {
+        "status": "ABSTRACT_REQUIRED_NOT_RUN",
+        "required": true,
+        "waiver": false,
+        "payload_fixture_generator_repro_exploit": "NOT_SUPPLIED"
+      },
+      "actual_current_operation": "Actual existing G1.write_all via x.m symbol on small owned pipe and EOF; not original G1.worker/BoundedResponse/full3 body and hash relation",
+      "current_route": "coordinator_body4",
+      "code_findings": [
+        "SOL063-C01",
+        "SOL063-C05",
+        "SOL063-C07",
+        "SOL063-C08"
+      ],
+      "scope_credit": "Actual CA parser scoped prior credit at position93; write_all primitive scoped credit for125-128; no original full3 worker acceptance",
+      "safe_performing_operation_required": true,
+      "original_positive_and_negative_obligation_unchanged": true,
+      "runtime": "NOT_RUN",
+      "SourceReady": false,
+      "GO": false
+    }
+  ]
+}

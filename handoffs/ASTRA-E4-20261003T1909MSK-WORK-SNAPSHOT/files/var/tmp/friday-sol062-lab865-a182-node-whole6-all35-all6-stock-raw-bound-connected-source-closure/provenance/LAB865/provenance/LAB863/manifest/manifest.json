@@ -1,0 +1,412 @@
+{
+  "files": [
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979664",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14779",
+        "1790932727349413814",
+        "1790932727349413814"
+      ],
+      "path": "all35-successor-matrix.json",
+      "sha256": "93d119c89c735afbdab8c0895c11361e369e3da0ad822e3734b5aa8ece6df109"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979640",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2019",
+        "1790932727325768452",
+        "1790932727325768452"
+      ],
+      "path": "author-effect-accounting.json",
+      "sha256": "fe1296e939208f7d249e867d99e1b0ff7728b2107efc546652515e956b2b6f1c"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979657",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "116904",
+        "1790932727343413470",
+        "1790932727343413470"
+      ],
+      "path": "caller.py",
+      "sha256": "d739a7e3705c5f76563fdf1a0dfff5bd90490689037b5eb6e187086c5d4d1236"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979662",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2916",
+        "1790932727347413700",
+        "1790932727347413700"
+      ],
+      "path": "candidate-text-relations.json",
+      "sha256": "95c9fa1626a2f2992fa8abc0d3f0b7a681499ca3194da633f807c475901c7761"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979646",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2958",
+        "1790932727330430321",
+        "1790932727330430321"
+      ],
+      "path": "evidence/ASTRA-E4-A134-SOURCE-REVIEW-RECEIVED-20261002.json",
+      "sha256": "7cf4c977d12e139a82a7589eef4709c689e2b9b24c23089fd38e6b3bb07ed1d5"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979647",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18310",
+        "1790932727331270269",
+        "1790932727331270269"
+      ],
+      "path": "evidence/ASTRA-E4-A161-INDEPENDENT-ALL35-STOCK-DATA-RESULT-RECEIVED-20261002.json",
+      "sha256": "7aee73be527a5635f2b69cbe9376f9451ffd66c24efc915fe2917d901979e3c5"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979648",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18362",
+        "1790932727332123218",
+        "1790932727332123218"
+      ],
+      "path": "evidence/ASTRA-E4-A164-ROOT-PREFLIGHT-RESULT-RECEIVED-20261002.json",
+      "sha256": "3f996ff220813f6ac741ddf89549a3796b556dc62c4179b8e208177b0c7d1252"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979649",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "35489",
+        "1790932727332951866",
+        "1790932727332951866"
+      ],
+      "path": "evidence/ASTRA-E4-A169-NODE-EXACT-INT9-WHOLE-NATIVE-RESULT-20261002.json",
+      "sha256": "a2c34645498674d15ba07111da729ee55b59913929b6cccda69d1076a2408aa7"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979650",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "89517",
+        "1790932727333970125",
+        "1790932727333970125"
+      ],
+      "path": "evidence/ASTRA-E4-A172-INPUT-20261002.json",
+      "sha256": "b666e8114fa15ae0720f5b7bbc984b6f58ac250c5a7ffac660860fca373e754b"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979651",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7382",
+        "1790932727334814374",
+        "1790932727334814374"
+      ],
+      "path": "evidence/LAB861-calls.json",
+      "sha256": "8ef5f1b1d6171ae349573a006b1df737276d3280def9fc14f836631b1b0534c7"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979652",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1243",
+        "1790932727335552216",
+        "1790932727335552216"
+      ],
+      "path": "evidence/LAB861-gaps.json",
+      "sha256": "60dc76dc07fac55c831f1b87cb1dde9623c2bc0f29c3fd09d28bcb3d39cab4fc"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979653",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17873",
+        "1790932727336235155",
+        "1790932727336235155"
+      ],
+      "path": "evidence/LAB861-primary.json",
+      "sha256": "e42fd3b503be1569de5ff059002c2ed947d6fc36b77ecf3362067ced545c8e4f"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979654",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16936",
+        "1790932727336972598",
+        "1790932727336972598"
+      ],
+      "path": "evidence/LAB861-root-received.json",
+      "sha256": "f1bd90cec0abf20602c6efe93a879d478559eeb1934719bd03e6a9e24cb25e49"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979655",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "82184",
+        "1790932727337741242",
+        "1790932727337741242"
+      ],
+      "path": "evidence/all35-producer-consumer-matrix.json",
+      "sha256": "86491544550cb1001ae8f8942c3b22f3cf56cbdbd15cbd405c3451e8caef9a1a"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979656",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "0",
+        "1790932727337741242",
+        "1790932727337741242"
+      ],
+      "path": "evidence/source-stderr.native",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979661",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9128",
+        "1790932727347413700",
+        "1790932727347413700"
+      ],
+      "path": "expectations.json",
+      "sha256": "c6c2635abb11aa3df34d662ef0d7495e0c96ce4940664af62a01f343085eb5cc"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979641",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1926",
+        "1790932727326915518",
+        "1790932727326915518"
+      ],
+      "path": "fixed-metadata-bound.json",
+      "sha256": "864d61d3183f7ba8a0d8f26c66d3acae5df594c2641b065820dffa7f596b3cab"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979642",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "50910",
+        "1790932727327814669",
+        "1790932727327814669"
+      ],
+      "path": "input-read-ledger.json",
+      "sha256": "a86a2a3f625f0f9ec152a75058fba4c4bc22f2b3852e9d1013f274b98db2d36c"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979660",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "48250",
+        "1790932727346413642",
+        "1790932727346413642"
+      ],
+      "path": "launch-contract.json",
+      "sha256": "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979643",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790932727328412608",
+        "1790932727328412608"
+      ],
+      "path": "ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979663",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3456",
+        "1790932727348413757",
+        "1790932727348413757"
+      ],
+      "path": "performing-read-budget.json",
+      "sha256": "7e334c42c53210732d5350835140e1510fff689b7175438fb0f76b3993881078"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979644",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3053",
+        "1790932727329477966",
+        "1790932727329477966"
+      ],
+      "path": "publication-bound.json",
+      "sha256": "c00c9376949534cc0b6266728882337e9e7cbd641ca8ab93be3cefce430bebb2"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979665",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13680",
+        "1790932727349413814",
+        "1790932727349413814"
+      ],
+      "path": "resource-raw-custody-matrix.json",
+      "sha256": "117f6e21c0e3a53b5f2edf64dc62f5b16e100431d407fe7ab1c5586b7c12afd9"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979670",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4570",
+        "1790932727357414273",
+        "1790932727357414273"
+      ],
+      "path": "result.json",
+      "sha256": "428f28de4b77fb8ffbde3749086e8ee55688600d02d8cd8e54853226b2acee53"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979666",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "33488",
+        "1790932727350413872",
+        "1790932727350413872"
+      ],
+      "path": "source-delta.diff",
+      "sha256": "d8327a39d9f559bc11373125013b13fc5f7770b0ac73c41ade72bd7c1a452e5e"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979658",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "89782",
+        "1790932727344413527",
+        "1790932727344413527"
+      ],
+      "path": "supervisor.py",
+      "sha256": "bcd0fb9f0c5d68468aa896b4a6f9a36f5e32a5d62dc11c6c3bc3787cfa128d10"
+    },
+    {
+      "identity9_decimal_strings": [
+        "2050",
+        "6979659",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "62097",
+        "1790932727345413585",
+        "1790932727345413585"
+      ],
+      "path": "verifier.py",
+      "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9"
+    }
+  ],
+  "pathset_bytes": 9933,
+  "pathset_sha256": "851bcf854d5c480fa63f36a2b4fbfb9a380599fc4a39fea976035076049cc9e7",
+  "schema": "friday.grok.lab863.manifest.v1"
+}

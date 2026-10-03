@@ -1,0 +1,13 @@
+# A079 native public caller Source
+
+SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD. No SourceReady, independent acceptance, current GO or execution authorization.
+
+A071-* filenames are preserved. Their changed native/session/public caller files are the current connected Source. INPUT-A071-MANIFEST.json and CONTRACT-A071.md pin the immutable input; all UPSTREAM-A066-SNAPSHOT-* files and the complete A071 bill, guard coverage and original FULL-CONTROLS oracle source remain unchanged. Only current program path labels point at this new package.
+
+The C bridge now consumes actual FR_START and fixes its real Root origin, actual owner/origin birth, full capsule bytes and socket inode using SO_PEERCRED and SCM_CREDENTIALS. Monotonic private sequence replaces role+1 in all current participants. Native wait4 status is private until actual REAP_ACK. Sticky UNKNOWN can still dispose of the exact owned clone and close its handle, without publishing a status or resetting creation poison. Python NativeOwner closes native handles through the native binding. Root borrowed receipts do not become Root wait4 outcomes.
+
+A071-CONTROLS.py contains an ordinary mode1 public caller with three independently fixed harmless pipe payloads and exit17/18/19. Its two isolated inert DATA cases cover invalid wait flags and legacy caller-status refusal. A079-NATIVE-PUBLIC-DRIVER.py calls the same native110 --held-a061 route with independent fresh capsule/source expectations and complete positive-first subset oracles. These are written Source, all NOT_RUN; they do not close the full registry control obligation. Original mode4, five HTTP, all63 guard/new9 runtime DATA constructors and full216+8 expectations are preserved.
+
+A079-REGISTRY-COVERAGE.json is the current precise delta and residual. A071-CONTROL-COVERAGE.json remains the unchanged inherited coverage snapshot. Complete actual wrong-origin/credential/sequence/deadline/rights/pidfd/barrier/real ABORT_ACK/invalid ACK/signal-close public pairs remain absent. All216 safe nested producer integration remains a separate unresolved obligation. Unsafe historical bodies are inert NOT_RUN, with no F10 waiver. Present Root/image absence is not itself a Source defect; no privileged service is added.
+
+RAW-DELTA.patch records current program/schema/ABI/build changes and added ordinary Source/DATA. DELTA-COMPLEMENT.json inventories the reused files and unchanged complement; final metadata bytes are bound by MANIFEST.json. READ-LEDGER.tsv records bounded explicit reads and honest unknown physical IO/RAM. RESULT.json is the package terminal; the external lifecycle result supplies the exact final manifest hash and completion time.

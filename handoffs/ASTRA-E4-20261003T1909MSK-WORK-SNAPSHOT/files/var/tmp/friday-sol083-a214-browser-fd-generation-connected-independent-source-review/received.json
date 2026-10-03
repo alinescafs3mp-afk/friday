@@ -1,0 +1,35 @@
+{
+  "schema": "friday.sol083.received.v1",
+  "event_id": "ASTRA-E4-SOL083-TASK",
+  "assignment": "ASTRA-E4-A214-BROWSER-FD-GENERATION-CONNECTED-NONAUTHOR-REVIEW-SOL083",
+  "generation": 1,
+  "accepted_msk": "2026-10-03T07:00:26+03:00",
+  "task": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-TASK-20261003.txt",
+    "sha256": "cda3b3d628a96656eba09da7a25f24bebc05b6c29c8ba06190f3d43778bfee6a"
+  },
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-INPUT-20261003.json",
+    "sha256": "3db254e03e10670e199989483c898d7db987c006901a79df90f71d57308ef067"
+  },
+  "pre_task_compact": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-PRE-TASK-COMPACT-20261003.json",
+    "bytes": 1908,
+    "sha256": "3a56f700b18d277092d3d5bf9118ef314784f5c7532f7c2fe1b9c22681f12988",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532381",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1908",
+      "1790999981217388734",
+      "1790999981217388734"
+    ]
+  },
+  "native_queue_count": 0,
+  "Source_execution": 0,
+  "children": 0,
+  "scope": "First non-author Root A214 four-file correction and changed-context rejoin only."
+}

@@ -1,0 +1,35 @@
+{
+  "files": [
+    {
+      "bytes": 2432,
+      "name": "bound.json",
+      "sha256": "37ab327bf2bc8a02e7200fc40216072ede8d0cf99d983e3605fa40e7a099541a"
+    },
+    {
+      "bytes": 849,
+      "name": "bound.txt",
+      "sha256": "928602259d1b36222e3b9c09ec442bf0330f61dc339dbac64bc01da765132fea"
+    },
+    {
+      "bytes": 104345,
+      "name": "pin-checks.json",
+      "sha256": "1442e00d3a896a6280a5926a3c22ea5f0d944f0ce4907ecde5fe97e098bb2966"
+    },
+    {
+      "bytes": 1312,
+      "name": "relation.json",
+      "sha256": "9f9d6c299328715cc89839d3beffa58834bb217ff8740c5e984e6bbb1182e7f5"
+    },
+    {
+      "bytes": 8462,
+      "name": "result.json",
+      "sha256": "a5249cc1bb0654025b3ec0b9db32f56f0295fe1cee34fc3b29ebc49a415a2db7"
+    },
+    {
+      "bytes": 540,
+      "name": "validation-plan.txt",
+      "sha256": "c53ddafa33ea2a8ee5ecb079cfebae574a0bd72800f870569dd9c19d8becc849"
+    }
+  ],
+  "schema": "friday.astra.lab913.node.prospective-errorgraph.connected-nonauthor.run.v1"
+}

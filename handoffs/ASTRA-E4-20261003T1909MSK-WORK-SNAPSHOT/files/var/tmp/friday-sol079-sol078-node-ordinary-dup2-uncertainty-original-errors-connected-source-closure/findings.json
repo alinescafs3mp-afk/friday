@@ -1,0 +1,59 @@
+{
+  "schema": "friday.sol079.scoped-authored-connected-source.v1",
+  "assignment": "ASTRA-E4-SOL078-NODE-ORDINARY-DUP2-UNCERTAINTY-ORIGINAL-ERRORS-CONNECTED-CLOSURE-SOL079",
+  "generation": 1,
+  "decision": "SCOPED_AUTHORED_E01_E02_CONNECTED_SOURCE_NOT_WHOLE_ACCEPTED",
+  "author_package_complete": true,
+  "task_done": false,
+  "scope": "SOL078 ordinary E01/E02 only, all3 actual actors/current6+binding dependencies. Not a repeat whole old audit or SOL075 denied native action.",
+  "authored_repairs": [
+    {
+      "id": "S078-E01",
+      "state": "SCOPED_SOURCE_AUTHORED_NOT_INDEPENDENTLY_ACCEPTED",
+      "fact": "Raw alias preown/dup2/publish sequence replaced by existing exact allocate_owned(os.dup2) with original short mask and prospective ACQUIRE_UNKNOWN/RETURNED. Actual body owner assigned earlier, caught opening errors held before diagnostics. Known typed/returned role records keep body open even on wrapper/unmask-before-assignment failure; no unconditional bare8 cleanup exemption, no guessed unknown close."
+    },
+    {
+      "id": "S078-E02",
+      "state": "SCOPED_SOURCE_AUTHORED_NOT_INDEPENDENTLY_ACCEPTED",
+      "fact": "Separate finite local original+TB first-store cells for commit primary and reached unlock/end plus acquire/adopt/seal/consume/publication failures. Original cells precede formatting; caught TB selected by actual render/projection. Reached phase rows and originals join both actual prefix snapshots/receipt graphs/full recursive decoders. Supervisor/verifier append refusal now clears actual flags then performs ONE normal bounded ordered error publication; caller does likewise. Unexpected publication secondary does not overwrite existing prefix/encoding originals."
+    }
+  ],
+  "preserved_credits": {
+    "D1": "Actual visible R/qualified/verified/end-before-frame order, now checks sticky outside fault for inherited actors too.",
+    "D2": "No changed arm/rearm/deadline/disarm. Active current-clock qualification not measured; existing timer_still_enforcing constant is not credit.",
+    "D3": "Actual per-process POSIX record-lock and whole reservation through fstat/check/append/unlock preserved; actual primary/reached-secondary catch owners added. Expected retry contention path unchanged, no universal repeated recoverable-error body claim.",
+    "D4": "Normal typed allocation/adoption and original simultaneous256 confirmed-close reclamation/sticky unknown retained. No old lifetime512 bound or inflated nofile limit.",
+    "D5": "Exact current6 4changed/2equal, final gapless164 partitions,9 contract leaf edits only path/hash/size, actual verifier->contract->supervisor->caller DAG; original134 fullSHA9 hash-only context/all13+review11 unchanged. Schemas and controls retained, not native/gate acceptance."
+  },
+  "retained_code": [
+    {
+      "id": "C1",
+      "state": "CODE_OPEN",
+      "scope": "Original native/stock/raw/private body/aliases and actual performing outside read-only consumer before original birth + finite BOTH native owner ends. Strong refs/typed8/memfd/PO880/rendered fields/labels/seals/exit/wait/ACK/hash are not this. No native body/grant implementation."
+    },
+    {
+      "id": "C2",
+      "state": "CODE_OPEN_UNKNOWN_NOT_ZERO",
+      "scope": "Original all6/all35/all3 full factory/catch/wholecost/native/raw/stock/error/parser/encoder/decoder/lock/read/copy/hash/FD/RAM/physicalIO/overlap/cleanup/end bounds. New fixed local rows are not full normal-fit proof, no aggregate cost/signal-runtime qualification claimed."
+    }
+  ],
+  "required_future": "Non-author review of changed paths+deps on these sealed bytes, separate exact image/namespace/module/provider/grants/native ABI/prebirth/authority/current19 int9/clocks/resources and full mandatory real positive/negative gates. No replay/waiver or own acceptance.",
+  "qualification": {
+    "runtime": "REQUIRED_NOT_RUN",
+    "compiler_AST_tests": "NOT_RUN",
+    "Root_Node_GPG_archive_network_live_gates": "NOT_RUN",
+    "independent_acceptance": "REQUIRED_NOT_RUN"
+  },
+  "unsafe": {
+    "handling": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false,
+    "rendered_copied_decoded_reconstructed_executed": false
+  },
+  "source_execution": 0,
+  "children": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "next": "Astra may commission non-author changed-context review; original C1/C2/full resources and qualification remain required. Finite author package ends with RESULT, no waiting/poll/retry."
+}

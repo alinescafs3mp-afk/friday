@@ -1,0 +1,1363 @@
+{
+  "schema": "friday.a189.whole17.v1",
+  "count": 17,
+  "equations": [
+    {
+      "id": "A090-CTX",
+      "source_files": [
+        "source/context.py",
+        "source/contracts.py",
+        "tools/worker_entry.py",
+        "tools/state_binding.py"
+      ],
+      "producer": "Seven independent selected role bytes/full actual code and object graph",
+      "consumer": "Performing context/loaded graph and rechecks before effects",
+      "raw_relation": "Raw selected bodies and closed transitive module/native relation; no Source permit",
+      "phase": "AUTHENTICATED_INGRESS",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/context.py",
+          "bytes": 20445,
+          "sha256": "43bbf91da3411a70986fc5e9d8518bc8197901dc74ca771d61fd4103fba12a4b",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980441",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "20445",
+            "1790942162194991526",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/contracts.py",
+          "bytes": 30961,
+          "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980442",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "30961",
+            "1790941728824240750",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/worker_entry.py",
+          "bytes": 5919,
+          "sha256": "112b2fa914daa0e7268945da5818c84b04d8e6240b4f008911331f3574bd8de5",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980462",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "5919",
+            "1790941728831863188",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/state_binding.py",
+          "bytes": 15906,
+          "sha256": "99e43760236702ad53c3fed9f7ed6462d937e8a7f9da38848d58e37b71dfd983",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980461",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "15906",
+            "1790942216972108529",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-CUSTODY",
+      "source_files": [
+        "source/custody.py",
+        "tools/root_holder.py",
+        "tools/native_owner.py",
+        "native/source_owner.c"
+      ],
+      "producer": "Original Root full202 prebirth held acquisition and genuine direct Source generation",
+      "consumer": "Root client full read/hash/named9/COMMIT -> direct Source wait -> publish -> observer",
+      "raw_relation": "One original202 holder; Source-parent and observer capsules have implemented exact peer ACK, not arbitrary parent adoption",
+      "phase": "HELD_CUSTODY_AND_ADMISSION",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/custody.py",
+          "bytes": 56605,
+          "sha256": "cba6ab3149298afe0b50dcdc53187bb0c363cc518f90d95b3c816b37bbd132bc",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980444",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "56605",
+            "1790943347115417528",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/root_holder.py",
+          "bytes": 32079,
+          "sha256": "640e8e48dd70089e373b6f49965d713820b9b2d0a7e6540c071105d9b0c2d266",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980460",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "32079",
+            "1790941728831183249",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/native_owner.py",
+          "bytes": 90243,
+          "sha256": "c24609bb6ccef3976d1922659596a595e13f3dcfeeb8a55960fded47498239ac",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980458",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "90243",
+            "1790941728829563456",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/native/source_owner.c",
+          "bytes": 111016,
+          "sha256": "3e1f2722141aa31a21187c9f03e4787300ed24682166978b24cf7bd38b325e06",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980418",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "111016",
+            "1790943491567637345",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-BUDGET",
+      "source_files": [
+        "source/bounds.py",
+        "tools/root_holder.py",
+        "tools/native_owner.py",
+        "native/source_owner.c"
+      ],
+      "producer": "Original selected typed logical/native ceilings and arena/FD/IO producers",
+      "consumer": "Before-producer reservations plus actual native counters/EOF/direct wait4 RSS",
+      "raw_relation": "Source4+Root4 body lower bound2980561136 plus all real overhead; whole RAM/implicit IO unknown",
+      "phase": "SHARED_STREAM_AND_CODEC",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/bounds.py",
+          "bytes": 19120,
+          "sha256": "d304b445915461a8f6ea7399cec8ce8861b660e349f45a4017d0fd9b2d9561e1",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980436",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "19120",
+            "1790942649050695272",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/root_holder.py",
+          "bytes": 32079,
+          "sha256": "640e8e48dd70089e373b6f49965d713820b9b2d0a7e6540c071105d9b0c2d266",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980460",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "32079",
+            "1790941728831183249",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/native_owner.py",
+          "bytes": 90243,
+          "sha256": "c24609bb6ccef3976d1922659596a595e13f3dcfeeb8a55960fded47498239ac",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980458",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "90243",
+            "1790941728829563456",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/native/source_owner.c",
+          "bytes": 111016,
+          "sha256": "3e1f2722141aa31a21187c9f03e4787300ed24682166978b24cf7bd38b325e06",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980418",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "111016",
+            "1790943491567637345",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-DECODER",
+      "source_files": [
+        "source/compression.py",
+        "source/pins.py",
+        "tools/worker_entry.py",
+        "tools/state_binding.py"
+      ],
+      "producer": "Admitted exact stock codec constructor/state/API",
+      "consumer": "Streaming ZIP/DEB DecodedReader -> full digest/member framing",
+      "raw_relation": "All selected input/window/pending/output/eof/tail/raw ownership, no algorithm or seven-format cut",
+      "phase": "SHARED_STREAM_AND_CODEC",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/compression.py",
+          "bytes": 19552,
+          "sha256": "81f845b58a41fd5e733a8e062f94f442718253563ceded26e9491fde72434274",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980440",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "19552",
+            "1790942162193991468",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/pins.py",
+          "bytes": 4553,
+          "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980451",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "4553",
+            "1790941728827180318",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/worker_entry.py",
+          "bytes": 5919,
+          "sha256": "112b2fa914daa0e7268945da5818c84b04d8e6240b4f008911331f3574bd8de5",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980462",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "5919",
+            "1790941728831863188",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/state_binding.py",
+          "bytes": 15906,
+          "sha256": "99e43760236702ad53c3fed9f7ed6462d937e8a7f9da38848d58e37b71dfd983",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980461",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "15906",
+            "1790942216972108529",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-ZIP",
+      "source_files": [
+        "source/zip_wheel.py",
+        "source/raw_relations.py",
+        "source/semantics.py"
+      ],
+      "producer": "Every legitimate supported central/local/EOCD/Zip64/descriptor/CRC event",
+      "consumer": "Independent raw replay -> full member/schema/public output",
+      "raw_relation": "No sampled header or missing effective/member linkage; no extraction",
+      "phase": "ARCHIVE_AND_MEMBER_CLOSURE",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/zip_wheel.py",
+          "bytes": 63188,
+          "sha256": "12c732f0674edf432461c598f5149d65fbde67211e2366fdce4c12b0987133a8",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980456",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "63188",
+            "1790942162208992322",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/raw_relations.py",
+          "bytes": 28991,
+          "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980453",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "28991",
+            "1790942162204992094",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/semantics.py",
+          "bytes": 3622,
+          "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980455",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "3622",
+            "1790941728828767110",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-METADATA-PIN",
+      "source_files": [
+        "source/zip_wheel.py",
+        "source/normalize.py",
+        "source/filename.py",
+        "source/context.py"
+      ],
+      "producer": "Full raw METADATA/WHEEL and selected publisher/raw-selector/ordinal expectation",
+      "consumer": "Exact content/raw publisher/name/version/tag/purelib/Requires-Python correspondence",
+      "raw_relation": "Publisher document pin differs from METADATA member content hash; null differs from empty",
+      "phase": "RAW_METADATA_CORRESPONDENCE",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/zip_wheel.py",
+          "bytes": 63188,
+          "sha256": "12c732f0674edf432461c598f5149d65fbde67211e2366fdce4c12b0987133a8",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980456",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "63188",
+            "1790942162208992322",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/normalize.py",
+          "bytes": 1458,
+          "sha256": "91053cc6010512819788b5adf11af85286c74ec32f90cbc76721e280cc28a43c",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980450",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1458",
+            "1790941728827037310",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/filename.py",
+          "bytes": 1917,
+          "sha256": "12d9730bbacfbcf32896c448d9fbaa84c304b62a7b6d24210f3d3339bd2851f7",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980447",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1917",
+            "1790941728826613786",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/context.py",
+          "bytes": 20445,
+          "sha256": "43bbf91da3411a70986fc5e9d8518bc8197901dc74ca771d61fd4103fba12a4b",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980441",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "20445",
+            "1790942162194991526",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-RECORD",
+      "source_files": [
+        "source/zip_wheel.py",
+        "source/digests.py",
+        "source/raw_relations.py"
+      ],
+      "producer": "Complete strict CSV RECORD and member observations",
+      "consumer": "Bidirectional path/coverage/type/content/algorithm/size binding",
+      "raw_relation": "SHA256/384/512; exact self/signature exceptions; symlink literal content hash",
+      "phase": "RAW_METADATA_CORRESPONDENCE",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/zip_wheel.py",
+          "bytes": 63188,
+          "sha256": "12c732f0674edf432461c598f5149d65fbde67211e2366fdce4c12b0987133a8",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980456",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "63188",
+            "1790942162208992322",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/digests.py",
+          "bytes": 3970,
+          "sha256": "fd588bda6e4edbe2fe751ea69ac147a9b2bbd3271096c00b69af31bb70757b1d",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980446",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "3970",
+            "1790942162200991867",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/raw_relations.py",
+          "bytes": 28991,
+          "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980453",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "28991",
+            "1790942162204992094",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-PAX",
+      "source_files": [
+        "source/deb_archive.py",
+        "source/raw_relations.py"
+      ],
+      "producer": "Bounded raw PAX/GNU physical extension records",
+      "consumer": "Persistent global/one-shot local/delete/supersession -> effective framing and independent replay",
+      "raw_relation": "Length/raw record SHA/order/application/history preserved, not only final projected value",
+      "phase": "ARCHIVE_AND_MEMBER_CLOSURE",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/deb_archive.py",
+          "bytes": 56876,
+          "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980445",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "56876",
+            "1790942162199991810",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/raw_relations.py",
+          "bytes": 28991,
+          "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980453",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "28991",
+            "1790942162204992094",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-AR",
+      "source_files": [
+        "source/deb_archive.py",
+        "source/raw_relations.py"
+      ],
+      "producer": "Full ar magic/header/numeric/name/dialect/padding/order",
+      "consumer": "Exact debian-binary/control/data closure -> DEB public observation",
+      "raw_relation": "No unsupported dialect silently normalized; full raw closure",
+      "phase": "ARCHIVE_AND_MEMBER_CLOSURE",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/deb_archive.py",
+          "bytes": 56876,
+          "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980445",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "56876",
+            "1790942162199991810",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/raw_relations.py",
+          "bytes": 28991,
+          "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980453",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "28991",
+            "1790942162204992094",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-TAR",
+      "source_files": [
+        "source/deb_archive.py",
+        "source/raw_relations.py",
+        "source/semantics.py"
+      ],
+      "producer": "Every512-byte physical header/checksum/type/owner/mode/size/payload/padding",
+      "consumer": "Two-zero terminal/aligned tail/full events -> raw/effective/member output",
+      "raw_relation": "All supported POSIX/GNU framing and field policies retained",
+      "phase": "ARCHIVE_AND_MEMBER_CLOSURE",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/deb_archive.py",
+          "bytes": 56876,
+          "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980445",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "56876",
+            "1790942162199991810",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/raw_relations.py",
+          "bytes": 28991,
+          "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980453",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "28991",
+            "1790942162204992094",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/semantics.py",
+          "bytes": 3622,
+          "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980455",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "3622",
+            "1790941728828767110",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-LINK",
+      "source_files": [
+        "source/guards.py",
+        "source/deb_archive.py",
+        "source/semantics.py",
+        "source/contracts.py",
+        "source/broker_map.py"
+      ],
+      "producer": "Source literal links plus selected installed namespace/recipe",
+      "consumer": "Noescape/nodangle/nocycle/terminal regular target -> final destination/content/owner",
+      "raw_relation": "Hardlink/symlink source and installed identity domains stay distinct; no invented installed nlink premise",
+      "phase": "AGGREGATE_PROVENANCE_AND_CANONICAL_CONSUMER",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/guards.py",
+          "bytes": 2031,
+          "sha256": "de34c880bd18b78d2e9b691008950809a31c466d581e3f232939b30d10969806",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980449",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "2031",
+            "1790941728826884401",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/deb_archive.py",
+          "bytes": 56876,
+          "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980445",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "56876",
+            "1790942162199991810",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/semantics.py",
+          "bytes": 3622,
+          "sha256": "d136960a218c983b2863d6abdb32407eb6c48d54cd5b65231076eb63fd26ab7c",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980455",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "3622",
+            "1790941728828767110",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/contracts.py",
+          "bytes": 30961,
+          "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980442",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "30961",
+            "1790941728824240750",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/broker_map.py",
+          "bytes": 18753,
+          "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980437",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "18753",
+            "1790941728822872371",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-DEB822",
+      "source_files": [
+        "source/deb_archive.py",
+        "source/raw_relations.py",
+        "source/pins.py"
+      ],
+      "producer": "Complete raw supported known simple/folded/multiline and unknown-simple Deb822 headers",
+      "consumer": "Raw order/hash/field policy -> DEB name/version/architecture/member correspondence",
+      "raw_relation": "Unknown simple field may not acquire continuation; supported contract, no invented policy",
+      "phase": "RAW_METADATA_CORRESPONDENCE",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/deb_archive.py",
+          "bytes": 56876,
+          "sha256": "45e456a0abb69e91d8491e21d92505161102f0f46a5c899a67a93230dd1a623f",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980445",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "56876",
+            "1790942162199991810",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/raw_relations.py",
+          "bytes": 28991,
+          "sha256": "ddb053210c2353e86ae7362a1fdd5542d31267f4bbd3e263409fc6bfe9c90427",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980453",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "28991",
+            "1790942162204992094",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/pins.py",
+          "bytes": 4553,
+          "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980451",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "4553",
+            "1790941728827180318",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-RECIPE",
+      "source_files": [
+        "source/contracts.py",
+        "source/broker_map.py",
+        "source/public.py"
+      ],
+      "producer": "Acyclic selected recipe identity before observed/late manifest fields",
+      "consumer": "Actual selected source/action/created-dir/installed/supplemental observations",
+      "raw_relation": "Full namespace/action/provenance joins; DATA equality not genuine stock producer evidence",
+      "phase": "AGGREGATE_PROVENANCE_AND_CANONICAL_CONSUMER",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/contracts.py",
+          "bytes": 30961,
+          "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980442",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "30961",
+            "1790941728824240750",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/broker_map.py",
+          "bytes": 18753,
+          "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980437",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "18753",
+            "1790941728822872371",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/public.py",
+          "bytes": 60149,
+          "sha256": "ac5343b8d0fbb5630432277f07d8a1f1ef8c1529e2d6e20f23de7afea3ad1014",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980452",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "60149",
+            "1790942527410773533",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-A009",
+      "source_files": [
+        "source/contracts.py",
+        "source/broker_map.py",
+        "source/public.py"
+      ],
+      "producer": "Whole canonical fields,350 artifact identities/512 member relations and selected authority",
+      "consumer": "Full snapshot/provenance/A009 comparator and final Root eligibility",
+      "raw_relation": "Original202+148 supplemental scope retained; external genuine Root/golden/approval facts not minted",
+      "phase": "AGGREGATE_PROVENANCE_AND_CANONICAL_CONSUMER",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/contracts.py",
+          "bytes": 30961,
+          "sha256": "87be5a77bbb28e0749f27327e43e9908602af9c4af2a507067798b8eb5c8bb00",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980442",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "30961",
+            "1790941728824240750",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/broker_map.py",
+          "bytes": 18753,
+          "sha256": "e6406e2b9a45109edb760613a25241e679886fe9b3a5ee91a8387fa26603c0de",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980437",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "18753",
+            "1790941728822872371",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/public.py",
+          "bytes": 60149,
+          "sha256": "ac5343b8d0fbb5630432277f07d8a1f1ef8c1529e2d6e20f23de7afea3ad1014",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980452",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "60149",
+            "1790942527410773533",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-SCHEMA",
+      "source_files": [
+        "source/schema_validate.py",
+        "source/public.py",
+        "schemas/scan-result.v1.json",
+        "schemas/scan-resource.v1.json"
+      ],
+      "producer": "All14 owned actual schema bytes/aliases/61 refs",
+      "consumer": "Strict public role/value/document/conditional final validation",
+      "raw_relation": "All61 independent metadata resolution verified; native216 separate native contract not Source schema evidence",
+      "phase": "FINAL_SCHEMA_OUTPUT_AND_CUSTODY",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/schema_validate.py",
+          "bytes": 12176,
+          "sha256": "57ec66bc4faf68c12576cd34418c7af1a45add88bd0f881f43f7e043401bca15",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980454",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "12176",
+            "1790942162205992152",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/public.py",
+          "bytes": 60149,
+          "sha256": "ac5343b8d0fbb5630432277f07d8a1f1ef8c1529e2d6e20f23de7afea3ad1014",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980452",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "60149",
+            "1790942527410773533",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/scan-result.v1.json",
+          "bytes": 11609,
+          "sha256": "d1f40916d2b2e36c077b28888f9c4dd9712bc7a70b2e5c17c2699bbfd84c31cb",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980432",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "11609",
+            "1790941728821809110",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/schemas/scan-resource.v1.json",
+          "bytes": 39747,
+          "sha256": "d70d4914ce82272338b3f3972ed258f651743cb56087567e2d2673e6a6b889e4",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980431",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "39747",
+            "1790941728821666201",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-CONTROLS",
+      "source_files": [
+        "source/controls.py",
+        "controls/catalog.json",
+        "controls/independent-contract.json",
+        "controls/whole-closure.json",
+        "future-scan-plan/plan.json"
+      ],
+      "producer": "Original31+20+55 controls/six scenarios/seven formats and calibrated ordinary result",
+      "consumer": "Independent ordinary full output/trace/lifetime comparator and all required gates",
+      "raw_relation": "Calibration not whole-positive grant; historical unsafe cases abstract REQUIRED_NOT_RUN",
+      "phase": "ALL_ORIGINAL_SCENARIOS",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/controls.py",
+          "bytes": 9780,
+          "sha256": "1603b21d0f65c116c3e46e7611e652a8ca2bdd2aa80e273ef212838d72003aef",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980443",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "9780",
+            "1790942162196991639",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/controls/catalog.json",
+          "bytes": 12103,
+          "sha256": "a3a2c499df062b6d9c048416dc8c2dbf3aa4638b23bc47cfe5c5c219bfaa63e2",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980404",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "12103",
+            "1790941728814267372",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/controls/independent-contract.json",
+          "bytes": 1484,
+          "sha256": "0c45acead7156172974dbf89d8a7044fe90bc420724638501d86f7f927942ca0",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980405",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1484",
+            "1790941728815267430",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/controls/whole-closure.json",
+          "bytes": 21559,
+          "sha256": "8208d4bc540dce0c0b7eabbd149d14ddc8686a68af851d8b6af22bad048aeced",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980406",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "21559",
+            "1790941728815639555",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/future-scan-plan/plan.json",
+          "bytes": 16241,
+          "sha256": "083fd2a22e468ab2adcced2a55e33225a6785b1c5dcb0362f139731c28b8f59c",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980414",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "16241",
+            "1790941728816855025",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-EVIDENCE",
+      "source_files": [
+        "source/pins.py",
+        "data/all202-identity-map.json",
+        "input-index/index.json",
+        "future-scan-plan/plan.json"
+      ],
+      "producer": "Original pinned administrative graph and current whole52/code28/schema14",
+      "consumer": "Different-author exact-byte Source review plus later full independent actual qualification",
+      "raw_relation": "Historical211/16changed/31equal/164 fence not current runtime credit; installed unchanged",
+      "phase": "ALL_ORIGINAL_SCENARIOS",
+      "actual_source_pins": [
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/pins.py",
+          "bytes": 4553,
+          "sha256": "d6b0a0cdbe3f2678c2166ce327b5653bff9108089476baf28c9be44c31a84b66",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980451",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "4553",
+            "1790941728827180318",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/data/all202-identity-map.json",
+          "bytes": 298123,
+          "sha256": "ffddb01d39713c2464856b717b7512733e7d2e68da58250cfc3ff599ea552529",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980408",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "298123",
+            "1790941728815639555",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/input-index/index.json",
+          "bytes": 238293,
+          "sha256": "41781d9297176e57c5b222a3692c737e8953cae175eec17e2477af9a48a31197",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980416",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "238293",
+            "1790941728816855025",
+            "1790943768722408389"
+          ],
+          "stable9": true
+        },
+        {
+          "path": "/var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/future-scan-plan/plan.json",
+          "bytes": 16241,
+          "sha256": "083fd2a22e468ab2adcced2a55e33225a6785b1c5dcb0362f139731c28b8f59c",
+          "identity9_decimal_strings": [
+            "2050",
+            "6980414",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "16241",
+            "1790941728816855025",
+            "1790943768723408446"
+          ],
+          "stable9": true
+        }
+      ],
+      "raw_custody_phase_end": "Prospective generic raw roots + prior original packet/slot/both-family consumers; original physical process loss remains A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "cost": "Original caps unchanged; complete raw aliases/ContextVar/native/factory/cleanup costs UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "SourceReady": false,
+      "independent_review": "REQUIRED_NEW_DIFFERENT_AUTHOR_WHOLE",
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "whole_closed": false,
+  "CODE": [
+    "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+  ],
+  "GO": false
+}

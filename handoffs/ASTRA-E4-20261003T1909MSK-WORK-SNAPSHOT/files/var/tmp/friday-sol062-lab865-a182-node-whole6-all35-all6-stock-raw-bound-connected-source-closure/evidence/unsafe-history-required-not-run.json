@@ -1,0 +1,13 @@
+{
+  "schema": "friday.sol062.abstract-required-historical-controls.v1",
+  "status": "ABSTRACT_REQUIRED_NOT_RUN",
+  "required": true,
+  "waiver": false,
+  "payload": null,
+  "fixture": null,
+  "generator": null,
+  "repro": null,
+  "exploit": null,
+  "legitimate_owned_child_EOF_write_deadline_cleanup": "still REQUIRED; no source/domain/oracle removal",
+  "native_live_gates": "NOT_RUN"
+}

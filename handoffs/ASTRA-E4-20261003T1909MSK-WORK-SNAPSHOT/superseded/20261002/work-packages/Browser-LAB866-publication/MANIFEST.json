@@ -1,0 +1,643 @@
+{
+  "schema": "friday.a171.connected-whole-source-manifest.v1",
+  "assignment": "ASTRA-E4-LAB858-SOL057-WHOLE209-ALL216-ACTUAL-SOURCE-IMPLEMENTATION-A171",
+  "generation": 1,
+  "source_reference_manifest_pin": {
+    "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/SOURCE-REFERENCE-MANIFEST.json",
+    "bytes": 409906,
+    "sha256": "bc7af2e45fb85e9a0622b0dcb63ef077b5a6bca376e3b2735838c9b4274987ea",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371028",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "409906",
+      "1790930081673941866",
+      "1790930081673941866"
+    ],
+    "stable9": true
+  },
+  "seal_pin": {
+    "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/SEAL.json",
+    "bytes": 17781,
+    "sha256": "e41c644be10866277cb83f4086e8d4badfac89ccf2a156095da92bc86cf4b570",
+    "identity9_decimal_strings": [
+      "2050",
+      "4371042",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "17781",
+      "1790930210115294157",
+      "1790930210115294157"
+    ],
+    "stable9": true
+  },
+  "leaf_pins": [
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/A171-INPUT.txt",
+      "bytes": 2602,
+      "sha256": "8327f418d81f3ede5ac84b7b44287e9e2a8a59f94cf13306085143712e887ab0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371004",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2602",
+        "1790928671782238764",
+        "1790929001795128528"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/A171-OPERATIONS.txt",
+      "bytes": 28444,
+      "sha256": "51815317ba6d47b3c73aa10affd486d2504e26fff4c37d313d91a96f9445450c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371003",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "28444",
+        "1790928909552848630",
+        "1790929001795128528"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/ALL-FIVE-CONNECTED-CAUSES.json",
+      "bytes": 4375,
+      "sha256": "6422a8a2395d1440037ae280730639274be147a558079fa75ff8a076ee19487d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371034",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4375",
+        "1790930134661975027",
+        "1790930134661975027"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/AUTHOR-METADATA-CACHE-CLEANUP.json",
+      "bytes": 727,
+      "sha256": "c8d244bf118316359e526bf54bf9ba56dd0d004ad871dbc8a4024996eb0259d2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371040",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "727",
+        "1790930134667975370",
+        "1790930134667975370"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/AUTHOR-METADATA-CHECKPOINT-CONTINUATION.json",
+      "bytes": 593,
+      "sha256": "5a279bafc45197ebb3c8c2d76e4376198c8ee6525651b11905b7694f5a706fab",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371039",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "593",
+        "1790930134666975313",
+        "1790930134666975313"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/CURRENT-SOURCE209.json",
+      "bytes": 409564,
+      "sha256": "ada8d3f8d043b068db41842230f95d2a9b34294a3846848ec621ae640fafb41c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371029",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "409564",
+        "1790930081676942038",
+        "1790930081676942038"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/DELTA-RAW-GAPLESS.json",
+      "bytes": 2110570,
+      "sha256": "748bf2dfe945026c6d521fab799f0e05b6a16a6f01d4decd70a8e6fd5ab7f67d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371031",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2110570",
+        "1790930081694943068",
+        "1790930081694943068"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/EQUAL-COMPLEMENT.json",
+      "bytes": 230622,
+      "sha256": "2c5ce09e28e2871ba7a650ac50eb4e57f0172194861a00551ba8adcdbdecf043",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371030",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230622",
+        "1790930081678942152",
+        "1790930081678942152"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/EXACT29-SAFETY-MATRIX.json",
+      "bytes": 64731,
+      "sha256": "3a464624d9a06c03476888359ade4031f1f7e5424259628c5d7dfdff0337c233",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371033",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "64731",
+        "1790930134660974969",
+        "1790930134660974969"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/FINAL-TEXTUAL-INVARIANTS.json",
+      "bytes": 1032,
+      "sha256": "56f549956e424ea84687b02cd7e0f62c00f59f3dc209efe2cceb35dfd97c09b7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371038",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1032",
+        "1790930134666975313",
+        "1790930134666975313"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/INTAKE-READ-LEDGER.json",
+      "bytes": 143380,
+      "sha256": "d39b25fe40d341a53fbad4ac18702396fcb73f7d45b474780113603749847e77",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370986",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "143380",
+        "1790927717860636776",
+        "1790927717860636776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/MATERIALIZATION.json",
+      "bytes": 8046,
+      "sha256": "599129d6149fbeff929b27b567bbcc75b1d8974601b9de799d4d71464f5e3084",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371023",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8046",
+        "1790929001856132020",
+        "1790929001856132020"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/ORIGINAL216-EXPECTATIONS.json",
+      "bytes": 154754,
+      "sha256": "105216d21a6f4ee47afa818ecbdf5164b8a48e8c98e0a1587380d10ff85e6421",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370987",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "154754",
+        "1790927717862636890",
+        "1790927717862636890"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/ORIGINAL29-SAFETY-REQUIREMENTS.json",
+      "bytes": 55792,
+      "sha256": "453b69f5d9be5a6006af6f3bd8292f6d231f040a465a887445482bc61c8cb7ce",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370988",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "55792",
+        "1790927717863636947",
+        "1790927717863636947"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/OWNER-RESOURCE-CUSTODY-GRAPH.json",
+      "bytes": 24893,
+      "sha256": "596149b5ca7ce58f162abe8fd4c4598485d96e1065a6476b9c09ec91defd34d3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371036",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24893",
+        "1790930134664975198",
+        "1790930134664975198"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/PRESERVED-ALL2-AND-ORIGINAL-SCOPE.json",
+      "bytes": 13161,
+      "sha256": "1ee39e5057eb7697b3c1c4fe9c0302ad2b7c56d3e89940dae17457cd20e6d1b7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371035",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13161",
+        "1790930134663975141",
+        "1790930134663975141"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/REPORTS-READ-LEDGER.json",
+      "bytes": 112427,
+      "sha256": "a7e3de47616e3ce2449ed978ab4e81082ab1ebb5f8eff51f2a0289d9af97a5f7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371041",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "112427",
+        "1790930134668975427",
+        "1790930134668975427"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/SOURCE-REFERENCE-MANIFEST.json",
+      "bytes": 409906,
+      "sha256": "bc7af2e45fb85e9a0622b0dcb63ef077b5a6bca376e3b2735838c9b4274987ea",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371028",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "409906",
+        "1790930081673941866",
+        "1790930081673941866"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/TYPED216-CONTRACTS.json",
+      "bytes": 157395,
+      "sha256": "2e1b6dfcf4c13e161730db7cfb9b2af5ff663fbc1a82508ae2ce1e50fb5913be",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371022",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "157395",
+        "1790929001852131791",
+        "1790929001852131791"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/WHOLE209-CLASSIFICATION.json",
+      "bytes": 171261,
+      "sha256": "63e31dbc9a042ed8960fbc3317fb42b7aa65aa497a77d8aa4f157e7f0a0b9360",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371037",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "171261",
+        "1790930134665975256",
+        "1790930134665975256"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/WHOLE216-ACTUAL-SOURCE-MATRIX.json",
+      "bytes": 1046120,
+      "sha256": "9a790d6beab418a05d8d119204b7b0d339ddf6852c0147b0a531698aa33ee069",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371032",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1046120",
+        "1790930134658974855",
+        "1790930134658974855"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/a171_materialize.py",
+      "bytes": 20386,
+      "sha256": "c7c2ee4c5a9f134d166823188611d42313ea2c05ccc26244186c0f0643373168",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371021",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20386",
+        "1790928980699921050",
+        "1790929001795128528"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/a171_metadata.py",
+      "bytes": 4936,
+      "sha256": "7be6be99a65df49fdbf18a037c9f2da190f58d1c1010a81065ad56fe6bcf35c6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370985",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4936",
+        "1790927711704284388",
+        "1790927717763631224"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/a171_publish.py",
+      "bytes": 36317,
+      "sha256": "cd51959160c90b7abf99955b91e3ad2314289ed29ae43e8a996e99e2f20ded53",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371027",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "36317",
+        "1790930210005287860",
+        "1790930210005287860"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A071-BILL.json",
+      "bytes": 149014,
+      "sha256": "eb9cc38144f33e25a6a5dc5630fd8b38565d0c75a87a31d69a0a44d1587157cc",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979792",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "149014",
+        "1790935043665576726",
+        "1790935043665576726"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A071-BUILD-RECIPE.json",
+      "bytes": 10204,
+      "sha256": "9828a63746715ad4e753b269aeacbaab6b9b9c9aec2e98f35c819aa93abcee2e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979793",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10204",
+        "1790935043666313827",
+        "1790935043666313827"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 227193,
+      "sha256": "cf99fae2979256597c658fb889699798e2a46d578a734903f59d490c36c6970c",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979794",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "227193",
+        "1790935043667313884",
+        "1790935043667313884"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A071-SCHEMA.json",
+      "bytes": 18931,
+      "sha256": "a1ace93c26eca44eaf2f6b623d010bb2da70fc3a74fb086f746721840a636639",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979795",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18931",
+        "1790935043668313941",
+        "1790935043668313941"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A071-SUPERVISOR.py",
+      "bytes": 54263,
+      "sha256": "e35ff3b99508109588b15d2b09495880703f075cebb3685492b98d8475c687d8",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979796",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "54263",
+        "1790935043669313999",
+        "1790935043669313999"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 101546,
+      "sha256": "ca7fbfb013653ebae18b4b7a23c38c871579dce51c84a62d87d2bdf5bf1c17e0",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979797",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101546",
+        "1790935043669313999",
+        "1790935043669313999"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A104-ORDINARY-CONTRACTS.json",
+      "bytes": 89618,
+      "sha256": "d891b6302ca3f4c662b8188fed60ce443600966aee1f9927b51b14ce0d825cc1",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979798",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "89618",
+        "1790935043670314056",
+        "1790935043670314056"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A118-CONNECTED-CONTRACT.json",
+      "bytes": 19606,
+      "sha256": "e655ed2c859cad06a3dd629d3b0a28bc130d83e988fde74289c03f1c92619b52",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979799",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19606",
+        "1790935043671314113",
+        "1790935043671314113"
+      ],
+      "stable9": true
+    }
+  ],
+  "full209": 209,
+  "changed_members": 8,
+  "equal_members": 201,
+  "original216": 216,
+  "original_remaining165": {
+    "ordinary": 136,
+    "exact29": 29
+  },
+  "Source_counts": {
+    "existing_genuine_source_primitives_retained": 51,
+    "new_actual_source_candidates_unreviewed": 65,
+    "new_ordinary_actual_source_candidates_unreviewed": 64,
+    "new_exact29_actual_source_candidates_unreviewed": 1,
+    "mandatory_specific_code_residuals": 100,
+    "ordinary_specific_code_residuals": 72,
+    "exact29_specific_code_residuals": 28,
+    "new_qualified_cases": 0
+  },
+  "allfive": "COHERENT_SOURCE_ATTEMPT_RESIDUALS_EXPLICIT_NOT_COMPLETE",
+  "original_scope_caps_topology_scenarios": "PRESERVED_UNWEAKENED",
+  "actual_acceptance_MSK": "2026-10-02 10:53:10 MSK",
+  "resource_accounting": {
+    "bounded_assignment_seconds": 6600,
+    "seal_reserve_seconds": 600,
+    "read_cap": 268435456,
+    "traced_physical_read_bytes_so_far": 34136411,
+    "conservative_read_reservations": {
+      "literal_shell_tool_reads": 67108864,
+      "apply_patch_and_tool_source_transport": 33554432,
+      "author_stock_interpreter_implicit_library_io": 33554432,
+      "final_reverification_allowance": 16777216
+    },
+    "conservative_read_upper_bound_bytes": 185131355,
+    "RAM_cap": 8589934592,
+    "output_cap": 16777216,
+    "output_leaf_and_seal_bytes": 5885075,
+    "author_metadata_helper_peak_self_KiB": 615856,
+    "whole_assignment_RAM": "UNKNOWN_NOT_ZERO",
+    "implicit_IO_actual_total": "UNKNOWN_WITH_CONSERVATIVE_BOUNDED_RESERVE",
+    "model_input_output_cached_reasoning_tokens_dollars": "UNKNOWN_NOT_ZERO",
+    "local_parallel_cap": 4,
+    "model_children": 0,
+    "network": 0,
+    "supplied_execution": 0,
+    "tests_native_Root_runtime_gates": 0,
+    "retries": 0
+  },
+  "source_execution_admission": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "all216": "REQUIRED_NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "installed": "0.208.58/r5RED_UNCHANGED",
+  "frozen": "0.208.64/schema50/cecd28a9_UNCHANGED",
+  "acyclic_hash_graph": true,
+  "initial_worknotes_are_not_final_Source": "MATERIALIZATION.json/A171-INPUT.txt/A171-OPERATIONS.txt/a171_materialize.py are initial assembly history, not final-byte build replay; use final source directory/ref pins"
+}

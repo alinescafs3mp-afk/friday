@@ -1,0 +1,12 @@
+{
+  "event_id": "ASTRA-SOL-E4-SOL060-T1",
+  "assignment": "ASTRA-E4-SOL060-LAB863-NODE-WHOLE6-ALL35-ALL6-CONNECTED-ERROR-RAW-SOURCE-CLOSURE",
+  "generation": 1,
+  "task_ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL060-TASK.txt",
+  "sha256": "0c84dc3f498bcbcaff7bf5c801d560925f887c42f0e63a1f4180ef3f339a98ee",
+  "accepted_at": "2026-10-02T12:44:44.680479643+03:00",
+  "accepted_epoch_ns": 1790934284680479643,
+  "compact": "VERIFIED_ONCE",
+  "queue": "exact_task_already_started; checkpoint_count0",
+  "effects": "INERT_TEXT_JSON_AND_STOCK_METADATA_ONLY"
+}

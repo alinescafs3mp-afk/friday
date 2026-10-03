@@ -1,0 +1,1 @@
+#@CALLER_UID@ ALL=(root) NOPASSWD:NOSETENV: /usr/bin/python3.14 -I -B -S /usr/libexec/friday/quality-gate-broker-v1/@PACKAGE_SHA256@/broker_bootstrap.py run-v1

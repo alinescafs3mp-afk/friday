@@ -1,0 +1,821 @@
+{
+  "schema": "friday.a191.whole-original-producerconsumer-review.v1",
+  "review_key": "SOL062-terminal64581c94cdd5-manifest5316343b810b-whole6-actual5changed1equal-all35all6all3-current19",
+  "normative": {
+    "input": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A191-INPUT-20261002.json",
+    "input_sha256": "7de0512a468fee2125dda1d4f8fcc972cfe94b41fbea88f293cfec0d1062eb5a",
+    "original_scope": "author/normative-ASTRA-E4-A169-NODE-EXACT-INT9-WHOLE-SCOPE-20261002.json",
+    "original_scope_sha256": "3435f9526751565165c852b98ccda72de6a533113d3edc52f82d88d5dcc785e6",
+    "original_six_contract": "author/original-expectations.json",
+    "original_all35": "provenance/LAB865/provenance/LAB863/evidence/all35-producer-consumer-matrix.json",
+    "original_all35_sha256": "86491544550cb1001ae8f8942c3b22f3cf56cbdbd15cbd405c3451e8caef9a1a",
+    "full_original_SOL062_input": "author/input.json",
+    "original_A182_full_review": "/var/tmp/friday-astra-sol060-node-whole6-all35-all6-raw-error-bound-independent-source-review-a182-g1/review.txt",
+    "A184_full_review": "/var/tmp/friday-astra-lab865-node-whole6-all35-all6-stock-cause-bound-independent-source-review-a184-g1/review.txt"
+  },
+  "scope": {
+    "whole6": true,
+    "whole3actors": true,
+    "original35": 35,
+    "original6": 6,
+    "originalGPG6": 6,
+    "original3": 3,
+    "F1F2D1D2": true,
+    "fullsource_lines": 6673,
+    "lexical_sections": 245,
+    "nested_defs": 26,
+    "not_author_residual_only": true,
+    "no_AST_execution": true
+  },
+  "findings": [
+    {
+      "id": "B01",
+      "kind": "ORIGINAL_STOCK_COMPLETE_NEW_SHAPE_BOUND_OPEN",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "A191 requirements[1..2]",
+        "original A169 all35 exact complete message/source/producer bounds, original32KiB/64KiB/2MiB caps"
+      ],
+      "source_sites": [
+        "caller.py:166",
+        "caller.py:496",
+        "caller.py:606",
+        "caller.py:2445",
+        "caller.py:2755",
+        "supervisor.py:204",
+        "supervisor.py:286",
+        "supervisor.py:2024",
+        "verifier.py:188",
+        "verifier.py:298",
+        "verifier.py:1306"
+      ],
+      "fact": "The256 owner/history ceilings and128 node/value/frame counts bound counts, not complete new full graph/history/default/raw/escape widths and repeated JSON copies. PUBLIC_FIXED_RESERVE489472 and raw-only1669337 are partition arithmetic, not joined current stock factories/alias/error bytes across all producers. No changed complete fixed-stock producer proof establishes inner32768/supervisor65536/outer2097152 fit.",
+      "negative_assertion": "65536 aggregate bytes would require87384 base64 bytes alone; this disproves caps-alone fit inference, NOT a claim fixed pinned stock GPG actually emits65536. No universal native objects or private heap serialization required.",
+      "future_facts_alone_CODE": false
+    },
+    {
+      "id": "B02",
+      "kind": "FULL_ORIGINAL_OTHER_SIDE_DELIVERY_BEFORE_PRIVATE_OWNER_END_OPEN",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "A191 requirement1: complete original raw/error custody and accepted original other-side receiver before private owner exit",
+        "original F2 required full raw/count/SHA/no summary substitute"
+      ],
+      "source_sites": [
+        "verifier.py:843",
+        "verifier.py:1674",
+        "verifier.py:1681",
+        "supervisor.py:2149",
+        "supervisor.py:2156",
+        "caller.py:2819"
+      ],
+      "fact": "encode/projection overflow or emission failure goes to native _exit without an accepted full current receipt or admitted other-side raw/error owner. Native objects retained privately until process end do not deliver their full evidence after that end. Normal complete reversible preimage transmission is credited; missing/partial/oversized output remains honest rejection, not full required prefix delivery.",
+      "future_facts_alone_CODE": false
+    },
+    {
+      "id": "B03",
+      "kind": "MANDATORY_ORIGINAL_RAW_PREFIX_COMPLETENESS_OPEN",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "original F2/all6 stdout stderr status and writable data full original produced bytes/count/SHA/alias",
+        "A191 source-only stock native+recorder prefix custody requirement"
+      ],
+      "source_sites": [
+        "verifier.py:770",
+        "verifier.py:789",
+        "verifier.py:1028",
+        "supervisor.py:1006",
+        "caller.py:1729",
+        "caller.py:1754",
+        "caller.py:2070"
+      ],
+      "fact": "attempted once, native owner/pending chunk, partial flags and lostless returned-byte projections are improved. However fstat failure, unsettled producer or quota check before reading, short/drifting/failed read, pending commit/capture failure can leave unread produced bytes only in an FD that is later once-closed; no complete original other-side handoff closes these prefixes. Both receivers correctly reject partial cells. No reread/retry or numeric-slot guessing is authorized.",
+      "future_facts_alone_CODE": false
+    },
+    {
+      "id": "B04",
+      "kind": "DEFINITE_NORMAL_ALL6_FD_HISTORY_CAPACITY_CONTRADICTION",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "original all6 unchanged cases/order and ordinary successful process observation/cleanup roles",
+        "A191 finite resources/onceFD/whole methods, original FD256 simultaneous cap and separate20MiB running-read reserve"
+      ],
+      "source_sites": [
+        "caller.py:702",
+        "caller.py:737",
+        "caller.py:878",
+        "caller.py:931",
+        "caller.py:992",
+        "caller.py:1202",
+        "caller.py:1370",
+        "caller.py:1471",
+        "caller.py:1847",
+        "caller.py:2021",
+        "caller.py:2493",
+        "caller.py:2578"
+      ],
+      "fact": "FD_ALLOCATION_USED increases for every acquisition and is never reclaimed, including proc descriptors closed immediately. A benign six-case source path needs >=255 allocations even with zero running-loop observations:22 unique component dirs +19 inputs +4 bootstrap +[33,33,33,34,34,35] launches/completions +8 final cleanup/terminal. One legal complete running observe alone adds>=7 and gives262>256; tree or actual descendant allocations only add more. preown_fd refuses before a later normal acquisition and can prevent later original cases/mandatory terminal sampling. Original simultaneous NOFILE256 does not imply total lifetime acquisition256.",
+      "symbolic_path_not_runtime_reproduction": true,
+      "source_negative_control": "No running iterations gives255<=256; one ordinary full live observation gives262>256. No hostile provider, arbitrary failure flood or operational fixture.",
+      "future_facts_alone_CODE": false
+    },
+    {
+      "id": "B05",
+      "kind": "CONDITIONAL_STOCK_RECORDER_PREFIX_CONTINUATION_NOT_CLOSED",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "A191 requirement1 neither secondary projection/serialization error may skip later raw/known owner retirement/original primary rethrow",
+        "original F1/F2 stock partial/native+recorder error-prefix closure"
+      ],
+      "source_sites": [
+        "caller.py:475",
+        "caller.py:1754",
+        "caller.py:2077",
+        "caller.py:2507",
+        "caller.py:2806",
+        "supervisor.py:1353",
+        "supervisor.py:1006",
+        "supervisor.py:2061",
+        "supervisor.py:2125",
+        "verifier.py:182",
+        "verifier.py:1635",
+        "verifier.py:1646"
+      ],
+      "fact": "Designated verifier.call secondary loops now store native failures and complete all captures/stream closes before deferred/public projection, so prior exact_error interruption there is FIXED. Other guarded catch bodies still call deferred_error with fallible exhausted256 owner journal, and outer finalizer guards are not themselves protected. A recorder failure there can interrupt another cell or bypass later physical final cleanup. The candidate does not join a complete actual stock reachable journal/recorder cost proof. This is conditional stock prefix CODE_OPEN, not an assertion arbitrary native reconstruction or malloc-proof C arena is mandated.",
+      "future_facts_alone_CODE": false
+    }
+  ],
+  "actors": [
+    {
+      "actor": "verifier",
+      "normal_producer": "call:929 -> native GPG memfd stdout/stderr/status/writable -> retain_cell:770 -> published_cell:843",
+      "exact_raw_before_loss": "cell.raw_object parts/pending/tail and native capture/decode errors; full output FD identity before/after; produced separate from returned charge",
+      "onceFD": "prospective allocation record before native syscall; exact returned number before wrapper; attempted/RETIRE_UNKNOWN beforeclose; capture all existing cells before all stream firstcloses",
+      "consumer": "supervisor.strict_receipt:1526/validate_common_inner:1549 then caller.validate_fullraw_layers:2191",
+      "normal_status": "SOURCE_REPAIR_CREDIT_RUNTIME_NOT_RUN",
+      "fault_or_partial": "B03; no unreturned allocation guess; Popen implicit internals need separate qualified-stock fact, not new malicious interpreter obligation",
+      "publication_or_loss": "B01/B02"
+    },
+    {
+      "actor": "supervisor",
+      "normal_producer": "TRANSPORT memfd bytes -> drain:930 -> retain_produced_transport:1006 -> capture_inner_evidence:1702/check_inner:1723",
+      "exact_raw_before_loss": "returned chunks held in data/pending before quota/extend; full parsed inner retained before validation; native errors retained",
+      "onceFD": "reserve_allocation/acquire_owned/acquire_pipe then unique generation physical once retirement; both pipe returns recorded; finish_allocations after designated finalizer closes",
+      "consumer": "caller.validate_canonical:2229/validate_entry:2338/supervisor_resources:2116",
+      "normal_status": "SOURCE_REPAIR_CREDIT_RUNTIME_NOT_RUN",
+      "fault_or_partial": "B03/B05; next independent raw cell normally attempted before projection; deferred recorder guard remains conditional",
+      "publication_or_loss": "B01/B02"
+    },
+    {
+      "actor": "caller",
+      "normal_producer": "launch:1847 -> drain_pipes:1754 -> capture_pipe:1729 -> full_supervisor/full_inner validation",
+      "exact_raw_before_loss": "LAUNCH_OWNERS primary+traceback/captureerrors/pipes; data/pending; original parsed objects before rejection",
+      "onceFD": "preown_fd + returned record before map/fstat; early aliases cleared before batch close; terminal close_final physical phase before public graph; DATA3 independent once state",
+      "consumer": "encode_complete:2760 -> wire_receipt:2388/recover_wire_receipt:2413 exact full reversible self-check; actual external full receiver not run",
+      "normal_status": "SOURCE_REPAIR_CREDIT_RUNTIME_NOT_RUN",
+      "fault_or_partial": "B03/B05 plus definite B04 normal arena capacity",
+      "publication_or_loss": "B01/B02"
+    }
+  ],
+  "original_all6": [
+    {
+      "index": 0,
+      "oracle": {
+        "case": "startup-env-negative",
+        "consumer": "fixed supervisor -> fixed verifier",
+        "outer_exit": 0,
+        "outer_status": "STARTUP_CONTROL_CAUSE_CONFIRMED",
+        "inner_exit": 2,
+        "inner_status": "NOT_PROVEN",
+        "cause_type": "Refusal",
+        "cause": "nonroot exact three-variable startup environment required",
+        "preexec_ENV": {
+          "PATH": "/usr/bin:/bin",
+          "LANG": "C"
+        },
+        "actual_ENV": "PATH/LANG exact, LC_ALL absent, optional actually observed nonempty LC_CTYPE retained",
+        "GPG_calls": 0,
+        "private_home_intent": "NOT_ATTEMPTED",
+        "private_home_absence": null,
+        "complete_inner_and_outer_receipts": true
+      },
+      "producer": "supervisor -> verifier complete receipts and phases; verify-node originalGPG6",
+      "consumer": "supervisor.check_inner:1723 -> caller.validate_canonical:2229",
+      "current_stock_cause_schema": "fullgraph validator then recomputed original rootcause, not selfdeclared stock_cause",
+      "raw_owner": "caller two original streams; normal supervisor inner32KiB and outer64KiB; no fabricated null/zero fields",
+      "caps_or_roles_unchanged": true,
+      "runtime": "NOT_RUN",
+      "Source_status": "B01-B05 prevent wholeclosure"
+    },
+    {
+      "index": 1,
+      "oracle": {
+        "case": "startup-as-negative",
+        "consumer": "fixed supervisor -> fixed verifier",
+        "outer_exit": 0,
+        "outer_status": "STARTUP_CONTROL_CAUSE_CONFIRMED",
+        "inner_exit": 2,
+        "inner_status": "NOT_PROVEN",
+        "cause_type": "Refusal",
+        "cause": "pre-interpreter inherited limit mismatch",
+        "inner_AS_soft_hard": [
+          67108864,
+          67108864
+        ],
+        "GPG_calls": 0,
+        "private_home_intent": "NOT_ATTEMPTED",
+        "private_home_absence": null,
+        "complete_inner_and_outer_receipts": true
+      },
+      "producer": "supervisor -> verifier complete receipts and phases; verify-node originalGPG6",
+      "consumer": "supervisor.check_inner:1723 -> caller.validate_canonical:2229",
+      "current_stock_cause_schema": "fullgraph validator then recomputed original rootcause, not selfdeclared stock_cause",
+      "raw_owner": "caller two original streams; normal supervisor inner32KiB and outer64KiB; no fabricated null/zero fields",
+      "caps_or_roles_unchanged": true,
+      "runtime": "NOT_RUN",
+      "Source_status": "B01-B05 prevent wholeclosure"
+    },
+    {
+      "index": 2,
+      "oracle": {
+        "case": "verify-node",
+        "consumer": "fixed supervisor -> fixed verifier -> six fixed GPG calls",
+        "outer_exit": 0,
+        "outer_status": "QUALIFIED_SUPERVISED_NODE_RAW_PUBLISHER_CHAIN_PROVEN",
+        "inner_exit": 0,
+        "inner_status": "QUALIFIED_NODE_RAW_PUBLISHER_CHAIN_PROVEN",
+        "calls": [
+          "show-raw-key",
+          "dearmor",
+          "check-self-signatures-and-bindings",
+          "positive-gpg",
+          "positive-gpgv-body",
+          "negative-same-path-changed-row"
+        ],
+        "independently_expected_primary": "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
+        "archive": "node-v22.23.2-linux-x64.tar.xz",
+        "archive_sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307",
+        "archive_bytes": 31058332,
+        "strict_signed_body_equals_gpgv_body": true,
+        "same_actual_gpg_signer": true,
+        "changed_row_exact_BADSIG_not_generic_failure": true,
+        "same_held_archive_inert_digest_mismatch": true,
+        "complete_inner_and_outer_receipts": true
+      },
+      "producer": "supervisor -> verifier complete receipts and phases; verify-node originalGPG6",
+      "consumer": "supervisor.check_inner:1723 -> caller.validate_canonical:2229",
+      "current_stock_cause_schema": "fullgraph validator then recomputed original rootcause, not selfdeclared stock_cause",
+      "raw_owner": "caller two original streams; normal supervisor inner32KiB and outer64KiB; no fabricated null/zero fields",
+      "caps_or_roles_unchanged": true,
+      "runtime": "NOT_RUN",
+      "Source_status": "B01-B05 prevent wholeclosure"
+    },
+    {
+      "index": 3,
+      "oracle": {
+        "case": "supervisor-entry-fd7",
+        "consumer": "fixed supervisor strict pre-ctypes inherited0..5 guard",
+        "own_extra": {
+          "fd": 7,
+          "role": "ordinary-surplus.txt",
+          "readonly": true
+        },
+        "outer_exit": 2,
+        "outer_status": "NOT_PROVEN",
+        "cause_type": "Refusal",
+        "cause": "unknown bootstrap inherited descriptor",
+        "fork_state": "NOT_ATTEMPTED",
+        "GPG_calls": 0,
+        "runtime_callback": "NOT_PREPARED",
+        "complete_supervisor_receipt": true,
+        "inner_receipt": null
+      },
+      "producer": "supervisor pre-ctypes original inherited guard -> fullgraph Refusal nofork",
+      "consumer": "caller.validate_entry:2338",
+      "current_stock_cause_schema": "fullgraph validator then recomputed original rootcause, not selfdeclared stock_cause",
+      "raw_owner": "caller two original streams; normal supervisor inner32KiB and outer64KiB; no fabricated null/zero fields",
+      "caps_or_roles_unchanged": true,
+      "runtime": "NOT_RUN",
+      "Source_status": "B01-B05 prevent wholeclosure"
+    },
+    {
+      "index": 4,
+      "oracle": {
+        "case": "supervisor-entry-fd127",
+        "consumer": "fixed supervisor strict pre-ctypes inherited0..5 guard",
+        "own_extra": {
+          "fd": 127,
+          "role": "ordinary-surplus.txt",
+          "readonly": true
+        },
+        "outer_exit": 2,
+        "outer_status": "NOT_PROVEN",
+        "cause_type": "Refusal",
+        "cause": "unknown bootstrap inherited descriptor",
+        "fork_state": "NOT_ATTEMPTED",
+        "GPG_calls": 0,
+        "runtime_callback": "NOT_PREPARED",
+        "complete_supervisor_receipt": true,
+        "inner_receipt": null
+      },
+      "producer": "supervisor pre-ctypes original inherited guard -> fullgraph Refusal nofork",
+      "consumer": "caller.validate_entry:2338",
+      "current_stock_cause_schema": "fullgraph validator then recomputed original rootcause, not selfdeclared stock_cause",
+      "raw_owner": "caller two original streams; normal supervisor inner32KiB and outer64KiB; no fabricated null/zero fields",
+      "caps_or_roles_unchanged": true,
+      "runtime": "NOT_RUN",
+      "Source_status": "B01-B05 prevent wholeclosure"
+    },
+    {
+      "index": 5,
+      "oracle": {
+        "case": "verifier-entry-fd7",
+        "consumer": "fixed verifier strict inherited0..6 guard before general imports",
+        "own_extra": {
+          "fd": 7,
+          "role": "ordinary-surplus.txt",
+          "readonly": true
+        },
+        "exit": 1,
+        "stdout_bytes": 0,
+        "stderr": "complete bounded actual traceback ending RuntimeError: unknown bootstrap inherited descriptor newline",
+        "GPG_calls": 0,
+        "private_home": "externally planned absent name; no mkdir",
+        "inner_receipt": null,
+        "inner_resources": null,
+        "inner_resources_reason": "guard precedes general imports and JSON/resource initialization; unknown, never zero"
+      },
+      "producer": "verifier pre-import exact inherited guard -> original fullstderr RuntimeError",
+      "consumer": "caller.validate_entry:2338",
+      "current_stock_cause_schema": "unchanged complete uncaught traceback",
+      "raw_owner": "caller two original streams; normal supervisor inner32KiB and outer64KiB; no fabricated null/zero fields",
+      "caps_or_roles_unchanged": true,
+      "runtime": "NOT_RUN",
+      "Source_status": "B01-B05 prevent wholeclosure"
+    }
+  ],
+  "original_GPG6": [
+    {
+      "index": 1,
+      "label": "show-raw-key",
+      "tool": "gpg",
+      "source_line": 1531,
+      "writable": [],
+      "custody": "raw publisher key FD",
+      "oracle": "key_listing strict exact primary/current key fingerprint and algorithm/caps; no writable slot",
+      "keyring": "--no-keyring; readonly home; zero explicit ring",
+      "producer_cap": {
+        "AS": 67108864,
+        "CPU_seconds": 20,
+        "wall_seconds": 30,
+        "NOFILE": 128,
+        "NPROC": 0,
+        "CORE": 0,
+        "aggregate_output_with_writable": 65536,
+        "per_file": "floor((65536-TOTAL_OUTPUT)/(3+writable_count)); first maximum21845"
+      },
+      "raw_channels": [
+        "stdout",
+        "stderr",
+        "status"
+      ],
+      "all_cells_preowned_and_attempted_before_stream_close": true,
+      "secondary_capacity": "2+2*(3+writable)+3 =11+2*writable; constructor journal/source cost separately",
+      "full_receiver": "supervisor.validate_common_inner + caller.validate_fullraw_layers",
+      "normal": "SOURCE_CREDIT_ONLY_NOT_RUN",
+      "error_prefix": "B01/B02/B03/B05",
+      "do_not_infer_fixed_stock_emits_fullcap": true
+    },
+    {
+      "index": 2,
+      "label": "dearmor",
+      "tool": "gpg",
+      "source_line": 1535,
+      "writable": [
+        "binary-key"
+      ],
+      "custody": "raw publisher key FD -> full writable binary-key FD",
+      "oracle": "dearmor rc0 plus complete bytes equal strict keypacket; sealed after fullraw capture",
+      "keyring": "--no-keyring; readonly home; zero explicit ring",
+      "producer_cap": {
+        "AS": 67108864,
+        "CPU_seconds": 20,
+        "wall_seconds": 30,
+        "NOFILE": 128,
+        "NPROC": 0,
+        "CORE": 0,
+        "aggregate_output_with_writable": 65536,
+        "per_file": "floor((65536-TOTAL_OUTPUT)/(3+writable_count)); first maximum21845"
+      },
+      "raw_channels": [
+        "stdout",
+        "stderr",
+        "status",
+        "binary-key"
+      ],
+      "all_cells_preowned_and_attempted_before_stream_close": true,
+      "secondary_capacity": "2+2*(3+writable)+3 =11+2*writable; constructor journal/source cost separately",
+      "full_receiver": "supervisor.validate_common_inner + caller.validate_fullraw_layers",
+      "normal": "SOURCE_CREDIT_ONLY_NOT_RUN",
+      "error_prefix": "B01/B02/B03/B05",
+      "do_not_infer_fixed_stock_emits_fullcap": true
+    },
+    {
+      "index": 3,
+      "label": "check-self-signatures-and-bindings",
+      "tool": "gpg",
+      "source_line": 1542,
+      "writable": [],
+      "custody": "explicit sealed binary-key FD",
+      "oracle": "key_listing checked self signatures/bindings/subkey cross-certification and current expiries/revocation",
+      "keyring": "explicit original sealed ring; --no-keyring absent",
+      "producer_cap": {
+        "AS": 67108864,
+        "CPU_seconds": 20,
+        "wall_seconds": 30,
+        "NOFILE": 128,
+        "NPROC": 0,
+        "CORE": 0,
+        "aggregate_output_with_writable": 65536,
+        "per_file": "floor((65536-TOTAL_OUTPUT)/(3+writable_count)); first maximum21845"
+      },
+      "raw_channels": [
+        "stdout",
+        "stderr",
+        "status"
+      ],
+      "all_cells_preowned_and_attempted_before_stream_close": true,
+      "secondary_capacity": "2+2*(3+writable)+3 =11+2*writable; constructor journal/source cost separately",
+      "full_receiver": "supervisor.validate_common_inner + caller.validate_fullraw_layers",
+      "normal": "SOURCE_CREDIT_ONLY_NOT_RUN",
+      "error_prefix": "B01/B02/B03/B05",
+      "do_not_infer_fixed_stock_emits_fullcap": true
+    },
+    {
+      "index": 4,
+      "label": "positive-gpg",
+      "tool": "gpg",
+      "source_line": 1555,
+      "writable": [],
+      "custody": "sealed binary ring + same owned signed-input reader FD/path",
+      "oracle": "exact GOODSIG/VALIDSIG signer/primary/current validity accepted",
+      "keyring": "explicit original sealed ring; --no-keyring absent",
+      "producer_cap": {
+        "AS": 67108864,
+        "CPU_seconds": 20,
+        "wall_seconds": 30,
+        "NOFILE": 128,
+        "NPROC": 0,
+        "CORE": 0,
+        "aggregate_output_with_writable": 65536,
+        "per_file": "floor((65536-TOTAL_OUTPUT)/(3+writable_count)); first maximum21845"
+      },
+      "raw_channels": [
+        "stdout",
+        "stderr",
+        "status"
+      ],
+      "all_cells_preowned_and_attempted_before_stream_close": true,
+      "secondary_capacity": "2+2*(3+writable)+3 =11+2*writable; constructor journal/source cost separately",
+      "full_receiver": "supervisor.validate_common_inner + caller.validate_fullraw_layers",
+      "normal": "SOURCE_CREDIT_ONLY_NOT_RUN",
+      "error_prefix": "B01/B02/B03/B05",
+      "do_not_infer_fixed_stock_emits_fullcap": true
+    },
+    {
+      "index": 5,
+      "label": "positive-gpgv-body",
+      "tool": "gpgv",
+      "source_line": 1562,
+      "writable": [
+        "verified-body"
+      ],
+      "custody": "same reader + explicit ring -> writable verified-body FD",
+      "oracle": "same accepted signer and full body equals strict signed body; no incompatible gpg options",
+      "keyring": "explicit original sealed ring; --no-keyring absent",
+      "producer_cap": {
+        "AS": 67108864,
+        "CPU_seconds": 20,
+        "wall_seconds": 30,
+        "NOFILE": 128,
+        "NPROC": 0,
+        "CORE": 0,
+        "aggregate_output_with_writable": 65536,
+        "per_file": "floor((65536-TOTAL_OUTPUT)/(3+writable_count)); first maximum21845"
+      },
+      "raw_channels": [
+        "stdout",
+        "stderr",
+        "status",
+        "verified-body"
+      ],
+      "all_cells_preowned_and_attempted_before_stream_close": true,
+      "secondary_capacity": "2+2*(3+writable)+3 =11+2*writable; constructor journal/source cost separately",
+      "full_receiver": "supervisor.validate_common_inner + caller.validate_fullraw_layers",
+      "normal": "SOURCE_CREDIT_ONLY_NOT_RUN",
+      "error_prefix": "B01/B02/B03/B05",
+      "do_not_infer_fixed_stock_emits_fullcap": true
+    },
+    {
+      "index": 6,
+      "label": "negative-same-path-changed-row",
+      "tool": "gpg",
+      "source_line": 1585,
+      "writable": [],
+      "custody": "same exact argument template/path/reader and owned writer one signed-row byte changed",
+      "oracle": "nonzero rc and exactly BADSIG; reject generic missing-key/error; restore full original raw then seal",
+      "keyring": "explicit original sealed ring; --no-keyring absent",
+      "producer_cap": {
+        "AS": 67108864,
+        "CPU_seconds": 20,
+        "wall_seconds": 30,
+        "NOFILE": 128,
+        "NPROC": 0,
+        "CORE": 0,
+        "aggregate_output_with_writable": 65536,
+        "per_file": "floor((65536-TOTAL_OUTPUT)/(3+writable_count)); first maximum21845"
+      },
+      "raw_channels": [
+        "stdout",
+        "stderr",
+        "status"
+      ],
+      "all_cells_preowned_and_attempted_before_stream_close": true,
+      "secondary_capacity": "2+2*(3+writable)+3 =11+2*writable; constructor journal/source cost separately",
+      "full_receiver": "supervisor.validate_common_inner + caller.validate_fullraw_layers",
+      "normal": "SOURCE_CREDIT_ONLY_NOT_RUN",
+      "error_prefix": "B01/B02/B03/B05",
+      "do_not_infer_fixed_stock_emits_fullcap": true
+    }
+  ],
+  "original_all3": [
+    {
+      "id": "A16901",
+      "producer": "supervisor.observe_owned:835 resources bootstrap_startup/last_live_supervisor/postexit + typed telemetry; verifier.resources:704 actual phases",
+      "consumer": "caller.supervisor_resources:2116 validates3self +4telemetry; supervisor.validate_common_inner:1549 validatesstartup/before_cleanup plus six before_call and verification_end only positive",
+      "default_optional": "absent samples carry concrete missing reason/count; no fabricated live tuple or zero unknown GPG; raw high-water not subtracted",
+      "status": "SOURCE_TYPED_SCHEMA_REPAIR_PRESERVED; actual runtime NOT_RUN"
+    },
+    {
+      "id": "A16902",
+      "producer": "verifier.main:1531..1585 firsttwo keyless/no-keyring then four explicit-ring original calls",
+      "consumer": "supervisor.check_inner:1763..1774 plus caller original receipt oracle",
+      "stock_four_behaviors": "read-only-home no-keyring; explicit keyring/trustdb-locks; agent; common.conf must remain actual qualified stock obligations",
+      "status": "SOURCE_RECIPE_REPAIR_PRESERVED; LAB861 four actual checks NOT_RUN"
+    },
+    {
+      "id": "A16903",
+      "producer": "caller.prepare_proc_retirement:1222 requires exact owned original lease, confirmed held pidfd exit and detachment, same dev/ino/mode and acquired uidgid or[0,0]",
+      "consumer": "caller.require_lease:794 then retire_and_close_owned:828; retains original/terminal full9 and generation",
+      "immutable9": "NO selected input/tool full9 relaxation, no replacing expected SHA, no guessing numeric pid/fd owner",
+      "historical": "A169 endedRED: all6 invoked/ten precloseRefusals, native unconfirmedclose listempty, missing changedfstat-field UNKNOWN",
+      "status": "SOURCE_NARROW_TOKEN_REPAIR_PRESERVED; provider relation future native qualification NOT_RUN"
+    }
+  ],
+  "F1": {
+    "prospective_returned_before_wrapper": true,
+    "both_pipe_numbers_recorded": true,
+    "lease_generation_retired_beforeclose": true,
+    "numericcache_removed": true,
+    "unknown_return": "ACQUIRE_UNKNOWN sticky, no guessed nakedclose",
+    "knownowner_cleanup": "designated physicalpass beforedeferredgraph; independentclose_batch each",
+    "source_open": [
+      "B04",
+      "B05"
+    ],
+    "future": "qualified installedstock syscall/Popen/teardown/provider separate NOT_RUN"
+  },
+  "F2": {
+    "genuine": "verifier.call secondary nativearray and primary traceback; captureallcells thenfirstcloseallstreams thenpubliccopies; sameobj reversiblerawpreimage receiver",
+    "mandatory_open": [
+      "B01",
+      "B02",
+      "B03",
+      "B05"
+    ],
+    "no_hash_summary_no_payload_clipping": true
+  },
+  "D1": {
+    "CPU20_wall30": true,
+    "dynamic_quota_firstmax": 21845,
+    "remaining_output_aggregate": 65536,
+    "original_bounds_not_greaterthan_firstquota": true,
+    "source_data_rejoined": true
+  },
+  "D2": {
+    "full19_bytes": 72457444,
+    "supervisor_subset_bytes": 7819077,
+    "verifier_subset_bytes": 7791116,
+    "fixed": 247788428,
+    "running": 20647028,
+    "sum": 268435456,
+    "min_observe_exit_recheck": 94216,
+    "selection_raw_bytes": 7943,
+    "buckets": {
+      "hash_initial": 72457463,
+      "hash_subsets": 93773086,
+      "hash_terminal": 72457463,
+      "selection": 917518,
+      "child": 196608,
+      "proc_bootstrap": 29186,
+      "proc_cleanup": 6222482,
+      "proc_terminal": 24834,
+      "expectations_body": 10864,
+      "transport_0": 98306,
+      "proc_launch_0": 155917,
+      "proc_close_0": 28931,
+      "transport_1": 98306,
+      "proc_launch_1": 155917,
+      "proc_close_1": 28931,
+      "transport_2": 98306,
+      "proc_launch_2": 155917,
+      "proc_close_2": 28931,
+      "transport_3": 98306,
+      "proc_launch_3": 155917,
+      "proc_close_3": 28931,
+      "transport_4": 98306,
+      "proc_launch_4": 155917,
+      "proc_close_4": 28931,
+      "transport_5": 98306,
+      "proc_launch_5": 155917,
+      "proc_close_5": 28931
+    },
+    "cleanup_parts": {
+      "freeze16_fdinfo_stat_status": 589872,
+      "tree32_generation_children": 786528,
+      "tree32_reconcile_bind_or_cached": 1835168,
+      "descendant31_presignal_generation": 634942,
+      "direct_presignal_target": 4097,
+      "adopted32_reconcile_and_presignal": 1966272,
+      "tracked32_unknown_wait_target": 131104,
+      "own_children_baseline_while33_adoption32_final": 274499
+    },
+    "stock_integer_absence_only": true,
+    "Root_authority": false,
+    "implicit_IO_CPU_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+  },
+  "transitive_fullmethods": [
+    {
+      "component": "source bootstrap and module prefixes",
+      "methods": "full lexical245 sections/nested26 at authenticated current bytes",
+      "domains": "outerENV3/inherited0..3/limits, supstrict0..5 beforectypes, verstrict0..6 beforegeneralimports",
+      "branches": "original unknown surplus cause refused without adoption/close; default R not initialized verifierentry guard; no home creation",
+      "status": "CHECKED_INERT_SOURCE_ONLY"
+    },
+    {
+      "component": "input/tools/path/full9 custody",
+      "methods": "caller.component/hold/custody/hash_fd/selection_data; supervisor.hold/custody; verifier.components/hold/custody",
+      "domains": "exact19 selected numeric9; pin digest over fullbytes+EOF; real inode before/open/after; no largeinteger V8",
+      "branches": "partial opens prospective owner; renamed/drift/short pin sticky refusal; terminal19 beforeclose; reused directory cache and heldleaf9 distinct",
+      "status": "CURRENT_READ_MATH_MATCHES; B04 capacity prevents ordinary continuation"
+    },
+    {
+      "component": "kernel/lineage/pidfd/natural ending",
+      "methods": "caller.kernel_policy/bind/exited/same_generation/observe_live/tree/adopted_records/wait_exact/signal_held/settle_owned/prepare_proc_retirement; supervisor parallel heldgeneration/register/enumerate/wait/terminate",
+      "domains": "normal ownchild solefork lineage; strict POLLIN exit not HUP-only/ERR/NVAL; optionalHUP; real X/Z/absentVm only potential ending; six checks/50ms max32 ending attempts",
+      "branches": "unchanged clocks/reserves and actualfirstlastlive/rawrusage; no fabricated aggregate/live child, foreignsignal/reopen or retry close",
+      "status": "FULL_SOURCE_READ; future native/provider NOT_RUN, B04/B05"
+    },
+    {
+      "component": "raw/canonical/error schema",
+      "methods": "all actor exact_error/validate_stock_error_graph/validate_received_error_graphs, capture/drain and encode/emit",
+      "domains": "actualerrorpresence errno/filename/filename2/notes,args,state,traceback,cause/context including suppressed/group; exact bytes/shared refs; two-frontier closure",
+      "branches": "native NOT_QUALIFIED notbug; late error discovered via args correctlymaterialized; normaldecode fallback complete; failedpending notoverwritten; nullpartial notzero",
+      "status": "SCHEMA_AND_ALIAS_REPAIR_CREDIT; B01/B02/B03/B05"
+    },
+    {
+      "component": "crypto/body/archive control",
+      "methods": "verifier.armor/parse_raw/statuses/key_listing/signature/compare/main; supervisor.check_inner; caller.validate_canonical",
+      "domains": "original oneprimary/fingerprint/currentkey/signature/issuer/binding/crosscert, exact signed row/body/archive size/hash, positivegpg andgpgv, same-path BADSIG",
+      "branches": "archive inert SHA only, no parse/extract/Node; normal ownhome exactintent andabsence; no collisions deleted",
+      "status": "ORIGINAL_ORACLES_PRESERVED; not proof actual six GPG runtime"
+    },
+    {
+      "component": "final resources/read accounts/closure/public receiver",
+      "methods": "caller.finish_terminal/close_final/encode_complete/emit_complete; supervisor.post_home/finish_allocations/encode/emit; verifier.cleanup/finish_allocations/finalize_read_accounting/encode_bounded/emit + all modulefinally",
+      "domains": "full actualproc/self/wait resource fields/aggregate/FD/elapsed originalcaps; nonzero/unknown cost honest; complete R+raw beforeemit; no summaryoverflow",
+      "branches": "default/unstarted/partial/error shape not erased; all original diagnostic/live/gates preserved",
+      "status": "NOT_CLOSED B01-B05; no Root/runtime credit"
+    }
+  ],
+  "phase_and_resources": {
+    "caller": [
+      "entry",
+      "running_case_each6",
+      "completed_case_each6",
+      "terminal"
+    ],
+    "supervisor_self": [
+      "bootstrap_startup",
+      "last_live_supervisor",
+      "postexit"
+    ],
+    "supervisor_telemetry": [
+      "last_parent_sample",
+      "last_observed_aggregate_as_kib",
+      "last_fd_counts",
+      "last_live_aggregate"
+    ],
+    "verifier_startup_controls": [
+      "startup",
+      "before_cleanup"
+    ],
+    "verifier_positive": [
+      "startup",
+      "before_call_1",
+      "before_call_2",
+      "before_call_3",
+      "before_call_4",
+      "before_call_5",
+      "before_call_6",
+      "verification_end",
+      "before_cleanup"
+    ],
+    "verifier_preimport_guard": "NULL no inner resources with original concrete guard-before-init reason; unknown notzero",
+    "limits": {
+      "outer_AS": 134217728,
+      "outer_CPU": [
+        60,
+        120
+      ],
+      "outer_NOFILE": [
+        256,
+        256
+      ],
+      "outer_FSIZE": 2097152,
+      "outer_read": 268435456,
+      "supervisor_AS": [
+        33554432,
+        117440512
+      ],
+      "supervisor_CPU": [
+        120,
+        120
+      ],
+      "supervisor_NOFILE": [
+        64,
+        128
+      ],
+      "supervisor_receipt": 65536,
+      "verifier_AS_positive": 117440512,
+      "verifier_AS_control": 67108864,
+      "verifier_receipt": 32768,
+      "verifier_fullread": 4294967296,
+      "GPG_AS": 67108864,
+      "GPG_CPU": 20,
+      "GPG_wall": 30,
+      "GPG_NOFILE": 128,
+      "GPG_aggregate65536": true,
+      "aggregate_memory": 268435456
+    },
+    "normaldefaults_failureprefixes": "full source inspected; no old runtime values promoted; counters/unknown preserved; B01..B05 remain"
+  },
+  "genuine_credits": [
+    "LAB865 exactroot stockcause fullgraph consumers repair preserved; no old top-level type/message contradiction repeated",
+    "SOL062 deferred native journal moves projection after designated requiredphysical loops",
+    "Verifier.call fixed local secondary capacity11+2*w, captures allcells/knownclose beforecopy/projection and originalprimary rethrow; prior designated interruption credited fixed",
+    "Sup raw cellfirstpass before fallible secondprojection pass; caller captureattemptsboth and batchalias firstclose",
+    "Joint graph error/value frontiers close lateerroraliases inargs/state/notes withfullpresence/causes/context/group andbytes",
+    "Normal reversible full canonical same-object preimages and exact consumerrestore; nothash-only",
+    "Current19/read buckets and whole6 actual5changed1equal/fullbeforeafter coherent",
+    "Original3resources/keyless/proc-token plusF1/F2/D1D2 repairs preserved"
+  ],
+  "future_only_NOT_CODE": {
+    "facts": [
+      "new genuine Root grant/finite clock/admission",
+      "actual independent Root selected exact19numeric9 Source6 image",
+      "executingstock interpreter/module/loader/provider/ENV/image facts",
+      "sameheld detached proc terminal owner relation",
+      "Popen implicit native/teardown and stocknative factory format boundaries",
+      "currentepoch crypto/keyring/readonlyhome/agent/trustdb/commonconf four behaviors",
+      "actual original all6/root/runtime andfullgates/live"
+    ],
+    "all_mandatory": true,
+    "missing_alone_CODE": false
+  },
+  "unsafe_history": {
+    "status": "REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false,
+    "operational_payload": null,
+    "fixture": null,
+    "generator": null,
+    "reproduction": null,
+    "exploit": null,
+    "normal_ownchild_EOF_write_deadline_cleanup_controls": "PRESERVED_REQUIRED"
+  },
+  "final": {
+    "decision": "REJECT_CURRENT_SOURCE_PROTOCOL",
+    "SourceReady": false,
+    "Root_admission": false,
+    "Root_Image": false,
+    "runtime": "NOT_RUN",
+    "gates": "NOT_RUN",
+    "GO": false
+  }
+}

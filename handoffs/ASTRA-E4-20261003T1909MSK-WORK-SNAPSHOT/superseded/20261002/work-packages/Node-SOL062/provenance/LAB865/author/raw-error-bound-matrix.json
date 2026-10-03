@@ -1,0 +1,31 @@
+{
+  "schema": "friday.sol060.new-bound-not-prior-carry.v1",
+  "raw_outer_original_caps": {
+    "stdout": 65536,
+    "stderr": 32768,
+    "whole": 2097152
+  },
+  "six_raw_cells": [
+    196644,
+    196644,
+    196644,
+    196644,
+    196644,
+    196644
+  ],
+  "raw_sum": 1179864,
+  "original_metadata_reserve_NOT_new_shape_proof": 489472,
+  "proposed_whole_partition": 1669337,
+  "margin": 427815,
+  "prior_A1752095321_margin1831_carried": false,
+  "GPG_aggregate_original": 65536,
+  "full_base64_for65536": 87384,
+  "inner_cap_original": 32768,
+  "supervisor_cap_original": 65536,
+  "raw_error_duplicate_value_preimages_history_factory_shapes": "CODE_OPEN",
+  "error_cells_original": 35,
+  "original_each2048_total71680": "preserved reservation NOT new graph bound",
+  "all35_native_factories": "complete retained original rows plus current-method complement; new shape proof CODE_OPEN",
+  "fullraw_partial_capped_hashonly_unknown": "NOT_PROVEN_NOT_FULLRAW",
+  "no_cap_or_oracle_cut": true
+}

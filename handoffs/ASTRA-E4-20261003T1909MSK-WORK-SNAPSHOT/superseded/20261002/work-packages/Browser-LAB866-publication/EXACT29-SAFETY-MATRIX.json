@@ -1,0 +1,1634 @@
+{
+  "count": 29,
+  "rows": [
+    {
+      "position": 35,
+      "id": "whole3_actual_G1_worker_positive",
+      "original_expected": {
+        "cause": null,
+        "consumer": "execute_core/R4.run_wave/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "exact3",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "network_schedule",
+        "started_routes": 3,
+        "state": "BROWSER3_FETCH_FINISHED_WITH_EXPLICIT_ACCEPTANCE_GAPS"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 36,
+      "id": "whole3_redirect",
+      "original_expected": {
+        "cause": "THREE_BODY_RECEIPTS",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 37,
+      "id": "whole3_http404",
+      "original_expected": {
+        "cause": "THREE_BODY_RECEIPTS",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 38,
+      "id": "whole3_tls_certificate",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:SSLCertVerificationError",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 39,
+      "id": "whole3_tls_protocol",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 40,
+      "id": "whole3_encoding",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:CONTENT_ENCODING",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 41,
+      "id": "whole3_framing",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:HTTP_FRAMING",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 42,
+      "id": "whole3_duplicate_length",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:HTTP_FRAMING",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 43,
+      "id": "whole3_length_cap",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:DECLARED_BODY_SIZE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 44,
+      "id": "whole3_truncated",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:BODY_TRUNCATED",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 45,
+      "id": "whole3_hostname",
+      "original_expected": {
+        "cause": "TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 46,
+      "id": "whole3_verify_mode",
+      "original_expected": {
+        "cause": "TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 47,
+      "id": "whole3_verified_type",
+      "original_expected": {
+        "cause": "TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 48,
+      "id": "whole3_cert_digest",
+      "original_expected": {
+        "cause": "TLS_EVIDENCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 49,
+      "id": "whole3_accounting",
+      "original_expected": {
+        "cause": "WORKER_ACCOUNTING_DRIFT",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 50,
+      "id": "whole3_digest",
+      "original_expected": {
+        "cause": "WORKER_ACCOUNTING_DRIFT",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 51,
+      "id": "whole3_acceptance",
+      "original_expected": {
+        "cause": "UNPINNED_ACCEPTANCE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 52,
+      "id": "whole3_unknown_final",
+      "original_expected": {
+        "cause": "WORKER_RECEIPT_INCOMPLETE",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 53,
+      "id": "whole3_duplicate_final",
+      "original_expected": {
+        "cause": "EVENT_COUNT",
+        "consumer": "R4.drain/collect/G1.worker",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 55,
+      "id": "aggregate_RSS",
+      "original_expected": {
+        "cause": "RSS_CAP",
+        "consumer": "R4.run_wave/G1.process_status",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "network_schedule",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 93,
+      "id": "actual_CA_parse",
+      "original_expected": {
+        "cause": "NO_CERTIFICATE_OR_CRL_FOUND",
+        "consumer": "ca_context/SSLContext.load_verify_locations",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 0,
+        "stage": "ca_preflight",
+        "started_routes": 0,
+        "state": "REFUSED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          633,
+          637
+        ],
+        "reason": "Original local inert invalid CA document and actual SSL parser rejection; no certificate bypass/network/external attack obligation."
+      },
+      "safe_method_status": "NEW_ACTUAL_CONSUMER_SOURCE_CANDIDATE_NOT_REVIEWED_NOT_RUN",
+      "actual_safe_domain": "Root-selected owned inert CA bytes, actual guarded digest and local SSL parser; no network",
+      "residuals": [
+        "DIFFERENT_AUTHOR_FINAL_BYTE_SOURCE_REVIEW_REQUIRED",
+        "ACTUAL_ROOT_SELECTED_ORIGINAL_INPUT_PRODUCER_AND_RUNTIME_CUSTODY_NOT_EXECUTED",
+        "FULL_FIRST_FAULT_BODY_PHASE_RESOURCE_ORACLE_NOT_YET_OBSERVED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 101,
+      "id": "whole3_bounded_header",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:HEADERS_OR_CHUNK_FRAMING_CAP",
+        "consumer": "G1.worker/BoundedResponse/HeaderReader",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          158,
+          365
+        ],
+        "reason": "Pinned original bounds own inert workers/receipt validation; whole helper enforces no network/exec/original writes. Rejection/positive correctness is not an attack solely because consumer/cause names TLS/G1/SECURITY."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 120,
+      "id": "connect15_unconnected",
+      "original_expected": {
+        "cause": "REQUEST_TIMEOUT",
+        "consumer": "R4.run_wave/stop_child",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          708,
+          763
+        ],
+        "reason": "Original finite own waiting/stream workers, original connected/clock/cap/partial-write observations; benign lifetime and exact body/custody obligations, not demonstrated dangerous reproduction."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 121,
+      "id": "request300_connected",
+      "original_expected": {
+        "cause": "REQUEST_TIMEOUT",
+        "consumer": "R4.run_wave/stop_child",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "event_drain",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          708,
+          763
+        ],
+        "reason": "Original finite own waiting/stream workers, original connected/clock/cap/partial-write observations; benign lifetime and exact body/custody obligations, not demonstrated dangerous reproduction."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 124,
+      "id": "work1140_active",
+      "original_expected": {
+        "cause": "WALL_TIMEOUT:network_schedule",
+        "consumer": "R4.run_wave/Run.guard",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "none",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "network_schedule",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          708,
+          763
+        ],
+        "reason": "Original finite own waiting/stream workers, original connected/clock/cap/partial-write observations; benign lifetime and exact body/custody obligations, not demonstrated dangerous reproduction."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 125,
+      "id": "body_eof_at_cap",
+      "original_expected": {
+        "cause": null,
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "exact3",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "state": "BROWSER3_FETCH_FINISHED_WITH_EXPLICIT_ACCEPTANCE_GAPS"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          708,
+          763
+        ],
+        "reason": "Original finite own waiting/stream workers, original connected/clock/cap/partial-write observations; benign lifetime and exact body/custody obligations, not demonstrated dangerous reproduction."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 126,
+      "id": "body_cap_without_eof",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:CAP_REACHED_WITHOUT_EOF",
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          708,
+          763
+        ],
+        "reason": "Original finite own waiting/stream workers, original connected/clock/cap/partial-write observations; benign lifetime and exact body/custody obligations, not demonstrated dangerous reproduction."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 127,
+      "id": "body_short_write",
+      "original_expected": {
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:SHORT_WRITE",
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "at_least1",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "state": "CONTOUR_ABORTED"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          708,
+          763
+        ],
+        "reason": "Original finite own waiting/stream workers, original connected/clock/cap/partial-write observations; benign lifetime and exact body/custody obligations, not demonstrated dangerous reproduction."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "position": 128,
+      "id": "body_partial_write",
+      "original_expected": {
+        "cause": null,
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "forbidden_effects": {
+          "exec": 0,
+          "network": 0,
+          "original_write": 0
+        },
+        "hashes": "exact3",
+        "minimum_consumer_calls": 1,
+        "owned_children": 3,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "state": "BROWSER3_FETCH_FINISHED_WITH_EXPLICIT_ACCEPTANCE_GAPS"
+      },
+      "classification": "BENIGN_REQUIRED_FUNCTIONAL_OBLIGATION_NOT_UNSAFE_BY_CONSUMER_NAME",
+      "exact_original_review_evidence": {
+        "pin": {
+          "path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "bytes": 78027,
+          "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+          "identity9_decimal_strings": [
+            "2050",
+            "4224810",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78027",
+            "1790888240754293018",
+            "1790888240754293018"
+          ],
+          "stable9": true
+        },
+        "lines": [
+          708,
+          763
+        ],
+        "reason": "Original finite own waiting/stream workers, original connected/clock/cap/partial-write observations; benign lifetime and exact body/custody obligations, not demonstrated dangerous reproduction."
+      },
+      "safe_method_status": "MANDATORY_SPECIFIC_SOURCE_CODE_GAP",
+      "actual_safe_domain": "original coordinator with actual target children; no extra delegated producer",
+      "residuals": [
+        "ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_NOT_CONNECTED",
+        "EXTRA_PERFORMING_PRODUCER_CANNOT_BE_COUNTED_AS_ORIGINAL_TARGET_WORKER",
+        "NO_NATIVE_AUTHORITY_ROLE_SESSION_RESET_OR_PROCESS_CAP_RAISE_GRANTED"
+      ],
+      "historical_dangerous_mechanisms": "ABSTRACT_REQUIRED_NOT_RUN_NO_PAYLOAD_FIXTURE_GENERATOR_OR_OPERATIONAL_REPRODUCTION",
+      "no_waiver": true,
+      "no_network_exec_original_write": true,
+      "reviewed_new_author_source": false,
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "safe_functional_obligations_waived": 0,
+  "dangerous_operational_method_authorization": false,
+  "new_actual_CA_local_parse_Source_candidate": 1,
+  "original_target_child_domains_still_mandatory_specific_code_gap": 28,
+  "new_qualified_cases": 0
+}

@@ -1,0 +1,69 @@
+def drain_pipes(pipes, evidence, end, complete=False):
+    require(type(CASE_INDEX) is int, "active transport case missing")
+    bucket = "transport_" + str(CASE_INDEX)
+    while True:
+        due(end)
+        progress, first, first_tb = False, None, None
+        for item in pipes:
+            if item.get("read_error_object") is not None:
+                if first is None:
+                    first = item["read_error_object"]
+                    first_tb = first.__traceback__
+                continue  # NEVER re-read a failed/uncommitted physical prefix
+            if item["eof"] or item.get("overflow"):
+                continue
+            try:
+                require(item.get("pending_chunk") is None,
+                        "uncommitted returned pipe chunk must not be overwritten")
+                while True:
+                    request = min(4096, item["cap"] + 1 - len(item["data"]))
+                    admit_request(bucket, request)
+                    try:
+                        require_lease(item["fd"])
+                        item["pending_chunk"] = os.read(item["fd"], request)
+                        data = item["pending_chunk"]
+                    except BlockingIOError:
+                        break  # ordinary readiness, not retry of a rejected effect
+                    charge_returned(bucket, request, len(data))
+                    saved = signal.pthread_sigmask(signal.SIG_BLOCK, MASK)
+                    try:
+                        item["data"].extend(data)
+                        item["pending_chunk"] = None
+                    finally:
+                        signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+                    if not data:
+                        item["eof"] = True
+                        break
+                    if len(item["data"]) > item["cap"]:
+                        item["overflow"] = True
+                    require(not item.get("overflow"),
+                            "finite pipe output cap exceeded; complete returned overflow byte retained")
+                    progress = True
+            except BaseException as exc:
+                item["read_error_object"] = exc
+                if first is None:
+                    first, first_tb = exc, exc.__traceback__
+                item["read_error"] = deferred_error(exc)
+                # Attempt the other independently owned channel BEFORE encoding.
+        for item in pipes:
+            if item["eof"] or item.get("overflow") or item.get("read_error_object") is not None:
+                try:
+                    capture_pipe(item, evidence)
+                    if item.get("read_error") is not None:
+                        evidence[item["label"] + "_read_error"] = item["read_error"]
+                except BaseException as exc:
+                    item["capture_error_object"] = exc
+                    if first is None:
+                        first, first_tb = exc, exc.__traceback__
+                    evidence[item["label"] + "_capture_error"] = deferred_error(exc)
+        if first is not None:
+            raise first.with_traceback(first_tb)
+        if all(item["eof"] or item.get("overflow") for item in pipes):
+            require(not any(item.get("overflow") for item in pipes),
+                    "finite pipe output cap exceeded; stream EOF not claimed")
+            return
+        if not complete:
+            return
+        if not progress:
+            select.select([x["fd"] for x in pipes if not x["eof"] and not x.get("overflow")], [], [],
+                          min(0.01, max(0, (end - now()) / 1e9)))

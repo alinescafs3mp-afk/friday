@@ -1,0 +1,279 @@
+{
+  "schema": "friday.astra.a205.lab887.scanner.scoped-non-author-source-review.v1",
+  "assignment": "ASTRA-E4-A205-LAB887-SCANNER-SCOPED-NON-AUTHOR-SOURCE-REVIEW",
+  "generation": 1,
+  "reviewer": "Astra active Lead Architect epoch4",
+  "authorship": "Grok authored LAB887 delta; Astra did not. Astra-authored A202 baseline is NOT whole independently accepted by this review.",
+  "review_key": "LAB887 exact native/source_owner.c three non-equal gapless byte parts plus actual preinit/guard/result/return consumers; original C1/whole Source retained",
+  "recorded_utc": "2026-10-03 00:07:04 UTC",
+  "decision": "SCOPED_STATIC_SOURCE_CREDIT_R02_R03_NOT_WHOLE_ACCEPTANCE",
+  "manifest": {
+    "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/manifest.json",
+    "bytes": 1307,
+    "sha256": "3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226494",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1307",
+      "1790984733230059915",
+      "1790984733230059915"
+    ],
+    "stable9": true
+  },
+  "received": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB887-SCANNER-SOURCE-RESULT-RECEIVED-20261003.json",
+    "bytes": 88777,
+    "sha256": "2be2eb18ac9bf910b7307783c1d37067e1a9f8810cd436abd2c1a42fc36d01ba",
+    "identity9_decimal_strings": [
+      "2050",
+      "8527893",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "88777",
+      "1790985550499080814",
+      "1790985550566084669"
+    ],
+    "stable9": true
+  },
+  "C_before": {
+    "path": "/var/tmp/friday-astra-a202-sol071-scanner-original-preinit-guard-task-start-and-final-receiver-connected-source/native/source_owner.c",
+    "bytes": 188353,
+    "sha256": "1220d0d6e83ac4668a27e5f415620dc80c495a538c888ca78358edfc0f6bbda3",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226440",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "188353",
+      "1790982721460337591",
+      "1790982721460337591"
+    ],
+    "stable9": true
+  },
+  "C_after": {
+    "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/native/source_owner.c",
+    "bytes": 190300,
+    "sha256": "92a7a8298f4c3390e83b33936755f63e0f608bdbff878f379ddbd9f960fa3493",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226486",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "190300",
+      "1790984733228059800",
+      "1790984733228059800"
+    ],
+    "stable9": true
+  },
+  "header": {
+    "path": "/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/native/scanner_selected_parent.h",
+    "bytes": 3074,
+    "sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226487",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3074",
+      "1790984733229059858",
+      "1790984733229059858"
+    ],
+    "stable9": true
+  },
+  "full_gapless_byte_partitions": [
+    {
+      "kind": "equal",
+      "before_offset": 0,
+      "before_bytes": 120371,
+      "before_sha256": "87ea7a1a1783e378958726b3687f10573dfa3197911ab6d38da9a16c107ea4f4",
+      "after_offset": 0,
+      "after_bytes": 120371,
+      "after_sha256": "87ea7a1a1783e378958726b3687f10573dfa3197911ab6d38da9a16c107ea4f4"
+    },
+    {
+      "kind": "replace",
+      "before_offset": 120371,
+      "before_bytes": 1308,
+      "before_sha256": "fb78a9dd3f23fddaf936d6298a5117d1af42480fa3c2461f60561a980f393671",
+      "after_offset": 120371,
+      "after_bytes": 2062,
+      "after_sha256": "e40dcbc25062e15a2db60c03def6d89e8e4f52e497bb6c4b7a6dbf5e06fa4dae"
+    },
+    {
+      "kind": "equal",
+      "before_offset": 121679,
+      "before_bytes": 52067,
+      "before_sha256": "da86b484ca42fe94337bff8957131922e9a5ac13fa0ad1153452d6508b8c08c8",
+      "after_offset": 122433,
+      "after_bytes": 52067,
+      "after_sha256": "da86b484ca42fe94337bff8957131922e9a5ac13fa0ad1153452d6508b8c08c8"
+    },
+    {
+      "kind": "replace",
+      "before_offset": 173746,
+      "before_bytes": 227,
+      "before_sha256": "7f477edc99eae600c83641aa891e0b301815537bf9f7cf89625bce67f9600c4e",
+      "after_offset": 174500,
+      "after_bytes": 734,
+      "after_sha256": "e03855ca9f7ae3da88568afd4e51eddd2552c9177b6c6ef2e0e56ebf34515a0e"
+    },
+    {
+      "kind": "equal",
+      "before_offset": 173973,
+      "before_bytes": 269,
+      "before_sha256": "23c5e6a7cd3891e05f0ae2313993173f453fd630cd939ba010ebe42a98b9ed4a",
+      "after_offset": 175234,
+      "after_bytes": 269,
+      "after_sha256": "23c5e6a7cd3891e05f0ae2313993173f453fd630cd939ba010ebe42a98b9ed4a"
+    },
+    {
+      "kind": "insert",
+      "before_offset": 174242,
+      "before_bytes": 0,
+      "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "after_offset": 175503,
+      "after_bytes": 686,
+      "after_sha256": "1f4332be4973fb9b20c3ec9d6bff43f47289c42c8b32208fe207f49c18968089"
+    },
+    {
+      "kind": "equal",
+      "before_offset": 174242,
+      "before_bytes": 14111,
+      "before_sha256": "a7e8f58b6f847426d32ac5827e5f18ab38a5b0ce807039cadbf398c5baba5d6e",
+      "after_offset": 176189,
+      "after_bytes": 14111,
+      "after_sha256": "a7e8f58b6f847426d32ac5827e5f18ab38a5b0ce807039cadbf398c5baba5d6e"
+    }
+  ],
+  "inventory_join": {
+    "current52_actual_changed": 1,
+    "current52_actual_equal": 51,
+    "header_unchanged": true,
+    "full_owned_file_pathset": 10,
+    "full_SHA_decimal9_join": "Already authenticated actual LAB887 received record. No stale pre-seal metadata acceptance."
+  },
+  "credits": [
+    {
+      "id": "LAB886-R02",
+      "class": "harness",
+      "invariant": "One original absolute/native minimum guard must precede prepare/interpreter/task work and not be rearmed during selected native initialization.",
+      "actual_path": "friday_scanner_selected_parent_entry -> install_original_caller_guard -> scanner_prepare_root_backing -> run_selected_existing_caller -> install_original_caller_guard exact rejoin -> initialize_native_owner",
+      "sites": [
+        {
+          "file": "native/source_owner.c",
+          "lines": "2051-2061"
+        },
+        {
+          "file": "native/source_owner.c",
+          "lines": "2511-2540"
+        },
+        {
+          "file": "native/source_owner.c",
+          "lines": "2972-3004"
+        }
+      ],
+      "closure": "SCOPED_SOURCE_CREDIT",
+      "why": "Actual changed initialize_native_owner branch with existing_parent_entry && scanner_original_guard_installed validates nonzero exact atomic minimum/current original end, expiry/sticky state, then does not invoke sigaction or setitimer. The initial producer commits original start/end/generation and actual minimum before fallible preparation, repeats only exact same identity/bound, and actual RETURN_SELECTED leaves guard installed. Changed Source does not refresh or extend the original end.",
+      "controls": "Static actual paths: exact live original selection rejoins; expired/sticky, changed generation/start/end/minimum refuse; Source/legacy nonselected original path keeps its first guard. Runtime controls REQUIRED_NOT_RUN."
+    },
+    {
+      "id": "LAB886-R03",
+      "class": "harness",
+      "invariant": "A no-birth or unregistered-startup prefix is not kernel-confirmed task exit, cannot read a possibly uninitialized/racing backing or certify completed transfer.",
+      "actual_path": "pthread_create success/failure+started/clear_tid registration -> RETURN_SELECTED -> scanner_final_root_receiver -> actual result/body-copy condition",
+      "sites": [
+        {
+          "file": "native/source_owner.c",
+          "lines": "2641-2644"
+        },
+        {
+          "file": "native/source_owner.c",
+          "lines": "2869-2915"
+        },
+        {
+          "file": "native/source_owner.c",
+          "lines": "2571-2580"
+        }
+      ],
+      "closure": "SCOPED_SOURCE_CREDIT",
+      "why": "Actual receiver sets task_exited only for created task with acquired positive registered started and kernel-cleared clear_tid. Never-created and negative-startup branches set UNCONFIRMED/task_exited0, retain primary startup errno if available, return before mapped-header reads; RETURN_SELECTED copies parent_terminal_result only when task_exited. No nonexistent task wait or no-birth-as-handover accepted. Actual zero-started created task remains unconfirmed/EBUSY before body reads.",
+      "controls": "Static no-birth, pthread_create failure, startup-registration failure, created-not-cleared and kernel-cleared paths distinguished. Original finite full both-body/child ownership remains independently required; runtime controls REQUIRED_NOT_RUN."
+    }
+  ],
+  "retained_open": [
+    {
+      "id": "A192-C1",
+      "class": "harness",
+      "condition": "Actual performing external Root factory/enrollment/callsite and full before-birth/both-family original-body/native finite endpoints remain CODE_OPEN. A204 requires new implementation under original trusted role rather than finding an unproved private original.",
+      "decision": {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A204-SCANNER-ORIGINAL-ROOT-FACTORY-CONNECTED-DECISION-20261003.json",
+        "bytes": 10329,
+        "sha256": "26083d9eb448cc14d0a91e3a7b18c85a3e915c7a6d25e31796d01d4ddda929e7",
+        "identity9_decimal_strings": [
+          "2050",
+          "8527955",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10329",
+          "1790985879783024312",
+          "1790985879844027821"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "id": "A192-C2-whole",
+      "class": "harness",
+      "condition": "Full actual main/preinit/init/error/ordinary retirement/cleanup/final caller dependencies still require joined whole review; scoped R02/R03 credit is not whole acceptance of Astra A202 or original Sol071 Source."
+    },
+    {
+      "id": "resource-fit",
+      "class": "evidence/environment",
+      "condition": "Whole native/allocator/mapping/implicit IO/cumulative work/catch/late finalization and actual Source/Root/global fit UNKNOWN_NOT_ZERO. Author budget and static storage extent are not Source grants; inherited helper NOT_FIT retained unchanged."
+    },
+    {
+      "id": "qualification",
+      "class": "environment",
+      "condition": "Actual stable Source+Root image/selected compiler-native ABI/provider/grants/resources/finite clocks and source admission REQUIRED_NOT_RUN; ABI constant isn't qualification."
+    },
+    {
+      "id": "required-execution",
+      "class": "evidence/deployment",
+      "condition": "All original positives/negatives/full domains/all17/all6/all30/F0-F11/live/gates/final artifact remain required NOT_RUN. Unsafe historical controls HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false."
+    }
+  ],
+  "effects": {
+    "stock_literal_read_hash_stat": 1,
+    "supplied_Source_import_AST_compile_exec": 0,
+    "tests": 0,
+    "native_Root": 0,
+    "network": 0,
+    "source_writes": 0,
+    "original_checkout_writes": 0,
+    "model_children": 0,
+    "author_self_whole_acceptance": 0
+  },
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "whole_grouped_roots_closed": 0,
+  "new_product_roots": 0,
+  "new_required_execution_layers": 0
+}

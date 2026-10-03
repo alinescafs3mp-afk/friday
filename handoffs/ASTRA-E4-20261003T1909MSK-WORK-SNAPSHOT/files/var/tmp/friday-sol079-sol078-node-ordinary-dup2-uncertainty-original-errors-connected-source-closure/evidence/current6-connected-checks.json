@@ -1,0 +1,5427 @@
+{
+  "schema": "friday.sol079.current6-static-connected-checks.v1",
+  "current6": [
+    {
+      "name": "caller.py",
+      "before": {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/caller.py",
+        "bytes": 191129,
+        "sha256": "5c47c9b2cf13f4e002f7c06cf1f7f99ed56b0ab54e6e42bfc86597e70c45217d"
+      },
+      "after": {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/caller.py",
+        "bytes": 196772,
+        "sha256": "cca5c0c2ae075ff732390d8d83c8c7737c63bc11ca52870f213c617db050951d"
+      },
+      "changed": true,
+      "parts": [
+        {
+          "kind": "equal",
+          "before": [
+            0,
+            712
+          ],
+          "after": [
+            0,
+            712
+          ],
+          "before_sha256": "4cb39961621ad3da37b2c38c5e857339a791f41a7d28c43919539167593001f7",
+          "after_sha256": "4cb39961621ad3da37b2c38c5e857339a791f41a7d28c43919539167593001f7",
+          "literal_equal": true,
+          "before_lines": [
+            1,
+            24
+          ],
+          "after_lines": [
+            1,
+            24
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            712,
+            818
+          ],
+          "after": [
+            712,
+            826
+          ],
+          "before_sha256": "526cc5afc61e8cb7e6f9c00041042933155891c3f0eb5b08da1ce9774c39ff50",
+          "after_sha256": "8eb668b18798c085c6b6e1719c0031cdea7dc63a92b0d40a0fa2a774d1361cc4",
+          "literal_equal": false,
+          "before_lines": [
+            25,
+            25
+          ],
+          "after_lines": [
+            25,
+            25
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            818,
+            1076
+          ],
+          "after": [
+            826,
+            1084
+          ],
+          "before_sha256": "7a5dcc5e7a3633d9e92feceae08482577e1fccbe117b2e2f1c722d8a6f02130a",
+          "after_sha256": "7a5dcc5e7a3633d9e92feceae08482577e1fccbe117b2e2f1c722d8a6f02130a",
+          "literal_equal": true,
+          "before_lines": [
+            26,
+            30
+          ],
+          "after_lines": [
+            26,
+            30
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            1076,
+            1301
+          ],
+          "after": [
+            1084,
+            1309
+          ],
+          "before_sha256": "78f745f1396b51c06dedb0342e70392aa30a1912763ceec4c8b01a29b05c8694",
+          "after_sha256": "efe9eca6a41543e7e3a1f606826badac4d26b757d84795b67a04605d253a32ba",
+          "literal_equal": false,
+          "before_lines": [
+            31,
+            33
+          ],
+          "after_lines": [
+            31,
+            33
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            1301,
+            2568
+          ],
+          "after": [
+            1309,
+            2576
+          ],
+          "before_sha256": "9ece642739e0e03fbe568ddef8dc5262fa47c7feea077225324d2812ba8729d5",
+          "after_sha256": "9ece642739e0e03fbe568ddef8dc5262fa47c7feea077225324d2812ba8729d5",
+          "literal_equal": true,
+          "before_lines": [
+            34,
+            49
+          ],
+          "after_lines": [
+            34,
+            49
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            2568,
+            2793
+          ],
+          "after": [
+            2576,
+            2801
+          ],
+          "before_sha256": "111ac3360f73603e6c94b805439fbd4694ab90d4104cc920349ac9c9f82daed8",
+          "after_sha256": "d28acd8c101f5acce942533c8bc1b7db4fbe2ac70c86a7cb018457607d828bf8",
+          "literal_equal": false,
+          "before_lines": [
+            50,
+            52
+          ],
+          "after_lines": [
+            50,
+            52
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            2793,
+            27303
+          ],
+          "after": [
+            2801,
+            27311
+          ],
+          "before_sha256": "6040e2e55a7011251c92e6ffd374849e1f7e03db34c80da8e43f268e89316c77",
+          "after_sha256": "6040e2e55a7011251c92e6ffd374849e1f7e03db34c80da8e43f268e89316c77",
+          "literal_equal": true,
+          "before_lines": [
+            53,
+            576
+          ],
+          "after_lines": [
+            53,
+            576
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            27303,
+            27303
+          ],
+          "after": [
+            27311,
+            27458
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "78866aaa7e44903a0c8df0026ee5c4e14dd18f99bdc7f50b3fef90d31e833b24",
+          "literal_equal": false,
+          "before_lines": [
+            577,
+            576
+          ],
+          "after_lines": [
+            577,
+            580
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            27303,
+            28935
+          ],
+          "after": [
+            27458,
+            29090
+          ],
+          "before_sha256": "2a44ac422485c039818f15239cd7d504b33abd5a53dcafe89384fbcb20aff052",
+          "after_sha256": "2a44ac422485c039818f15239cd7d504b33abd5a53dcafe89384fbcb20aff052",
+          "literal_equal": true,
+          "before_lines": [
+            577,
+            627
+          ],
+          "after_lines": [
+            581,
+            631
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            28935,
+            28935
+          ],
+          "after": [
+            29090,
+            30394
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "c862802d02822c3075d6e1997b54dfd9cd88d67bdbd9a3cca329bfeb2aa0fc29",
+          "literal_equal": false,
+          "before_lines": [
+            628,
+            627
+          ],
+          "after_lines": [
+            632,
+            664
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            28935,
+            29159
+          ],
+          "after": [
+            30394,
+            30618
+          ],
+          "before_sha256": "fea424cdf181e0471cc054ed9d0ca1cce3572dfbfb1ede4d12acb826392e84c4",
+          "after_sha256": "fea424cdf181e0471cc054ed9d0ca1cce3572dfbfb1ede4d12acb826392e84c4",
+          "literal_equal": true,
+          "before_lines": [
+            628,
+            637
+          ],
+          "after_lines": [
+            665,
+            674
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            29159,
+            29179
+          ],
+          "after": [
+            30618,
+            30708
+          ],
+          "before_sha256": "8d17cc6cb3704f01318daa1bc191d773f393d85c1b650bb5936c497b28306a21",
+          "after_sha256": "e8ff2c90852f163065112fcb4aff19a715fb56556b926e0e68bd8bca8f2f32db",
+          "literal_equal": false,
+          "before_lines": [
+            638,
+            638
+          ],
+          "after_lines": [
+            675,
+            676
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            29179,
+            29199
+          ],
+          "after": [
+            30708,
+            30728
+          ],
+          "before_sha256": "d10424bde3ad91ff8daea81a4aa504b2fe9d37923f59379152d543d7b4deaf71",
+          "after_sha256": "d10424bde3ad91ff8daea81a4aa504b2fe9d37923f59379152d543d7b4deaf71",
+          "literal_equal": true,
+          "before_lines": [
+            639,
+            639
+          ],
+          "after_lines": [
+            677,
+            677
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            29199,
+            29292
+          ],
+          "after": [
+            30728,
+            31946
+          ],
+          "before_sha256": "97ad4bb5ede1e13205a7173f0079689418b1ecf8192b595f82c10ad77fa17a7e",
+          "after_sha256": "caabb955e6687047624dd78ddd92398ec8b51ff35a694a1157e221002ab2077b",
+          "literal_equal": false,
+          "before_lines": [
+            640,
+            641
+          ],
+          "after_lines": [
+            678,
+            699
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            29292,
+            30009
+          ],
+          "after": [
+            31946,
+            32663
+          ],
+          "before_sha256": "2e5f6879e50b67b78589f5c3acda9d56480f53f6241f3f4f7a80dd6fd94ed78e",
+          "after_sha256": "2e5f6879e50b67b78589f5c3acda9d56480f53f6241f3f4f7a80dd6fd94ed78e",
+          "literal_equal": true,
+          "before_lines": [
+            642,
+            660
+          ],
+          "after_lines": [
+            700,
+            718
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            30009,
+            30009
+          ],
+          "after": [
+            32663,
+            32865
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "4a98316b83ce3ef7ad7ba2f377519be156506138cd949effc052313afda7275d",
+          "literal_equal": false,
+          "before_lines": [
+            661,
+            660
+          ],
+          "after_lines": [
+            719,
+            722
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            30009,
+            30070
+          ],
+          "after": [
+            32865,
+            32926
+          ],
+          "before_sha256": "b2684f4eb3b98567d50c889dd065eca8d4cb843a8594c1a9a4a48c060d9b0007",
+          "after_sha256": "b2684f4eb3b98567d50c889dd065eca8d4cb843a8594c1a9a4a48c060d9b0007",
+          "literal_equal": true,
+          "before_lines": [
+            661,
+            664
+          ],
+          "after_lines": [
+            723,
+            726
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            30070,
+            31065
+          ],
+          "after": [
+            32926,
+            34326
+          ],
+          "before_sha256": "be6fb3432372fe60c2f4c989d15154320e54b6b91217a5139a4b1d8b5354f19c",
+          "after_sha256": "722fcec2c51caa2e72991249d9b8b8fbfe90a8c942443d6455c1da2e2e3b3d83",
+          "literal_equal": false,
+          "before_lines": [
+            665,
+            685
+          ],
+          "after_lines": [
+            727,
+            753
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            31065,
+            31093
+          ],
+          "after": [
+            34326,
+            34354
+          ],
+          "before_sha256": "403ea2f558cdfef765b2e0bc0e9eee82b8a90dd32f2ac001e39a2bd0c017d23b",
+          "after_sha256": "403ea2f558cdfef765b2e0bc0e9eee82b8a90dd32f2ac001e39a2bd0c017d23b",
+          "literal_equal": true,
+          "before_lines": [
+            686,
+            688
+          ],
+          "after_lines": [
+            754,
+            756
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            31093,
+            31683
+          ],
+          "after": [
+            34354,
+            35100
+          ],
+          "before_sha256": "3dbf80d55554795bd81ad0eed1e7149f3d0e760dbbacc6818566481ea425b22e",
+          "after_sha256": "b1a8831acae11196ddd480891443f2f3e2c7772084c2ce03cff02ca832c41389",
+          "literal_equal": false,
+          "before_lines": [
+            689,
+            703
+          ],
+          "after_lines": [
+            757,
+            774
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            31683,
+            33781
+          ],
+          "after": [
+            35100,
+            37198
+          ],
+          "before_sha256": "f91194b2cb066a9d8985340f437ee5dca0c4475e48b732c07847c77db3539987",
+          "after_sha256": "f91194b2cb066a9d8985340f437ee5dca0c4475e48b732c07847c77db3539987",
+          "literal_equal": true,
+          "before_lines": [
+            704,
+            753
+          ],
+          "after_lines": [
+            775,
+            824
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            33781,
+            33854
+          ],
+          "after": [
+            37198,
+            37284
+          ],
+          "before_sha256": "13d21cafdc028b966719ff476b065dd66d1dddba705728bb357a93699da78db2",
+          "after_sha256": "a966bfca6610576a7bbf2d084ca7c3d8df13deb9f0d34a83cc198eda30a7f0e6",
+          "literal_equal": false,
+          "before_lines": [
+            754,
+            755
+          ],
+          "after_lines": [
+            825,
+            826
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            33854,
+            33969
+          ],
+          "after": [
+            37284,
+            37399
+          ],
+          "before_sha256": "2811b714761011d47875f0fd9d6080bde11dcc9a854a218678ce7e2370af9694",
+          "after_sha256": "2811b714761011d47875f0fd9d6080bde11dcc9a854a218678ce7e2370af9694",
+          "literal_equal": true,
+          "before_lines": [
+            756,
+            759
+          ],
+          "after_lines": [
+            827,
+            830
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            33969,
+            34097
+          ],
+          "after": [
+            37399,
+            37640
+          ],
+          "before_sha256": "cbe15140e35a402238de751d7a8f3467624e77e473094102d99d773151267388",
+          "after_sha256": "9739233620a56af4741ce050acdadb670349f73f76067803167cadf8570e20a6",
+          "literal_equal": false,
+          "before_lines": [
+            760,
+            762
+          ],
+          "after_lines": [
+            831,
+            834
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            34097,
+            34357
+          ],
+          "after": [
+            37640,
+            37900
+          ],
+          "before_sha256": "5711b50264bd099c9757f9ecbb59c2cfb3ae4af9a09301281728e2cece404b25",
+          "after_sha256": "5711b50264bd099c9757f9ecbb59c2cfb3ae4af9a09301281728e2cece404b25",
+          "literal_equal": true,
+          "before_lines": [
+            763,
+            772
+          ],
+          "after_lines": [
+            835,
+            844
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            34357,
+            34423
+          ],
+          "after": [
+            37900,
+            38017
+          ],
+          "before_sha256": "a658a8ed4f7c956c265f47774960995cebe5e54288d3589d1ffe69b2393959e4",
+          "after_sha256": "fc7128417f86df253672d69983cd5baaaeb6ba4b91d45cf7e54f38e6bf2f58b4",
+          "literal_equal": false,
+          "before_lines": [
+            773,
+            773
+          ],
+          "after_lines": [
+            845,
+            845
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            34423,
+            35014
+          ],
+          "after": [
+            38017,
+            38608
+          ],
+          "before_sha256": "ac2a8fb17b3f476db2d253267c6af43b99b0d2ed1010f7b7f86f13e314a67679",
+          "after_sha256": "ac2a8fb17b3f476db2d253267c6af43b99b0d2ed1010f7b7f86f13e314a67679",
+          "literal_equal": true,
+          "before_lines": [
+            774,
+            786
+          ],
+          "after_lines": [
+            846,
+            858
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            35014,
+            35089
+          ],
+          "after": [
+            38608,
+            38692
+          ],
+          "before_sha256": "1c04f690066a418bf68764b89a48946714d43e900a90ebb147182219c26a46d2",
+          "after_sha256": "fc8f890b3b284fbff11b937a8187a02eafbe9ef434f51e8e4e0acc679b251c73",
+          "literal_equal": false,
+          "before_lines": [
+            787,
+            788
+          ],
+          "after_lines": [
+            859,
+            860
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            35089,
+            35119
+          ],
+          "after": [
+            38692,
+            38722
+          ],
+          "before_sha256": "a037070baccf86f826529fd3cdadc5485d56a85959c62bd1d53dd5d43031eea3",
+          "after_sha256": "a037070baccf86f826529fd3cdadc5485d56a85959c62bd1d53dd5d43031eea3",
+          "literal_equal": true,
+          "before_lines": [
+            789,
+            791
+          ],
+          "after_lines": [
+            861,
+            863
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            35119,
+            35193
+          ],
+          "after": [
+            38722,
+            38880
+          ],
+          "before_sha256": "d64c4c0f04d27545696ebae58830f2ffc7c4e264c77610d37fd77026e2935332",
+          "after_sha256": "323dc09ffffa8b0b2d38e61db6198665f1e5db5547e6789f3d011a8385e4263e",
+          "literal_equal": false,
+          "before_lines": [
+            792,
+            792
+          ],
+          "after_lines": [
+            864,
+            867
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            35193,
+            35845
+          ],
+          "after": [
+            38880,
+            39532
+          ],
+          "before_sha256": "ca150972a4abaff3f327783deabe0e7f3383a2ffea6b7802d59b6d18b84ba89e",
+          "after_sha256": "ca150972a4abaff3f327783deabe0e7f3383a2ffea6b7802d59b6d18b84ba89e",
+          "literal_equal": true,
+          "before_lines": [
+            793,
+            807
+          ],
+          "after_lines": [
+            868,
+            882
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            35845,
+            35912
+          ],
+          "after": [
+            39532,
+            39612
+          ],
+          "before_sha256": "fc055975de18c4c8ffb0a15670e7b4f65ddc3ac954e12ba081f754f71499e004",
+          "after_sha256": "c119cfefe51f02db0d8ec4cefa8dc6ab74dc1010cac31e9f4084c4e9fc75ac7f",
+          "literal_equal": false,
+          "before_lines": [
+            808,
+            809
+          ],
+          "after_lines": [
+            883,
+            884
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            35912,
+            37881
+          ],
+          "after": [
+            39612,
+            41581
+          ],
+          "before_sha256": "27995f8e4499f4ae18585c0d9fb4263ec7e56eb7ec93f3bc7428605bb278e8ff",
+          "after_sha256": "27995f8e4499f4ae18585c0d9fb4263ec7e56eb7ec93f3bc7428605bb278e8ff",
+          "literal_equal": true,
+          "before_lines": [
+            810,
+            854
+          ],
+          "after_lines": [
+            885,
+            929
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            37881,
+            37921
+          ],
+          "after": [
+            41581,
+            41646
+          ],
+          "before_sha256": "a7864f08c71b2358aeb6689614f572ce8a83619c0d1c850aea91bb71b20d7e3b",
+          "after_sha256": "ce722902a49667650512d96ac6c511da9f8794b4c765eaaa42b1c86d4c75d301",
+          "literal_equal": false,
+          "before_lines": [
+            855,
+            855
+          ],
+          "after_lines": [
+            930,
+            930
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            37921,
+            38369
+          ],
+          "after": [
+            41646,
+            42094
+          ],
+          "before_sha256": "04d369c3e02d5c42cf41ba3ee8211dd4006b9b48d93f5effda06db2bca415aee",
+          "after_sha256": "04d369c3e02d5c42cf41ba3ee8211dd4006b9b48d93f5effda06db2bca415aee",
+          "literal_equal": true,
+          "before_lines": [
+            856,
+            863
+          ],
+          "after_lines": [
+            931,
+            938
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            38369,
+            38395
+          ],
+          "after": [
+            42094,
+            42170
+          ],
+          "before_sha256": "cb74e1491e88c7583d541d447529f981dc22e12f87389b1c5ddb4579ff58b724",
+          "after_sha256": "3238eda2e0c6d9a36ca32f654cc954717cc786d31dbdfba5c28d5b6a7169d3f4",
+          "literal_equal": false,
+          "before_lines": [
+            864,
+            864
+          ],
+          "after_lines": [
+            939,
+            940
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            38395,
+            38478
+          ],
+          "after": [
+            42170,
+            42253
+          ],
+          "before_sha256": "30bcbb057110f021945e1ded0e6f0d700ad20f90308ddc7111a1ad2882b055b6",
+          "after_sha256": "30bcbb057110f021945e1ded0e6f0d700ad20f90308ddc7111a1ad2882b055b6",
+          "literal_equal": true,
+          "before_lines": [
+            865,
+            866
+          ],
+          "after_lines": [
+            941,
+            942
+          ]
+        },
+        {
+          "kind": "delete",
+          "before": [
+            38478,
+            38519
+          ],
+          "after": [
+            42253,
+            42253
+          ],
+          "before_sha256": "430135a8e2ad4aa1d29de1f6ff9d7bb3303ba7a2f68a1be9fd74633a8af88bc6",
+          "after_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "literal_equal": false,
+          "before_lines": [
+            867,
+            867
+          ],
+          "after_lines": [
+            943,
+            942
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            38519,
+            45630
+          ],
+          "after": [
+            42253,
+            49364
+          ],
+          "before_sha256": "cf19a7ef1c5c182b8b31036455ca3aa994abc12b53821c8e4fed13db9dac3268",
+          "after_sha256": "cf19a7ef1c5c182b8b31036455ca3aa994abc12b53821c8e4fed13db9dac3268",
+          "literal_equal": true,
+          "before_lines": [
+            868,
+            1042
+          ],
+          "after_lines": [
+            943,
+            1117
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            45630,
+            45630
+          ],
+          "after": [
+            49364,
+            49550
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "88b1a8949e664576f0b17f2f9206dbce2bd3553958da8e1a117cac6028228c96",
+          "literal_equal": false,
+          "before_lines": [
+            1043,
+            1042
+          ],
+          "after_lines": [
+            1118,
+            1121
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            45630,
+            46632
+          ],
+          "after": [
+            49550,
+            50552
+          ],
+          "before_sha256": "5c0b61246e19d9fc3d8ae885fe8c72b74e7cb7f189c91c34a98f10c749944812",
+          "after_sha256": "5c0b61246e19d9fc3d8ae885fe8c72b74e7cb7f189c91c34a98f10c749944812",
+          "literal_equal": true,
+          "before_lines": [
+            1043,
+            1074
+          ],
+          "after_lines": [
+            1122,
+            1153
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            46632,
+            46632
+          ],
+          "after": [
+            50552,
+            50593
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "59ce9038898b15877c51ed6bcdb524c2a7746213a556650f20ec976ea24373f7",
+          "literal_equal": false,
+          "before_lines": [
+            1075,
+            1074
+          ],
+          "after_lines": [
+            1154,
+            1154
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            46632,
+            69125
+          ],
+          "after": [
+            50593,
+            73086
+          ],
+          "before_sha256": "fc1a2b502e2a74d184c284d2754d8c8344c6032e064cefa516d3f1e558d3cc49",
+          "after_sha256": "fc1a2b502e2a74d184c284d2754d8c8344c6032e064cefa516d3f1e558d3cc49",
+          "literal_equal": true,
+          "before_lines": [
+            1075,
+            1551
+          ],
+          "after_lines": [
+            1155,
+            1631
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            69125,
+            69125
+          ],
+          "after": [
+            73086,
+            73249
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "1d30d72f9540cb3a0495029af3decb0524e6ab0bb700ee50094445df637fc69e",
+          "literal_equal": false,
+          "before_lines": [
+            1552,
+            1551
+          ],
+          "after_lines": [
+            1632,
+            1635
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            69125,
+            71610
+          ],
+          "after": [
+            73249,
+            75734
+          ],
+          "before_sha256": "dc27dee81a16cf9309e2ebf2894620bf741b6db6812592d114f055fe1e0ac4fa",
+          "after_sha256": "dc27dee81a16cf9309e2ebf2894620bf741b6db6812592d114f055fe1e0ac4fa",
+          "literal_equal": true,
+          "before_lines": [
+            1552,
+            1591
+          ],
+          "after_lines": [
+            1636,
+            1675
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            71610,
+            71610
+          ],
+          "after": [
+            75734,
+            76965
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "fa4495f3093a9305d71744773393e153134b9f95bace06c58e72708a455126cb",
+          "literal_equal": false,
+          "before_lines": [
+            1592,
+            1591
+          ],
+          "after_lines": [
+            1676,
+            1696
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            71610,
+            190343
+          ],
+          "after": [
+            76965,
+            195698
+          ],
+          "before_sha256": "7965545e5e9b42d3d170547c8717ff9a8287ca343bb12e61c126a952508adcd8",
+          "after_sha256": "7965545e5e9b42d3d170547c8717ff9a8287ca343bb12e61c126a952508adcd8",
+          "literal_equal": true,
+          "before_lines": [
+            1592,
+            3918
+          ],
+          "after_lines": [
+            1697,
+            4023
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            190343,
+            190428
+          ],
+          "after": [
+            195698,
+            196071
+          ],
+          "before_sha256": "f544ce64873e627e9948a440e12749ce29648efd53256ca5005ab75e4c46e8e3",
+          "after_sha256": "d6554b99e7e27349f041518b402e1aa25ef8b42f7bcd449cbd1bb5fd872c87bb",
+          "literal_equal": false,
+          "before_lines": [
+            3919,
+            3920
+          ],
+          "after_lines": [
+            4024,
+            4032
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            190428,
+            191129
+          ],
+          "after": [
+            196071,
+            196772
+          ],
+          "before_sha256": "4ac52bfb2c34ddc8bb35f2075e7838b2eaa08487d21c923dbd406929afd95372",
+          "after_sha256": "4ac52bfb2c34ddc8bb35f2075e7838b2eaa08487d21c923dbd406929afd95372",
+          "literal_equal": true,
+          "before_lines": [
+            3921,
+            3934
+          ],
+          "after_lines": [
+            4033,
+            4046
+          ]
+        }
+      ],
+      "partition_count": 49,
+      "changed_regions": 24
+    },
+    {
+      "name": "expectations.json",
+      "before": {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/expectations.json",
+        "bytes": 12120,
+        "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb"
+      },
+      "after": {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/expectations.json",
+        "bytes": 12120,
+        "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb"
+      },
+      "changed": false,
+      "parts": [
+        {
+          "kind": "equal",
+          "before": [
+            0,
+            12120
+          ],
+          "after": [
+            0,
+            12120
+          ],
+          "before_sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+          "after_sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+          "literal_equal": true,
+          "before_lines": [
+            1,
+            285
+          ],
+          "after_lines": [
+            1,
+            285
+          ]
+        }
+      ],
+      "partition_count": 1,
+      "changed_regions": 0
+    },
+    {
+      "name": "launch-contract.json",
+      "before": {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/launch-contract.json",
+        "bytes": 51517,
+        "sha256": "a9745e8b13656d1fda2f1229962ccb1f1cb94109197c9e916cfc71140ac4f1de"
+      },
+      "after": {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/launch-contract.json",
+        "bytes": 51549,
+        "sha256": "41b34c9a72de8d60d986ec5cf1eff09c0d6829140f24ff7bb794305bc29a0144"
+      },
+      "changed": true,
+      "parts": [
+        {
+          "kind": "equal",
+          "before": [
+            0,
+            1544
+          ],
+          "after": [
+            0,
+            1544
+          ],
+          "before_sha256": "f1013adfd635339ce8f46ceef9e06fb418c5eeba4a2324d32f314b09c6ee41f0",
+          "after_sha256": "f1013adfd635339ce8f46ceef9e06fb418c5eeba4a2324d32f314b09c6ee41f0",
+          "literal_equal": true,
+          "before_lines": [
+            1,
+            8
+          ],
+          "after_lines": [
+            1,
+            8
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            1544,
+            1768
+          ],
+          "after": [
+            1544,
+            1776
+          ],
+          "before_sha256": "a583d4abdaeaec82d441de1a8018f349df0ed6da856d7c6f7915b90ce2c719e4",
+          "after_sha256": "eb28d79cbc3b79418b5a2bc69e5da42bf92e2660fd56dbb3882f714e3268b9cd",
+          "literal_equal": false,
+          "before_lines": [
+            9,
+            11
+          ],
+          "after_lines": [
+            9,
+            11
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            1768,
+            11645
+          ],
+          "after": [
+            1776,
+            11653
+          ],
+          "before_sha256": "71b9b7c42c2d27bcbf5081a0e02e129ea49a22ff8d7572b81f9e25376586241a",
+          "after_sha256": "71b9b7c42c2d27bcbf5081a0e02e129ea49a22ff8d7572b81f9e25376586241a",
+          "literal_equal": true,
+          "before_lines": [
+            12,
+            107
+          ],
+          "after_lines": [
+            12,
+            107
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            11645,
+            11880
+          ],
+          "after": [
+            11653,
+            11896
+          ],
+          "before_sha256": "fd961fdd70bf9b63f3b19ee7219c1b641e8490bda81ed8d65cded008f1d8d208",
+          "after_sha256": "f9ff8208304645bbe7e7b7f1588edd2c1d8601e55760a4c34f80a9b2bf54083d",
+          "literal_equal": false,
+          "before_lines": [
+            108,
+            110
+          ],
+          "after_lines": [
+            108,
+            110
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            11880,
+            11902
+          ],
+          "after": [
+            11896,
+            11918
+          ],
+          "before_sha256": "8625477fac877e269db4d79486b365479523e61bc7c3f2f79245aa0674722e4b",
+          "after_sha256": "8625477fac877e269db4d79486b365479523e61bc7c3f2f79245aa0674722e4b",
+          "literal_equal": true,
+          "before_lines": [
+            111,
+            112
+          ],
+          "after_lines": [
+            111,
+            112
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            11902,
+            12036
+          ],
+          "after": [
+            11918,
+            12060
+          ],
+          "before_sha256": "fbc3ef062a98d1310b89657c158788d2569acf7c0d4d098b7a1096e4b1250d80",
+          "after_sha256": "0df177777963aba0a504d145066e184ae79a9ec6b8dfcf37921888c7b399dfa7",
+          "literal_equal": false,
+          "before_lines": [
+            113,
+            113
+          ],
+          "after_lines": [
+            113,
+            113
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            12036,
+            12705
+          ],
+          "after": [
+            12060,
+            12729
+          ],
+          "before_sha256": "69df3362125f5d4007a1b91480707748c697fa431b4b04f0cb026199aca0b85b",
+          "after_sha256": "69df3362125f5d4007a1b91480707748c697fa431b4b04f0cb026199aca0b85b",
+          "literal_equal": true,
+          "before_lines": [
+            114,
+            143
+          ],
+          "after_lines": [
+            114,
+            143
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            12705,
+            12779
+          ],
+          "after": [
+            12729,
+            12803
+          ],
+          "before_sha256": "becbbf208724a3abd1550f3074dd31745a3be024da2059eb28b09922cb2745db",
+          "after_sha256": "69c2d343e8a5cbeddf6da0cc203c24b040fd8536ce115f7e164682e457971603",
+          "literal_equal": false,
+          "before_lines": [
+            144,
+            144
+          ],
+          "after_lines": [
+            144,
+            144
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            12779,
+            28456
+          ],
+          "after": [
+            12803,
+            28480
+          ],
+          "before_sha256": "d35b3717babc4b973f474be1efb2dad14dae3538e03de0c3aaf607f0639ded20",
+          "after_sha256": "d35b3717babc4b973f474be1efb2dad14dae3538e03de0c3aaf607f0639ded20",
+          "literal_equal": true,
+          "before_lines": [
+            145,
+            492
+          ],
+          "after_lines": [
+            145,
+            492
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            28456,
+            28579
+          ],
+          "after": [
+            28480,
+            28611
+          ],
+          "before_sha256": "1996d4766506a3c72d351f14137f29e86039507b0423517ffce30149a396b9a5",
+          "after_sha256": "a93d53fa93472391229db9d73e5b144579680d6d165c4d5957a5ef345e56b908",
+          "literal_equal": false,
+          "before_lines": [
+            493,
+            493
+          ],
+          "after_lines": [
+            493,
+            493
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            28579,
+            51517
+          ],
+          "after": [
+            28611,
+            51549
+          ],
+          "before_sha256": "75738a8501b0f1e74a456d4f950f0ca049c75cf203f05223d33262a07f167057",
+          "after_sha256": "75738a8501b0f1e74a456d4f950f0ca049c75cf203f05223d33262a07f167057",
+          "literal_equal": true,
+          "before_lines": [
+            494,
+            757
+          ],
+          "after_lines": [
+            494,
+            757
+          ]
+        }
+      ],
+      "partition_count": 11,
+      "changed_regions": 5
+    },
+    {
+      "name": "ordinary-surplus.txt",
+      "before": {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+      },
+      "after": {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+      },
+      "changed": false,
+      "parts": [
+        {
+          "kind": "equal",
+          "before": [
+            0,
+            158
+          ],
+          "after": [
+            0,
+            158
+          ],
+          "before_sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+          "after_sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+          "literal_equal": true,
+          "before_lines": [
+            1,
+            2
+          ],
+          "after_lines": [
+            1,
+            2
+          ]
+        }
+      ],
+      "partition_count": 1,
+      "changed_regions": 0
+    },
+    {
+      "name": "supervisor.py",
+      "before": {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+        "bytes": 155024,
+        "sha256": "660477909be790ceb9f7872c2dbe57d2d2646470823f4f210fe30f6dec209607"
+      },
+      "after": {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/supervisor.py",
+        "bytes": 160864,
+        "sha256": "b0afe12983e920053bdd7adaedf98cefe28cff938dc021ed3429ec8eba821cab"
+      },
+      "changed": true,
+      "parts": [
+        {
+          "kind": "equal",
+          "before": [
+            0,
+            560
+          ],
+          "after": [
+            0,
+            560
+          ],
+          "before_sha256": "bad6e610032dfdfdc8b75f1f7f44c4670d50010ecacb63e63997e33e403dd1ef",
+          "after_sha256": "bad6e610032dfdfdc8b75f1f7f44c4670d50010ecacb63e63997e33e403dd1ef",
+          "literal_equal": true,
+          "before_lines": [
+            1,
+            21
+          ],
+          "after_lines": [
+            1,
+            21
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            560,
+            665
+          ],
+          "after": [
+            560,
+            673
+          ],
+          "before_sha256": "73e92fe6238c3632021681bd4d8eb6ce0f9ec803c26b3934f565dab3044f539b",
+          "after_sha256": "e0a60fe5c2237e2225775d7a5d6af4263da178818f4c2531cfadeac64417a9cd",
+          "literal_equal": false,
+          "before_lines": [
+            22,
+            22
+          ],
+          "after_lines": [
+            22,
+            22
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            665,
+            911
+          ],
+          "after": [
+            673,
+            919
+          ],
+          "before_sha256": "8feecb20c592a3fc6dd7bee91049dfeb9e4ef4856b0dd67a3be9232e03bb01ca",
+          "after_sha256": "8feecb20c592a3fc6dd7bee91049dfeb9e4ef4856b0dd67a3be9232e03bb01ca",
+          "literal_equal": true,
+          "before_lines": [
+            23,
+            26
+          ],
+          "after_lines": [
+            23,
+            26
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            911,
+            1073
+          ],
+          "after": [
+            919,
+            1081
+          ],
+          "before_sha256": "1af809306ddb8c85a531211ada4163e0788d842bca5bae800a79cd2c916ea6c6",
+          "after_sha256": "25b8500409a76c0228e7e54bbe7e3f21f3fb4fca0d32113f4a517c25d67dd63d",
+          "literal_equal": false,
+          "before_lines": [
+            27,
+            28
+          ],
+          "after_lines": [
+            27,
+            28
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            1073,
+            3237
+          ],
+          "after": [
+            1081,
+            3245
+          ],
+          "before_sha256": "40d18101f058442ae74cd620911913526728a72a28dc814303cdf40f5858890f",
+          "after_sha256": "40d18101f058442ae74cd620911913526728a72a28dc814303cdf40f5858890f",
+          "literal_equal": true,
+          "before_lines": [
+            29,
+            63
+          ],
+          "after_lines": [
+            29,
+            63
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            3237,
+            3401
+          ],
+          "after": [
+            3245,
+            3409
+          ],
+          "before_sha256": "d71bb9b41040feeb3656c2f0921574987d2b77aa2be29af664e158af9d7e7c5a",
+          "after_sha256": "fa68daed78c3fd49ac91c9d34e89a3ad4b3b34dd7ca5f1ee29a9b82bcd3d01cc",
+          "literal_equal": false,
+          "before_lines": [
+            64,
+            65
+          ],
+          "after_lines": [
+            64,
+            65
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            3401,
+            10044
+          ],
+          "after": [
+            3409,
+            10052
+          ],
+          "before_sha256": "5f96686d622b3fa13cdbb58f921d85416d472770bc4bee6d8a8548c1b648a2bd",
+          "after_sha256": "5f96686d622b3fa13cdbb58f921d85416d472770bc4bee6d8a8548c1b648a2bd",
+          "literal_equal": true,
+          "before_lines": [
+            66,
+            233
+          ],
+          "after_lines": [
+            66,
+            233
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            10044,
+            10044
+          ],
+          "after": [
+            10052,
+            10199
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "78866aaa7e44903a0c8df0026ee5c4e14dd18f99bdc7f50b3fef90d31e833b24",
+          "literal_equal": false,
+          "before_lines": [
+            234,
+            233
+          ],
+          "after_lines": [
+            234,
+            237
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            10044,
+            11676
+          ],
+          "after": [
+            10199,
+            11831
+          ],
+          "before_sha256": "2a44ac422485c039818f15239cd7d504b33abd5a53dcafe89384fbcb20aff052",
+          "after_sha256": "2a44ac422485c039818f15239cd7d504b33abd5a53dcafe89384fbcb20aff052",
+          "literal_equal": true,
+          "before_lines": [
+            234,
+            284
+          ],
+          "after_lines": [
+            238,
+            288
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            11676,
+            11676
+          ],
+          "after": [
+            11831,
+            13135
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "c862802d02822c3075d6e1997b54dfd9cd88d67bdbd9a3cca329bfeb2aa0fc29",
+          "literal_equal": false,
+          "before_lines": [
+            285,
+            284
+          ],
+          "after_lines": [
+            289,
+            321
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            11676,
+            11900
+          ],
+          "after": [
+            13135,
+            13359
+          ],
+          "before_sha256": "fea424cdf181e0471cc054ed9d0ca1cce3572dfbfb1ede4d12acb826392e84c4",
+          "after_sha256": "fea424cdf181e0471cc054ed9d0ca1cce3572dfbfb1ede4d12acb826392e84c4",
+          "literal_equal": true,
+          "before_lines": [
+            285,
+            294
+          ],
+          "after_lines": [
+            322,
+            331
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            11900,
+            11920
+          ],
+          "after": [
+            13359,
+            13449
+          ],
+          "before_sha256": "8d17cc6cb3704f01318daa1bc191d773f393d85c1b650bb5936c497b28306a21",
+          "after_sha256": "e8ff2c90852f163065112fcb4aff19a715fb56556b926e0e68bd8bca8f2f32db",
+          "literal_equal": false,
+          "before_lines": [
+            295,
+            295
+          ],
+          "after_lines": [
+            332,
+            333
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            11920,
+            11940
+          ],
+          "after": [
+            13449,
+            13469
+          ],
+          "before_sha256": "d10424bde3ad91ff8daea81a4aa504b2fe9d37923f59379152d543d7b4deaf71",
+          "after_sha256": "d10424bde3ad91ff8daea81a4aa504b2fe9d37923f59379152d543d7b4deaf71",
+          "literal_equal": true,
+          "before_lines": [
+            296,
+            296
+          ],
+          "after_lines": [
+            334,
+            334
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            11940,
+            12033
+          ],
+          "after": [
+            13469,
+            14687
+          ],
+          "before_sha256": "97ad4bb5ede1e13205a7173f0079689418b1ecf8192b595f82c10ad77fa17a7e",
+          "after_sha256": "caabb955e6687047624dd78ddd92398ec8b51ff35a694a1157e221002ab2077b",
+          "literal_equal": false,
+          "before_lines": [
+            297,
+            298
+          ],
+          "after_lines": [
+            335,
+            356
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            12033,
+            12750
+          ],
+          "after": [
+            14687,
+            15404
+          ],
+          "before_sha256": "2e5f6879e50b67b78589f5c3acda9d56480f53f6241f3f4f7a80dd6fd94ed78e",
+          "after_sha256": "2e5f6879e50b67b78589f5c3acda9d56480f53f6241f3f4f7a80dd6fd94ed78e",
+          "literal_equal": true,
+          "before_lines": [
+            299,
+            317
+          ],
+          "after_lines": [
+            357,
+            375
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            12750,
+            12750
+          ],
+          "after": [
+            15404,
+            15606
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "4a98316b83ce3ef7ad7ba2f377519be156506138cd949effc052313afda7275d",
+          "literal_equal": false,
+          "before_lines": [
+            318,
+            317
+          ],
+          "after_lines": [
+            376,
+            379
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            12750,
+            12811
+          ],
+          "after": [
+            15606,
+            15667
+          ],
+          "before_sha256": "b2684f4eb3b98567d50c889dd065eca8d4cb843a8594c1a9a4a48c060d9b0007",
+          "after_sha256": "b2684f4eb3b98567d50c889dd065eca8d4cb843a8594c1a9a4a48c060d9b0007",
+          "literal_equal": true,
+          "before_lines": [
+            318,
+            321
+          ],
+          "after_lines": [
+            380,
+            383
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            12811,
+            13806
+          ],
+          "after": [
+            15667,
+            17067
+          ],
+          "before_sha256": "be6fb3432372fe60c2f4c989d15154320e54b6b91217a5139a4b1d8b5354f19c",
+          "after_sha256": "722fcec2c51caa2e72991249d9b8b8fbfe90a8c942443d6455c1da2e2e3b3d83",
+          "literal_equal": false,
+          "before_lines": [
+            322,
+            342
+          ],
+          "after_lines": [
+            384,
+            410
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            13806,
+            13834
+          ],
+          "after": [
+            17067,
+            17095
+          ],
+          "before_sha256": "403ea2f558cdfef765b2e0bc0e9eee82b8a90dd32f2ac001e39a2bd0c017d23b",
+          "after_sha256": "403ea2f558cdfef765b2e0bc0e9eee82b8a90dd32f2ac001e39a2bd0c017d23b",
+          "literal_equal": true,
+          "before_lines": [
+            343,
+            345
+          ],
+          "after_lines": [
+            411,
+            413
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            13834,
+            14424
+          ],
+          "after": [
+            17095,
+            17841
+          ],
+          "before_sha256": "3dbf80d55554795bd81ad0eed1e7149f3d0e760dbbacc6818566481ea425b22e",
+          "after_sha256": "b1a8831acae11196ddd480891443f2f3e2c7772084c2ce03cff02ca832c41389",
+          "literal_equal": false,
+          "before_lines": [
+            346,
+            360
+          ],
+          "after_lines": [
+            414,
+            431
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            14424,
+            16522
+          ],
+          "after": [
+            17841,
+            19939
+          ],
+          "before_sha256": "f91194b2cb066a9d8985340f437ee5dca0c4475e48b732c07847c77db3539987",
+          "after_sha256": "f91194b2cb066a9d8985340f437ee5dca0c4475e48b732c07847c77db3539987",
+          "literal_equal": true,
+          "before_lines": [
+            361,
+            410
+          ],
+          "after_lines": [
+            432,
+            481
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            16522,
+            16595
+          ],
+          "after": [
+            19939,
+            20025
+          ],
+          "before_sha256": "13d21cafdc028b966719ff476b065dd66d1dddba705728bb357a93699da78db2",
+          "after_sha256": "a966bfca6610576a7bbf2d084ca7c3d8df13deb9f0d34a83cc198eda30a7f0e6",
+          "literal_equal": false,
+          "before_lines": [
+            411,
+            412
+          ],
+          "after_lines": [
+            482,
+            483
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            16595,
+            16710
+          ],
+          "after": [
+            20025,
+            20140
+          ],
+          "before_sha256": "2811b714761011d47875f0fd9d6080bde11dcc9a854a218678ce7e2370af9694",
+          "after_sha256": "2811b714761011d47875f0fd9d6080bde11dcc9a854a218678ce7e2370af9694",
+          "literal_equal": true,
+          "before_lines": [
+            413,
+            416
+          ],
+          "after_lines": [
+            484,
+            487
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            16710,
+            16838
+          ],
+          "after": [
+            20140,
+            20381
+          ],
+          "before_sha256": "cbe15140e35a402238de751d7a8f3467624e77e473094102d99d773151267388",
+          "after_sha256": "9739233620a56af4741ce050acdadb670349f73f76067803167cadf8570e20a6",
+          "literal_equal": false,
+          "before_lines": [
+            417,
+            419
+          ],
+          "after_lines": [
+            488,
+            491
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            16838,
+            17098
+          ],
+          "after": [
+            20381,
+            20641
+          ],
+          "before_sha256": "5711b50264bd099c9757f9ecbb59c2cfb3ae4af9a09301281728e2cece404b25",
+          "after_sha256": "5711b50264bd099c9757f9ecbb59c2cfb3ae4af9a09301281728e2cece404b25",
+          "literal_equal": true,
+          "before_lines": [
+            420,
+            429
+          ],
+          "after_lines": [
+            492,
+            501
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            17098,
+            17164
+          ],
+          "after": [
+            20641,
+            20758
+          ],
+          "before_sha256": "a658a8ed4f7c956c265f47774960995cebe5e54288d3589d1ffe69b2393959e4",
+          "after_sha256": "fc7128417f86df253672d69983cd5baaaeb6ba4b91d45cf7e54f38e6bf2f58b4",
+          "literal_equal": false,
+          "before_lines": [
+            430,
+            430
+          ],
+          "after_lines": [
+            502,
+            502
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            17164,
+            17755
+          ],
+          "after": [
+            20758,
+            21349
+          ],
+          "before_sha256": "ac2a8fb17b3f476db2d253267c6af43b99b0d2ed1010f7b7f86f13e314a67679",
+          "after_sha256": "ac2a8fb17b3f476db2d253267c6af43b99b0d2ed1010f7b7f86f13e314a67679",
+          "literal_equal": true,
+          "before_lines": [
+            431,
+            443
+          ],
+          "after_lines": [
+            503,
+            515
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            17755,
+            17830
+          ],
+          "after": [
+            21349,
+            21433
+          ],
+          "before_sha256": "1c04f690066a418bf68764b89a48946714d43e900a90ebb147182219c26a46d2",
+          "after_sha256": "fc8f890b3b284fbff11b937a8187a02eafbe9ef434f51e8e4e0acc679b251c73",
+          "literal_equal": false,
+          "before_lines": [
+            444,
+            445
+          ],
+          "after_lines": [
+            516,
+            517
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            17830,
+            17860
+          ],
+          "after": [
+            21433,
+            21463
+          ],
+          "before_sha256": "a037070baccf86f826529fd3cdadc5485d56a85959c62bd1d53dd5d43031eea3",
+          "after_sha256": "a037070baccf86f826529fd3cdadc5485d56a85959c62bd1d53dd5d43031eea3",
+          "literal_equal": true,
+          "before_lines": [
+            446,
+            448
+          ],
+          "after_lines": [
+            518,
+            520
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            17860,
+            17934
+          ],
+          "after": [
+            21463,
+            21621
+          ],
+          "before_sha256": "d64c4c0f04d27545696ebae58830f2ffc7c4e264c77610d37fd77026e2935332",
+          "after_sha256": "323dc09ffffa8b0b2d38e61db6198665f1e5db5547e6789f3d011a8385e4263e",
+          "literal_equal": false,
+          "before_lines": [
+            449,
+            449
+          ],
+          "after_lines": [
+            521,
+            524
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            17934,
+            18586
+          ],
+          "after": [
+            21621,
+            22273
+          ],
+          "before_sha256": "ca150972a4abaff3f327783deabe0e7f3383a2ffea6b7802d59b6d18b84ba89e",
+          "after_sha256": "ca150972a4abaff3f327783deabe0e7f3383a2ffea6b7802d59b6d18b84ba89e",
+          "literal_equal": true,
+          "before_lines": [
+            450,
+            464
+          ],
+          "after_lines": [
+            525,
+            539
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            18586,
+            18653
+          ],
+          "after": [
+            22273,
+            22353
+          ],
+          "before_sha256": "fc055975de18c4c8ffb0a15670e7b4f65ddc3ac954e12ba081f754f71499e004",
+          "after_sha256": "c119cfefe51f02db0d8ec4cefa8dc6ab74dc1010cac31e9f4084c4e9fc75ac7f",
+          "literal_equal": false,
+          "before_lines": [
+            465,
+            466
+          ],
+          "after_lines": [
+            540,
+            541
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            18653,
+            20622
+          ],
+          "after": [
+            22353,
+            24322
+          ],
+          "before_sha256": "27995f8e4499f4ae18585c0d9fb4263ec7e56eb7ec93f3bc7428605bb278e8ff",
+          "after_sha256": "27995f8e4499f4ae18585c0d9fb4263ec7e56eb7ec93f3bc7428605bb278e8ff",
+          "literal_equal": true,
+          "before_lines": [
+            467,
+            511
+          ],
+          "after_lines": [
+            542,
+            586
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            20622,
+            20662
+          ],
+          "after": [
+            24322,
+            24387
+          ],
+          "before_sha256": "a7864f08c71b2358aeb6689614f572ce8a83619c0d1c850aea91bb71b20d7e3b",
+          "after_sha256": "ce722902a49667650512d96ac6c511da9f8794b4c765eaaa42b1c86d4c75d301",
+          "literal_equal": false,
+          "before_lines": [
+            512,
+            512
+          ],
+          "after_lines": [
+            587,
+            587
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            20662,
+            21110
+          ],
+          "after": [
+            24387,
+            24835
+          ],
+          "before_sha256": "04d369c3e02d5c42cf41ba3ee8211dd4006b9b48d93f5effda06db2bca415aee",
+          "after_sha256": "04d369c3e02d5c42cf41ba3ee8211dd4006b9b48d93f5effda06db2bca415aee",
+          "literal_equal": true,
+          "before_lines": [
+            513,
+            520
+          ],
+          "after_lines": [
+            588,
+            595
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            21110,
+            21136
+          ],
+          "after": [
+            24835,
+            24911
+          ],
+          "before_sha256": "cb74e1491e88c7583d541d447529f981dc22e12f87389b1c5ddb4579ff58b724",
+          "after_sha256": "3238eda2e0c6d9a36ca32f654cc954717cc786d31dbdfba5c28d5b6a7169d3f4",
+          "literal_equal": false,
+          "before_lines": [
+            521,
+            521
+          ],
+          "after_lines": [
+            596,
+            597
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            21136,
+            21219
+          ],
+          "after": [
+            24911,
+            24994
+          ],
+          "before_sha256": "30bcbb057110f021945e1ded0e6f0d700ad20f90308ddc7111a1ad2882b055b6",
+          "after_sha256": "30bcbb057110f021945e1ded0e6f0d700ad20f90308ddc7111a1ad2882b055b6",
+          "literal_equal": true,
+          "before_lines": [
+            522,
+            523
+          ],
+          "after_lines": [
+            598,
+            599
+          ]
+        },
+        {
+          "kind": "delete",
+          "before": [
+            21219,
+            21260
+          ],
+          "after": [
+            24994,
+            24994
+          ],
+          "before_sha256": "430135a8e2ad4aa1d29de1f6ff9d7bb3303ba7a2f68a1be9fd74633a8af88bc6",
+          "after_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "literal_equal": false,
+          "before_lines": [
+            524,
+            524
+          ],
+          "after_lines": [
+            600,
+            599
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            21260,
+            28176
+          ],
+          "after": [
+            24994,
+            31910
+          ],
+          "before_sha256": "a94095e6df677a1908811ff83e4898c641f62861e14db24b015781da6354d612",
+          "after_sha256": "a94095e6df677a1908811ff83e4898c641f62861e14db24b015781da6354d612",
+          "literal_equal": true,
+          "before_lines": [
+            525,
+            693
+          ],
+          "after_lines": [
+            600,
+            768
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            28176,
+            28176
+          ],
+          "after": [
+            31910,
+            32096
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "88b1a8949e664576f0b17f2f9206dbce2bd3553958da8e1a117cac6028228c96",
+          "literal_equal": false,
+          "before_lines": [
+            694,
+            693
+          ],
+          "after_lines": [
+            769,
+            772
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            28176,
+            29178
+          ],
+          "after": [
+            32096,
+            33098
+          ],
+          "before_sha256": "5c0b61246e19d9fc3d8ae885fe8c72b74e7cb7f189c91c34a98f10c749944812",
+          "after_sha256": "5c0b61246e19d9fc3d8ae885fe8c72b74e7cb7f189c91c34a98f10c749944812",
+          "literal_equal": true,
+          "before_lines": [
+            694,
+            725
+          ],
+          "after_lines": [
+            773,
+            804
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            29178,
+            29178
+          ],
+          "after": [
+            33098,
+            33139
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "59ce9038898b15877c51ed6bcdb524c2a7746213a556650f20ec976ea24373f7",
+          "literal_equal": false,
+          "before_lines": [
+            726,
+            725
+          ],
+          "after_lines": [
+            805,
+            805
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            29178,
+            51670
+          ],
+          "after": [
+            33139,
+            55631
+          ],
+          "before_sha256": "1ce9c10eabccb6098d1053369e8a1e02d68d0194a487871879334730457790f6",
+          "after_sha256": "1ce9c10eabccb6098d1053369e8a1e02d68d0194a487871879334730457790f6",
+          "literal_equal": true,
+          "before_lines": [
+            726,
+            1202
+          ],
+          "after_lines": [
+            806,
+            1282
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            51670,
+            51670
+          ],
+          "after": [
+            55631,
+            55794
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "1d30d72f9540cb3a0495029af3decb0524e6ab0bb700ee50094445df637fc69e",
+          "literal_equal": false,
+          "before_lines": [
+            1203,
+            1202
+          ],
+          "after_lines": [
+            1283,
+            1286
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            51670,
+            54155
+          ],
+          "after": [
+            55794,
+            58279
+          ],
+          "before_sha256": "dc27dee81a16cf9309e2ebf2894620bf741b6db6812592d114f055fe1e0ac4fa",
+          "after_sha256": "dc27dee81a16cf9309e2ebf2894620bf741b6db6812592d114f055fe1e0ac4fa",
+          "literal_equal": true,
+          "before_lines": [
+            1203,
+            1242
+          ],
+          "after_lines": [
+            1287,
+            1326
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            54155,
+            54155
+          ],
+          "after": [
+            58279,
+            59510
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "fa4495f3093a9305d71744773393e153134b9f95bace06c58e72708a455126cb",
+          "literal_equal": false,
+          "before_lines": [
+            1243,
+            1242
+          ],
+          "after_lines": [
+            1327,
+            1347
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            54155,
+            154077
+          ],
+          "after": [
+            59510,
+            159432
+          ],
+          "before_sha256": "0bcf2b641838673398a000cc549f63443bdad382508adbc574914985ec0db5f6",
+          "after_sha256": "0bcf2b641838673398a000cc549f63443bdad382508adbc574914985ec0db5f6",
+          "literal_equal": true,
+          "before_lines": [
+            1243,
+            3162
+          ],
+          "after_lines": [
+            1348,
+            3267
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            154077,
+            154077
+          ],
+          "after": [
+            159432,
+            159779
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "7bd68cddf9c1a06b3d8a939944b63c1c1b98bf7cf31da0c07172ef2664f82c30",
+          "literal_equal": false,
+          "before_lines": [
+            3163,
+            3162
+          ],
+          "after_lines": [
+            3268,
+            3275
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            154077,
+            154102
+          ],
+          "after": [
+            159779,
+            159804
+          ],
+          "before_sha256": "b937d8a9bd5e3f31148e6ab4aa9528ae39a573f441d0b87c6e163b2db490db40",
+          "after_sha256": "b937d8a9bd5e3f31148e6ab4aa9528ae39a573f441d0b87c6e163b2db490db40",
+          "literal_equal": true,
+          "before_lines": [
+            3163,
+            3163
+          ],
+          "after_lines": [
+            3276,
+            3276
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            154102,
+            154102
+          ],
+          "after": [
+            159804,
+            159963
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "7d3efd3ce05d88de89cf36b41a738f70376fdac6e0838fbafb7054083c3c8001",
+          "literal_equal": false,
+          "before_lines": [
+            3164,
+            3163
+          ],
+          "after_lines": [
+            3277,
+            3278
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            154102,
+            154216
+          ],
+          "after": [
+            159963,
+            160077
+          ],
+          "before_sha256": "7d8cc7620baa5b08d8e097dee743247edacadef2eda3ba979b82190c6c7c2c6e",
+          "after_sha256": "7d8cc7620baa5b08d8e097dee743247edacadef2eda3ba979b82190c6c7c2c6e",
+          "literal_equal": true,
+          "before_lines": [
+            3164,
+            3166
+          ],
+          "after_lines": [
+            3279,
+            3281
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            154216,
+            154428
+          ],
+          "after": [
+            160077,
+            160268
+          ],
+          "before_sha256": "9d1e98b4d3a52794ddd7dabed293afb01bbb51f50c2eca8c2c55c7debab80cc4",
+          "after_sha256": "cffcecb4a847774edcda66ee7e8849c28ee2559db66640f281caeed770fa9602",
+          "literal_equal": false,
+          "before_lines": [
+            3167,
+            3172
+          ],
+          "after_lines": [
+            3282,
+            3285
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            154428,
+            155024
+          ],
+          "after": [
+            160268,
+            160864
+          ],
+          "before_sha256": "7f925bd6fead21bba47ebde2e4e82d23f9f61ce20003d7bd717a09b4d2d49040",
+          "after_sha256": "7f925bd6fead21bba47ebde2e4e82d23f9f61ce20003d7bd717a09b4d2d49040",
+          "literal_equal": true,
+          "before_lines": [
+            3173,
+            3188
+          ],
+          "after_lines": [
+            3286,
+            3301
+          ]
+        }
+      ],
+      "partition_count": 53,
+      "changed_regions": 26
+    },
+    {
+      "name": "verifier.py",
+      "before": {
+        "path": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+        "bytes": 124618,
+        "sha256": "a9cf2df726de2eff7fbd7ce77759540686467ea4761f91e1bed7af8244c33c39"
+      },
+      "after": {
+        "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/verifier.py",
+        "bytes": 130328,
+        "sha256": "cc555050158effe62096a6d7452ad74094893cfce641865fdad46cfe03591b33"
+      },
+      "changed": true,
+      "parts": [
+        {
+          "kind": "equal",
+          "before": [
+            0,
+            3251
+          ],
+          "after": [
+            0,
+            3251
+          ],
+          "before_sha256": "ee402ac98b2e5a2531fb7cce95097c71030ed52395737f0cc393dabcccb9e49a",
+          "after_sha256": "ee402ac98b2e5a2531fb7cce95097c71030ed52395737f0cc393dabcccb9e49a",
+          "literal_equal": true,
+          "before_lines": [
+            1,
+            92
+          ],
+          "after_lines": [
+            1,
+            92
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            3251,
+            3356
+          ],
+          "after": [
+            3251,
+            3364
+          ],
+          "before_sha256": "73e92fe6238c3632021681bd4d8eb6ce0f9ec803c26b3934f565dab3044f539b",
+          "after_sha256": "e0a60fe5c2237e2225775d7a5d6af4263da178818f4c2531cfadeac64417a9cd",
+          "literal_equal": false,
+          "before_lines": [
+            93,
+            93
+          ],
+          "after_lines": [
+            93,
+            93
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            3356,
+            11137
+          ],
+          "after": [
+            3364,
+            11145
+          ],
+          "before_sha256": "14cdd0ebdb8949b12c562dd3dfe60a2e9fa82c342c6f848eea949a12b969598f",
+          "after_sha256": "14cdd0ebdb8949b12c562dd3dfe60a2e9fa82c342c6f848eea949a12b969598f",
+          "literal_equal": true,
+          "before_lines": [
+            94,
+            288
+          ],
+          "after_lines": [
+            94,
+            288
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            11137,
+            11137
+          ],
+          "after": [
+            11145,
+            11292
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "78866aaa7e44903a0c8df0026ee5c4e14dd18f99bdc7f50b3fef90d31e833b24",
+          "literal_equal": false,
+          "before_lines": [
+            289,
+            288
+          ],
+          "after_lines": [
+            289,
+            292
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            11137,
+            12769
+          ],
+          "after": [
+            11292,
+            12924
+          ],
+          "before_sha256": "2a44ac422485c039818f15239cd7d504b33abd5a53dcafe89384fbcb20aff052",
+          "after_sha256": "2a44ac422485c039818f15239cd7d504b33abd5a53dcafe89384fbcb20aff052",
+          "literal_equal": true,
+          "before_lines": [
+            289,
+            339
+          ],
+          "after_lines": [
+            293,
+            343
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            12769,
+            12769
+          ],
+          "after": [
+            12924,
+            14228
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "c862802d02822c3075d6e1997b54dfd9cd88d67bdbd9a3cca329bfeb2aa0fc29",
+          "literal_equal": false,
+          "before_lines": [
+            340,
+            339
+          ],
+          "after_lines": [
+            344,
+            376
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            12769,
+            12993
+          ],
+          "after": [
+            14228,
+            14452
+          ],
+          "before_sha256": "fea424cdf181e0471cc054ed9d0ca1cce3572dfbfb1ede4d12acb826392e84c4",
+          "after_sha256": "fea424cdf181e0471cc054ed9d0ca1cce3572dfbfb1ede4d12acb826392e84c4",
+          "literal_equal": true,
+          "before_lines": [
+            340,
+            349
+          ],
+          "after_lines": [
+            377,
+            386
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            12993,
+            13013
+          ],
+          "after": [
+            14452,
+            14542
+          ],
+          "before_sha256": "8d17cc6cb3704f01318daa1bc191d773f393d85c1b650bb5936c497b28306a21",
+          "after_sha256": "e8ff2c90852f163065112fcb4aff19a715fb56556b926e0e68bd8bca8f2f32db",
+          "literal_equal": false,
+          "before_lines": [
+            350,
+            350
+          ],
+          "after_lines": [
+            387,
+            388
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            13013,
+            13033
+          ],
+          "after": [
+            14542,
+            14562
+          ],
+          "before_sha256": "d10424bde3ad91ff8daea81a4aa504b2fe9d37923f59379152d543d7b4deaf71",
+          "after_sha256": "d10424bde3ad91ff8daea81a4aa504b2fe9d37923f59379152d543d7b4deaf71",
+          "literal_equal": true,
+          "before_lines": [
+            351,
+            351
+          ],
+          "after_lines": [
+            389,
+            389
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            13033,
+            13126
+          ],
+          "after": [
+            14562,
+            15780
+          ],
+          "before_sha256": "97ad4bb5ede1e13205a7173f0079689418b1ecf8192b595f82c10ad77fa17a7e",
+          "after_sha256": "caabb955e6687047624dd78ddd92398ec8b51ff35a694a1157e221002ab2077b",
+          "literal_equal": false,
+          "before_lines": [
+            352,
+            353
+          ],
+          "after_lines": [
+            390,
+            411
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            13126,
+            13843
+          ],
+          "after": [
+            15780,
+            16497
+          ],
+          "before_sha256": "2e5f6879e50b67b78589f5c3acda9d56480f53f6241f3f4f7a80dd6fd94ed78e",
+          "after_sha256": "2e5f6879e50b67b78589f5c3acda9d56480f53f6241f3f4f7a80dd6fd94ed78e",
+          "literal_equal": true,
+          "before_lines": [
+            354,
+            372
+          ],
+          "after_lines": [
+            412,
+            430
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            13843,
+            13843
+          ],
+          "after": [
+            16497,
+            16699
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "4a98316b83ce3ef7ad7ba2f377519be156506138cd949effc052313afda7275d",
+          "literal_equal": false,
+          "before_lines": [
+            373,
+            372
+          ],
+          "after_lines": [
+            431,
+            434
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            13843,
+            13904
+          ],
+          "after": [
+            16699,
+            16760
+          ],
+          "before_sha256": "b2684f4eb3b98567d50c889dd065eca8d4cb843a8594c1a9a4a48c060d9b0007",
+          "after_sha256": "b2684f4eb3b98567d50c889dd065eca8d4cb843a8594c1a9a4a48c060d9b0007",
+          "literal_equal": true,
+          "before_lines": [
+            373,
+            376
+          ],
+          "after_lines": [
+            435,
+            438
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            13904,
+            14899
+          ],
+          "after": [
+            16760,
+            18160
+          ],
+          "before_sha256": "be6fb3432372fe60c2f4c989d15154320e54b6b91217a5139a4b1d8b5354f19c",
+          "after_sha256": "722fcec2c51caa2e72991249d9b8b8fbfe90a8c942443d6455c1da2e2e3b3d83",
+          "literal_equal": false,
+          "before_lines": [
+            377,
+            397
+          ],
+          "after_lines": [
+            439,
+            465
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            14899,
+            14927
+          ],
+          "after": [
+            18160,
+            18188
+          ],
+          "before_sha256": "403ea2f558cdfef765b2e0bc0e9eee82b8a90dd32f2ac001e39a2bd0c017d23b",
+          "after_sha256": "403ea2f558cdfef765b2e0bc0e9eee82b8a90dd32f2ac001e39a2bd0c017d23b",
+          "literal_equal": true,
+          "before_lines": [
+            398,
+            400
+          ],
+          "after_lines": [
+            466,
+            468
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            14927,
+            15517
+          ],
+          "after": [
+            18188,
+            18934
+          ],
+          "before_sha256": "3dbf80d55554795bd81ad0eed1e7149f3d0e760dbbacc6818566481ea425b22e",
+          "after_sha256": "b1a8831acae11196ddd480891443f2f3e2c7772084c2ce03cff02ca832c41389",
+          "literal_equal": false,
+          "before_lines": [
+            401,
+            415
+          ],
+          "after_lines": [
+            469,
+            486
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            15517,
+            17615
+          ],
+          "after": [
+            18934,
+            21032
+          ],
+          "before_sha256": "f91194b2cb066a9d8985340f437ee5dca0c4475e48b732c07847c77db3539987",
+          "after_sha256": "f91194b2cb066a9d8985340f437ee5dca0c4475e48b732c07847c77db3539987",
+          "literal_equal": true,
+          "before_lines": [
+            416,
+            465
+          ],
+          "after_lines": [
+            487,
+            536
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            17615,
+            17688
+          ],
+          "after": [
+            21032,
+            21118
+          ],
+          "before_sha256": "13d21cafdc028b966719ff476b065dd66d1dddba705728bb357a93699da78db2",
+          "after_sha256": "a966bfca6610576a7bbf2d084ca7c3d8df13deb9f0d34a83cc198eda30a7f0e6",
+          "literal_equal": false,
+          "before_lines": [
+            466,
+            467
+          ],
+          "after_lines": [
+            537,
+            538
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            17688,
+            17803
+          ],
+          "after": [
+            21118,
+            21233
+          ],
+          "before_sha256": "2811b714761011d47875f0fd9d6080bde11dcc9a854a218678ce7e2370af9694",
+          "after_sha256": "2811b714761011d47875f0fd9d6080bde11dcc9a854a218678ce7e2370af9694",
+          "literal_equal": true,
+          "before_lines": [
+            468,
+            471
+          ],
+          "after_lines": [
+            539,
+            542
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            17803,
+            17931
+          ],
+          "after": [
+            21233,
+            21474
+          ],
+          "before_sha256": "cbe15140e35a402238de751d7a8f3467624e77e473094102d99d773151267388",
+          "after_sha256": "9739233620a56af4741ce050acdadb670349f73f76067803167cadf8570e20a6",
+          "literal_equal": false,
+          "before_lines": [
+            472,
+            474
+          ],
+          "after_lines": [
+            543,
+            546
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            17931,
+            18191
+          ],
+          "after": [
+            21474,
+            21734
+          ],
+          "before_sha256": "5711b50264bd099c9757f9ecbb59c2cfb3ae4af9a09301281728e2cece404b25",
+          "after_sha256": "5711b50264bd099c9757f9ecbb59c2cfb3ae4af9a09301281728e2cece404b25",
+          "literal_equal": true,
+          "before_lines": [
+            475,
+            484
+          ],
+          "after_lines": [
+            547,
+            556
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            18191,
+            18257
+          ],
+          "after": [
+            21734,
+            21851
+          ],
+          "before_sha256": "a658a8ed4f7c956c265f47774960995cebe5e54288d3589d1ffe69b2393959e4",
+          "after_sha256": "fc7128417f86df253672d69983cd5baaaeb6ba4b91d45cf7e54f38e6bf2f58b4",
+          "literal_equal": false,
+          "before_lines": [
+            485,
+            485
+          ],
+          "after_lines": [
+            557,
+            557
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            18257,
+            18848
+          ],
+          "after": [
+            21851,
+            22442
+          ],
+          "before_sha256": "ac2a8fb17b3f476db2d253267c6af43b99b0d2ed1010f7b7f86f13e314a67679",
+          "after_sha256": "ac2a8fb17b3f476db2d253267c6af43b99b0d2ed1010f7b7f86f13e314a67679",
+          "literal_equal": true,
+          "before_lines": [
+            486,
+            498
+          ],
+          "after_lines": [
+            558,
+            570
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            18848,
+            18923
+          ],
+          "after": [
+            22442,
+            22526
+          ],
+          "before_sha256": "1c04f690066a418bf68764b89a48946714d43e900a90ebb147182219c26a46d2",
+          "after_sha256": "fc8f890b3b284fbff11b937a8187a02eafbe9ef434f51e8e4e0acc679b251c73",
+          "literal_equal": false,
+          "before_lines": [
+            499,
+            500
+          ],
+          "after_lines": [
+            571,
+            572
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            18923,
+            18953
+          ],
+          "after": [
+            22526,
+            22556
+          ],
+          "before_sha256": "a037070baccf86f826529fd3cdadc5485d56a85959c62bd1d53dd5d43031eea3",
+          "after_sha256": "a037070baccf86f826529fd3cdadc5485d56a85959c62bd1d53dd5d43031eea3",
+          "literal_equal": true,
+          "before_lines": [
+            501,
+            503
+          ],
+          "after_lines": [
+            573,
+            575
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            18953,
+            19027
+          ],
+          "after": [
+            22556,
+            22714
+          ],
+          "before_sha256": "d64c4c0f04d27545696ebae58830f2ffc7c4e264c77610d37fd77026e2935332",
+          "after_sha256": "323dc09ffffa8b0b2d38e61db6198665f1e5db5547e6789f3d011a8385e4263e",
+          "literal_equal": false,
+          "before_lines": [
+            504,
+            504
+          ],
+          "after_lines": [
+            576,
+            579
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            19027,
+            19679
+          ],
+          "after": [
+            22714,
+            23366
+          ],
+          "before_sha256": "ca150972a4abaff3f327783deabe0e7f3383a2ffea6b7802d59b6d18b84ba89e",
+          "after_sha256": "ca150972a4abaff3f327783deabe0e7f3383a2ffea6b7802d59b6d18b84ba89e",
+          "literal_equal": true,
+          "before_lines": [
+            505,
+            519
+          ],
+          "after_lines": [
+            580,
+            594
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            19679,
+            19746
+          ],
+          "after": [
+            23366,
+            23446
+          ],
+          "before_sha256": "fc055975de18c4c8ffb0a15670e7b4f65ddc3ac954e12ba081f754f71499e004",
+          "after_sha256": "c119cfefe51f02db0d8ec4cefa8dc6ab74dc1010cac31e9f4084c4e9fc75ac7f",
+          "literal_equal": false,
+          "before_lines": [
+            520,
+            521
+          ],
+          "after_lines": [
+            595,
+            596
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            19746,
+            21715
+          ],
+          "after": [
+            23446,
+            25415
+          ],
+          "before_sha256": "27995f8e4499f4ae18585c0d9fb4263ec7e56eb7ec93f3bc7428605bb278e8ff",
+          "after_sha256": "27995f8e4499f4ae18585c0d9fb4263ec7e56eb7ec93f3bc7428605bb278e8ff",
+          "literal_equal": true,
+          "before_lines": [
+            522,
+            566
+          ],
+          "after_lines": [
+            597,
+            641
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            21715,
+            21755
+          ],
+          "after": [
+            25415,
+            25480
+          ],
+          "before_sha256": "a7864f08c71b2358aeb6689614f572ce8a83619c0d1c850aea91bb71b20d7e3b",
+          "after_sha256": "ce722902a49667650512d96ac6c511da9f8794b4c765eaaa42b1c86d4c75d301",
+          "literal_equal": false,
+          "before_lines": [
+            567,
+            567
+          ],
+          "after_lines": [
+            642,
+            642
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            21755,
+            22203
+          ],
+          "after": [
+            25480,
+            25928
+          ],
+          "before_sha256": "04d369c3e02d5c42cf41ba3ee8211dd4006b9b48d93f5effda06db2bca415aee",
+          "after_sha256": "04d369c3e02d5c42cf41ba3ee8211dd4006b9b48d93f5effda06db2bca415aee",
+          "literal_equal": true,
+          "before_lines": [
+            568,
+            575
+          ],
+          "after_lines": [
+            643,
+            650
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            22203,
+            22229
+          ],
+          "after": [
+            25928,
+            26004
+          ],
+          "before_sha256": "cb74e1491e88c7583d541d447529f981dc22e12f87389b1c5ddb4579ff58b724",
+          "after_sha256": "3238eda2e0c6d9a36ca32f654cc954717cc786d31dbdfba5c28d5b6a7169d3f4",
+          "literal_equal": false,
+          "before_lines": [
+            576,
+            576
+          ],
+          "after_lines": [
+            651,
+            652
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            22229,
+            22312
+          ],
+          "after": [
+            26004,
+            26087
+          ],
+          "before_sha256": "30bcbb057110f021945e1ded0e6f0d700ad20f90308ddc7111a1ad2882b055b6",
+          "after_sha256": "30bcbb057110f021945e1ded0e6f0d700ad20f90308ddc7111a1ad2882b055b6",
+          "literal_equal": true,
+          "before_lines": [
+            577,
+            578
+          ],
+          "after_lines": [
+            653,
+            654
+          ]
+        },
+        {
+          "kind": "delete",
+          "before": [
+            22312,
+            22353
+          ],
+          "after": [
+            26087,
+            26087
+          ],
+          "before_sha256": "430135a8e2ad4aa1d29de1f6ff9d7bb3303ba7a2f68a1be9fd74633a8af88bc6",
+          "after_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "literal_equal": false,
+          "before_lines": [
+            579,
+            579
+          ],
+          "after_lines": [
+            655,
+            654
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            22353,
+            29165
+          ],
+          "after": [
+            26087,
+            32899
+          ],
+          "before_sha256": "39a23b9c5e2420657501cc509bc15f9086da9f165ee1ac03063969bb90335a0e",
+          "after_sha256": "39a23b9c5e2420657501cc509bc15f9086da9f165ee1ac03063969bb90335a0e",
+          "literal_equal": true,
+          "before_lines": [
+            580,
+            747
+          ],
+          "after_lines": [
+            655,
+            822
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            29165,
+            29165
+          ],
+          "after": [
+            32899,
+            33085
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "88b1a8949e664576f0b17f2f9206dbce2bd3553958da8e1a117cac6028228c96",
+          "literal_equal": false,
+          "before_lines": [
+            748,
+            747
+          ],
+          "after_lines": [
+            823,
+            826
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            29165,
+            30167
+          ],
+          "after": [
+            33085,
+            34087
+          ],
+          "before_sha256": "5c0b61246e19d9fc3d8ae885fe8c72b74e7cb7f189c91c34a98f10c749944812",
+          "after_sha256": "5c0b61246e19d9fc3d8ae885fe8c72b74e7cb7f189c91c34a98f10c749944812",
+          "literal_equal": true,
+          "before_lines": [
+            748,
+            779
+          ],
+          "after_lines": [
+            827,
+            858
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            30167,
+            30167
+          ],
+          "after": [
+            34087,
+            34128
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "59ce9038898b15877c51ed6bcdb524c2a7746213a556650f20ec976ea24373f7",
+          "literal_equal": false,
+          "before_lines": [
+            780,
+            779
+          ],
+          "after_lines": [
+            859,
+            859
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            30167,
+            51528
+          ],
+          "after": [
+            34128,
+            55489
+          ],
+          "before_sha256": "0457e088195e48c17c66201c3f33d2cdbd63957954f9b32b830e145b9c390d5b",
+          "after_sha256": "0457e088195e48c17c66201c3f33d2cdbd63957954f9b32b830e145b9c390d5b",
+          "literal_equal": true,
+          "before_lines": [
+            780,
+            1236
+          ],
+          "after_lines": [
+            860,
+            1316
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            51528,
+            51528
+          ],
+          "after": [
+            55489,
+            55652
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "1d30d72f9540cb3a0495029af3decb0524e6ab0bb700ee50094445df637fc69e",
+          "literal_equal": false,
+          "before_lines": [
+            1237,
+            1236
+          ],
+          "after_lines": [
+            1317,
+            1320
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            51528,
+            54013
+          ],
+          "after": [
+            55652,
+            58137
+          ],
+          "before_sha256": "dc27dee81a16cf9309e2ebf2894620bf741b6db6812592d114f055fe1e0ac4fa",
+          "after_sha256": "dc27dee81a16cf9309e2ebf2894620bf741b6db6812592d114f055fe1e0ac4fa",
+          "literal_equal": true,
+          "before_lines": [
+            1237,
+            1276
+          ],
+          "after_lines": [
+            1321,
+            1360
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            54013,
+            54013
+          ],
+          "after": [
+            58137,
+            59368
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "fa4495f3093a9305d71744773393e153134b9f95bace06c58e72708a455126cb",
+          "literal_equal": false,
+          "before_lines": [
+            1277,
+            1276
+          ],
+          "after_lines": [
+            1361,
+            1381
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            54013,
+            123659
+          ],
+          "after": [
+            59368,
+            129014
+          ],
+          "before_sha256": "4dc2c86e2ffc67596728e462fd3d4504fad954a331f7c38b8879f8855a432ba6",
+          "after_sha256": "4dc2c86e2ffc67596728e462fd3d4504fad954a331f7c38b8879f8855a432ba6",
+          "literal_equal": true,
+          "before_lines": [
+            1277,
+            2642
+          ],
+          "after_lines": [
+            1382,
+            2747
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            123659,
+            123659
+          ],
+          "after": [
+            129014,
+            129339
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "392ccb975c10731920c6ab15ec35ef1abad14df62be86178083ac8bcf66af2a3",
+          "literal_equal": false,
+          "before_lines": [
+            2643,
+            2642
+          ],
+          "after_lines": [
+            2748,
+            2754
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            123659,
+            123684
+          ],
+          "after": [
+            129339,
+            129364
+          ],
+          "before_sha256": "b937d8a9bd5e3f31148e6ab4aa9528ae39a573f441d0b87c6e163b2db490db40",
+          "after_sha256": "b937d8a9bd5e3f31148e6ab4aa9528ae39a573f441d0b87c6e163b2db490db40",
+          "literal_equal": true,
+          "before_lines": [
+            2643,
+            2643
+          ],
+          "after_lines": [
+            2755,
+            2755
+          ]
+        },
+        {
+          "kind": "insert",
+          "before": [
+            123684,
+            123684
+          ],
+          "after": [
+            129364,
+            129442
+          ],
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "4b0a9b65bcd8a502a0128a823dcf72bc5f7224d8781bfee94036505ab45e1529",
+          "literal_equal": false,
+          "before_lines": [
+            2644,
+            2643
+          ],
+          "after_lines": [
+            2756,
+            2756
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            123684,
+            123803
+          ],
+          "after": [
+            129442,
+            129561
+          ],
+          "before_sha256": "0580328a5f3459d0aa0a97f59c5e69d9e0e513821a1c3df52c6ec04df596b748",
+          "after_sha256": "0580328a5f3459d0aa0a97f59c5e69d9e0e513821a1c3df52c6ec04df596b748",
+          "literal_equal": true,
+          "before_lines": [
+            2644,
+            2646
+          ],
+          "after_lines": [
+            2757,
+            2759
+          ]
+        },
+        {
+          "kind": "replace",
+          "before": [
+            123803,
+            124015
+          ],
+          "after": [
+            129561,
+            129725
+          ],
+          "before_sha256": "caa6a2de1aa9f965135877db4be732779a084ea02287090378bb56cc6558e3f3",
+          "after_sha256": "215bdade4c2483014cad00203b14adba225846cb32cd39fdb55f1e37a03fbbd0",
+          "literal_equal": false,
+          "before_lines": [
+            2647,
+            2652
+          ],
+          "after_lines": [
+            2760,
+            2762
+          ]
+        },
+        {
+          "kind": "equal",
+          "before": [
+            124015,
+            124618
+          ],
+          "after": [
+            129725,
+            130328
+          ],
+          "before_sha256": "59c0e9a84db57ca2918c5d4c5abd945bced6525f5f6c8c8dab4ece2b757712e6",
+          "after_sha256": "59c0e9a84db57ca2918c5d4c5abd945bced6525f5f6c8c8dab4ece2b757712e6",
+          "literal_equal": true,
+          "before_lines": [
+            2653,
+            2667
+          ],
+          "after_lines": [
+            2763,
+            2777
+          ]
+        }
+      ],
+      "partition_count": 49,
+      "changed_regions": 24
+    }
+  ],
+  "changed": 4,
+  "equal": 2,
+  "total_gapless_partitions": 164,
+  "all_gapless_EOF_slice_hashes": true,
+  "contract_leaf_changes": [
+    {
+      "pointer": "/source/path",
+      "before": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "after": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/verifier.py"
+    },
+    {
+      "pointer": "/source/sha256",
+      "before": "a9cf2df726de2eff7fbd7ce77759540686467ea4761f91e1bed7af8244c33c39",
+      "after": "cc555050158effe62096a6d7452ad74094893cfce641865fdad46cfe03591b33"
+    },
+    {
+      "pointer": "/source/bytes",
+      "before": 124618,
+      "after": 130328
+    },
+    {
+      "pointer": "/independent_prelaunch_custody/inherited_fds/5/path",
+      "before": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/verifier.py",
+      "after": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/verifier.py"
+    },
+    {
+      "pointer": "/independent_prelaunch_custody/inherited_fds/5/sha256",
+      "before": "a9cf2df726de2eff7fbd7ce77759540686467ea4761f91e1bed7af8244c33c39",
+      "after": "cc555050158effe62096a6d7452ad74094893cfce641865fdad46cfe03591b33"
+    },
+    {
+      "pointer": "/independent_prelaunch_custody/inherited_fds/5/bytes",
+      "before": 124618,
+      "after": 130328
+    },
+    {
+      "pointer": "/independent_prelaunch_custody/inherited_fds/6/path",
+      "before": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/launch-contract.json",
+      "after": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/launch-contract.json"
+    },
+    {
+      "pointer": "/parent_exec/argv_template/13",
+      "before": "a9cf2df726de2eff7fbd7ce77759540686467ea4761f91e1bed7af8244c33c39",
+      "after": "cc555050158effe62096a6d7452ad74094893cfce641865fdad46cfe03591b33"
+    },
+    {
+      "pointer": "/supervisor/path",
+      "before": "/var/tmp/friday-lab891-a208-lab889-node-ordinary-end-timer-fd-append-connected-implementation/supervisor.py",
+      "after": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/supervisor.py"
+    }
+  ],
+  "binding_DAG_verified": true,
+  "receipt_resource_schemas_equal": true,
+  "method_rejoins": [
+    {
+      "file": "caller.py",
+      "method": "reclaim_confirmed_slot",
+      "literal_equal": true,
+      "before_sha256": "2c1650c172c061d8b9e257b33f6e044bd9c40ca12432658e2c1b5cad51936f21",
+      "after_sha256": "2c1650c172c061d8b9e257b33f6e044bd9c40ca12432658e2c1b5cad51936f21",
+      "before_lines": [
+        1619,
+        1631
+      ],
+      "after_lines": [
+        1724,
+        1736
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "preown_fd",
+      "literal_equal": true,
+      "before_sha256": "84f04c4b4c3c2d06c61a49691d3840b2e8b802d4509115ee52919feaeea94ef0",
+      "after_sha256": "84f04c4b4c3c2d06c61a49691d3840b2e8b802d4509115ee52919feaeea94ef0",
+      "before_lines": [
+        1682,
+        1693
+      ],
+      "after_lines": [
+        1787,
+        1798
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "publish_fd",
+      "literal_equal": true,
+      "before_sha256": "33d8361e9d1a338575c431a8b595137f161fa4ec776a909968c085489eb7ac2e",
+      "after_sha256": "33d8361e9d1a338575c431a8b595137f161fa4ec776a909968c085489eb7ac2e",
+      "before_lines": [
+        1696,
+        1702
+      ],
+      "after_lines": [
+        1801,
+        1807
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "allocate_owned",
+      "literal_equal": true,
+      "before_sha256": "cb801d9d221fcf5a0350ef9dfe63d20c5e04cba73aa199bbe9ef2a4960f92057",
+      "after_sha256": "cb801d9d221fcf5a0350ef9dfe63d20c5e04cba73aa199bbe9ef2a4960f92057",
+      "before_lines": [
+        1705,
+        1717
+      ],
+      "after_lines": [
+        1810,
+        1822
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "retire_and_close_owned",
+      "literal_equal": true,
+      "before_sha256": "76d1966f9cd9919a28a88bcbf0189bf8e088c770ebd33dc5af2bd19c5e1c6dee",
+      "after_sha256": "76d1966f9cd9919a28a88bcbf0189bf8e088c770ebd33dc5af2bd19c5e1c6dee",
+      "before_lines": [
+        1776,
+        1814
+      ],
+      "after_lines": [
+        1881,
+        1919
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "append_parent_bytes",
+      "literal_equal": true,
+      "before_sha256": "d5f2dd2b2eba324fba1e54c67ddf2276d211f5ddf5e324350a0e1364ac8a3ccc",
+      "after_sha256": "d5f2dd2b2eba324fba1e54c67ddf2276d211f5ddf5e324350a0e1364ac8a3ccc",
+      "before_lines": [
+        936,
+        996
+      ],
+      "after_lines": [
+        1011,
+        1071
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "publish_preowned_then_frame",
+      "literal_equal": false,
+      "before_sha256": "b628516b2d4a73c4895e4426c2c7c23164815c6e5d51ae2c39934fb6075a7eeb",
+      "after_sha256": "8faf79169bca5bda55cff7a92dbc7c042271ddb0a8c431cad9545cd0e8ab4e76",
+      "before_lines": [
+        1070,
+        1105
+      ],
+      "after_lines": [
+        1149,
+        1185
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "reserve_final_parent_reads",
+      "literal_equal": true,
+      "before_sha256": "67e1a7711962737b53271c7f422dc3868043fb6973738c4916b51e48abe74fd0",
+      "after_sha256": "67e1a7711962737b53271c7f422dc3868043fb6973738c4916b51e48abe74fd0",
+      "before_lines": [
+        900,
+        915
+      ],
+      "after_lines": [
+        975,
+        990
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "retain_publication_failure",
+      "literal_equal": true,
+      "before_sha256": "a703d84e49c2ed10b33bf579ab9cd5d1eab729a8d7e7fa9d8afbacb780197caa",
+      "after_sha256": "a703d84e49c2ed10b33bf579ab9cd5d1eab729a8d7e7fa9d8afbacb780197caa",
+      "before_lines": [
+        1003,
+        1010
+      ],
+      "after_lines": [
+        1078,
+        1085
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "peel_preowned",
+      "literal_equal": true,
+      "before_sha256": "e77e682fd908941c6184e4772f729db0832005188c16409c50d23a05f69ae638",
+      "after_sha256": "e77e682fd908941c6184e4772f729db0832005188c16409c50d23a05f69ae638",
+      "before_lines": [
+        1046,
+        1067
+      ],
+      "after_lines": [
+        1125,
+        1146
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "decode_channel_frame",
+      "literal_equal": true,
+      "before_sha256": "697ff83065a1bc83b60e12282d29c4068bf64673e96bc83b8f3912a54e989f0d",
+      "after_sha256": "697ff83065a1bc83b60e12282d29c4068bf64673e96bc83b8f3912a54e989f0d",
+      "before_lines": [
+        1462,
+        1470
+      ],
+      "after_lines": [
+        1542,
+        1550
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "validate_publication_transport",
+      "literal_equal": true,
+      "before_sha256": "1528e604ba5dccb25500eb2d8937f0a8b054d225745f6d62fe136407c1055459",
+      "after_sha256": "1528e604ba5dccb25500eb2d8937f0a8b054d225745f6d62fe136407c1055459",
+      "before_lines": [
+        1442,
+        1459
+      ],
+      "after_lines": [
+        1522,
+        1539
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "validate_received_error_graphs",
+      "literal_equal": false,
+      "before_sha256": "b07e1e45c3a9fd0f04281aaebed517b9e1498910d3fbb80e116750298d9107b8",
+      "after_sha256": "ccb2a321908ed7e5f0d5d009887b94581b25deef1cebb318e91933576fbda25a",
+      "before_lines": [
+        1588,
+        1599
+      ],
+      "after_lines": [
+        1672,
+        1704
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "due",
+      "literal_equal": true,
+      "before_sha256": "6f377385ea3e17b7754407cb43463fc4b26f146f5d91205d77ed8a23b5bf90a5",
+      "after_sha256": "6f377385ea3e17b7754407cb43463fc4b26f146f5d91205d77ed8a23b5bf90a5",
+      "before_lines": [
+        257,
+        259
+      ],
+      "after_lines": [
+        257,
+        259
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "reclaim_confirmed_slot",
+      "literal_equal": true,
+      "before_sha256": "e707cc2c936781e680c27a5f28f7b925ddbaaed7e86ea237b9cc3f0e7b664a98",
+      "after_sha256": "e707cc2c936781e680c27a5f28f7b925ddbaaed7e86ea237b9cc3f0e7b664a98",
+      "before_lines": [
+        110,
+        122
+      ],
+      "after_lines": [
+        110,
+        122
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "acquire_owned",
+      "literal_equal": true,
+      "before_sha256": "c236adbb913a44eabd162aa4a04aa7883b90e6a75e3e874fc06212f81046c8a1",
+      "after_sha256": "c236adbb913a44eabd162aa4a04aa7883b90e6a75e3e874fc06212f81046c8a1",
+      "before_lines": [
+        1293,
+        1305
+      ],
+      "after_lines": [
+        1398,
+        1410
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "reserve_allocation",
+      "literal_equal": true,
+      "before_sha256": "5afde1641b11289ffb24d75d83629ebb80b42491b2b59ea23effc7da42a51ca3",
+      "after_sha256": "5afde1641b11289ffb24d75d83629ebb80b42491b2b59ea23effc7da42a51ca3",
+      "before_lines": [
+        1264,
+        1278
+      ],
+      "after_lines": [
+        1369,
+        1383
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "publish_allocation",
+      "literal_equal": true,
+      "before_sha256": "7e487a96c6cf65850ffd009cae8488f28ca104d5f74ff44ba37e71159fb7a250",
+      "after_sha256": "7e487a96c6cf65850ffd009cae8488f28ca104d5f74ff44ba37e71159fb7a250",
+      "before_lines": [
+        1281,
+        1290
+      ],
+      "after_lines": [
+        1386,
+        1395
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "adopt_exact_fd",
+      "literal_equal": true,
+      "before_sha256": "ce33a38c0484532849f1c5b814e7be9d7c9bef6f1dfda5e9a3fa075c14692ab4",
+      "after_sha256": "ce33a38c0484532849f1c5b814e7be9d7c9bef6f1dfda5e9a3fa075c14692ab4",
+      "before_lines": [
+        1331,
+        1333
+      ],
+      "after_lines": [
+        1436,
+        1438
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "retire_record",
+      "literal_equal": true,
+      "before_sha256": "72ffa97dd65e547e51bbad6226d44120f34f8977ec7ad9da01ed74ffd734e459",
+      "after_sha256": "72ffa97dd65e547e51bbad6226d44120f34f8977ec7ad9da01ed74ffd734e459",
+      "before_lines": [
+        1336,
+        1355
+      ],
+      "after_lines": [
+        1441,
+        1460
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "close_allocation",
+      "literal_equal": true,
+      "before_sha256": "1819da6f420743d724ce89198c5695c01ff18604d9136c75a4130d37495023c5",
+      "after_sha256": "1819da6f420743d724ce89198c5695c01ff18604d9136c75a4130d37495023c5",
+      "before_lines": [
+        1358,
+        1366
+      ],
+      "after_lines": [
+        1463,
+        1471
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "append_parent_bytes",
+      "literal_equal": true,
+      "before_sha256": "d5f2dd2b2eba324fba1e54c67ddf2276d211f5ddf5e324350a0e1364ac8a3ccc",
+      "after_sha256": "d5f2dd2b2eba324fba1e54c67ddf2276d211f5ddf5e324350a0e1364ac8a3ccc",
+      "before_lines": [
+        587,
+        647
+      ],
+      "after_lines": [
+        662,
+        722
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "publish_preowned_then_frame",
+      "literal_equal": false,
+      "before_sha256": "b628516b2d4a73c4895e4426c2c7c23164815c6e5d51ae2c39934fb6075a7eeb",
+      "after_sha256": "8faf79169bca5bda55cff7a92dbc7c042271ddb0a8c431cad9545cd0e8ab4e76",
+      "before_lines": [
+        721,
+        756
+      ],
+      "after_lines": [
+        800,
+        836
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "reserve_final_parent_reads",
+      "literal_equal": true,
+      "before_sha256": "67e1a7711962737b53271c7f422dc3868043fb6973738c4916b51e48abe74fd0",
+      "after_sha256": "67e1a7711962737b53271c7f422dc3868043fb6973738c4916b51e48abe74fd0",
+      "before_lines": [
+        554,
+        569
+      ],
+      "after_lines": [
+        629,
+        644
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "retain_publication_failure",
+      "literal_equal": true,
+      "before_sha256": "a703d84e49c2ed10b33bf579ab9cd5d1eab729a8d7e7fa9d8afbacb780197caa",
+      "after_sha256": "a703d84e49c2ed10b33bf579ab9cd5d1eab729a8d7e7fa9d8afbacb780197caa",
+      "before_lines": [
+        654,
+        661
+      ],
+      "after_lines": [
+        729,
+        736
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "peel_preowned",
+      "literal_equal": true,
+      "before_sha256": "e77e682fd908941c6184e4772f729db0832005188c16409c50d23a05f69ae638",
+      "after_sha256": "e77e682fd908941c6184e4772f729db0832005188c16409c50d23a05f69ae638",
+      "before_lines": [
+        697,
+        718
+      ],
+      "after_lines": [
+        776,
+        797
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "decode_channel_frame",
+      "literal_equal": true,
+      "before_sha256": "697ff83065a1bc83b60e12282d29c4068bf64673e96bc83b8f3912a54e989f0d",
+      "after_sha256": "697ff83065a1bc83b60e12282d29c4068bf64673e96bc83b8f3912a54e989f0d",
+      "before_lines": [
+        1113,
+        1121
+      ],
+      "after_lines": [
+        1193,
+        1201
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "validate_publication_transport",
+      "literal_equal": true,
+      "before_sha256": "1528e604ba5dccb25500eb2d8937f0a8b054d225745f6d62fe136407c1055459",
+      "after_sha256": "1528e604ba5dccb25500eb2d8937f0a8b054d225745f6d62fe136407c1055459",
+      "before_lines": [
+        1093,
+        1110
+      ],
+      "after_lines": [
+        1173,
+        1190
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "validate_received_error_graphs",
+      "literal_equal": false,
+      "before_sha256": "b07e1e45c3a9fd0f04281aaebed517b9e1498910d3fbb80e116750298d9107b8",
+      "after_sha256": "ccb2a321908ed7e5f0d5d009887b94581b25deef1cebb318e91933576fbda25a",
+      "before_lines": [
+        1239,
+        1250
+      ],
+      "after_lines": [
+        1323,
+        1355
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "due",
+      "literal_equal": true,
+      "before_sha256": "c81dba6a6089e0d53c0dda1842fa3282227520dd3a2f875c9c25cba5d9dbae4c",
+      "after_sha256": "c81dba6a6089e0d53c0dda1842fa3282227520dd3a2f875c9c25cba5d9dbae4c",
+      "before_lines": [
+        1401,
+        1405
+      ],
+      "after_lines": [
+        1506,
+        1510
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "reclaim_confirmed_slot",
+      "literal_equal": true,
+      "before_sha256": "e707cc2c936781e680c27a5f28f7b925ddbaaed7e86ea237b9cc3f0e7b664a98",
+      "after_sha256": "e707cc2c936781e680c27a5f28f7b925ddbaaed7e86ea237b9cc3f0e7b664a98",
+      "before_lines": [
+        165,
+        177
+      ],
+      "after_lines": [
+        165,
+        177
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "acquire_owned",
+      "literal_equal": true,
+      "before_sha256": "c236adbb913a44eabd162aa4a04aa7883b90e6a75e3e874fc06212f81046c8a1",
+      "after_sha256": "c236adbb913a44eabd162aa4a04aa7883b90e6a75e3e874fc06212f81046c8a1",
+      "before_lines": [
+        1327,
+        1339
+      ],
+      "after_lines": [
+        1432,
+        1444
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "reserve_allocation",
+      "literal_equal": true,
+      "before_sha256": "5afde1641b11289ffb24d75d83629ebb80b42491b2b59ea23effc7da42a51ca3",
+      "after_sha256": "5afde1641b11289ffb24d75d83629ebb80b42491b2b59ea23effc7da42a51ca3",
+      "before_lines": [
+        1298,
+        1312
+      ],
+      "after_lines": [
+        1403,
+        1417
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "publish_allocation",
+      "literal_equal": true,
+      "before_sha256": "7e487a96c6cf65850ffd009cae8488f28ca104d5f74ff44ba37e71159fb7a250",
+      "after_sha256": "7e487a96c6cf65850ffd009cae8488f28ca104d5f74ff44ba37e71159fb7a250",
+      "before_lines": [
+        1315,
+        1324
+      ],
+      "after_lines": [
+        1420,
+        1429
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "adopt_exact_fd",
+      "literal_equal": true,
+      "before_sha256": "ce33a38c0484532849f1c5b814e7be9d7c9bef6f1dfda5e9a3fa075c14692ab4",
+      "after_sha256": "ce33a38c0484532849f1c5b814e7be9d7c9bef6f1dfda5e9a3fa075c14692ab4",
+      "before_lines": [
+        1365,
+        1367
+      ],
+      "after_lines": [
+        1470,
+        1472
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "retire_record",
+      "literal_equal": true,
+      "before_sha256": "72ffa97dd65e547e51bbad6226d44120f34f8977ec7ad9da01ed74ffd734e459",
+      "after_sha256": "72ffa97dd65e547e51bbad6226d44120f34f8977ec7ad9da01ed74ffd734e459",
+      "before_lines": [
+        1370,
+        1389
+      ],
+      "after_lines": [
+        1475,
+        1494
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "close_allocation",
+      "literal_equal": true,
+      "before_sha256": "1819da6f420743d724ce89198c5695c01ff18604d9136c75a4130d37495023c5",
+      "after_sha256": "1819da6f420743d724ce89198c5695c01ff18604d9136c75a4130d37495023c5",
+      "before_lines": [
+        1392,
+        1400
+      ],
+      "after_lines": [
+        1497,
+        1505
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "append_parent_bytes",
+      "literal_equal": true,
+      "before_sha256": "d5f2dd2b2eba324fba1e54c67ddf2276d211f5ddf5e324350a0e1364ac8a3ccc",
+      "after_sha256": "d5f2dd2b2eba324fba1e54c67ddf2276d211f5ddf5e324350a0e1364ac8a3ccc",
+      "before_lines": [
+        641,
+        701
+      ],
+      "after_lines": [
+        716,
+        776
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "publish_preowned_then_frame",
+      "literal_equal": false,
+      "before_sha256": "b628516b2d4a73c4895e4426c2c7c23164815c6e5d51ae2c39934fb6075a7eeb",
+      "after_sha256": "8faf79169bca5bda55cff7a92dbc7c042271ddb0a8c431cad9545cd0e8ab4e76",
+      "before_lines": [
+        775,
+        810
+      ],
+      "after_lines": [
+        854,
+        890
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "reserve_final_parent_reads",
+      "literal_equal": true,
+      "before_sha256": "67e1a7711962737b53271c7f422dc3868043fb6973738c4916b51e48abe74fd0",
+      "after_sha256": "67e1a7711962737b53271c7f422dc3868043fb6973738c4916b51e48abe74fd0",
+      "before_lines": [
+        608,
+        623
+      ],
+      "after_lines": [
+        683,
+        698
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "retain_publication_failure",
+      "literal_equal": true,
+      "before_sha256": "a703d84e49c2ed10b33bf579ab9cd5d1eab729a8d7e7fa9d8afbacb780197caa",
+      "after_sha256": "a703d84e49c2ed10b33bf579ab9cd5d1eab729a8d7e7fa9d8afbacb780197caa",
+      "before_lines": [
+        708,
+        715
+      ],
+      "after_lines": [
+        783,
+        790
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "peel_preowned",
+      "literal_equal": true,
+      "before_sha256": "e77e682fd908941c6184e4772f729db0832005188c16409c50d23a05f69ae638",
+      "after_sha256": "e77e682fd908941c6184e4772f729db0832005188c16409c50d23a05f69ae638",
+      "before_lines": [
+        751,
+        772
+      ],
+      "after_lines": [
+        830,
+        851
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "decode_channel_frame",
+      "literal_equal": true,
+      "before_sha256": "697ff83065a1bc83b60e12282d29c4068bf64673e96bc83b8f3912a54e989f0d",
+      "after_sha256": "697ff83065a1bc83b60e12282d29c4068bf64673e96bc83b8f3912a54e989f0d",
+      "before_lines": [
+        1147,
+        1155
+      ],
+      "after_lines": [
+        1227,
+        1235
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "validate_received_error_graphs",
+      "literal_equal": false,
+      "before_sha256": "b07e1e45c3a9fd0f04281aaebed517b9e1498910d3fbb80e116750298d9107b8",
+      "after_sha256": "ccb2a321908ed7e5f0d5d009887b94581b25deef1cebb318e91933576fbda25a",
+      "before_lines": [
+        1273,
+        1284
+      ],
+      "after_lines": [
+        1357,
+        1389
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "due",
+      "literal_equal": true,
+      "before_sha256": "7ab11a57ced2d78959e3667e82f2be4a6832347bf168ee6d891710d80147f8f3",
+      "after_sha256": "7ab11a57ced2d78959e3667e82f2be4a6832347bf168ee6d891710d80147f8f3",
+      "before_lines": [
+        1435,
+        1437
+      ],
+      "after_lines": [
+        1540,
+        1542
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "allocate_owned",
+      "literal_equal": true,
+      "before_sha256": "cb801d9d221fcf5a0350ef9dfe63d20c5e04cba73aa199bbe9ef2a4960f92057",
+      "after_sha256": "cb801d9d221fcf5a0350ef9dfe63d20c5e04cba73aa199bbe9ef2a4960f92057",
+      "before_lines": [
+        1705,
+        1717
+      ],
+      "after_lines": [
+        1810,
+        1822
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "preown_fd",
+      "literal_equal": true,
+      "before_sha256": "84f04c4b4c3c2d06c61a49691d3840b2e8b802d4509115ee52919feaeea94ef0",
+      "after_sha256": "84f04c4b4c3c2d06c61a49691d3840b2e8b802d4509115ee52919feaeea94ef0",
+      "before_lines": [
+        1682,
+        1693
+      ],
+      "after_lines": [
+        1787,
+        1798
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "publish_fd",
+      "literal_equal": true,
+      "before_sha256": "33d8361e9d1a338575c431a8b595137f161fa4ec776a909968c085489eb7ac2e",
+      "after_sha256": "33d8361e9d1a338575c431a8b595137f161fa4ec776a909968c085489eb7ac2e",
+      "before_lines": [
+        1696,
+        1702
+      ],
+      "after_lines": [
+        1801,
+        1807
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "reclaim_confirmed_slot",
+      "literal_equal": true,
+      "before_sha256": "2c1650c172c061d8b9e257b33f6e044bd9c40ca12432658e2c1b5cad51936f21",
+      "after_sha256": "2c1650c172c061d8b9e257b33f6e044bd9c40ca12432658e2c1b5cad51936f21",
+      "before_lines": [
+        1619,
+        1631
+      ],
+      "after_lines": [
+        1724,
+        1736
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "close_final",
+      "literal_equal": true,
+      "before_sha256": "c659950ccbb677050cc614fce7d72d508203ae3a2b2b656fde98659e45840c97",
+      "after_sha256": "c659950ccbb677050cc614fce7d72d508203ae3a2b2b656fde98659e45840c97",
+      "before_lines": [
+        3707,
+        3806
+      ],
+      "after_lines": [
+        3812,
+        3911
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "main",
+      "literal_equal": true,
+      "before_sha256": "555ea5e893a83b4ce26e427391218060ee682ad1e837b0e6e4b1c8ef3df7d961",
+      "after_sha256": "555ea5e893a83b4ce26e427391218060ee682ad1e837b0e6e4b1c8ef3df7d961",
+      "before_lines": [
+        3584,
+        3704
+      ],
+      "after_lines": [
+        3689,
+        3809
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "launch",
+      "literal_equal": true,
+      "before_sha256": "410169e64e6309cf47fffa80a8a2d04bc336ac43dc62386e0ba3c84632189b4a",
+      "after_sha256": "410169e64e6309cf47fffa80a8a2d04bc336ac43dc62386e0ba3c84632189b4a",
+      "before_lines": [
+        2798,
+        3068
+      ],
+      "after_lines": [
+        2903,
+        3173
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "validate_canonical",
+      "literal_equal": true,
+      "before_sha256": "cea996db457e78ce0d5f732cb21348afdaa4ef4b6b941cfb64f09101fabeb5a1",
+      "after_sha256": "cea996db457e78ce0d5f732cb21348afdaa4ef4b6b941cfb64f09101fabeb5a1",
+      "before_lines": [
+        3226,
+        3339
+      ],
+      "after_lines": [
+        3331,
+        3444
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "validate_entry",
+      "literal_equal": true,
+      "before_sha256": "beadc3552bcebf50e458ae1902a58daba45830e01ac9c14859532ea5e8f06d57",
+      "after_sha256": "beadc3552bcebf50e458ae1902a58daba45830e01ac9c14859532ea5e8f06d57",
+      "before_lines": [
+        3342,
+        3369
+      ],
+      "after_lines": [
+        3447,
+        3474
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "derived_stock_bounds",
+      "literal_equal": true,
+      "before_sha256": "bd6a19e4a5dde52335a510268f61860501e872e73c2403bb19ac9eefb62e3770",
+      "after_sha256": "bd6a19e4a5dde52335a510268f61860501e872e73c2403bb19ac9eefb62e3770",
+      "before_lines": [
+        1280,
+        1295
+      ],
+      "after_lines": [
+        1360,
+        1375
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "caller.py",
+      "method": "derived_catch_capacity",
+      "literal_equal": true,
+      "before_sha256": "2afd5b64530e31ff96c183e5006b06987435b0ac6bc08af756ef776a2eb14ac5",
+      "after_sha256": "2afd5b64530e31ff96c183e5006b06987435b0ac6bc08af756ef776a2eb14ac5",
+      "before_lines": [
+        1272,
+        1278
+      ],
+      "after_lines": [
+        1352,
+        1358
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "acquire_owned",
+      "literal_equal": true,
+      "before_sha256": "c236adbb913a44eabd162aa4a04aa7883b90e6a75e3e874fc06212f81046c8a1",
+      "after_sha256": "c236adbb913a44eabd162aa4a04aa7883b90e6a75e3e874fc06212f81046c8a1",
+      "before_lines": [
+        1293,
+        1305
+      ],
+      "after_lines": [
+        1398,
+        1410
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "publish_allocation",
+      "literal_equal": true,
+      "before_sha256": "7e487a96c6cf65850ffd009cae8488f28ca104d5f74ff44ba37e71159fb7a250",
+      "after_sha256": "7e487a96c6cf65850ffd009cae8488f28ca104d5f74ff44ba37e71159fb7a250",
+      "before_lines": [
+        1281,
+        1290
+      ],
+      "after_lines": [
+        1386,
+        1395
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "adopt_exact_fd",
+      "literal_equal": true,
+      "before_sha256": "ce33a38c0484532849f1c5b814e7be9d7c9bef6f1dfda5e9a3fa075c14692ab4",
+      "after_sha256": "ce33a38c0484532849f1c5b814e7be9d7c9bef6f1dfda5e9a3fa075c14692ab4",
+      "before_lines": [
+        1331,
+        1333
+      ],
+      "after_lines": [
+        1436,
+        1438
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "retire_record",
+      "literal_equal": true,
+      "before_sha256": "72ffa97dd65e547e51bbad6226d44120f34f8977ec7ad9da01ed74ffd734e459",
+      "after_sha256": "72ffa97dd65e547e51bbad6226d44120f34f8977ec7ad9da01ed74ffd734e459",
+      "before_lines": [
+        1336,
+        1355
+      ],
+      "after_lines": [
+        1441,
+        1460
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "reclaim_confirmed_slot",
+      "literal_equal": true,
+      "before_sha256": "e707cc2c936781e680c27a5f28f7b925ddbaaed7e86ea237b9cc3f0e7b664a98",
+      "after_sha256": "e707cc2c936781e680c27a5f28f7b925ddbaaed7e86ea237b9cc3f0e7b664a98",
+      "before_lines": [
+        110,
+        122
+      ],
+      "after_lines": [
+        110,
+        122
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "finish_allocations",
+      "literal_equal": true,
+      "before_sha256": "9de9cbd09352781853de3553d77e266c4d589f56a6b7e58fa96c74b0db1ee58b",
+      "after_sha256": "9de9cbd09352781853de3553d77e266c4d589f56a6b7e58fa96c74b0db1ee58b",
+      "before_lines": [
+        1369,
+        1398
+      ],
+      "after_lines": [
+        1474,
+        1503
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "run",
+      "literal_equal": true,
+      "before_sha256": "96f1f4d4376b79881fac11178e964ef2afb057deead12252eb53e133002a9ce9",
+      "after_sha256": "96f1f4d4376b79881fac11178e964ef2afb057deead12252eb53e133002a9ce9",
+      "before_lines": [
+        2963,
+        3017
+      ],
+      "after_lines": [
+        3068,
+        3122
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "due",
+      "literal_equal": true,
+      "before_sha256": "c81dba6a6089e0d53c0dda1842fa3282227520dd3a2f875c9c25cba5d9dbae4c",
+      "after_sha256": "c81dba6a6089e0d53c0dda1842fa3282227520dd3a2f875c9c25cba5d9dbae4c",
+      "before_lines": [
+        1401,
+        1405
+      ],
+      "after_lines": [
+        1506,
+        1510
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "derived_stock_bounds",
+      "literal_equal": true,
+      "before_sha256": "bd6a19e4a5dde52335a510268f61860501e872e73c2403bb19ac9eefb62e3770",
+      "after_sha256": "bd6a19e4a5dde52335a510268f61860501e872e73c2403bb19ac9eefb62e3770",
+      "before_lines": [
+        931,
+        946
+      ],
+      "after_lines": [
+        1011,
+        1026
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "supervisor.py",
+      "method": "derived_catch_capacity",
+      "literal_equal": true,
+      "before_sha256": "2afd5b64530e31ff96c183e5006b06987435b0ac6bc08af756ef776a2eb14ac5",
+      "after_sha256": "2afd5b64530e31ff96c183e5006b06987435b0ac6bc08af756ef776a2eb14ac5",
+      "before_lines": [
+        923,
+        929
+      ],
+      "after_lines": [
+        1003,
+        1009
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "acquire_owned",
+      "literal_equal": true,
+      "before_sha256": "c236adbb913a44eabd162aa4a04aa7883b90e6a75e3e874fc06212f81046c8a1",
+      "after_sha256": "c236adbb913a44eabd162aa4a04aa7883b90e6a75e3e874fc06212f81046c8a1",
+      "before_lines": [
+        1327,
+        1339
+      ],
+      "after_lines": [
+        1432,
+        1444
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "publish_allocation",
+      "literal_equal": true,
+      "before_sha256": "7e487a96c6cf65850ffd009cae8488f28ca104d5f74ff44ba37e71159fb7a250",
+      "after_sha256": "7e487a96c6cf65850ffd009cae8488f28ca104d5f74ff44ba37e71159fb7a250",
+      "before_lines": [
+        1315,
+        1324
+      ],
+      "after_lines": [
+        1420,
+        1429
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "adopt_exact_fd",
+      "literal_equal": true,
+      "before_sha256": "ce33a38c0484532849f1c5b814e7be9d7c9bef6f1dfda5e9a3fa075c14692ab4",
+      "after_sha256": "ce33a38c0484532849f1c5b814e7be9d7c9bef6f1dfda5e9a3fa075c14692ab4",
+      "before_lines": [
+        1365,
+        1367
+      ],
+      "after_lines": [
+        1470,
+        1472
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "retire_record",
+      "literal_equal": true,
+      "before_sha256": "72ffa97dd65e547e51bbad6226d44120f34f8977ec7ad9da01ed74ffd734e459",
+      "after_sha256": "72ffa97dd65e547e51bbad6226d44120f34f8977ec7ad9da01ed74ffd734e459",
+      "before_lines": [
+        1370,
+        1389
+      ],
+      "after_lines": [
+        1475,
+        1494
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "reclaim_confirmed_slot",
+      "literal_equal": true,
+      "before_sha256": "e707cc2c936781e680c27a5f28f7b925ddbaaed7e86ea237b9cc3f0e7b664a98",
+      "after_sha256": "e707cc2c936781e680c27a5f28f7b925ddbaaed7e86ea237b9cc3f0e7b664a98",
+      "before_lines": [
+        165,
+        177
+      ],
+      "after_lines": [
+        165,
+        177
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "finish_allocations",
+      "literal_equal": true,
+      "before_sha256": "9de9cbd09352781853de3553d77e266c4d589f56a6b7e58fa96c74b0db1ee58b",
+      "after_sha256": "9de9cbd09352781853de3553d77e266c4d589f56a6b7e58fa96c74b0db1ee58b",
+      "before_lines": [
+        1403,
+        1432
+      ],
+      "after_lines": [
+        1508,
+        1537
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "main",
+      "literal_equal": true,
+      "before_sha256": "ce596b6fc99558b3e2b658097949d9827b4948132e7abecdab21ad5b9a76331f",
+      "after_sha256": "ce596b6fc99558b3e2b658097949d9827b4948132e7abecdab21ad5b9a76331f",
+      "before_lines": [
+        2392,
+        2579
+      ],
+      "after_lines": [
+        2497,
+        2684
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "due",
+      "literal_equal": true,
+      "before_sha256": "7ab11a57ced2d78959e3667e82f2be4a6832347bf168ee6d891710d80147f8f3",
+      "after_sha256": "7ab11a57ced2d78959e3667e82f2be4a6832347bf168ee6d891710d80147f8f3",
+      "before_lines": [
+        1435,
+        1437
+      ],
+      "after_lines": [
+        1540,
+        1542
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "derived_stock_bounds",
+      "literal_equal": true,
+      "before_sha256": "bd6a19e4a5dde52335a510268f61860501e872e73c2403bb19ac9eefb62e3770",
+      "after_sha256": "bd6a19e4a5dde52335a510268f61860501e872e73c2403bb19ac9eefb62e3770",
+      "before_lines": [
+        985,
+        1000
+      ],
+      "after_lines": [
+        1065,
+        1080
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    },
+    {
+      "file": "verifier.py",
+      "method": "derived_catch_capacity",
+      "literal_equal": true,
+      "before_sha256": "2afd5b64530e31ff96c183e5006b06987435b0ac6bc08af756ef776a2eb14ac5",
+      "after_sha256": "2afd5b64530e31ff96c183e5006b06987435b0ac6bc08af756ef776a2eb14ac5",
+      "before_lines": [
+        977,
+        983
+      ],
+      "after_lines": [
+        1057,
+        1063
+      ],
+      "changed_dependency_review_required": true,
+      "not_runtime_credit": true
+    }
+  ],
+  "literal_sites": [
+    {
+      "file": "caller.py",
+      "method": "retain_outside_failure",
+      "lines": [
+        643,
+        653
+      ],
+      "sha256": "a3b28aefc6e56a2df0e2e31022f3d23efa252185a551bb8d0a8022dcc66409b2"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "retain_outside_failure",
+      "lines": [
+        300,
+        310
+      ],
+      "sha256": "a3b28aefc6e56a2df0e2e31022f3d23efa252185a551bb8d0a8022dcc66409b2"
+    },
+    {
+      "file": "verifier.py",
+      "method": "retain_outside_failure",
+      "lines": [
+        355,
+        365
+      ],
+      "sha256": "a3b28aefc6e56a2df0e2e31022f3d23efa252185a551bb8d0a8022dcc66409b2"
+    },
+    {
+      "file": "caller.py",
+      "method": "publish_outside_failures",
+      "lines": [
+        656,
+        663
+      ],
+      "sha256": "e538fc933390a0316acca07eae4ae46028802383eb618ea064405d8d9cb83840"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "publish_outside_failures",
+      "lines": [
+        313,
+        320
+      ],
+      "sha256": "e538fc933390a0316acca07eae4ae46028802383eb618ea064405d8d9cb83840"
+    },
+    {
+      "file": "verifier.py",
+      "method": "publish_outside_failures",
+      "lines": [
+        368,
+        375
+      ],
+      "sha256": "e538fc933390a0316acca07eae4ae46028802383eb618ea064405d8d9cb83840"
+    },
+    {
+      "file": "caller.py",
+      "method": "outside_body_fault",
+      "lines": [
+        666,
+        669
+      ],
+      "sha256": "3ca769f14b6f9086144e3685671c94278cb31811b767b6d0313b6e17853eb2bc"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "outside_body_fault",
+      "lines": [
+        323,
+        326
+      ],
+      "sha256": "3ca769f14b6f9086144e3685671c94278cb31811b767b6d0313b6e17853eb2bc"
+    },
+    {
+      "file": "verifier.py",
+      "method": "outside_body_fault",
+      "lines": [
+        378,
+        381
+      ],
+      "sha256": "3ca769f14b6f9086144e3685671c94278cb31811b767b6d0313b6e17853eb2bc"
+    },
+    {
+      "file": "caller.py",
+      "method": "outside_body_number",
+      "lines": [
+        672,
+        699
+      ],
+      "sha256": "7a076e11ebb8769d324154719fe2c9b893210a4cb8ed72e29f125678a6018140"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "outside_body_number",
+      "lines": [
+        329,
+        356
+      ],
+      "sha256": "7a076e11ebb8769d324154719fe2c9b893210a4cb8ed72e29f125678a6018140"
+    },
+    {
+      "file": "verifier.py",
+      "method": "outside_body_number",
+      "lines": [
+        384,
+        411
+      ],
+      "sha256": "7a076e11ebb8769d324154719fe2c9b893210a4cb8ed72e29f125678a6018140"
+    },
+    {
+      "file": "caller.py",
+      "method": "outside_relation_bytes",
+      "lines": [
+        703,
+        723
+      ],
+      "sha256": "69c7822d29ebf8bdb8c7d11387445d68fab7d777db932cbded31a2682dea4259"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "outside_relation_bytes",
+      "lines": [
+        360,
+        380
+      ],
+      "sha256": "69c7822d29ebf8bdb8c7d11387445d68fab7d777db932cbded31a2682dea4259"
+    },
+    {
+      "file": "verifier.py",
+      "method": "outside_relation_bytes",
+      "lines": [
+        415,
+        435
+      ],
+      "sha256": "69c7822d29ebf8bdb8c7d11387445d68fab7d777db932cbded31a2682dea4259"
+    },
+    {
+      "file": "caller.py",
+      "method": "open_caller_outside_body",
+      "lines": [
+        726,
+        753
+      ],
+      "sha256": "aee7d28161c36d4b517125a49f38010e868ff83781948ccd8392336d92585994"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "open_caller_outside_body",
+      "lines": [
+        383,
+        410
+      ],
+      "sha256": "aee7d28161c36d4b517125a49f38010e868ff83781948ccd8392336d92585994"
+    },
+    {
+      "file": "verifier.py",
+      "method": "open_caller_outside_body",
+      "lines": [
+        438,
+        465
+      ],
+      "sha256": "aee7d28161c36d4b517125a49f38010e868ff83781948ccd8392336d92585994"
+    },
+    {
+      "file": "caller.py",
+      "method": "adopt_outside_body",
+      "lines": [
+        756,
+        774
+      ],
+      "sha256": "27235fc9475c7067d21ec5e82798598be92b6a1962a20f5391d0851030c213c6"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "adopt_outside_body",
+      "lines": [
+        413,
+        431
+      ],
+      "sha256": "27235fc9475c7067d21ec5e82798598be92b6a1962a20f5391d0851030c213c6"
+    },
+    {
+      "file": "verifier.py",
+      "method": "adopt_outside_body",
+      "lines": [
+        468,
+        486
+      ],
+      "sha256": "27235fc9475c7067d21ec5e82798598be92b6a1962a20f5391d0851030c213c6"
+    },
+    {
+      "file": "caller.py",
+      "method": "commit_outside_body",
+      "lines": [
+        777,
+        834
+      ],
+      "sha256": "02dafd83346cd5320ebe00b030091ea9e17ed7e5ce6fc1f85c225b45649fe437"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "commit_outside_body",
+      "lines": [
+        434,
+        491
+      ],
+      "sha256": "02dafd83346cd5320ebe00b030091ea9e17ed7e5ce6fc1f85c225b45649fe437"
+    },
+    {
+      "file": "verifier.py",
+      "method": "commit_outside_body",
+      "lines": [
+        489,
+        546
+      ],
+      "sha256": "02dafd83346cd5320ebe00b030091ea9e17ed7e5ce6fc1f85c225b45649fe437"
+    },
+    {
+      "file": "caller.py",
+      "method": "seal_outside_body",
+      "lines": [
+        844,
+        860
+      ],
+      "sha256": "717332777a220cd39dab751187421ac29d4ac4b9256d85c8f926289be7f23428"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "seal_outside_body",
+      "lines": [
+        501,
+        517
+      ],
+      "sha256": "717332777a220cd39dab751187421ac29d4ac4b9256d85c8f926289be7f23428"
+    },
+    {
+      "file": "verifier.py",
+      "method": "seal_outside_body",
+      "lines": [
+        556,
+        572
+      ],
+      "sha256": "717332777a220cd39dab751187421ac29d4ac4b9256d85c8f926289be7f23428"
+    },
+    {
+      "file": "caller.py",
+      "method": "consume_outside_body",
+      "lines": [
+        863,
+        885
+      ],
+      "sha256": "f1ebfbbd8cb8b799d6a0e88be6309581e2e86db8a4e9f0b72a7e8bc0f8cef348"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "consume_outside_body",
+      "lines": [
+        520,
+        542
+      ],
+      "sha256": "f1ebfbbd8cb8b799d6a0e88be6309581e2e86db8a4e9f0b72a7e8bc0f8cef348"
+    },
+    {
+      "file": "verifier.py",
+      "method": "consume_outside_body",
+      "lines": [
+        575,
+        597
+      ],
+      "sha256": "f1ebfbbd8cb8b799d6a0e88be6309581e2e86db8a4e9f0b72a7e8bc0f8cef348"
+    },
+    {
+      "file": "caller.py",
+      "method": "finish_outside_end",
+      "lines": [
+        888,
+        956
+      ],
+      "sha256": "f4c2f9ff36816eb97c4960541375478e5cd59fe3421d955f9234aa7487f6c07e"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "finish_outside_end",
+      "lines": [
+        545,
+        613
+      ],
+      "sha256": "f4c2f9ff36816eb97c4960541375478e5cd59fe3421d955f9234aa7487f6c07e"
+    },
+    {
+      "file": "verifier.py",
+      "method": "finish_outside_end",
+      "lines": [
+        600,
+        668
+      ],
+      "sha256": "f4c2f9ff36816eb97c4960541375478e5cd59fe3421d955f9234aa7487f6c07e"
+    },
+    {
+      "file": "caller.py",
+      "method": "snapshot_owned_originals",
+      "lines": [
+        1088,
+        1122
+      ],
+      "sha256": "aa7b8810b9fdac10a6c365546bf8f776576219905e1a98d45660d6224c4add62"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "snapshot_owned_originals",
+      "lines": [
+        739,
+        773
+      ],
+      "sha256": "aa7b8810b9fdac10a6c365546bf8f776576219905e1a98d45660d6224c4add62"
+    },
+    {
+      "file": "verifier.py",
+      "method": "snapshot_owned_originals",
+      "lines": [
+        793,
+        827
+      ],
+      "sha256": "aa7b8810b9fdac10a6c365546bf8f776576219905e1a98d45660d6224c4add62"
+    },
+    {
+      "file": "caller.py",
+      "method": "publish_preowned_then_frame",
+      "lines": [
+        1149,
+        1185
+      ],
+      "sha256": "8faf79169bca5bda55cff7a92dbc7c042271ddb0a8c431cad9545cd0e8ab4e76"
+    },
+    {
+      "file": "supervisor.py",
+      "method": "publish_preowned_then_frame",
+      "lines": [
+        800,
+        836
+      ],
+      "sha256": "8faf79169bca5bda55cff7a92dbc7c042271ddb0a8c431cad9545cd0e8ab4e76"
+    },
+    {
+      "file": "verifier.py",
+      "method": "publish_preowned_then_frame",
+      "lines": [
+        854,
+        890
+      ],
+      "sha256": "8faf79169bca5bda55cff7a92dbc7c042271ddb0a8c431cad9545cd0e8ab4e76"
+    }
+  ],
+  "source_execution": 0,
+  "AST_compiler_tests": "NOT_RUN",
+  "author_only_no_self_acceptance": true,
+  "phase_cells": 8,
+  "actual_connected_literal_checks": true,
+  "reason_for_repeat": "Own Source changed: publication secondary first-store and final exact binding DAG. No native/Source operation repeated."
+}

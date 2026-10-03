@@ -1,0 +1,328 @@
+{
+  "schema": "friday.astra.a197.scanner.existing-allocator.custody.decision.v1",
+  "assignment": "ASTRA-E4-A197-SCANNER-EXISTING-ALLOCATOR-PHYSICAL-CUSTODY-CONNECTED-DECISION",
+  "generation": 1,
+  "owner": "Astra Lead Architect epoch4",
+  "accepted_msk": "2026-10-02T21:25:00.026889+03:00",
+  "current_source": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB874-SCANNER-SOURCE-RESULT-RECEIVED-20261002.json",
+    "bytes": 42477,
+    "sha256": "d92029cd02494cf6c0df95319311be2af970acbf13805aa4a3d6c6c9df40c927",
+    "identity9_decimal_strings": [
+      "2050",
+      "8521785",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "42477",
+      "1790959591134233027",
+      "1790959591191236355"
+    ],
+    "stable9": true
+  },
+  "actual_code_pins": [
+    {
+      "path": "/var/tmp/friday-lab874-lab871-scanner-registered-custody-carrier-existing-parent-closure/native/source_owner.c",
+      "bytes": 126890,
+      "sha256": "eab4a2e5a75ea8ad66fb0e7ee7644ae9a07c0d526d2b0d2c09690156a7d9d099",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225651",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "126890",
+        "1790958593629446230",
+        "1790958593629446230"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab874-lab871-scanner-registered-custody-carrier-existing-parent-closure/tools/native_owner.py",
+      "bytes": 93818,
+      "sha256": "73d072b9268337723af6cc8f0c7c8a0d2f1eaee36ac4a569763f667f82446d1d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225652",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "93818",
+        "1790958593630446288",
+        "1790958593630446288"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab874-lab871-scanner-registered-custody-carrier-existing-parent-closure/tools/native_support.py",
+      "bytes": 24164,
+      "sha256": "3cd671e0117771a3b64d7182a5be5dad6313f74e88068e6dbad65974b47f337a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225653",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24164",
+        "1790958593634446519",
+        "1790958593634446519"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab874-lab871-scanner-registered-custody-carrier-existing-parent-closure/tools/root_holder.py",
+      "bytes": 32386,
+      "sha256": "e659bf2b6f83a09d8cfcad81e81802ce862b8ca5f50e258c799d2f52429907c8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225654",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32386",
+        "1790958593635446576",
+        "1790958593635446576"
+      ],
+      "stable9": true
+    }
+  ],
+  "original_authority": [
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A189-INPUT-20261002.json",
+      "keys": [
+        "schema",
+        "assignment",
+        "generation",
+        "owner_scope",
+        "task_kind",
+        "snapshot",
+        "current_source_pins",
+        "current52",
+        "current_Source_Root_received_pin",
+        "original_A180_input_pin",
+        "A185_final_independent_review_received_pin",
+        "A185_review_pins",
+        "current_two_CODE",
+        "scope",
+        "directions",
+        "effects",
+        "resources",
+        "output",
+        "terminal",
+        "SourceReady",
+        "Root_admission",
+        "runtime",
+        "gates",
+        "GO"
+      ],
+      "requirements": null,
+      "original_mandatory_edges": null,
+      "directions": [
+        "Read fulloriginalA180INPUT/originalnormative/current52 first, then exact independentA185 whole review. Implement both final original process ownership and actual new generic Source raw-before-projection path across ZIP/DEB/public/compression/causes/_run_owned together, with all unchangedrequired methods/dependencies preserved.",
+        "C1: reuse actual EXISTING original outside native parent/caller/observer topology, with genuine preowned full202/original required raw/native records/slots/FD and actual direct both-family child relationship BEFORE birth/initialization, or real accepted legal original owner-transfer BEFORE loss, or confirmed finite actual native retirement. Calling a local receiver/keeping sameTGID refs/thread/exit125/flag/count/hash is not full ownership. No new Rootprocess/service/grant/capraise/reparentingclaim without actual accepted legal relation. If a real original relation cannot be implemented, state exactly why/new authority needed, don't invent an external service or keep a dying intermediate.",
+        "C2: preown native/meter/ResultOwner raw roots for exact actually reached primary/secondary/host context/recorder origin BEFORE typed detail/factory projections; preserve original cause/traceback/context/body identity and actual finite accepted lifetime across normal/error/default/cleanup. Pure policy refusals do not acquire fabricated underlying host exceptions. Do not reopen genuine repaired seven oldR2 custody/Root catches; fix the independent generic sites and dependencies.",
+        "Interpret fullVM/custody only under ORIGINAL reviewed-stock registered records/resources/actual prescribed state, NOT universal interpreter/privateCHeap/customnative/frame-local/kernel/host assumptions. Required full actual raw origins/aliases/resources/packet body remain; no waiver. Missing newRootimage/compiler/grant/provider/epoch/actualqualification alone notSourceCODE.",
+        "OriginalSource16/RootB+220/holder13500416/original206207/full202/global4/combined2980561136/all17/all6 and original caps/min-hard ends/both families/negativecontrols/oracles/schema14/ref61/noextraRootrole unchanged. Internal task/clone3/clear_tid/coldconsumer must match ORIGINAL count/identity/actualownership scope, not declarations. Preserve genuine preinit/deadline/bothchildren/raw packet/slot/minend/ACK/current3 improvements.",
+        "Rebind exactall52 actualsource/index/current202/bothreceiver schemas/hashes + fullnew constructor/default/secondaryerror/phase/cost/ownership/custody beforeclaiming acceptance. No capincrease/oraclecut/budgettransfer/expiredparking/infinitewait/mocksforlive. All original all30/F0F11/fullgates/live remain REQUIREDNOTRUN; compiler/native/newRoot differauthorreview aftersourceonly."
+      ],
+      "inputs": {
+        "original_A180_input_pin": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A180-INPUT-20261002.json",
+          "bytes": 69476,
+          "sha256": "e9e064f4b29c2b0e6fcb41c9036f79aaaa8283881352687aac82b93498262ca1",
+          "identity9_decimal_strings": [
+            "2050",
+            "8533599",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "69476",
+            "1790935377710479809",
+            "1790935377779483768"
+          ],
+          "stable9": true
+        }
+      }
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A180-INPUT-20261002.json",
+      "keys": [
+        "schema",
+        "assignment",
+        "generation",
+        "owner_scope",
+        "task_kind",
+        "Source",
+        "original_exact_A176_input",
+        "original_exact_LAB862_input",
+        "independent_A176",
+        "original_mandatory_edges",
+        "original_exact_A162_input",
+        "original_whole_A168_input",
+        "original_SOL058_input",
+        "scope",
+        "directions",
+        "effects",
+        "resources",
+        "output",
+        "terminal",
+        "SourceReady",
+        "Root_admission",
+        "compiler_ELF_ABI",
+        "runtime",
+        "gates",
+        "GO"
+      ],
+      "requirements": null,
+      "original_mandatory_edges": [
+        "Read exact A159 SOURCE.md, current5 performing diffs, full52/28code/schema14/61ref/whole17 original cost and A154 findings. R2/R3 and R4 worker-only genuinely addressed prior; A159 adds pre-birth202/directnativewait/calledcapsules but R1role2_exit still loses owner. Preserve those mechanisms, final bytes require whole independent review.",
+        "Implement ACTUAL selected existing outside native parent/caller as owner of complete202+innerSource generation/direct parenthood before any worker bounded birth, or actual called transfer/adoption whose independent acceptance precedes local loss. Prefer coherent fold of holder/direct wait into already existing independently selected outside native parent rather than extra intermediate parent process dying at its own deadline. This is inert legal code/topology authorship within original roles, not runtime execution/grant. Do not simply annotate future Root absence or relabel existing role2 as outside.",
+        "Whole native roles/entry/bootstrap/callsite/caller-consumer must truly implement selected relation. Remove the actual path where a sole resource-owning/direct-parent role2 destroys original202/unreapedchild/raw/slot/errors at _exit while observer onlygetsBYTES. NumericPID/pidfd-only transferred handle isn't parenthood. Existing native original parent must own or legally establish actual generation/wait relation before bounded child creation. No guessed authority, new Root/process/service/TUI/model, unboundedwait, late expired parking, capraise or broadkill.",
+        "Complete final native-end consumer/capsule and error graph: actual partialconstructor/recording/delivery/error/raw/FDaliases retained under independently selected existing caller before fallible operation. Genuine direct Source/Root wait commit and fullstdout/stderr/EOF/native216 remain required, native-end not pre-return sample. Implement called both sides and actual acceptance/retirement once, no infinite chain of merely returned local capsules. Unknown close stays owned and bounded; no blind retry/pretendfree.",
+        "Preserve Source16FD/global canonical4/original RootB+220 baseline and finite original ends/work-tail/minconsumerends/no deadline refresh. Original202externalcapsule206/207FD and duplicatedesciptions/slots/envelopes13500416 must actually fit original caps through overlaps; no hidden extra domain. Source4/Root4each1490280568 bodylower combined2980561136 plus everyactual metadata/bootstrap/IPC/error/hash/encode/cleanup costs. Immutable cache legal only originalfence/currentheld+named9/fullbytes/generation. No extra duplicatefull372570142 recheck assumption or Source allowance from author256MiB.",
+        "Keep original7formats/algorithms/31+20+55controls/sixscenarios/202(106Ubuntu94wheel2kernel)/350artifacts512members/all17/C01C14/F0F11/fullgates. Actualpathset5DATA (prior6typo isn't missingcode). No archived957 unchanged body reread. Historical unsafe obligations abstract REQUIRED_NOT_RUN; nevercreatepayload/fixture/generator/repro/exploitation/waiver.",
+        "Produce actual cohesive changed Source+consumers/finalnativeprotocol and complete delta/equal/full52/schema14/all61/whole17/cost/custody/causal matrices. Do not freeze another 30-minute partial after merely moving birth inside the same dying role2. Use finite original package wall6600 with600reserve. If a mandatory code edge genuinely remains, retain exact attempted code/reason without SourceReady. One terminal then stop; no polling."
+      ],
+      "directions": [
+        "Read whole current52/28code/schema14/ref61/all17/all6 and independent A176 full three findings/report/cause/resource/custody matrices/original A162/A168/SOL058/LAB862. Required_source_relation originalroles/ends is authoritative; no new Root role/service/TUI/model, hostileprovider assumption, capraise/oraclecuts or expired parking.",
+        "Implement actual finite original hard/minimum-end enforcing relation across preinit/init/selected callsite/nonreturning prefix/error/default/destructor/Python retirement/graph decref/interpreterfinalization/FDclose/native216two writes. Current one-shot flag/killing onlypending Source then work afterexpiry is actualCODE. Do whole existing original owner graph/performing domains before births. Use legitimate original work-tail/ends only; finite cleanup tail starts inside original allowance and actual enforcing nativeend remains; byte prepayment notwall allowance. Do not merely add another callback/flag/wrapper/_exit/new capsule which dies with same unretired graph.",
+        "Complete actual direct child families pendingSource and observedRoot: before live-child constructor/selector/recording/receipt/deadline/error/prefix loss, actual independently accepted legal complete original202/raw/slot/FD/parenthood custody or confirmed directretirement must hold in alreadypermitted existing outside roles. One WNOHANG-zero thenownexit/automaticpidfdclose isnotreap/adoption; numericPID/pidfdalone notparenthood. RootCompletionObserver lackcancel_and_reap +handler targetsSourceonly actualedge; fix both realcalled producers/receivers and originalRootSourceOwner/nativeRootWait/caller/observer boundaries, not infiniteobserverchain or broadkill.",
+        "Retain actual primary AND every reached secondary/cleanup/projection/recorder/budgetbegin/release/unlock error object/traceback/notes/cause/context graph prospectively in same preowned actual caller/native receiver beforefallible projection, evenexistingprimary present. Generic STOP_UNCONFIRMED/native errno/operation labels alone notPythonraworigin. Complete raw lifetime acceptedreceiver before any caller/interpreter/process destruction, stickyonceclose/unlock keptno guessedfree/retry.",
+        "Preserve originalholder13500416/descriptions206207/Source16/RootB+220/globalcanonical4/Source4+Root4 combined2980561136 beforeallnative/metadata/raw/allocator/clock/finalization costs; no duplicate27000832holder or extra372570142 pass. Inherited630636544vs268435456 NOT_FIT and wholeunknownRAMIO notpass. No reviewer/author256M transfer toSource budget. Wholeactual parent/caller/interface/bootstrap/sourcecontrol/end211/216 resources count originalroles exactly.",
+        "Complete coherently materialized performing Source+bothproducerreceiver/schema/hash/size/currentindex/source52 changed/equal/all17/C01C14/28/14/61/phase/minend/causal/custody/resource/ABI/cost matrices, everyactual knowncause nottiny patch. Original202/7formats/allalgorithms/31+20+55neg/six/350512/all30/F0F11/gates/live preserved. Unknown future exactRoot image/epoch/grant/compilerABI/currentstock facts pending, notSourcecodebug. Currentcodecaps/control contradictions remainCODEafteractualattempt.",
+        "Own NEW inertSourceTEXT/JSON/manualmechanicalmaterialization +trustedboundedstockmetadata only. NO supplied import/AST/compiler/eval/exec/tests/native/Root/GPG/Node/archiveparse/decompress/extract/network/install/live/UI/model/gates or originalSource/Git/config/guards/settings/writerlocks/models mutations. Historicalunsafe ABSTRACT_REQUIRED_NOT_RUN/no operationalpayload/fixture/generator/repro/exploitation/waiver. Exact >2^53 integers preserve rawstockparser/noV8round/absence notnull.",
+        "Full private700600/nlink1/SHA9decimal/pathset/DAG leaves-seal-manifest-externalterminal acceptedfinishedelapsedMSK/cumulativecosts. Freezeend-600 oneRESULT thenstop. FullchangedSource mustget new different-author whole review/currentRoot admission beforeeffects. Neverselfmint SourceReady/Root/runtime/gates/GO."
+      ],
+      "inputs": {
+        "original_exact_A176_input": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A176-INPUT-20261002.json",
+          "bytes": 64548,
+          "sha256": "1b3a75a142622b024d4527126ea3f33b506bfe3dab783a309a988c64c7c94ed0",
+          "identity9_decimal_strings": [
+            "2050",
+            "8533526",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "64548",
+            "1790932983764125752",
+            "1790932983824278003"
+          ],
+          "stable9": true
+        },
+        "original_exact_LAB862_input": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB862-INPUT-20261002.json",
+          "bytes": 71058,
+          "sha256": "1a997b297a577bd72805e90e1460c0b21f4b3c58ae9aef04a69be8ad889b79e9",
+          "identity9_decimal_strings": [
+            "2050",
+            "8533512",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "71058",
+            "1790930430704921228",
+            "1790930430756924205"
+          ],
+          "stable9": true
+        },
+        "original_exact_A162_input": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A162-INPUT-20261002.json",
+          "bytes": 87521,
+          "sha256": "a9dfb1ae60d4028852b7250682e3033500934b3be7ad7a2b675d7c0c63c08e38",
+          "identity9_decimal_strings": [
+            "2050",
+            "8532882",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "87521",
+            "1790922760031783369",
+            "1790922760090786746"
+          ],
+          "stable9": true
+        },
+        "original_whole_A168_input": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A168-INPUT-20261002.json",
+          "bytes": 57136,
+          "sha256": "656c58877d79a2c3f03362c724ee8719d486d2a1809235788af27e83ef9c054c",
+          "identity9_decimal_strings": [
+            "2050",
+            "8533224",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "57136",
+            "1790925992628869317",
+            "1790925992692872981"
+          ],
+          "stable9": true
+        },
+        "original_SOL058_input": {
+          "bytes": 73786,
+          "identity9_decimal_strings": [
+            "2050",
+            "8533441",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "73786",
+            "1790927525585631058",
+            "1790927525585631058"
+          ],
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL058-INPUT-20261002.json",
+          "sha256": "edd69e0556070c97b622291e4323344c3aecbccf52ea865ac0d66e7e963e8c19",
+          "stable9": true
+        }
+      }
+    }
+  ],
+  "decision": "BOUNDED_INERT_SOURCE_IMPLEMENTATION_DIRECTION_NOT_ACCEPTANCE_OR_EXECUTION",
+  "scope": "A192-C1 and C2; actual prescribed registered roots/resources/raw/error/aliases plus direct Source/Root child-parenthood, original52/28/14schemas/61refs/all17/all6/full202. Not project audit or universal privateheap theorem.",
+  "actual_findings": [
+    {
+      "path": "source_owner.c.initialize_native_owner -> PyMem_SetAllocator/PyObject_SetArenaAllocator -> friday_malloc",
+      "fact": "All three Python allocator domains and selected native malloc edges already use original ordinary/terminal arenas BEFORE Py_PreInitialize. Existing backing is MAP_PRIVATE|MAP_ANONYMOUS. Reusing these actual already-controlled arenas is preferable to a new universal heap walker or late serializer."
+    },
+    {
+      "path": "source_owner.c.receive_preowned_source_plane -> source_native_raw_endpoint -> retire_source_registered_fds_once -> commit_source_plane_full",
+      "fact": "Plane fd is registered; ordinary retirement closes all active fd!=2, including that fd, before pwrite commit. Both normal and uncertain calls ignore commit return. The new plane context therefore cannot inherit old confirmed-main credit automatically."
+    },
+    {
+      "path": "source_owner.c.commit_source_plane_full -> native_owner._accept_registered_source_plane",
+      "fact": "Existing plane128KiB contains fixed FD_MAX4096 table plus canonical table and packet bytes; original up-to2M packet body does not fit this specific copied representation. Commit writes a header before remaining body/tables and sets confirmed-retired before Python raw clears/finalization, while receiver accepts NOT_FIT/signal kinds as mere called commits. These are not full custody or terminal completion."
+    }
+  ],
+  "implementation_direction": [
+    "Reuse original Source-only allocator arenas/registered native tables rather than creating a new heap/observer/service. Let an already existing independently selected outside native parent preown their physical Source-owned backing before bounded Source birth/interpreter initialization. Source alone may write its own separate data storage; privileged Root observes read-only. Never map/inherit Root private privileged writable storage into Source. This is original native allocation custody, not metadata/hash/serialized label as a body.",
+    "Keep the exact original allocator algorithm, Source16/RootB+220/global4/holder13500416/206207/original lower/body/control/caps/clock obligations. Derive arena backing extent from exact original validated caps and actual header layout, not a new allowance. Account native metadata, address space, mapping/physical residency/alias attribution, descriptors, allocator work/dirty or transport IO, receiver reads/hash and overlap prospectively. A mapped physical alias is not a duplicate physical copy, but its actual virtual/RSS/IO costs are not zero.",
+    "Put actual registered Source raw roots, caller error triplets/lane, packet/FD/canonical records and allocation metadata directly into the Source-owned preheld storage or a faithful native alias relation while they are created. A late refresh/count/pointer table alone does not cover earlier hard/end prefixes. Preserve all original actual object/body/traceback/cause/context/notes/aliases in the selected native fence. Qualified loaded stock/static image preimages may support non-arena references only with full current original identity/lifetime/body correspondence; not filename/label/hash alone.",
+    "Root actual receiving holder must strongly own full storage and exact generation/body ranges/Source image-ABI relation, not just a byte ACK. Do not dereference foreign Source pointers as parent pointers; validate actual typed offsets/ranges and supported selected-stock correspondence through the existing native ABI. Missing future selected ABI qualification is not a Source CODE defect alone; a missing actual receiving Source path is.",
+    "Close BOTH endpoints and actual outside-parent caller. Same-TGID Py_INCREF/local carrier/result acceptance is not independent original transfer. Implement the actual existing selected caller/receiver/source callsite and prebirth legal direct Source and Root child relation; no guessed late adoption, extra Root process/domain, recursive returned capsule, deadline refresh or expired parking. If required precise existing caller source/material is missing, name exact ref/hash gap; do not reconstruct private artifacts from prose or replace it with a promise.",
+    "Preserve actual confirmed Source retirement before raw-root clears/Py_FinalizeEx. For uncertainty, full externally preheld registered storage must survive native owner loss; neither process exit nor typed125 is the transfer. Plane availability is an invariant before admission-dependent effects, not a best-effort endpoint copy. Do not close the only transport/storage handle before completing its required relation, and propagate every incomplete/partial commit/close/finalization error to real terminal receiver.",
+    "Commit ordering: payload/table/body relation first, published complete state last; confirmed-retired only after actual registered retirement, with any subsequent finalization/close/metric error revoking success. Actual receiver distinguishes incomplete, NOT_FIT, hard signal and confirmed state; no positive acceptance from commit-kind alone.",
+    "Rejoin whole current52/actual producers/receivers/schema14/ref61/all17/all6/full202/constructor/default/error/cold/hard paths and costs as ONE Source package. Do not submit a local writer-only helper for whole review while its caller/receiver/body relation is known incompatible. Preserve immutable failed evidence and genuine old credits within unchanged dependencies."
+  ],
+  "alternatives": "If actual Source backing/registered stock/static reference/parent relation cannot fit an ORIGINAL bound after this concrete attempt, return exact reached code/requirement/arithmetic and smallest owner-only decision with compliant alternatives. Do not claim universal impossibility or seek general audit.",
+  "effects": "Inert new own Source text/JSON and bounded trusted stock read/hash/stat only. No supplied imports/AST/compile/eval/exec/tests/native/Root/GPG/archive/network/install/live/UI/model/gates; no originals/Git/config/models/guards/locks writes.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "historical_unsafe": "ABSTRACT_REQUIRED_NOT_RUN",
+  "required": true,
+  "waiver": false
+}

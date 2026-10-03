@@ -1,0 +1,97 @@
+{
+  "schema": "friday.astra.a229.native.caller.transfer.author.result.v1",
+  "assignment": "ASTRA-E4-A229-PUBLISHER-ACTUAL-NATIVE-CALLER-BANK-TRANSFER-AND-END",
+  "generation": 1,
+  "classification": "CONNECTED_INERT_OWNED_SOURCE_IMPLEMENTATION",
+  "accepted_msk": "2026-10-03T18:01:23.212741+03:00",
+  "recorded_utc": "2026-10-03 15:20:06 UTC",
+  "scope": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A229-PUBLISHER-ACTUAL-NATIVE-TRANSFER-SCOPE-20261003.json",
+    "bytes": 3571,
+    "sha256": "ff2f261996de87f55d3cf3d937f0bd8156445a7587d1a8c7a7c97bfb8a6d7ffd",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534272",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3571",
+      "1791039954370034500",
+      "1791039954421037460"
+    ],
+    "stable9": true
+  },
+  "source3": [
+    {
+      "path": "/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/native/publisher_owned_custody.c",
+      "bytes": 45358,
+      "sha256": "933865f47ec4258026bad94096ac92a9a684cc59dbbd52949c247b5ed0b36779",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371827",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "45358",
+        "1791040608358991142",
+        "1791040608358991142"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/native/publisher_owned_custody.h",
+      "bytes": 3675,
+      "sha256": "11c15f283a8b8d7aa42e1485a8b2a304b12f8379208b75f2e1b43016e8262361",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371828",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3675",
+        "1791040307887552180",
+        "1791040307965556707"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a229-publisher-actual-native-caller-bank-transfer-end-inert-source/source/existing_root_caller.py",
+      "bytes": 20902,
+      "sha256": "c025e89546757ff376198f3610ece040e80629af2fff5f86c014265594f9a8bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371829",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20902",
+        "1791040307909553457",
+        "1791040307965556707"
+      ],
+      "stable9": true
+    }
+  ],
+  "actual_delta": "C Invoke now calls actual existing Python receiver on complete full-bank/28-root/actual-close packet; caller frame owns real bytes and aliases before Release. Release clears fields instead of dangling decrefs; no Source/user callback or allocation after confirmed cleanup; final bool only afterward. Pre-retirement native result remainsFalse; old Source/doc bytes not rewritten. Inactive Source context not used to read transferred full immutable raw bank tuple.",
+  "manual_precall_consumer_fix": "Tuple13 passed to Python consumer using explicit (O), not O argument-unpacking. No Source compiler/parser/import/test used.",
+  "same_original_roles": true,
+  "new_role_grant_image_service": false,
+  "original_binding_table_supplier_unchanged_and_unproven": true,
+  "implementation_is_not_independent_acceptance": true,
+  "known_remaining": [
+    "Whole original caller/outer-ABI consumer supplier not established by header/API Source; exact gap not reconstructed. Actual image/ABI/provider/resources/admission/runtime remainNOT_RUN.",
+    "N1 pre-module full error/body/end and N2 preseed/stock/source failure retainedCODE.",
+    "N3 whole original all-job output/read/hash/RAM/FD/cohort mapping and publicnative state retainedCODE/UNKNOWN. This transfer doesn't increase caps, shorten cases or solve unrelated layout.",
+    "Full native destruction/whole factory/CPU/RSS/implicitIO/C2 remainsUNKNOWN_NOT_ZERO; reference-debit is a real prospective declared floor, not whole upper bound.",
+    "Independent source review required; no SourceReady/RootGO or any required runtime gate credit."
+  ],
+  "native_memory_scope": "Own registered Run fields/owned PyObjects with public C API only; no fabricated pointers, arbitrary/private/foreign memory or Scanner guard-denied operation retry/route.",
+  "Source_execution": 0,
+  "Root_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

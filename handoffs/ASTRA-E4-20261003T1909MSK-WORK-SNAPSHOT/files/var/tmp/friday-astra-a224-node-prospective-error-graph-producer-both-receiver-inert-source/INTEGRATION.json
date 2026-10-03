@@ -1,0 +1,262 @@
+{
+  "schema": "friday.astra.a224.node.prospective-errorgraph.connected-source.integration.v1",
+  "recorded_utc": "2026-10-03 09:17:44 UTC",
+  "author": "Astra active Lead Architect epoch4",
+  "class": "harness",
+  "parent": {
+    "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/manifest.json",
+    "bytes": 9429,
+    "sha256": "3981cc05a99abf578767413249db6812c7319346b844a5ac846348c2082558ec",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226817",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "9429",
+      "1790993924285137315",
+      "1790993924336140246"
+    ],
+    "stable9": true
+  },
+  "current6": [
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/caller.py",
+      "bytes": 199266,
+      "sha256": "52a2c0c6369d2fc0b8a811288f751643d140a30052e52f5e6d90b6e2b25010ab",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227356",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "199266",
+        "1791018944643352015",
+        "1791018944643352015"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/expectations.json",
+      "bytes": 12120,
+      "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227360",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12120",
+        "1791018944669353506",
+        "1791018944721356488"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/launch-contract.json",
+      "bytes": 51509,
+      "sha256": "78696677e5dc89062d12148402a6053dcb2b7ef94ee941c2c2ed5c5f7ee96bc5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227359",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51509",
+        "1791018944266330395",
+        "1791018944318333377"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227361",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1791018944761358782",
+        "1791018944810361592"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/supervisor.py",
+      "bytes": 163358,
+      "sha256": "e4d98b693faccb41fd445078a4868faff7640db94d97fff153391cb08ab3388c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227357",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "163358",
+        "1791018944496343584",
+        "1791018944496343584"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a224-node-prospective-error-graph-producer-both-receiver-inert-source/verifier.py",
+      "bytes": 132822,
+      "sha256": "a627290ae91076649ac22ddd066ca01fcfa6b66e661324dd18227ff3af91cea0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227358",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "132822",
+        "1791018944101320932",
+        "1791018944101320932"
+      ],
+      "stable9": true
+    }
+  ],
+  "before_current6": [
+    {
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/caller.py",
+      "bytes": 196772,
+      "sha256": "cca5c0c2ae075ff732390d8d83c8c7737c63bc11ca52870f213c617db050951d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226776",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "196772",
+        "1790993710147831822",
+        "1790993710147831822"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/expectations.json",
+      "bytes": 12120,
+      "sha256": "8b89a3b9ff35af38f5eb1073afec48917b1ab02e9b46e4d5abdcfd50ebce7ddb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226780",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12120",
+        "1790993254569651871",
+        "1790993254699659341"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/launch-contract.json",
+      "bytes": 51549,
+      "sha256": "41b34c9a72de8d60d986ec5cf1eff09c0d6829140f24ff7bb794305bc29a0144",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226779",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51549",
+        "1790993709940819927",
+        "1790993709940819927"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226781",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790993254651656583",
+        "1790993254699659341"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/supervisor.py",
+      "bytes": 160864,
+      "sha256": "b0afe12983e920053bdd7adaedf98cefe28cff938dc021ed3429ec8eba821cab",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226777",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "160864",
+        "1790993710047826076",
+        "1790993710047826076"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol079-sol078-node-ordinary-dup2-uncertainty-original-errors-connected-source-closure/verifier.py",
+      "bytes": 130328,
+      "sha256": "cc555050158effe62096a6d7452ad74094893cfce641865fdad46cfe03591b33",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226778",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "130328",
+        "1790993709761809640",
+        "1790993709761809640"
+      ],
+      "stable9": true
+    }
+  ],
+  "scope": "Connected safe Python complete error-graph producer used by caller/supervisor/verifier, BOTH actual receivers, exact existing verifier->contract->supervisor->caller pin chain. No native/body/ABI/grant implementation, no execution.",
+  "actual_failing_path": "project_owned_error previously constructed unbounded args/state/notes literal and container builders, hashes/base64 before exact seal_stock_graph wire cap. Known C2 path, not a new grouped or product root.",
+  "implemented": [
+    "Prospective necessary lower-bound work check against exact unchanged per-graph remainder and remaining aggregate debit before variable-sized builders.",
+    "All referenced original exception/value frontiers complete before message formatting. None message is private builder state only; no partial output.",
+    "Complete base64 width checked before hash/encode, strings before returned literal cells, integers by permissive bit-length lower bound before decimal encoding.",
+    "Exact existing whole byte seal + both decoder validators still required. No graph field/schema/case/resource/negative-control reduction or native truth marker conversion.",
+    "All current6 linked through leaf verifier SHA/size -> contract source/inherited fd bindings -> supervisor SOURCE_SHA/CONTRACT_SHA/PINS -> caller VHASH/CHASH/SHASH/FIXED. No self-SHA cycle or incompatible caller."
+  ],
+  "locally_checked": "FULL_SHA9_EXACT_CURRENT6_LITERAL_REJOIN_NO_AST_IMPORT_EXEC_TESTS",
+  "integrated": "INERT_HARNESS_PROPOSAL_ONLY_NOT_PRODUCT_CANDIDATE_OR_ENVIRONMENT",
+  "independently_accepted": "PENDING_FIRST_CHANGED_CONTEXT_NONAUTHOR_REVIEW",
+  "target_verified": "NOT_RUN",
+  "not_closed": [
+    "Original native/stock/raw/prebirth body/custody/BOTH native finite endpoints C1 CODE remains.",
+    "Native allocator/readonly decoder/final end + whole graph/factory/resource C2 UNKNOWN_NOT_ZERO remains, no fit/RSS claim.",
+    "Arbitrary __str__/provider/native construction allocation cost is not bounded by this lower-bound check; actual existing selected factory message/class qualification required.",
+    "Changed producer error formatting/alias/frontier/ordinary refusal must rejoin E01/E02 prior scoped credits; byte-equal unrelated helper alone is not whole acceptance.",
+    "Current image/compiler/nativeABI/grants/providers/resources/finiteclocks Source+Root admission and original positive/negative runtime/gates NOT_RUN."
+  ],
+  "original_scope": "Original35/all6/all3/GPG6/F1F2/D1D2/current19/schema/caps/900s and all meaningful positives/negatives preserved. B04 simultaneous256/confirmed-close reclamation unchanged; no old lifetime history finding.",
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "denied_Scanner_operation": "NOT_RETRIED_REPHRASED_DELEGATED_OR_ROUTED",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

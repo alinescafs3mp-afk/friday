@@ -1,0 +1,440 @@
+{
+  "a169_observation": {
+    "actual_gpg_calls_recorded_by_a169": 1,
+    "matches_manual_default_keyring_fallback": true,
+    "rc": 2,
+    "status_integer_omitted": "AUTHOR_OUTPUT_EXCLUDES_THE_OBSERVED_EXIT_INTEGER",
+    "status_names": [
+      "ERROR add_keyblock_resource",
+      "FAILURE gpg-exit"
+    ],
+    "stderr_names_pubring_kbx": true,
+    "stderr_permission_denied": true,
+    "waived": false
+  },
+  "citations_gpg": {
+    "always": [
+      ".B  always",
+      "Skip key validation and assume that used keys are always fully",
+      "valid. You generally won't use this unless you are using some",
+      "external validation scheme. This option also suppresses the",
+      "\"[uncertain]\" tag printed with signature checks when there is no",
+      "evidence that the user ID is bound to the key.  Note that this",
+      "trust model still does not allow the use of expired, revoked, or",
+      "disabled keys.",
+      "",
+      ".TP"
+    ],
+    "batch": [
+      ".B  \\-\\-batch",
+      ".TQ",
+      ".B  \\-\\-no\\-batch",
+      "Use batch mode.  Never ask, do not allow interactive commands.",
+      "\\fB\\-\\-no\\-batch\\fP disables this option.  Note that even with a",
+      "filename given on the command line, gpg might still need to read from",
+      "STDIN (in particular if gpg figures that the input is a",
+      "detached signature and no data file has been specified).  Thus if you",
+      "do not want to feed data via STDIN, you should connect STDIN to",
+      "\\(oq\\fI/dev/null\\fP\\(cq.",
+      "",
+      "It is highly recommended to use this option along with the options",
+      "\\fB\\-\\-status\\-fd\\fP and \\fB\\-\\-with\\-colons\\fP for any unattended use of",
+      "\\fBgpg\\fP.  Should not be used in an option file.",
+      "",
+      ".TP",
+      ".B  \\-\\-no\\-tty",
+      "Make sure that the TTY (terminal) is never used for any output.",
+      "This option is needed in some cases because GnuPG sometimes prints",
+      "warnings to the TTY even if \\fB\\-\\-batch\\fP is used."
+    ],
+    "check_sigs": [
+      ".B  \\-\\-check\\-signatures",
+      ".TQ",
+      ".B  \\-\\-check\\-sigs",
+      "Same as \\fB\\-\\-list\\-keys\\fP, but the key signatures are verified and",
+      "listed too.  Note that for performance reasons the revocation status",
+      "of a signing key is not shown.  This command has the same effect as",
+      "using \\fB\\-\\-list\\-keys\\fP with \\fB\\-\\-with\\-sig\\-check\\fP.",
+      ""
+    ],
+    "clear": [
+      ".B  clear",
+      "Clear all defined mechanisms.  This is useful to override",
+      "mechanisms given in a config file.  Note that a \\fBnodefault\\fP in",
+      "\\fImechanisms\\fP will also be cleared unless it is given after the",
+      "\\fBclear\\fP.",
+      ""
+    ],
+    "common_conf": [
+      ".B  common.conf",
+      "This is an optional configuration file read by \\fBgpg\\fP on",
+      "startup.  It may contain options pertaining to all components of",
+      "GnuPG.  Its current main use is for the \"use-keyboxd\" option.  If",
+      "the default home directory \\(oq\\fI~/.gnupg\\fP\\(cq does not exist, GnuPG creates",
+      "this directory and a \\(oq\\fIcommon.conf\\fP\\(cq file with \"use-keyboxd\"."
+    ],
+    "cross": [
+      ".B  \\-\\-require\\-cross\\-certification",
+      ".TQ",
+      ".B  \\-\\-no\\-require\\-cross\\-certification",
+      "When verifying a signature made from a subkey, ensure that the cross",
+      "certification \"back signature\" on the subkey is present and valid.  This",
+      "protects against a subtle attack against subkeys that can sign.",
+      "Defaults to \\fB\\-\\-require\\-cross\\-certification\\fP for",
+      "\\fBgpg\\fP."
+    ],
+    "dearmor": [
+      ".B  \\-\\-dearmor",
+      "Pack or unpack an arbitrary input into/from an OpenPGP ASCII armor.",
+      "This is a GnuPG extension to OpenPGP and in general not very useful.",
+      "The \\fB\\-\\-dearmor\\fP command can also be used to dearmor PEM armors."
+    ],
+    "homedir": [
+      ".B  \\-\\-homedir \\fIdir\\fP",
+      "Set the name of the home directory to \\fIdir\\fP. If this option is not",
+      "used, the home directory defaults to \\(oq\\fI~/.gnupg\\fP\\(cq.  It is only",
+      "recognized when given on the command line.  It also overrides any home",
+      "directory stated through the environment variable \\(oq\\fIGNUPGHOME\\fP\\(cq or",
+      "(on Windows systems) by means of the Registry entry",
+      "\\fIHKCU\\[rs]Software\\[rs]GNU\\[rs]GnuPG:HomeDir\\fP."
+    ],
+    "keyring": [
+      ".B  \\-\\-keyring \\fIfile\\fP",
+      "Add \\fIfile\\fP to the current list of keyrings. If \\fIfile\\fP begins",
+      "with a tilde and a slash, these are replaced by the $HOME directory. If",
+      "the filename does not contain a slash, it is assumed to be in the GnuPG",
+      "home directory (\"~/.gnupg\" unless \\fB\\-\\-homedir\\fP or $GNUPGHOME is",
+      "used).",
+      "",
+      "Note that this adds a keyring to the current list. If the intent is to",
+      "use the specified keyring alone, use \\fB\\-\\-keyring\\fP along with",
+      "\\fB\\-\\-no\\-default\\-keyring\\fP.",
+      "",
+      "If the option \\fB\\-\\-no\\-keyring\\fP has been used no keyrings will",
+      "be used at all.",
+      "",
+      "Note that if the option \\fBuse\\-keyboxd\\fP is enabled in",
+      "\\(oq\\fIcommon.conf\\fP\\(cq, no keyrings are used at all and keys are all",
+      "maintained by the keyboxd process in its own database.",
+      ""
+    ],
+    "lock_never": [
+      ".B  \\-\\-lock\\-never",
+      "Disable locking entirely. This option should be used only in very",
+      "special environments, where it can be assured that only one process",
+      "is accessing those files. A bootable floppy with a stand-alone",
+      "encryption system will probably use this. Improper usage of this",
+      "option may lead to data and key corruption."
+    ],
+    "no_auto_check_trustdb": [
+      ".B  \\-\\-no\\-auto\\-check\\-trustdb",
+      "If GnuPG feels that its information about the Web of Trust has to be",
+      "updated, it automatically runs the \\fB\\-\\-check\\-trustdb\\fP command",
+      "internally.  This may be a time consuming",
+      "process. \\fB\\-\\-no\\-auto\\-check\\-trustdb\\fP disables this option.",
+      ""
+    ],
+    "no_auto_key_import": [
+      ".B  \\-\\-no\\-auto\\-key\\-import",
+      "This is an offline mechanism to get a missing key for signature",
+      "verification and for later encryption to this key.  If this option is",
+      "enabled and a signature includes an embedded key, that key is",
+      "used to verify the signature and on verification success the key is",
+      "imported. The default is \\fB\\-\\-no\\-auto\\-key\\-import\\fP."
+    ],
+    "no_auto_key_retrieve": [
+      ".B  \\-\\-no\\-auto\\-key\\-retrieve",
+      "These options enable or disable the automatic retrieving of keys from",
+      "a keyserver when verifying signatures made by keys that are not on the",
+      "local keyring.  The default is \\fB\\-\\-no\\-auto\\-key\\-retrieve\\fP.",
+      ""
+    ],
+    "no_autostart": [
+      ".B  \\-\\-no\\-autostart",
+      "Do not start the gpg-agent or the dirmngr if it has not yet been",
+      "started and its service is required.  This option is mostly useful on",
+      "machines where the connection to gpg-agent has been redirected to",
+      "another machines.  If dirmngr is required on the remote machine, it",
+      "may be started manually using \\fBgpgconf \\-\\-launch dirmngr\\fP."
+    ],
+    "no_default_keyring": [
+      ".B  \\-\\-no\\-default\\-keyring",
+      "Do not add the default keyring to the list of keyrings. Note that",
+      "GnuPG needs for almost all operations a keyring. Thus if you use this",
+      "option and do not provide alternate keyrings via \\fB\\-\\-keyring\\fP,",
+      "then GnuPG will still use the default keyring.",
+      "",
+      "Note that if the option \\fBuse\\-keyboxd\\fP is enabled in",
+      "\\(oq\\fIcommon.conf\\fP\\(cq, no keyrings are used at all and keys are all",
+      "maintained by the keyboxd process in its own database.",
+      "",
+      ".TP",
+      ".B  \\-\\-no\\-keyring",
+      "Do not use any keyring at all.  This overrides the default and all",
+      "options which specify keyrings."
+    ],
+    "no_options": [
+      ".B  \\-\\-no\\-options",
+      "Shortcut for \\fB\\-\\-options /dev/null\\fP. This option is detected",
+      "before an attempt to open an option file.  Using this option will also",
+      "prevent the creation of a \\(oq\\fI~/.gnupg\\fP\\(cq homedir."
+    ],
+    "no_sig_cache": [
+      ".B  \\-\\-no\\-sig\\-cache",
+      "Do not cache the verification status of key signatures.",
+      "Caching gives a much better performance in key listings. However, if",
+      "you suspect that your public keyring is not safe against write",
+      "modifications, you can use this option to disable the caching. It",
+      "probably does not make sense to disable it because all kind of damage",
+      "can be done if someone else has write access to your public keyring.",
+      ""
+    ],
+    "no_use_agent": [
+      ".B  \\-\\-no\\-use\\-agent",
+      "This is dummy option. \\fBgpg\\fP always requires the agent.",
+      "",
+      ".TP"
+    ],
+    "pubring_kbx": [
+      ".B  ~/.gnupg/pubring.kbx",
+      "The public keyring using the new keybox format.  This file is shared",
+      "with \\fBgpgsm\\fP.  You should backup this file.  See above for",
+      "the relation between this file and it predecessor.",
+      ""
+    ],
+    "show_keys": [
+      ".B  \\-\\-show\\-keys",
+      "This commands takes OpenPGP keys as input and prints information about",
+      "them in the same way the command \\fB\\-\\-list\\-keys\\fP does for locally",
+      "stored key.  In addition the list options \\fBshow\\-unusable\\-uids\\fP,",
+      "\\fBshow\\-unusable\\-subkeys\\fP, \\fBshow\\-notations\\fP and",
+      "\\fBshow\\-policy\\-urls\\fP are also enabled.  As usual for automated",
+      "processing, this command should be combined with the option",
+      "\\fB\\-\\-with\\-colons\\fP."
+    ],
+    "status_fd": [
+      ".B  \\-\\-status\\-fd \\fIn\\fP",
+      "Write special status strings to the file descriptor \\fIn\\fP.",
+      "See the file DETAILS in the documentation for a listing of them."
+    ],
+    "verify": [
+      ".B  \\-\\-verify",
+      "Assume that the first argument is a signed file and verify it without",
+      "generating any output.  With no arguments, the signature packet is",
+      "read from STDIN.  If only one argument is given, the specified file is",
+      "expected to include a complete signature.",
+      "",
+      "With more than one argument, the first argument should specify a file",
+      "with a detached signature and the remaining files should contain the",
+      "signed data. To read the signed data from STDIN, use \\(oq\\-\\(cq as the",
+      "second filename.  For security reasons, a detached signature will not",
+      "read the signed material from STDIN if not explicitly specified.",
+      ""
+    ],
+    "with_colons": [
+      ".B  \\-\\-with\\-colons",
+      "Print key listings delimited by colons. Note that the output will be",
+      "encoded in UTF-8 regardless of any \\fB\\-\\-display\\-charset\\fP setting. This",
+      "format is useful when GnuPG is called from scripts and other programs",
+      "as it is easily machine parsed. The details of this format are",
+      "documented in the file \\(oq\\fIdoc/DETAILS\\fP\\(cq, which is included in the GnuPG",
+      "source distribution.",
+      "",
+      ".TP",
+      ".B  \\-\\-fixed\\-list\\-mode",
+      "Do not merge primary user ID and primary key in \\fB\\-\\-with\\-colon\\fP",
+      "listing mode and print all timestamps as seconds since 1970-01-01.",
+      "Since GnuPG 2.0.10, this mode is always used and thus this option is",
+      "obsolete; it does not harm to use it though."
+    ]
+  },
+  "citations_gpgv": {
+    "homedir": [
+      ".B  \\-\\-homedir \\fIdir\\fP",
+      "Set the name of the home directory to \\fIdir\\fP. If this option is not",
+      "used, the home directory defaults to \\(oq\\fI~/.gnupg\\fP\\(cq.  It is only",
+      "recognized when given on the command line.  It also overrides any home",
+      "directory stated through the environment variable \\(oq\\fIGNUPGHOME\\fP\\(cq or",
+      "(on Windows systems) by means of the Registry entry",
+      "\\fIHKCU\\[rs]Software\\[rs]GNU\\[rs]GnuPG:HomeDir\\fP.",
+      ""
+    ],
+    "keyring": [
+      ".B  \\-\\-keyring \\fIfile\\fP",
+      "Add \\fIfile\\fP to the list of keyrings.",
+      "If \\fIfile\\fP begins with a tilde and a slash, these",
+      "are replaced by the HOME directory. If the filename",
+      "does not contain a slash, it is assumed to be in the",
+      "home-directory (\"~/.gnupg\" if --homedir is not used)."
+    ],
+    "output": [
+      ".B  \\-\\-output \\fIfile\\fP",
+      ".TQ",
+      ".B  \\-o \\fIfile\\fP",
+      "Write output to \\fIfile\\fP; to write to stdout use \\fB\\-\\fP.  This",
+      "option can be used to get the signed text from a cleartext or binary",
+      "signature; it also works for detached signatures, but in that case",
+      "this option is in general not useful.  Note that an existing file will",
+      "be overwritten."
+    ],
+    "preamble": [
+      ".\\\" Created from Texinfo source by yat2m 1.58",
+      ".TH GPGV 1 2025-02-19 \"GnuPG 2.4.8\" \"GNU Privacy Guard 2.4\"",
+      ".SH NAME",
+      ".B gpgv",
+      "\\- Verify OpenPGP signatures",
+      ".SH SYNOPSIS",
+      ".B  gpgv",
+      ".RI [ options ]",
+      ".I signed_files",
+      "",
+      "",
+      ".SH DESCRIPTION",
+      "\\fBgpgv\\fP is an OpenPGP signature verification tool.",
+      "",
+      "This program is actually a stripped-down version of \\fBgpg\\fP which is",
+      "only able to check signatures. It is somewhat smaller than the fully-blown",
+      "\\fBgpg\\fP and uses a different (and simpler) way to check that",
+      "the public keys used to make the signature are valid. There are",
+      "no configuration files and only a few options are implemented.",
+      "",
+      "\\fBgpgv\\fP assumes that all keys in the keyring are trustworthy.",
+      "That does also mean that it does not check for expired or revoked",
+      "keys.",
+      ""
+    ],
+    "status_fd": [
+      ".B  \\-\\-status\\-fd \\fIn\\fP",
+      "Write special status strings to the file descriptor \\fIn\\fP.  See the",
+      "file DETAILS in the documentation for a listing of them."
+    ]
+  },
+  "decoded_sha256": {
+    "DETAILS.gz": "83e51cf7dbe13dc4ad95c37785803de0c0d040b8e02151030f814182c826056c",
+    "gpg.1.gz": "f8f0fbcb0aa1d597a0396004fd44fd57485ea1c529f2a4a30fab917a1ddddbe1",
+    "gpgv.1.gz": "5991f971efb325b2743e8b916c380c887a3d5e1e0a7e09f11590a86e0c531911"
+  },
+  "details_body_not_copied": true,
+  "docs": {
+    "DETAILS.gz": {
+      "compressed_bytes": 24780,
+      "compressed_sha256": "b07a304e70fa94c0d8f2554135164b2ed14be906e90a4278fe4cff3f5016de61",
+      "decoded_bytes": 75977,
+      "path": "/usr/share/doc/gnupg/DETAILS.gz"
+    },
+    "gpg.1.gz": {
+      "compressed_bytes": 56529,
+      "compressed_sha256": "84f8996b777c108987ee472fd1a820d607f1b937c30f034c6ddce4d8067e3884",
+      "decoded_bytes": 181578,
+      "path": "/usr/share/man/man1/gpg.1.gz"
+    },
+    "gpgv.1.gz": {
+      "compressed_bytes": 2382,
+      "compressed_sha256": "f2cc540c3ef40b4001411bdad4faff7f7a56e4760b2d3b5315b73478d2d69203",
+      "decoded_bytes": 5320,
+      "path": "/usr/share/man/man1/gpgv.1.gz"
+    }
+  },
+  "elf": {
+    "gpg": {
+      "abi": "Linux 3.2.0",
+      "build_id": "6fba7fc3c81913e3d5365a5d0f0add1108cec720",
+      "class": "ELF64",
+      "machine": "X86-64",
+      "needed": [
+        "libz.so.1",
+        "libbz2.so.1.0",
+        "libsqlite3.so.0",
+        "libgcrypt.so.20",
+        "libreadline.so.8",
+        "libassuan.so.9",
+        "libnpth.so.0",
+        "libgpg-error.so.0",
+        "libc.so.6"
+      ],
+      "package": {
+        "architecture": "amd64",
+        "name": "gnupg2",
+        "os": "ubuntu",
+        "type": "deb",
+        "version": "2.4.8-4ubuntu3.1"
+      },
+      "pie": "DYN",
+      "type": "DYN"
+    },
+    "gpgv": {
+      "abi": "Linux 3.2.0",
+      "build_id": "fcd9f3baa5cf40e0021db09b6ddb2238d90c4feb",
+      "class": "ELF64",
+      "machine": "X86-64",
+      "needed": [
+        "libz.so.1",
+        "libbz2.so.1.0",
+        "libgcrypt.so.20",
+        "libgpg-error.so.0",
+        "libc.so.6"
+      ],
+      "package": {
+        "architecture": "amd64",
+        "name": "gnupg2",
+        "os": "ubuntu",
+        "type": "deb",
+        "version": "2.4.8-4ubuntu3.1"
+      },
+      "pie": "DYN",
+      "type": "DYN"
+    }
+  },
+  "option_tokens_in_image": {
+    "gpg": {
+      "check-sigs": 1,
+      "dearmor": 4,
+      "keyboxd": 14,
+      "lock-never": 1,
+      "no-auto-check-trustdb": 1,
+      "no-autostart": 1,
+      "no-default-keyring": 1,
+      "no-keyring": 1,
+      "no-options": 1,
+      "no-sig-cache": 1,
+      "pubring.kbx": 0,
+      "require-cross-certification": 2,
+      "show-keys": 2,
+      "trustedkeys.kbx": 0,
+      "use-keyboxd": 1
+    },
+    "gpgv": {
+      "check-sigs": 0,
+      "dearmor": 0,
+      "keyboxd": 3,
+      "lock-never": 0,
+      "no-auto-check-trustdb": 0,
+      "no-autostart": 1,
+      "no-default-keyring": 0,
+      "no-keyring": 0,
+      "no-options": 0,
+      "no-sig-cache": 0,
+      "pubring.kbx": 0,
+      "require-cross-certification": 0,
+      "show-keys": 0,
+      "trustedkeys.kbx": 1,
+      "use-keyboxd": 1
+    },
+    "not_semantic_proof": true
+  },
+  "schema": "friday.grok.lab861.primary.v1",
+  "stock_common_conf": [
+    {
+      "exists": false,
+      "path": "/etc/gnupg/common.conf"
+    },
+    {
+      "exists": false,
+      "path": "/etc/gnupg/gpgconf.conf"
+    },
+    {
+      "exists": false,
+      "path": "/usr/share/gnupg/common.conf"
+    }
+  ]
+}

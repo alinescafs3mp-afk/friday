@@ -1,0 +1,40 @@
+{
+  "schema": "friday.sol089.finite-future-validation.v1",
+  "now_permitted_and_done": [
+    "metadata JSON/exact pin/full byte and literal checks only",
+    "NEW inert Source authored via apply_patch",
+    "exact original obligations and costs retained"
+  ],
+  "future_required": [
+    "Independent non-author full review of all3 changed Source files, whole new codec and all actual dependencies/equal complement; no SourceReady on author claims",
+    "Exact stock image/MRO/metaclass/__new__/lookup/layout/member constructor/allocator/ABI qualification under original stock fence and original resources",
+    "Full legal native/raw/error body and two outside finite-end supplier closure, no denied Scanner C/native retry or private expansion",
+    "Prospective whole Source implicit read/RAM/CPU/physical frame and full graph/strong alias retention cost proof inside original caps",
+    "Original real isolated positive/error/cleanup and all meaningful negative controls, typed schemas and original full gates on final exact artifact only"
+  ],
+  "disallowed_now": [
+    "AST",
+    "Source imports",
+    "compiler",
+    "exec/tests",
+    "constructors/probes",
+    "native/C/private heap",
+    "keys/signing",
+    "network/live/models",
+    "frozen/production/helpers/guard edits"
+  ],
+  "Source_execution": 0,
+  "compiler_AST": "NOT_RUN",
+  "compiler_ABI": "NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "independent_changed_dependency_review": "REQUIRED_NOT_RUN",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

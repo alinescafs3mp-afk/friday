@@ -1,0 +1,56 @@
+{
+  "schema": "friday.sol093.source-literal-materialization.v1",
+  "operation": "LITERAL_EXACT_STRING_REPLACEMENT_NO_SOURCE_PARSE_OR_EXEC",
+  "baselines": [
+    {
+      "path": "/var/tmp/friday-lab916-sol091-publisher-n3-prospective-owned-cohort-total-bank-layout-connected-inert-source/source/capacity.py",
+      "bytes": 18159,
+      "sha256": "b2dad4775045af9bfce40ccfdafea70c91d00ca7ec904c3164667f15869728ad",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371786",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18159",
+        "1791037099155218425",
+        "1791037099155218425"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab916-sol091-publisher-n3-prospective-owned-cohort-total-bank-layout-connected-inert-source/source/observer.py",
+      "bytes": 100883,
+      "sha256": "afe2a6f45e7ddc10a3a19486d8a72d6f8a9a1975ca85eb03cdc8444572b8a8ac",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371787",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "100883",
+        "1791037099155218425",
+        "1791037099155218425"
+      ],
+      "stable9": true
+    }
+  ],
+  "anchors": [
+    {
+      "file": "capacity.py",
+      "literal": "    plan=exact(admission[\"capacity_plan\"],(\"output_components\",\"implicit_output_upper\",",
+      "change": "Actual validate_complete_capacity known-mode caller joins numerical whole-positive refusal; SAME original all13 output components remain."
+    },
+    {
+      "file": "observer.py",
+      "literal": "        self.terminal_credit = REFUSAL_RESERVE+INPUT_MAX_TERMINAL*6\n",
+      "change": "Root constructs/retains precise proposal before output/helper effect; old actual reservation untouched; pre-first-effect closure explicitly false."
+    }
+  ],
+  "Source_execution": 0,
+  "N2_changed2": "EXACT_UNCHANGED_EXTERNAL",
+  "whole_implementation_complete": false,
+  "classification": "EXACT_NUMERICAL_CURRENT_LAYOUT_CONFLICT_AFTER_CONNECTED_PROSPECTIVE_IMPLEMENTATION_ATTEMPT"
+}

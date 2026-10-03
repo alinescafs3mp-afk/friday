@@ -1,0 +1,155 @@
+{
+  "schema": "friday.sol062.original3-F1F2-D1D2-current.v1",
+  "all3": [
+    {
+      "id": "A16901",
+      "credit": "typed actual phase resources+telemetry bothside unchanged; error graph extended",
+      "future_actual": "NOT_RUN"
+    },
+    {
+      "id": "A16902",
+      "credit": "--no-keyring only first2 / explicit original rings other4; authority/rc/fingerprint/signature/body/archive/negative checks unchanged",
+      "LAB8614_actual_readonly_agent_trustdb_commonconf": "NOT_RUN"
+    },
+    {
+      "id": "A16903",
+      "credit": "caller terminal exact owned proc generation immutable_input9 versus scoped proc retirement token unchanged",
+      "historical_RED10_preclose_Refusals": "UNCHANGED; native unconfirmed-close empty; missing field UNKNOWN",
+      "future_proc_provider": "NOT_RUN"
+    }
+  ],
+  "F1": {
+    "current_methods": {
+      "preown_fd": [
+        {
+          "file": "caller.py",
+          "line": 737,
+          "body_sha256": "7eda8159fd1c11fce709ae013283ee62e407bc0a84c55391f4f9af1af1640df1"
+        }
+      ],
+      "allocate_owned": [
+        {
+          "file": "caller.py",
+          "line": 757,
+          "body_sha256": "cb801d9d221fcf5a0350ef9dfe63d20c5e04cba73aa199bbe9ef2a4960f92057"
+        }
+      ],
+      "allocate_pipe": [
+        {
+          "file": "caller.py",
+          "line": 772,
+          "body_sha256": "677108087f409311868e8e672abb21af6a9edecfed3c0ef0279d263f2ae63f1f"
+        }
+      ],
+      "retire_record": [
+        {
+          "file": "supervisor.py",
+          "line": 416,
+          "body_sha256": "198d3bb8999a65863f4d21d3eecfa27b783b4ef64ba3b4c7fe18f8d0bdd4add6"
+        },
+        {
+          "file": "verifier.py",
+          "line": 471,
+          "body_sha256": "198d3bb8999a65863f4d21d3eecfa27b783b4ef64ba3b4c7fe18f8d0bdd4add6"
+        }
+      ],
+      "retire_and_close_owned": [
+        {
+          "file": "caller.py",
+          "line": 828,
+          "body_sha256": "274039c1eb507acec6810848d1c6e2b89f7090c4dc228fb9d06d6c6e5de76d81"
+        }
+      ],
+      "finish_allocations": [
+        {
+          "file": "supervisor.py",
+          "line": 446,
+          "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+        },
+        {
+          "file": "verifier.py",
+          "line": 501,
+          "body_sha256": "c077dea46b80edcf06de766669e6a2bbd86821ba43447bea5a8f3ae386a9916b"
+        }
+      ],
+      "close_final": [
+        {
+          "file": "caller.py",
+          "line": 2670,
+          "body_sha256": "fe9215c55689016322969f7f9c350ff365ef76c5d494a57e1b97d2c5beecb193"
+        }
+      ]
+    },
+    "private_physical_close_phase_before_public_graph": "implemented designated loops; all implicit operations/history fit not proven C01/C03",
+    "original_allocation_history_capacity": 256,
+    "unconfirmedclose_retry": false
+  },
+  "F2": {
+    "current_methods": {
+      "call": [
+        {
+          "file": "verifier.py",
+          "line": 929,
+          "body_sha256": "6c89015cc812edb95df751a9d66066f14f0c04b8d9f370e956c45e9d00da4769"
+        }
+      ],
+      "retain_cell": [
+        {
+          "file": "verifier.py",
+          "line": 770,
+          "body_sha256": "dacbd3aaab57b0a40d00c103e7930e1ef4a46922279199b6394511a115338734"
+        }
+      ],
+      "capture_pipe": [
+        {
+          "file": "caller.py",
+          "line": 1729,
+          "body_sha256": "670c8c517a2ad9447fe11f2888109327071d6df10d313286fe2bf104d7aa0c88"
+        }
+      ],
+      "drain_pipes": [
+        {
+          "file": "caller.py",
+          "line": 1754,
+          "body_sha256": "32ae6551759324f2473f204ac9fc0504e9f059d382e7719563920f658e9e533f"
+        }
+      ],
+      "drain": [
+        {
+          "file": "supervisor.py",
+          "line": 930,
+          "body_sha256": "fa2e8390dc81d7a162988675498529073750ecde5f9000b5815f62dab92b77ba"
+        }
+      ],
+      "retain_produced_transport": [
+        {
+          "file": "supervisor.py",
+          "line": 1006,
+          "body_sha256": "e5c2f5f783c40290ea1c8e1820ade82261af3fea7946f98ba0772fa2eb33e98a"
+        }
+      ],
+      "validate_fullraw_layers": [
+        {
+          "file": "caller.py",
+          "line": 2191,
+          "body_sha256": "aa8c55016fbed86bd42459987f58a208b7af1b692194b17754d1ae40ec22685f"
+        }
+      ]
+    },
+    "original_complete_raw_durable_required": true,
+    "pending_commit": "retained owners; next arithmetic before masked commit; failed read/pending offset not overwritten by cleanup reread",
+    "complete_allprefix_delivery": "C02/C03/C04 CODE_OPEN"
+  },
+  "D1": {
+    "GPG_CPU": 20,
+    "GPG_wall": 30,
+    "firstcall_dynamic_quota_max": 21845,
+    "no_executable_cap_increase": true
+  },
+  "D2": {
+    "all_phase_memory_raw_self_wait4_highwater_current_Vm_fields": "original rules retained; unknown never0; no peak subtraction",
+    "full_pins": "actual19 recomputed, not execution qualification",
+    "original_phase_clock": "unchanged single deadline and one cleanup"
+  },
+  "runtime": "NOT_RUN"
+}

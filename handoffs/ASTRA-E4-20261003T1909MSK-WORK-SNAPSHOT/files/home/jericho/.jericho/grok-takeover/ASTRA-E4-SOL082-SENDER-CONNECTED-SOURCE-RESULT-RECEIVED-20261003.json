@@ -1,0 +1,341 @@
+{
+  "schema": "friday.astra.sol082.sender.changed-context.received.v1",
+  "recorded_utc": "2026-10-03T03:56:44Z",
+  "assignment": "ASTRA-E4-LAB896-SENDER-ACTUAL-METHOD-ERROR-SELECTOR-NONAUTHOR-REVIEW-SOL082",
+  "generation": 1,
+  "authority": "Astra active Lead Architect epoch4; unchanged protected role pin",
+  "native_event": "SOL-SOL082-R1",
+  "exact_queued_id": "01a0ffda-df4d-7d03-94d1-22b98d6244f1",
+  "envelope": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL082-RESULT.json",
+    "bytes": 1987,
+    "sha256": "a4f1364551d5c4a46f12d1749d4ee02e0aa0e73455499e7baffc07d5595616db",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532101",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1987",
+      "1790998927868014428",
+      "1790998927918017294"
+    ],
+    "stable9": true
+  },
+  "task": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL082-TASK-20261003.txt",
+    "bytes": 1951,
+    "sha256": "b41ef895c492ad27b515d6b740ba36e9bda021cdafa157b202dd9df825afd63b",
+    "identity9_decimal_strings": [
+      "2050",
+      "8531926",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1951",
+      "1790998371532177209",
+      "1790998371584130173"
+    ],
+    "stable9": true
+  },
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL082-INPUT-20261003.json",
+    "bytes": 23985,
+    "sha256": "a404a535e5692c06abad3a9c1c068b76b1bb7b3a7c44cebde5cd826b176ab8c9",
+    "identity9_decimal_strings": [
+      "2050",
+      "8531924",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "23985",
+      "1790998309730584947",
+      "1790998309785388564"
+    ],
+    "stable9": true
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/manifest.json",
+    "bytes": 7036,
+    "sha256": "fb1b2a65d0251a1e61f1add9d22c8e182d1b0e72dbe6b25ab7002b64ded804b9",
+    "identity9_decimal_strings": [
+      "2050",
+      "4226919",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "7036",
+      "1790998905301721003",
+      "1790998905355724099"
+    ],
+    "stable9": true
+  },
+  "full_owned_pins": [
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/manifest.json",
+      "bytes": 7036,
+      "sha256": "fb1b2a65d0251a1e61f1add9d22c8e182d1b0e72dbe6b25ab7002b64ded804b9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226919",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7036",
+        "1790998905301721003",
+        "1790998905355724099"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/REVIEW.txt",
+      "bytes": 3330,
+      "sha256": "fe5ce1eecd25abffa2b3c45c5b0e9da7eb2a086b974cd40b043ce5df26c7af06",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226916",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3330",
+        "1790998872916864810",
+        "1790998872968867790"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/evidence/current96-dependency-rejoin.json",
+      "bytes": 119333,
+      "sha256": "73e16787c358be11389bc819abe5399dbc919f02f9a03a02b421e1e73f3f6a49",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226911",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "119333",
+        "1790998713805745129",
+        "1790998713862748397"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/evidence/effects-and-costs.json",
+      "bytes": 2435,
+      "sha256": "b0282e0aab2b8885d636309002c9e8186b89e39750dcf4cd3b3af07a6a8eb3f7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226914",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2435",
+        "1790998829898399147",
+        "1790998829898399147"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/evidence/final-external-snapshot.json",
+      "bytes": 92283,
+      "sha256": "43e002173a8be4fbfe8fae2a30f661601881a838ccdc1c77fd213384f91cf13c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226915",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "92283",
+        "1790998829927400810",
+        "1790998829980403848"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/evidence/full-gapless-parts.json",
+      "bytes": 19889,
+      "sha256": "6eb32cc6f0d65b7487a6593e10decedeb6653034d4f0cf570dc14258bdc29986",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226910",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19889",
+        "1790998713805745129",
+        "1790998713862748397"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/evidence/initial-pin-checks.json",
+      "bytes": 14352,
+      "sha256": "da855a935ba2a3f98c228d5f8fefddd24e38bf5f1188a3165342b14a7b668a12",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226909",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14352",
+        "1790998713804745072",
+        "1790998713862748397"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/evidence/literal-context-rejoin.json",
+      "bytes": 15184,
+      "sha256": "5839a071761033f633787614fa4c3a04042ebddcdc4916a416cf0781c785185e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226912",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15184",
+        "1790998713806745186",
+        "1790998713862748397"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/evidence/review-matrix.json",
+      "bytes": 16655,
+      "sha256": "4269e806e85cb817608a943e370d4f5f57e93709d68bba1ae8fbe95ebd432ae4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226913",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16655",
+        "1790998776994366870",
+        "1790998777053370253"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/pathset.json",
+      "bytes": 558,
+      "sha256": "1449c747f9a2803871d359c786797a6bfeffb0be19df20ef574192b58773b962",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226918",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "558",
+        "1790998872917864867",
+        "1790998872968867790"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/received.json",
+      "bytes": 988,
+      "sha256": "54c4b9ded4074ca2500f5135318c356fb81529e912246f7cf840a63a60980985",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226908",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "988",
+        "1790998482568491410",
+        "1790998482615494105"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol082-lab896-sender-actual-method-error-selector-independent-source-review/result.json",
+      "bytes": 2908,
+      "sha256": "a6a19ad7dec0b751dd5141102eae84db0bce8d39bafb7041eaaca629b7c4e262",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226917",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2908",
+        "1790998872916864810",
+        "1790998872968867790"
+      ],
+      "stable9": true
+    }
+  ],
+  "files": 12,
+  "dirs": 2,
+  "accepted_msk": "2026-10-03T06:33:38+03:00",
+  "completed_msk": "2026-10-03T06:41:45.389480+03:00",
+  "elapsed_seconds": 487.38948,
+  "decision": "CREDIT_NARROW_FILENAME_AND_SELECTOR_CONTEXT_ONE_CLOSE_CREATE_OPERAND_CODE_OPEN",
+  "independent_scope": "Sol is non-author of Root A212 filename insertion and current LAB896 selector-context delta; no own historical whole Source acceptance",
+  "credits": [
+    {
+      "id": "C01_R03_METHOD_STATE_FILENAME_ORDER",
+      "decision": "CREDIT_NARROW_SOURCE"
+    },
+    {
+      "id": "C02_R03_BOTH_ERROR_RESTORE_CONTEXTS",
+      "decision": "PRESERVE_EXISTING_API_CREDIT_REJOINED_NO_WHOLE_CREDIT"
+    },
+    {
+      "id": "C03_R05_SELECTOR_EFFECT_MEMBERSHIP_FACADE",
+      "decision": "CREDIT_NARROW_SOURCE_MEMBERSHIP"
+    },
+    {
+      "id": "C04_R05_SELECTOR_CONTEXT_AND_ONE_CLOSE",
+      "decision": "CREDIT_NARROW_CONDITIONAL_SOURCE"
+    },
+    {
+      "id": "C05_PRIOR_R02_M01_AND_R05_CONTEXT_REJOIN",
+      "decision": "PRESERVE_PRIOR_NARROW_NONAUTHOR_CREDITS_NO_REEXECUTION"
+    }
+  ],
+  "residuals": [
+    {
+      "id": "E01_SELECTOR_CREATE_ACTUAL_OPERAND",
+      "decision": "REJECT_WHOLE_SELECTOR_CLOSURE_CODE_OPEN"
+    },
+    {
+      "id": "E02_NATIVE_RAW_BODY_BOTH_ENDS",
+      "decision": "CODE_OPEN_NOT_RUN"
+    },
+    {
+      "id": "E03_FULL_COST_AND_QUALIFICATION",
+      "decision": "UNKNOWN_NOT_ZERO_AND_REQUIRED_NOT_RUN"
+    }
+  ],
+  "reconciliation": "Accept first non-author narrow method-state filename-before-str restoration and conditional local selector membership/context/one-close. Actual Caller native-self operand versus consumer no-operand exact matcher remains CODE; no whole selector/Source closure.",
+  "full_source_evidence": "Root prior exact LAB896 eight-file/28-gapless parts + A212 three-gapless insertion proof unchanged; Sol reports full current96/aux dependency and final121 pins. No re-execution credit.",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  },
+  "Source_execution": 0,
+  "whole_accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

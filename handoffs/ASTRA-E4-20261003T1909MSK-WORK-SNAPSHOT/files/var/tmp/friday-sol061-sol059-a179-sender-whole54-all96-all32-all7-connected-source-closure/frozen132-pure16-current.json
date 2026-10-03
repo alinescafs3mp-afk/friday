@@ -1,0 +1,1289 @@
+{
+  "GO": false,
+  "effectful_body_predicates": 72,
+  "predicates": [
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.exact.1",
+      "sender_lines": [
+        87,
+        87
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.control_types.1",
+      "sender_lines": [
+        101,
+        101
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.control_types.2",
+      "sender_lines": [
+        108,
+        108
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.object_wire.pairs.1",
+      "sender_lines": [
+        118,
+        118
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.object_wire.1",
+      "sender_lines": [
+        125,
+        125
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.object_wire.2",
+      "sender_lines": [
+        128,
+        128
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.object_wire.3",
+      "sender_lines": [
+        130,
+        130
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.source_map.1",
+      "sender_lines": [
+        133,
+        133
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.source_map.2",
+      "sender_lines": [
+        135,
+        137
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.namespace_shape.1",
+      "sender_lines": [
+        139,
+        139
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.namespace_shape.2",
+      "sender_lines": [
+        143,
+        145
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.body_shape.1",
+      "sender_lines": [
+        148,
+        151
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.custody_shape.1",
+      "sender_lines": [
+        157,
+        160
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.custody_shape.2",
+      "sender_lines": [
+        165,
+        167
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.context_shape.1",
+      "sender_lines": [
+        171,
+        173
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.context_shape.2",
+      "sender_lines": [
+        174,
+        174
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.context_shape.3",
+      "sender_lines": [
+        176,
+        177
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.context_shape.4",
+      "sender_lines": [
+        178,
+        179
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.context_shape.5",
+      "sender_lines": [
+        180,
+        181
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.context_shape.6",
+      "sender_lines": [
+        184,
+        184
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.context_shape.7",
+      "sender_lines": [
+        186,
+        187
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.context_shape.8",
+      "sender_lines": [
+        189,
+        189
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.expectation_shape.1",
+      "sender_lines": [
+        193,
+        194
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.expectation_shape.2",
+      "sender_lines": [
+        195,
+        195
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.expectation_shape.3",
+      "sender_lines": [
+        197,
+        198
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage1.1",
+      "sender_lines": [
+        204,
+        205
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage1.2",
+      "sender_lines": [
+        206,
+        208
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage1.3",
+      "sender_lines": [
+        211,
+        214
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage1.4",
+      "sender_lines": [
+        217,
+        218
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage1.5",
+      "sender_lines": [
+        222,
+        222
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage1.6",
+      "sender_lines": [
+        225,
+        226
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage1.7",
+      "sender_lines": [
+        231,
+        232
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage1.8",
+      "sender_lines": [
+        233,
+        235
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage1.9",
+      "sender_lines": [
+        236,
+        239
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_init.1",
+      "sender_lines": [
+        244,
+        244
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_init.2",
+      "sender_lines": [
+        245,
+        250
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_claim.1",
+      "sender_lines": [
+        253,
+        253
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_claim.2",
+      "sender_lines": [
+        254,
+        256
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_claim.3",
+      "sender_lines": [
+        257,
+        259
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_claim.4",
+      "sender_lines": [
+        263,
+        270
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.check_held_observation.1",
+      "sender_lines": [
+        275,
+        280
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.check_held_observation.2",
+      "sender_lines": [
+        281,
+        281
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.check_held_observation.3",
+      "sender_lines": [
+        283,
+        284
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.check_held_observation.4",
+      "sender_lines": [
+        285,
+        285
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.check_held_observation.5",
+      "sender_lines": [
+        287,
+        287
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage2.1",
+      "sender_lines": [
+        290,
+        293
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage2.2",
+      "sender_lines": [
+        294,
+        295
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage2.3",
+      "sender_lines": [
+        298,
+        299
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage2.4",
+      "sender_lines": [
+        303,
+        305
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage2.5",
+      "sender_lines": [
+        306,
+        307
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage2.6",
+      "sender_lines": [
+        310,
+        312
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage2.7",
+      "sender_lines": [
+        313,
+        313
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_stage2.8",
+      "sender_lines": [
+        316,
+        318
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Clock.__init__.1",
+      "sender_lines": [
+        328,
+        328
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Clock.now.1",
+      "sender_lines": [
+        331,
+        331
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Named.__init__.1",
+      "sender_lines": [
+        343,
+        343
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Named.__init__.2",
+      "sender_lines": [
+        344,
+        346
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Named.check.1",
+      "sender_lines": [
+        358,
+        359
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Named.check.2",
+      "sender_lines": [
+        361,
+        362
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Named.check.3",
+      "sender_lines": [
+        363,
+        363
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Directory.__init__.1",
+      "sender_lines": [
+        374,
+        376
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Directory.check.1",
+      "sender_lines": [
+        386,
+        387
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Generation.proc_read.1",
+      "sender_lines": [
+        411,
+        411
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Generation.stat.1",
+      "sender_lines": [
+        419,
+        419
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Generation.check.1",
+      "sender_lines": [
+        426,
+        426
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Generation.check.2",
+      "sender_lines": [
+        430,
+        430
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Generation.check.3",
+      "sender_lines": [
+        432,
+        432
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Generation.children.1",
+      "sender_lines": [
+        440,
+        440
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Generation.children.2",
+      "sender_lines": [
+        445,
+        445
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Generation.children.3",
+      "sender_lines": [
+        447,
+        447
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Generation.children.4",
+      "sender_lines": [
+        450,
+        451
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.__init__.1",
+      "sender_lines": [
+        477,
+        477
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.__init__.2",
+      "sender_lines": [
+        479,
+        479
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.__init__.3",
+      "sender_lines": [
+        483,
+        483
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.proc_read.1",
+      "sender_lines": [
+        511,
+        511
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.single_thread.1",
+      "sender_lines": [
+        517,
+        518
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.runtime_check.1",
+      "sender_lines": [
+        521,
+        523
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.runtime_check.2",
+      "sender_lines": [
+        526,
+        526
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.check.1",
+      "sender_lines": [
+        531,
+        532
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.children.1",
+      "sender_lines": [
+        536,
+        537
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.terminal.1",
+      "sender_lines": [
+        542,
+        543
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.OwnScope.terminal.2",
+      "sender_lines": [
+        546,
+        546
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Held.__init__.1",
+      "sender_lines": [
+        560,
+        561
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Held.flags.1",
+      "sender_lines": [
+        573,
+        573
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Held.check.1",
+      "sender_lines": [
+        578,
+        578
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Held.check.2",
+      "sender_lines": [
+        581,
+        581
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Held.check.3",
+      "sender_lines": [
+        584,
+        584
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Held.check.4",
+      "sender_lines": [
+        592,
+        597
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Held.check.5",
+      "sender_lines": [
+        599,
+        599
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.terminal.1",
+      "sender_lines": [
+        645,
+        646
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.terminal.2",
+      "sender_lines": [
+        652,
+        652
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.terminal.3",
+      "sender_lines": [
+        655,
+        655
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.terminal.4",
+      "sender_lines": [
+        665,
+        665
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.terminal.5",
+      "sender_lines": [
+        671,
+        672
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.pump.1",
+      "sender_lines": [
+        682,
+        682
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.write.1",
+      "sender_lines": [
+        719,
+        719
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.write.2",
+      "sender_lines": [
+        721,
+        721
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.write.3",
+      "sender_lines": [
+        738,
+        738
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.line.1",
+      "sender_lines": [
+        747,
+        747
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.IO.line.2",
+      "sender_lines": [
+        759,
+        759
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_report.1",
+      "sender_lines": [
+        774,
+        774
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_report.2",
+      "sender_lines": [
+        777,
+        779
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_report.3",
+      "sender_lines": [
+        782,
+        783
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_report.4",
+      "sender_lines": [
+        785,
+        787
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_report.5",
+      "sender_lines": [
+        789,
+        789
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_report.6",
+      "sender_lines": [
+        799,
+        806
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.validate_report.7",
+      "sender_lines": [
+        811,
+        818
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.fd_guard.1",
+      "sender_lines": [
+        857,
+        857
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.fd_guard.2",
+      "sender_lines": [
+        862,
+        862
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.fd_guard.3",
+      "sender_lines": [
+        864,
+        864
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.fd_guard.4",
+      "sender_lines": [
+        866,
+        866
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.prepare_inputs.1",
+      "sender_lines": [
+        881,
+        883
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.prepare_inputs.2",
+      "sender_lines": [
+        885,
+        886
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.prepare_inputs.3",
+      "sender_lines": [
+        888,
+        889
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.prepare_inputs.4",
+      "sender_lines": [
+        891,
+        891
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.prepare_inputs.5",
+      "sender_lines": [
+        899,
+        899
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.sample_tree.1",
+      "sender_lines": [
+        913,
+        913
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.sample_tree.2",
+      "sender_lines": [
+        916,
+        916
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.spawn.1",
+      "sender_lines": [
+        927,
+        927
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.spawn.2",
+      "sender_lines": [
+        928,
+        928
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.prepare_custody.1",
+      "sender_lines": [
+        958,
+        958
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.prepare_custody.2",
+      "sender_lines": [
+        959,
+        959
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.preauth.1",
+      "sender_lines": [
+        972,
+        972
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.preauth.2",
+      "sender_lines": [
+        980,
+        980
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.final_namespace.1",
+      "sender_lines": [
+        983,
+        983
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.Session.cleanup.1",
+      "sender_lines": [
+        1041,
+        1041
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.perform_staged_send.1",
+      "sender_lines": [
+        1159,
+        1159
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.perform_staged_send.2",
+      "sender_lines": [
+        1161,
+        1161
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.perform_staged_send.3",
+      "sender_lines": [
+        1162,
+        1162
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.perform_staged_send.4",
+      "sender_lines": [
+        1199,
+        1199
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.perform_staged_send.5",
+      "sender_lines": [
+        1211,
+        1211
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "id": "sender.predicate.perform_staged_send.6",
+      "sender_lines": [
+        1214,
+        1214
+      ]
+    }
+  ],
+  "pure": [
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "exact",
+      "grammar_lines": [
+        73,
+        74
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        86,
+        87
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "control_types",
+      "grammar_lines": [
+        86,
+        95
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        99,
+        108
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "encode",
+      "grammar_lines": [
+        96,
+        100
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        109,
+        113
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "object_wire",
+      "grammar_lines": [
+        101,
+        118
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        114,
+        131
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "source_map",
+      "grammar_lines": [
+        119,
+        124
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        132,
+        137
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "expectation_shape",
+      "grammar_lines": [
+        178,
+        188
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        191,
+        201
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "body_shape",
+      "grammar_lines": [
+        133,
+        140
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        146,
+        153
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "context_shape",
+      "grammar_lines": [
+        156,
+        177
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        169,
+        190
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "namespace_shape",
+      "grammar_lines": [
+        125,
+        132
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        138,
+        145
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "custody_shape",
+      "grammar_lines": [
+        141,
+        155
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        154,
+        168
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "validate_stage1",
+      "grammar_lines": [
+        189,
+        227
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        202,
+        240
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "validate_init",
+      "grammar_lines": [
+        228,
+        237
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        241,
+        250
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "validate_stage2",
+      "grammar_lines": [
+        275,
+        307
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        288,
+        320
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "validate_claim",
+      "grammar_lines": [
+        238,
+        259
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        251,
+        272
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "validate_report",
+      "grammar_lines": [
+        308,
+        355
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        773,
+        819
+      ]
+    },
+    {
+      "current_same_literal": true,
+      "full_text_correspondence_ignoring_whitespace": true,
+      "function": "check_held_observation",
+      "grammar_lines": [
+        260,
+        274
+      ],
+      "literal_function_bytes_preserved_from_A147": true,
+      "sender_lines": [
+        273,
+        287
+      ]
+    }
+  ],
+  "scope": "literal textual preservation only, not semantic independent acceptance"
+}

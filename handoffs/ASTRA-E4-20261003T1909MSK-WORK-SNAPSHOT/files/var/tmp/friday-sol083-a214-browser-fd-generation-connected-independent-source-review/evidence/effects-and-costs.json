@@ -1,0 +1,39 @@
+{
+  "schema": "friday.sol083.effects-costs.v1",
+  "Source_execution": 0,
+  "Source_edits": 0,
+  "supplied_AST_import_compile_preprocess_eval_exec_tests": 0,
+  "children": 0,
+  "native_body_grant_work": 0,
+  "network": 0,
+  "Friday_calls": 0,
+  "live_UI_model_gates": "NOT_RUN",
+  "Sol075": "No denied-action retry/rephrase/implementation/delegation/route-around.",
+  "accounting": {
+    "selected_full_read_lower_bound_bytes": 7316821,
+    "components": {
+      "initial_pins": 1489033,
+      "captured_gapless_and_base_join": 900094,
+      "captured_current_physical_pins": 4185499,
+      "unique_literal_context_files": 742195
+    },
+    "additional_JSON_sed_rg_helper_own_seal_diagnostic_and_transport_reads": "UNKNOWN_NOT_ZERO",
+    "physical_cumulative_IO_peak_RAM_model_bill_whole_fit": "UNKNOWN_NOT_ZERO",
+    "read_cap": 268435456,
+    "output_cap": 16777216
+  },
+  "diagnostic_incidents": [
+    "One oversized successful read-only verification output was truncated in transport, making JSON.parse fail before evidence writing. Replaced by a bounded compact summary/pin transfer; actual Source was never executed. First verification read cost is additional unknown/not zero beyond captured lower bound.",
+    "Some text summaries exceeded renderer budget. Required actual Source contexts subsequently read in smaller bounded ranges; local full-part checks are retained.",
+    "A stock sed read used an unconfirmed historical controls path and returned ENOENT (exit 2), no mutation. Exact current Controls pin resolved from verified current209 and read successfully.",
+    "Final own-package seal found the newly created parent review directory inherited mode0775 while evidence child was0700. Verified exact owned directory and set only this new root/evidence to0700; all leaves0600. Complete sealed tree and SHA9 cross-check performed afterwards. No original/source modes changed.",
+    "Own seal diagnostic compared the entire stat_result across a read, including access time; normal read changed atime and assertion failed. Corrected diagnostic to exact contract identity9 excluding atime. No content/identity9 drift or Source effect."
+  ],
+  "repeated_checks_reason": "Only transport-truncated verification repeated with compact output; no repeat whole unchanged Source review. New A214 changed context once.",
+  "writes": "Only new owned review JSON/text in assigned private root and official RESULT; no originals, indexes, source, permissions/config or runtime bodies modified.",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

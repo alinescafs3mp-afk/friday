@@ -1,0 +1,11 @@
+# A079 independent review handoff
+
+Decision: SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD. SourceReady=false, accepted=false, ready_for_exec=false, current_GO=false. This is a finite author Source package, not independent acceptance.
+
+Review the actual complete changed current functions and callers: OWNED.fr_session_start/cap_get/session_socket/packet/ack/private bindings/wait4/local_cleanup/stop/release/fixture interfaces; BOOTSTRAP.registry/run/stop_known/reap_owned; CONTRACT.startup/native_bridge/command/ABI; NativeOwner close/unknown cleanup; protected mode1 supervisor and held102 ordinary caller; A079-NATIVE-PUBLIC-DRIVER full input/output oracles. No imports, AST/compile/eval/exec/native/controls/probes/GET are authorized by this handoff.
+
+The new ordinary positive and two inert API DATA control routes are incomplete coverage of AUTHORITATIVE_NATIVE_REGISTRY_FULL_CONTROLS. Required residual includes actual wrong-origin PID/UID/GID, session/role/sequence/deadline, rights count/type/close, owned PID-pidfd generation, READY timing, real creation error and ABORT_ACK, invalid/lost REAP_ACK, and signal/close failures with exact cleanup. Do not count source declarations, labels or UID observations as kernel outcomes. Private actual wait4 status stays UNKNOWN publicly until the real ACK. Root borrowed receipts have no Root kernel-status credit.
+
+All63 DATA guard/full original mode4/five HTTP/117-to111/source19/seal18/OS9/image17 mappings are unchanged; path labels alone follow the new package. Complete inherited216+8 mappings are retained. Their per-ID safe nested-own producer integration is separate unresolved work; unsafe historical bodies stay inert NOT_RUN. No whole-browser credit or F10 waiver. A genuine future independently admitted stock/native Root caller remains an external prerequisite, not a new privileged service and not a defect inferred from present absence.
+
+Use current exact manifest and raw delta/complement. Native ABI adds96B read-only observation plus session start/close/fixture stop; original wire848/208/56/1088/96 and fr_child32 are unchanged. Sequence semantics changed consistently to monotonic transactions, and all future native objects must be newly built/reviewed from these bytes. Do not transfer old build, review, harness or live results to this snapshot.

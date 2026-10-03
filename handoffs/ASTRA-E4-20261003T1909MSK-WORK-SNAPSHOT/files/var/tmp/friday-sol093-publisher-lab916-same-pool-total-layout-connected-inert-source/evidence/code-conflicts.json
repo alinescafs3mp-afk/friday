@@ -1,0 +1,100 @@
+{
+  "schema": "friday.sol093.connected-contract-conflicts.v1",
+  "conflicts": [
+    {
+      "id": "CODE-WHOLE-OUTPUT-CURRENT-ALL15-LAYOUT",
+      "functions": [
+        "RootObserver.__init__",
+        "RootObserver._reserve/check/commit/release",
+        "RootNative._run/verify_admission/perform",
+        "RootToolAdapter.launch/validate_image",
+        "PerformingOperations.node_archive/venv/loader/browser",
+        "PrefixBodyMailbox.prepare/attach_late"
+      ],
+      "requirements": [
+        "SAME cumulative whole32MiB",
+        "both original primary/late metadata mmaps per mandatory job, separate2M payload ceilings",
+        "same original six stream envelopes and refusal reserve",
+        "all15/original cases and full raw values, no cap growth"
+      ],
+      "minimum": 36005644,
+      "cap": 33554432,
+      "shortfall": 2451212,
+      "scope": "current fixed-size/prospective simultaneous-reservation design, not all encodings or a reached execution witness",
+      "result": "Connected prospective refusal code supplied; no whole-layout implementation/acceptance",
+      "minimal_same_role_alternatives": [
+        "Use actual original Root/caller to prepare a single finite all-job cohort representation/codec with full raw/primary/late error and BOTH readers; derive real entire job layout rather than resetting per-hold bank slots",
+        "If genuine before-effect exact smaller metadata serialization/dedup/reuse can preserve all full values and lifetime/error semantics, join actual suppliers/both receivers and allocator/read/hash/output/FD costs; cap unchanged. No guessed or prose-reconstructed artifact",
+        "Reuse physical original endpoints only after authentic BOTH-end transfer/retirement AND full escaping raw/error alias custody, with original cumulative output still charged; missing actual last native end remains CODE, not a callback flag"
+      ]
+    },
+    {
+      "id": "CODE-SELF-COHORT-BODY-PLUS-METADATA",
+      "functions": [
+        "PrefixBodyMailbox.__init__/retain_cohort_before_effect/add/finish",
+        "OwnedMappingBirth._cohort_cut_before_effect/cut/require_cut",
+        "full_value_arena ref(bytes)/selected-owned-mmap",
+        "validate_full_value_arena + both validate_spans/read_parent consumers"
+      ],
+      "requirements": [
+        "own body mapping full retained before-write image B bytes",
+        "own metadata mapping full retained before-write image M=2000128 bytes",
+        "single current physical_body bank width B, exact existing offset/bytes codec",
+        "preserve every raw byte/identity; no hash/address/header as body"
+      ],
+      "equation": "B + 2000128 > B for every integer B>=1; widening the same self-bank also widens its selected image",
+      "minimum_at_B1": 2000129,
+      "capacity_at_B1": 1,
+      "shortfall": 2000128,
+      "larger_cohort": "primary+late raw4 maps adds more, not needed for smallest conflict",
+      "special_alias": "add reuses own before_effect_raw at offset0 and sets count=B; exact metadata raw then has positive width, fails. It is not a retained physical second full image/end.",
+      "scope": "selected mapped cohort actually reached by original ordinary error traceback/ForkOwner/credit/global roots; if not selected on one branch, no inference that branch's entire body impossible",
+      "minimal_same_role_alternatives": [
+        "Same enrolled before-effect producer must carry lossless full snapshot outside its own mutable target or through an exact full lossless representation, using existing original prepared bank/Root/native role only",
+        "Both actual physical span/value receivers must validate exact full bytes + original mapping/row/credit/cut aliases and last-error finite end. A new local flag/half reader/header/schema does not qualify",
+        "Recompute all original shared pools and both receiver allocations for that representation, preserve codec/ABI obligations; no operational native/private memory changes in this task"
+      ]
+    },
+    {
+      "id": "CODE-GLOBAL-TWO-SLOTS-ARE-NOT-ALL-JOB-LAYOUT",
+      "functions": [
+        "PrefixBodyMailbox.prepare",
+        "RootNative._run",
+        "RootToolAdapter.launch"
+      ],
+      "requirements": [
+        "same terminal_hold throughout Root",
+        "cached prefix_bank_layout.banks=2 and monotonically increased prefix_bank_slot",
+        "every helper/actor needs primary+late"
+      ],
+      "boundary": "first complete pair consumes slots0,1; next primary prepare hits slot>=banks. Raising banks only moves global output/read/hash/RAM/FD conflicts, not closure.",
+      "minimum_missing_jobs": 4,
+      "min_missing_metadata_files": 8,
+      "min_additional_metadata_output": 16001024,
+      "minimal_same_role_alternative": "Original Root prospective ALL-job layout, same cumulative tokens/pools; no slot reset/token replacement/after-effect capacity growth/FD reuse as native end."
+    },
+    {
+      "id": "CODE-FIRST-EFFECT-MODE-BIND-AND-FULL-COST",
+      "functions": [
+        "RootObserver.__init__",
+        "admission.qualify",
+        "RootNative.verify_admission/_run",
+        "RootToolAdapter.validate_image",
+        "validate_complete_capacity"
+      ],
+      "boundary": "Known launch_mode after native signature; late validate_complete_capacity gate does not close pre-signature or first preparatory/helper effects. Exact proposed all15 layout retained early, but authentic full first-effect joint supplier/cost remains absent.",
+      "C2": "Factory/CPU/RSS/implicit IO/full seed/body/parser/native/alias overlap UNKNOWN_NOT_ZERO; no zero/pass.",
+      "minimal_same_role_alternative": "Actual original pre-admission Root enrollment/supplier must select complete known work before first effect and retain full original ordinary/cleanup errors through BOTH readers, within immutable pools; no new grant/role/image/caller"
+    },
+    {
+      "id": "CODE-NATIVE-N1-N4-BOTH-ENDS",
+      "boundary": "SOL092 N2 exact unchanged; LAB916 birth/cut/full raw supplier present but not native whole-body/last-error retirement. Full Root/public/native backing/pre-module supplier/late/native finite ends still CODE; parent wait4/table cancel is not alias retirement; current ownership_retired False retained.",
+      "C1": "CODE",
+      "C2": "UNKNOWN_NOT_ZERO",
+      "target": "NOT_RUN"
+    }
+  ],
+  "new_grants": 0,
+  "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false",
+  "original_controls_reduced": false
+}

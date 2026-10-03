@@ -1,0 +1,20 @@
+{
+  "astra_hunk_required": false,
+  "caller_order": [
+    "adapter whole-result, whole-final, whole-final-document",
+    "signature native five bodies then prepare and attach_late",
+    "actor launch six bodies then prepare and attach_late",
+    "node-version, python-version, loader-list, browser-version each add five bodies"
+  ],
+  "existing_root_caller_edited": false,
+  "n2_files_edited": false,
+  "native_c_h_edited": false,
+  "receivers": [
+    "read_parent",
+    "validate_spans",
+    "validate_full_value_arena"
+  ],
+  "schema": "friday.lab918.relation.v1",
+  "slots_reset_to_two": false,
+  "terminal_hold_reused": true
+}

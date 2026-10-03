@@ -1,0 +1,91 @@
+{
+  "GO": false,
+  "Root_Image": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "a182_input_bytes": 56952,
+  "a182_input_sha256": "ca828f123030f9ca76442cee010f0eb2ec9e9e3ffdb26e5fab29294978c9397a",
+  "accepted": false,
+  "assignment": "ASTRA-E4-SOL060-A182-NODE-WHOLE6-ALL35-ALL6-RAW-BOUND-SCHEMA-CONNECTED-SOURCE-CLOSURE-LAB-865",
+  "caller_bytes": 132543,
+  "caller_sha256": "708ed145bbf323edea7b2cf338a6b7c63b63e32b72ab8ec05cdeabc066141554",
+  "caps_preserved": {
+    "old_A175_bound_applied": false,
+    "outer_public": 2097152,
+    "public_output": 32768,
+    "stream": 32768,
+    "supervisor_output": 65536
+  },
+  "changed": [
+    "caller.py",
+    "supervisor.py",
+    "verifier.py",
+    "launch-contract.json",
+    "expectations.json"
+  ],
+  "changed_count": 5,
+  "code_open": [
+    "INNER32KIB_AND_SUPERVISOR64KIB_COMPLETE_FIT_NOT_PROVEN: the original caps stay, and a graph that does not fit is not a fullraw publication.",
+    "PUBLICATION_OVER_CAP_EXITS_WITHOUT_SUBSTITUTE: bytes that never leave the process are not recovered after exit.",
+    "NATIVE_OBJECT_RECONSTRUCTION_NOT_QUALIFIED: stock type/message/cause links are kept; C heap and custom native values are outside the stock fence.",
+    "PREFUNDED_ARENAS_ARE_NOT_WHOLE_MEMORY_PROOF: fixed caps are not a disjoint whole-memory or implicit IO proof.",
+    "LAB861_FOUR_GAPS_PENDING: readonly home, agent, trustdb and common.conf remain future Root qualification.",
+    "NOT_RUN: no Source execution, compiler, runtime, gates, or Root admission."
+  ],
+  "compiler_ELF_ABI": "NOT_RUN",
+  "completed_msk": "2026-10-02T13:45:52.849984+03:00",
+  "contract_bytes": 48792,
+  "contract_sha256": "f4af798566916c32ef504f95865faceffadd5e62e247e3c8e2ce64b4cd74bb7d",
+  "costs": {
+    "cgroup_memory_current": "2060689408",
+    "cumulative_bytes": 9012424,
+    "implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "meminfo_present": true,
+    "memory_hash_bytes": 3301475,
+    "physical_read_bytes": 2872753,
+    "proc_read_bytes": 3316,
+    "transport_write_bytes": 2838196,
+    "vm_rss_kib": "24896",
+    "whole_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+  },
+  "delivery_id": "del_785455f9ef904a03bbfdc2556209b58b",
+  "elapsed_seconds": 583.326772,
+  "equal_count": 1,
+  "equal_current6": [
+    "ordinary-surplus.txt"
+  ],
+  "expectations_bytes": 10129,
+  "expectations_sha256": "a77ad81425bb7abd2ffc954bb3bdccb2784a5b4785ce98f658c649a2755a7b60",
+  "gates": "NOT_RUN",
+  "input_bytes": 48888,
+  "input_sha256": "9d7ed5265d13953eb03b209cb8de8b1855466173128d5e368657a4cdf89751fe",
+  "job_id": "job_79aca90b5a3c4a25b8aedce33e3a7409",
+  "ordinary_surplus_bytes": 158,
+  "ordinary_surplus_sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+  "pinned_read_arithmetic": {
+    "cap": 268435456,
+    "fixed_nonrunning": 247403149,
+    "full19_bytes": 72420125,
+    "running": 21032307,
+    "source": "A182 input arithmetic, not a fresh measurement",
+    "sum": 268435456
+  },
+  "pins_verified": 62,
+  "repairs": [
+    "Producers keep error-graph.v2 and stock_cause copied from nodes[root].",
+    "supervisor.check_inner and caller.validate_canonical/validate_entry recompute original_stock_cause and compare it to the original Refusal messages.",
+    "Both startup controls and both supervisor-entry controls use that projection. The verifier-entry stderr oracle is unchanged.",
+    "Descriptor history, caller allocation records, retained error objects, exception nodes, values and traceback frames use prefunded caps before the native acquire or projection.",
+    "A close-failure record stores one exact_error projection.",
+    "Inner publication still exits without a smaller substitute when the 32768 public cap cannot hold the receipt."
+  ],
+  "run_message_id": "msg_935fdddca52d4d16a850c36289a4a5ca",
+  "runtime": "NOT_RUN",
+  "schema": "friday.grok.lab865.node-whole6-all35-all6-raw-bound-schema-connected-source-closure.v1",
+  "source_execution": 0,
+  "supervisor_bytes": 101776,
+  "supervisor_sha256": "49b507fbc2a4b99791908e92213979056ebaa1da4ddfe733c9eab86738e79d5c",
+  "verdict": "RAW_BOUND_SCHEMA_CONNECTED_SOURCE_CLOSURE_AUTHORED_NOT_RUN",
+  "verifier_bytes": 73847,
+  "verifier_sha256": "2b2e64f0062ba156b5b927a9af8960d85444e79f989a93fa180876f647bfbc60"
+}

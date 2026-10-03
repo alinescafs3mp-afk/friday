@@ -1,0 +1,156 @@
+{
+  "pin": {
+    "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/schemas/control-inventory.v1.json",
+    "bytes": 4139478,
+    "sha256": "e7255f04bc4fa806960fcca79b6b37b67202417170ed59c3b9101863e3e91224",
+    "identity9_decimal_strings": [
+      "2050",
+      "4225142",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "4139478",
+      "1790911179040333168",
+      "1790911179040333168"
+    ],
+    "stable9": true,
+    "before_opened_held_after_named_after_stable": true,
+    "mode": "600",
+    "uid": 1000,
+    "gid": 1000,
+    "nlink": 1
+  },
+  "baseline_declarations": {
+    "collection_path": "/var/tmp/friday-sol020-final-source-closure/sol020-quality-toolchain-v1/fixtures/official-runs/final-focus03-collect/collection.json",
+    "collection_sha256": "cebda764bd348a58302c6fb9ebec1e4de84064b8e9c00e41d8b7e702df003340",
+    "cases": 462,
+    "required_keys": 642,
+    "matrices": 373,
+    "rows": 11807,
+    "credit": "INHERITED_OLD_EVIDENCE/NOT_NEW_CREDIT"
+  },
+  "actual_test_id_count": 464,
+  "actual_test_id_distinct_count": 464,
+  "collection_per_module_counts": {
+    "test_archive": 10,
+    "test_broker": 12,
+    "test_canonical": 7,
+    "test_custody": 17,
+    "test_effect_bills": 4,
+    "test_install_recovery": 355,
+    "test_ledger": 4,
+    "test_manifest": 17,
+    "test_provenance": 8,
+    "test_uninstall": 30
+  },
+  "contract_shapes": {
+    "matrices": {
+      "type": "dict",
+      "length": 374,
+      "scalar": null
+    },
+    "observation_semantics": {
+      "type": "dict",
+      "length": 10514,
+      "scalar": null
+    },
+    "declared_modules": {
+      "type": "list",
+      "length": 10,
+      "scalar": null
+    },
+    "required_observations": {
+      "type": "list",
+      "length": 657,
+      "scalar": null
+    },
+    "matrix_owners": {
+      "type": "dict",
+      "length": 374,
+      "scalar": null
+    }
+  },
+  "matrix_value_shape_counts": {
+    "dict": 0,
+    "list": 374,
+    "str": 0,
+    "int": 0
+  },
+  "top": {
+    "schema": "friday.a049.static-control-inventory.v1",
+    "derivation": "INHERITED_AUTHENTICATED_DECLARATIONS_PLUS_EXPLICIT_CURRENT_SOURCE_ADDITIONS; NOT_RUNTIME_COLLECTION",
+    "baseline": {
+      "type": "dict",
+      "length": 7,
+      "keys": [
+        "collection_path",
+        "collection_sha256",
+        "cases",
+        "required_keys",
+        "matrices",
+        "rows",
+        "credit"
+      ]
+    },
+    "collection": {
+      "type": "dict",
+      "length": 10,
+      "keys": [
+        "test_archive",
+        "test_broker",
+        "test_canonical",
+        "test_custody",
+        "test_effect_bills",
+        "test_install_recovery",
+        "test_ledger",
+        "test_manifest",
+        "test_provenance",
+        "test_uninstall"
+      ]
+    },
+    "test_ids": {
+      "type": "list",
+      "length": 464,
+      "keys": null
+    },
+    "control_contract": {
+      "type": "dict",
+      "length": 5,
+      "keys": [
+        "matrices",
+        "observation_semantics",
+        "declared_modules",
+        "required_observations",
+        "matrix_owners"
+      ]
+    },
+    "additions": {
+      "type": "dict",
+      "length": 3,
+      "keys": [
+        "case_ids",
+        "required_keys",
+        "matrices"
+      ]
+    }
+  },
+  "whole_decoded_node_type_counts": {
+    "dict": 12327,
+    "str": 37994,
+    "int": 14,
+    "list": 10894
+  },
+  "whole_distinct_keys": 10919,
+  "all_keys_counts_sha256": "4edc448ceb92180a601d0089e5165833eaaa83224b7fe55fda81387e586c66f5",
+  "common_key_counts": {
+    "outcome": 12318,
+    "test_id": 12318
+  },
+  "decoded_string_count": 37994,
+  "every_string_utf8_total_bytes": 2446218,
+  "all_strings_sha256_ordered": "8033ee8f20c06f12ade8b4f55d1695769ee6358c6e19c55390778b8365184411",
+  "physical_read_bytes": 4139478,
+  "semantic_admission": false
+}
+
