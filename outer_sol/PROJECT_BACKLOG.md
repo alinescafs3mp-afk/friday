@@ -16,7 +16,7 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Current release frontier — 2026-10-03, 07:00 MSK
+## Current release frontier — 2026-10-03, 07:04 MSK
 
 Authority: Astra active Lead Architect epoch4; Kimi continuity deputy. Only this
 backlog is mutable status. Existing three participants/TUIs/models/ultra/tier/
@@ -45,7 +45,7 @@ environment and deployment gaps remain separately NOT_ESTABLISHED/NOT_RUN.
 Actual progress: independently closed this slice Browser E01/E02/E04 and Sender
 method-state filename ordering, all narrowly scoped; Node E01/E02 prior credits
 preserved. No independently closed whole root, new product root or completed
-required execution layer. Browser E03 FD-generation defect is a real remaining
+required execution layer. One new environment-binding drift, described below. Browser E03 FD-generation defect is a real remaining
 path inside the existing retirement invariant, not a newly invented product
 root. Root's connected correction requires different-author acceptance.
 
@@ -89,6 +89,18 @@ observations/independent final acceptance remain incomplete. Valid exact-gate
 receipt may feed acceptance reader without a second pytest controller. Initial
 pair exit4 pending B09 is neither GO nor alone a rerun reason. Heavy exclusive
 slot/canonical topology and production Telegram/home protections unchanged.
+
+Environment: at07:02 full protected-pin check found5558/5560 unchanged.
+Host libcrypto.so.3 changed SHA dcce5a26…→5385f043… and inode; ld.so.cache
+bytes remained equal but timestamp identity changed. Dpkg records OpenSSL/
+libssl/provider3.5.5-1ubuntu3.6→.7 upgrade at06:48:59–06:49:00.
+Class=environment, not a product/source defect; old exact library/loader
+bindings INVALIDATED_NO_CURRENT_CREDIT. Historical expected pins and failed
+check remain immutable; no replacement of old evidence, system restore,
+execution or implicit current ABI credit. Original Source/index/role pins
+unchanged. Next closure=Astra establish exact new environment/ABI through the
+existing authorized qualification after necessary Source acceptance. This
+does not turn a source defect into an environment waiver.
 
 Identity readiness: exact gate requires actual Git candidate identity and
 launcher/inventory. Battery source digest is a full content inventory that
