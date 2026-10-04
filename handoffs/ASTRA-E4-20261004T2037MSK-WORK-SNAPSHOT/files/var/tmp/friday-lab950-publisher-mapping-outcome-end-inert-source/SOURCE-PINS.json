@@ -1,0 +1,46 @@
+{
+  "a258_manifest_sha256": "82773d86edb14c70f82a7f5f3b31c9fb217b4097435596c93be786d697751374",
+  "a258_manifest_size": 32692,
+  "a258_mtime_equals_ctime": false,
+  "baseline": "LAB948",
+  "changed": [
+    "native/publisher_root_entry.c",
+    "source/observer.py",
+    "source/selected_owned_values.py"
+  ],
+  "lab948_author_stable9": true,
+  "lab948_identity9": [
+    "2050",
+    "5135430",
+    "33152",
+    "1000",
+    "1000",
+    "1",
+    "17218",
+    "1791132990308324798",
+    "1791132990308324798"
+  ],
+  "lab948_manifest_sha256": "9eba2d683ad67d0a481b6175f2b398d70dbd60da30a6747a1718fffaa6698314",
+  "lab948_manifest_size": 17218,
+  "lab948_mtime_equals_ctime": true,
+  "schema": "friday.lab950.source-pins.v1",
+  "sol110_author_stable9": true,
+  "sol110_identity9": [
+    "2050",
+    "5266314",
+    "33152",
+    "1000",
+    "1000",
+    "1",
+    "10606",
+    "1791134697150564812",
+    "1791134697173566058"
+  ],
+  "sol110_manifest_sha256": "0e14e819ce477a6a0517ba63488f987caacf1547a3faff1c685dd71b44509c34",
+  "sol110_manifest_size": 10606,
+  "sol110_mtime_equals_ctime": false,
+  "sol110_result_mtime_equals_ctime": false,
+  "sol110_result_sha256": "72359d919518d81263e4c1af5be5d50055ac8b166a2a3b13074b140450f46917",
+  "sol110_result_size": 1864,
+  "source_file_count": 57
+}

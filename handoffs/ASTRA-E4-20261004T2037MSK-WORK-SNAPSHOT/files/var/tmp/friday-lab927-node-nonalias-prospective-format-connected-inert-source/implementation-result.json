@@ -1,0 +1,244 @@
+{
+  "C1": "CODE_OPEN",
+  "C2": "UNKNOWN_NOT_ZERO",
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "assignment": "ASTRA-E4-A236-NODE-NONALIAS-PROSPECTIVE-FORMAT-CONNECTED-IMPLEMENTATION-LAB-927",
+  "buildinfo_retrieved": false,
+  "compiler_ABI": "NOT_RUN",
+  "decision": "OSERROR_EXISTING_FIELDS_PROSPECTIVE_LENGTH_BEFORE_STR_RESIDUAL_SUPPLIERS_OPEN",
+  "delta": {
+    "caller_bytes": [
+      203294,
+      209925
+    ],
+    "contract_bytes": [
+      51469,
+      51457
+    ],
+    "expectations_bytes": [
+      12093,
+      12090
+    ],
+    "ordinary_surplus_bytes": [
+      158,
+      158
+    ],
+    "supervisor_bytes": [
+      167386,
+      174024
+    ],
+    "verifier_bytes": [
+      136850,
+      143484
+    ]
+  },
+  "elapsed_seconds": 910.75485,
+  "finite_implementation_attempt_completed": true,
+  "formula": {
+    "allocator_admission": "visible workspace code points compared with the module address-space cap already named in that file",
+    "constructor_cost": "already retained on the existing OSError; not added to formatter workspace",
+    "not_used_as_allocator_bound": [
+      900,
+      12118,
+      6058,
+      "wire remainder"
+    ],
+    "piece_r_exact_ascii_str": "pinned unicode_repr switch below 128, plus two quotes",
+    "piece_s_exact_int": "decimal width of the existing int; visible temporary equals that width",
+    "piece_s_exact_str": "Py_NewRef of the existing exact ASCII str; temporary 0",
+    "piece_s_none": "none_repr FromString of None; 4 code points allocated",
+    "routes": {
+      "both_filenames": "[Errno %S] %S: %R -> %R",
+      "errno_and_strerror": "[Errno %S] %S",
+      "one_filename": "[Errno %S] %S: %R"
+    },
+    "tuple_repr_on_these_routes": 0,
+    "tuple_repr_prealloc_when_reached": "3n for n>1 and 4 for one item; element repr is separate",
+    "wire_debit": "exact result code points through the existing before_message, after the 900 domain check and before str",
+    "writer": "max(strlen(format)+100, result + result//4); non-Windows factor 4"
+  },
+  "gates": "NOT_RUN",
+  "generation": 1,
+  "host_drift_claimed": false,
+  "image": "NOT_RUN",
+  "implementation_complete": false,
+  "implementation_submitted": true,
+  "independent_acceptance": "REQUIRED_NOT_RUN",
+  "input_bytes": 16416,
+  "input_sha256": "400064dadd873bbad6442ce52b0b4c58566bc17ee3dd9f2ce1d440a127b5d050",
+  "joined_callers": [
+    "full_stock_message alias unchanged",
+    "full_stock_message calls prospective_oserror_message before str on the stock OSError slot",
+    "project_owned_error passes reserve_lower_bound into full_stock_message",
+    "render_original_body calls full_stock_message_bytes which calls full_stock_message",
+    "caller supervisor and verifier share the preflight text"
+  ],
+  "lab924_qualification_credit": false,
+  "network_requests": 0,
+  "passport_bytes": 33195,
+  "passport_consulted": true,
+  "physical_read_bytes": 1390042,
+  "pre_task_compact": "FORBIDDEN_OWNER_POLICY",
+  "preserved": [
+    "alias zero-arg and one-exact-str optimization",
+    "before-encoding widths 1, 4, 6 and 10",
+    "first-fault original, error and first traceback; no formatter retry",
+    "both full v2 decoders",
+    "all35, all6, GPG6, F1, F2, D1, D2, current19 and simultaneous 256 with confirmed reclamation",
+    "original caps, clocks and enabled nonalias factories"
+  ],
+  "prior_scoped_manifest_sha256": "b3d78eb5615dc85b13b2f821e2c97da03505ed397dc2380c2129964744e24385",
+  "review_key": "AUTHOR_IMPLEMENTATION_REQUIRES_NONAUTHOR_CURRENT6_REVIEW",
+  "runtime": "NOT_RUN",
+  "schema": "friday.lab927.connected-inert-source.implementation-result.v1",
+  "seal_elapsed_seconds": 0.009029,
+  "sealed_msk": "2026-10-03T22:15:39.874926+03:00",
+  "source6": [
+    {
+      "bytes": 209925,
+      "name": "caller.py",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/caller.py",
+      "sha256": "6f7991ec6ec972b1a73962886ab20ce2c52d29b35481ccdc337da5d52a938923",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372040",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "209925",
+        "1791054939873372703",
+        "1791054939873372703"
+      ]
+    },
+    {
+      "bytes": 12090,
+      "name": "expectations.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/expectations.json",
+      "sha256": "ea3bd7bb60fae43b2e106a8b36d3915a1344a8f0e07102d808ce2db4c86ce14e",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372041",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12090",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    },
+    {
+      "bytes": 51457,
+      "name": "launch-contract.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/launch-contract.json",
+      "sha256": "a45f7d48f6d8318845897585bdff2d806064437b8f803d5db7c2a1bb11d18d79",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372042",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51457",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    },
+    {
+      "bytes": 158,
+      "name": "ordinary-surplus.txt",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372043",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    },
+    {
+      "bytes": 174024,
+      "name": "supervisor.py",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/supervisor.py",
+      "sha256": "1bdbf3fd7cf66d2bfed5673773b17904513eb3d3efbfd23e5099a870debf9890",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372044",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "174024",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    },
+    {
+      "bytes": 143484,
+      "name": "verifier.py",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/verifier.py",
+      "sha256": "9a520ca571d8f28cc060511bc4c9573f5a15b949fe8820b60b7e8407681ebca6",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372045",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "143484",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    }
+  ],
+  "source6_pin_closure_complete": true,
+  "source_execution": 0,
+  "started_msk": "2026-10-03T22:00:29.120076+03:00",
+  "task_done": false,
+  "task_done_scope": true,
+  "unresolved": [
+    "longobject decimal buffer is not in the pinned vendor set and is not guessed",
+    "bytes filename repr is not in the pinned vendor set",
+    "non-ASCII repr depends on printability, which is not defined in the pinned text",
+    "a stored None object is not distinguishable from a null slot; the null reading is predicted and a length mismatch faults without clipping",
+    "MS_WINDOWS OSError_str text is not selected; installed ELF correspondence remains NOT_RUN",
+    "BaseException_str multiarg, changed slots, and other nonalias factories still call str",
+    "object headers and RSS are not claimed admitted by the visible code-point check",
+    "provider, image, compiler ABI and Root admission remain NOT_RUN"
+  ],
+  "vendor_text_unqualified": [
+    {
+      "bytes": 133418,
+      "path": "/var/tmp/friday-lab923-selected-cpython314-stock-factory-source-correspondence/q-exceptions.c",
+      "sha256": "77385964591e0c3840675066e9610d50142a1cf0605acaf26c04e1ad69996821"
+    },
+    {
+      "bytes": 94718,
+      "path": "/var/tmp/friday-lab923-selected-cpython314-stock-factory-source-correspondence/q-object.c",
+      "sha256": "e9f19810f17357f6c059d5b9995cd633718caa1e18a040ffe860ba764aa3fdee"
+    },
+    {
+      "bytes": 34940,
+      "path": "/var/tmp/friday-lab924-required-nonalias-factory-domain-bounds/q-tupleobject.c",
+      "sha256": "81c1f950888089f3e4af0e00b7979874066d3c3f2f1ae981db7f5d63661c2cc1"
+    },
+    {
+      "bytes": 494714,
+      "path": "/var/tmp/friday-lab924-required-nonalias-factory-domain-bounds/q-unicodeobject.c",
+      "sha256": "60a5ebb5c9c76449e5118e88f1e525e86d6c6ca14f7a4b3e8618b3b2ff643831"
+    }
+  ],
+  "verdict": "FINITE_STATIC_CONNECTED_IMPLEMENTATION_NOT_SOURCE_READY",
+  "vmrss_kib": 19596,
+  "whole_accepted": false,
+  "whole_source_ready": false
+}

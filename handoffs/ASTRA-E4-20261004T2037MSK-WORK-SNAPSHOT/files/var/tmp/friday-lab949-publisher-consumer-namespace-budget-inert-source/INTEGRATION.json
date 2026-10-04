@@ -1,0 +1,29 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "a258_preserved": true,
+  "active_sol107_output_read": false,
+  "changed": [
+    "native/publisher_root_entry.c",
+    "source/observer.py",
+    "source/selected_owned_values.py"
+  ],
+  "child_acceptance_claimed": false,
+  "classification": {
+    "code": [
+      "retained consumer pass debit",
+      "registry scan debit before namespace and support probes"
+    ],
+    "evidence": "literal forward and inverse replay against A258",
+    "qualification": "NOT_RUN"
+  },
+  "compiler_abi": "NOT_RUN",
+  "decision": "REJOINED_A258_CONSUMER_PASS_NAMESPACE_SCAN_BUDGET_WHOLE_ADMISSION_OPEN",
+  "execution": "NOT_RUN",
+  "fit": "UNCONFIRMED",
+  "lab948_overlay": false,
+  "native_cost": "UNKNOWN_NOT_ZERO",
+  "schema": "friday.lab949.integration.v1",
+  "self_acceptance": false
+}

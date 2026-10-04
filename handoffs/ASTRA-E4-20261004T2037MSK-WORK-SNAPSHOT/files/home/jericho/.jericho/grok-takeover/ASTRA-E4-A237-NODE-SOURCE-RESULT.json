@@ -1,0 +1,152 @@
+{
+  "schema": "friday.astra.a237.node-connected-source-result.v1",
+  "assignment": "ASTRA-E4-A237-NODE-FORMAT-NATIVE-ROUTE-SET-CONNECTED",
+  "generation": 1,
+  "author": "Astra Lead Architect epoch4",
+  "accepted_msk": "2026-10-03T22:27:33.416965+03:00",
+  "completed_msk": "2026-10-03T22:35:13.694+03:00",
+  "elapsed_seconds": 460.278,
+  "manifest": {
+    "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/manifest.json",
+    "bytes": 5423,
+    "sha256": "8e9f2f157ea87785761578fd4ab3795b327c45016be8d29c43a55fe7d184f35f",
+    "identity9_decimal_strings": [
+      "2050",
+      "4227595",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "5423",
+      "1791056113643371822",
+      "1791056113694400387"
+    ],
+    "stable9": true
+  },
+  "Source6": [
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+      "bytes": 212160,
+      "sha256": "ff637c2f44d26cab0bfa60c747abbfc040e5255527ad6f2bccf4efb43b43b7e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227584",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "212160",
+        "1791055955910668376",
+        "1791055955910668376"
+      ],
+      "stable9": true,
+      "name": "caller.py"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+      "bytes": 176259,
+      "sha256": "9f08d0eb19739b5fc47c42a794baf1f73f7619002ab156566ad9d8ff4f2c1fc4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227585",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "176259",
+        "1791055955781661257",
+        "1791055955781661257"
+      ],
+      "stable9": true,
+      "name": "supervisor.py"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py",
+      "bytes": 145719,
+      "sha256": "075e9114fa2adeeb6ec4da5b88faa3dea546d2aa8b41d01ae5904e18c2fa3be3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227586",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "145719",
+        "1791055955512646413",
+        "1791055955512646413"
+      ],
+      "stable9": true,
+      "name": "verifier.py"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/launch-contract.json",
+      "bytes": 51393,
+      "sha256": "21cd06037b8682fd390315e996a5665b8bb75ca9c7a98abbb3d3295f1b29102f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227587",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51393",
+        "1791055955657654414",
+        "1791055955657654414"
+      ],
+      "stable9": true,
+      "name": "launch-contract.json"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/expectations.json",
+      "bytes": 12074,
+      "sha256": "83b5a8dc9e1b6af5a54c01eacc61d479cfdefc2f1298792ca9858a134e62781c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227588",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12074",
+        "1791055955513646469",
+        "1791055955513646469"
+      ],
+      "stable9": true,
+      "name": "expectations.json"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227589",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1791054939874372760",
+        "1791055785980851103"
+      ],
+      "stable9": true,
+      "name": "ordinary-surplus.txt"
+    }
+  ],
+  "author_report": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/implementation-result.json",
+  "validation": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/validation-cases.json",
+  "source_join": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/SOURCE-JOIN.json",
+  "decision": "AUTHORED_CONNECTED_ROUTE_ALTERNATIVES_AND_ACTUAL_WIRE_DEBIT_NEW6_REVIEW_PENDING",
+  "independent_review": {
+    "assignment": "ASTRA-E4-A237-NODE-NATIVE-ROUTE-ALTERNATIVES-ACTUAL-WIRE-ALL3-NONAUTHOR-LAB-929",
+    "job_id": "job_ccd8c5ef47ea401db4ffa4775896f533",
+    "actual_executor_ACK": "2026-10-03T19:37:48.416438Z"
+  },
+  "own_source_changed_files": 3,
+  "namespace_and_pin_metadata_changed_files": 2,
+  "unchanged_surplus": true,
+  "Source_execution": 0,
+  "Root_execution": 0,
+  "SourceReady": false,
+  "GO": false
+}

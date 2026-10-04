@@ -1,0 +1,38 @@
+Friday work snapshot — 2026-10-04T20:52:03.354220+03:00
+INERT ARCHIVE: not execution authority, SourceReady, independent whole acceptance or release approval.
+
+Product: cecd28a92ac4fd4e34c4d3813d0c598debe09436 / 0.208.64 / schema50.
+Installed production: recorded 0.208.58 unchanged; final wheel absent.
+Actual lead: gpt-6-astra / ultra / openai_https; Astra Lead Architect epoch4, Kimi deputy. Tier not exposed/unchanged.
+
+CURRENT implementations (not all accepted): Browser A226; Scanner LAB887;
+Publisher A259; Sender SOL089; Node A237. Latest separate Publisher LAB950
+is author-only, unintegrated, now in Sol112 review. Active LAB951 excluded.
+CURRENT-PACKAGES.json maps all selected bodies/dependencies and omissions.
+
+Since a7599e2: coherent Publisher native/Root/error/resource work and Node A237;
+actual recent author results and SOL108-SOL111/LAB929 reviews included.
+SOL111 accepts the full retained Source-pass debit and credits graph/phase/end
+properties, but rejects historical-current error traceback and nested class
+scan accounting. No whole component closed; no release execution layer added.
+See INDEX.json for current exact roots, owners and next closure conditions.
+
+REVIEW-BINDINGS.json binds each result to its exact evaluated manifest.
+MANIFEST.json maps original paths to archived paths, sizes and SHA256 hashes.
+SHA256SUMS includes the manifest; manifest excludes itself/checksum list to
+avoid a circular self-hash. Original source bytes/import paths were NOT rewritten.
+The Git commit binds this complete dated directory and canonical backlog.
+
+Coverage: 869 existing files, 25396481 bytes.
+All current native/Source implementations supplied except listed restricted
+control collections. 43 exact per-file omissions; private conversations,
+credentials, denied WIP, active outputs, host images and package archives excluded.
+This is NOT complete unrestricted/transitive runtime or acceptance coverage.
+Publisher fixtures helper is historical supplemental source, not a new binding.
+OMISSIONS.json explains impacts; REFERENCES.json identifies literal reference gaps.
+Required controls stay required/not waived, never PASS. No tests rerun, Source
+execution, extra audit or product fixes performed just to prepare this export.
+
+Next: connected independent source acceptance -> qualified stable bindings ->
+collect-all diagnostics -> full canonical release sequence. No release ETA claimed.
+The only mutable status register remains outer_sol/PROJECT_BACKLOG.md.

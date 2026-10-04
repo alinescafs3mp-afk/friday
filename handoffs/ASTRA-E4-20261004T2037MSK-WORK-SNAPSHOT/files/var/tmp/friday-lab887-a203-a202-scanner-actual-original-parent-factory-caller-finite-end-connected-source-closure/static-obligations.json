@@ -1,0 +1,90 @@
+{
+  "assignment": "ASTRA-E4-A203-A202-SCANNER-ACTUAL-ORIGINAL-PARENT-FACTORY-CALLER-FINITE-END-CONNECTED-CLOSURE-LAB-887",
+  "generation": 1,
+  "invariants": [
+    {
+      "actual_paths": [
+        "friday_scanner_selected_parent_entry -> install_original_caller_guard -> scanner_prepare_root_backing -> run_selected_existing_caller",
+        "run_selected_existing_caller -> friday_existing_parent_preinitialize -> initialize_native_owner",
+        "initialize_native_owner rejoin when scanner_original_guard_installed"
+      ],
+      "decision": "CORRECTED",
+      "id": "R02",
+      "implemented_delta": "An already guarded existing parent rejoins original_absolute_end and the installed consumer minimum. That branch does not call sigaction or setitimer. The unguarded parent path and the bounded Source child keep their original timers.",
+      "kind": "CODE",
+      "local_check": "TEXT_AND_GAPLESS_BYTES_ONLY",
+      "target_verified": "NOT_RUN"
+    },
+    {
+      "actual_paths": [
+        "RETURN_SELECTED -> scanner_final_root_receiver",
+        "never_created and startup_unregistered return before the mapped header read",
+        "kernel_cleared is started above zero and clear_tid zero"
+      ],
+      "decision": "CORRECTED",
+      "id": "R03",
+      "implemented_delta": "A clear created flag is never-created, not kernel exit. A started-below-zero task is unregistered and is not inspected. The mapped header is read only after the kernel has cleared the exit word. Accepted and outside-end flags stay zero.",
+      "kind": "CODE",
+      "local_check": "TEXT_AND_GAPLESS_BYTES_ONLY",
+      "target_verified": "NOT_RUN"
+    },
+    {
+      "decision": "OPEN_EXACT_REF_ABSENT",
+      "exact_evidence_gap": {
+        "classification": "EVIDENCE_PREREQUISITE",
+        "conflict": "The five-argument opaque permit factory has no implementation pin in the searched authority. A new constructor would mint that permit, so this package does not add one.",
+        "declared_only": "native/scanner_selected_parent.h function pointer original_materials_factory, called from scanner_selected_root_callsite",
+        "required": "Exact source path and sha256 of the original five-argument opaque-permit factory, and of the outside issuer that calls friday_scanner_selected_parent_entry and retires both Source and Root bodies.",
+        "searched": [
+          {
+            "bytes": 24643,
+            "found": "custody decision, no factory implementation and no factory source pin",
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A197-SCANNER-EXISTING-ALLOCATOR-PHYSICAL-CUSTODY-DECISION-20261002.json",
+            "sha256": "eb9c3ae40fa532d26fb1f5cf2800a8c1ea4b283275e937b0389b394d0f22c478"
+          },
+          {
+            "bytes": 86942,
+            "found": "SOL071 input, no factory implementation and no factory source pin",
+            "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL071-INPUT-20261003.json",
+            "sha256": "c3f183af6e6addbc1a748ba370c849bb2c4309f5ef61ad83fb483f00b8f5bb11"
+          },
+          {
+            "bytes": 32566,
+            "found": "launch_selected_source and existing_parent_source_entry require an already selected permit and do not construct one",
+            "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/root_holder.py",
+            "sha256": "c328debde6b321ca9ae091ad21619bc4747ea96def79aa580aa40c848833b6a6"
+          },
+          {
+            "bytes": 99214,
+            "found": "RootNativeOwner requires the same already selected permit and does not construct one",
+            "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/native_owner.py",
+            "sha256": "9f79a3225d5936badaa4fb938df0acd0f09698281451ba03df64a2aacedfdd79"
+          },
+          {
+            "bytes": 24555,
+            "found": "support helpers, no permit factory",
+            "path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/tools/native_support.py",
+            "sha256": "cfd31b3d71c23c243ecad4764f3e4b880d2963c64712e22f825565d53000023f"
+          },
+          {
+            "bytes": 3074,
+            "found": "declares the enrollment pointer and states that its implementation is not supplied",
+            "path": "/var/tmp/friday-astra-a202-sol071-scanner-original-preinit-guard-task-start-and-final-receiver-connected-source/native/scanner_selected_parent.h",
+            "sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee"
+          }
+        ]
+      },
+      "id": "C1",
+      "implemented_delta": "The existing callsite still calls the enrollment pointer. No factory body, callback, role, service, or permit constructor was added.",
+      "kind": "EVIDENCE_PREREQUISITE",
+      "owner": "original issuer artifact is an owner-only prerequisite"
+    },
+    {
+      "decision": "NOT_RUN",
+      "id": "QUALIFICATION",
+      "kind": "FUTURE_QUALIFICATION",
+      "note": "Image, compiler, native ABI, provider, permits, admission, and gates stay NOT_RUN. Helper peak 630636544 above declared 268435456 stays NOT_FIT. Whole fit and product RAM and IO stay UNKNOWN_NOT_ZERO."
+    }
+  ],
+  "schema": "friday.astra.connected-static-obligations.v1"
+}

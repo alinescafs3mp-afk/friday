@@ -1,0 +1,35 @@
+{
+  "schema": "friday.astra.a257.literal-sequential.v1",
+  "baseline": {
+    "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/manifest.json",
+    "bytes": 32881,
+    "sha256": "c4ea289c4df851e3364d6d3cc802c60ee6fa0162c12e25449ee01c70fda11e86",
+    "identity9_decimal_strings": [
+      "2050",
+      "5010660",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32881",
+      "1791129359526042982",
+      "1791129359546343017"
+    ],
+    "stable9": true
+  },
+  "hunks": [
+    {
+      "file": "native/publisher_root_entry.c",
+      "old": "           r->nodes[id-1].original!=(value?value:Py_None)||\n           r->edge_roles[v->edge_at+j]!=(value&&!support))return -1;\n    }\n    if(p->kind==OWN_HASH) {\n        PyObject *ledger=p->refs[1],*ops=own_plain_field(ledger,\"updates\");\n        uint64_t mode=(p->flags>>8)&3;\n        if(FridayPublisherMasterBefore(&root_storage.pool,24576,0,0,0)<0)return -1;\n        PyObject *metadata=own_plain_field(ledger,\"metadata_error\");\n        if(!ledger||!PyDict_CheckExact(ledger)||PyDict_Size(ledger)!=14||\n           !ascii(own_plain_field(ledger,\"schema\"),\"friday.astra256.own-hash-input-ledger.v2\")||\n           !ops||!PyList_CheckExact(ops)||!metadata||\n           (metadata!=Py_None&&!PyExceptionInstance_Check(metadata))||\n           own_plain_field(ledger,\"original_error\")!=Py_None||\n           own_hash_status_key(ledger,\"runtime_h\")!=p->refs[9]||\n",
+      "new": "           r->nodes[id-1].original!=(value?value:Py_None)||\n           r->edge_roles[v->edge_at+j]!=(value&&!support))return -1;\n    }\n    if(p->kind==OWN_HASH) {\n        PyObject *ledger=p->refs[1];\n        uint64_t mode=(p->flags>>8)&3;\n        if(FridayPublisherMasterBefore(&root_storage.pool,24576,0,0,0)<0)return -1;\n        /* Shape BEFORE the first dictionary walk. This fixed debit pays the\n         * constructor/status fields only, never an arbitrary update history. */\n        if(!ledger||!PyDict_CheckExact(ledger)||PyDict_Size(ledger)!=14)return -1;\n        PyObject *ops=own_plain_field(ledger,\"updates\");\n        PyObject *metadata=own_plain_field(ledger,\"metadata_error\");\n        if(!ascii(own_plain_field(ledger,\"schema\"),\"friday.astra256.own-hash-input-ledger.v2\")||\n           !ops||!PyList_CheckExact(ops)||!metadata||\n           (metadata!=Py_None&&!PyExceptionInstance_Check(metadata))||\n           own_plain_field(ledger,\"original_error\")!=Py_None||\n           own_hash_status_key(ledger,\"runtime_h\")!=p->refs[9]||\n",
+      "id": "A257-H001"
+    },
+    {
+      "file": "native/publisher_root_entry.c",
+      "old": "           own_plain_field(ledger,\"actual_attempted\")!=Py_True||\n           (own_plain_field(ledger,\"state_complete\")!=Py_True&&\n            own_plain_field(ledger,\"state_complete\")!=Py_False)||\n           !ascii(own_plain_field(ledger,\"mode\"),mode==1?\"sha256\":mode==2?\"new\":mode==3?\"copy\":\"\"))return -1;\n        uint64_t attempted=1,confirmed=1;int complete=own_plain_field(ledger,\"state_complete\")==Py_True;\n        for(Py_ssize_t j=0;j<PyList_GET_SIZE(ops);j++) {\n            PyObject *op=PyList_GET_ITEM(ops,j);\n            if((j&1023)==0&&!command_clock(r))return -1;\n            PyObject *full=own_plain_field(op,\"full_bytes\");\n            PyObject *actual=own_plain_field(op,\"actual_attempted\"),*returned=own_plain_field(op,\"confirmed\");\n            PyObject *error=own_plain_field(op,\"original_error\");\n            PyObject *metadata_error=own_plain_field(op,\"metadata_error\");\n            if(!op||!PyDict_CheckExact(op)||PyDict_Size(op)!=7||\n               own_plain_field(op,\"attempted\")!=Py_True||!full||!PyBytes_CheckExact(full)||\n               (actual!=Py_True&&actual!=Py_False)||(returned!=Py_True&&returned!=Py_False)||\n               !error||(error!=Py_None&&!PyExceptionInstance_Check(error))||\n               !metadata_error||(metadata_error!=Py_None&&!PyExceptionInstance_Check(metadata_error))||\n               (metadata_error!=Py_None&&returned!=Py_True))return -1;\n",
+      "new": "           own_plain_field(ledger,\"actual_attempted\")!=Py_True||\n           (own_plain_field(ledger,\"state_complete\")!=Py_True&&\n            own_plain_field(ledger,\"state_complete\")!=Py_False)||\n           !ascii(own_plain_field(ledger,\"mode\"),mode==1?\"sha256\":mode==2?\"new\":mode==3?\"copy\":\"\"))return -1;\n        /* A257: pay every actual row BEFORE entering the loop. Exact seven\n         * fields bound each row's scans, not the number of update rows. Keep\n         * the original pool/caps; refusal retains the same owners. This is an\n         * explicit conservative debit, NOT measured whole implicit ABI fit. */\n        uint64_t updates=(uint64_t)PyList_GET_SIZE(ops);\n        const uint64_t row_reads=24576;\n        if(updates>UINT64_MAX/row_reads)\n            return FridayPublisherMasterFault(&root_storage.pool,\"own_hash_full_update_scan_overflow\");\n        if(FridayPublisherMasterBefore(&root_storage.pool,updates*row_reads,0,0,0)<0)return -1;\n        uint64_t attempted=1,confirmed=1;int complete=own_plain_field(ledger,\"state_complete\")==Py_True;\n        for(Py_ssize_t j=0;j<(Py_ssize_t)updates;j++) {\n            PyObject *op=PyList_GET_ITEM(ops,j);\n            if((j&1023)==0&&!command_clock(r))return -1;\n            if(!op||!PyDict_CheckExact(op)||PyDict_Size(op)!=7)return -1;\n            PyObject *full=own_plain_field(op,\"full_bytes\");\n            PyObject *actual=own_plain_field(op,\"actual_attempted\"),*returned=own_plain_field(op,\"confirmed\");\n            PyObject *error=own_plain_field(op,\"original_error\");\n            PyObject *metadata_error=own_plain_field(op,\"metadata_error\");\n            if(own_plain_field(op,\"attempted\")!=Py_True||!full||!PyBytes_CheckExact(full)||\n               (actual!=Py_True&&actual!=Py_False)||(returned!=Py_True&&returned!=Py_False)||\n               !error||(error!=Py_None&&!PyExceptionInstance_Check(error))||\n               !metadata_error||(metadata_error!=Py_None&&!PyExceptionInstance_Check(metadata_error))||\n               (metadata_error!=Py_None&&returned!=Py_True))return -1;\n",
+      "id": "A257-H002"
+    }
+  ],
+  "exact_forward_inverse": true
+}

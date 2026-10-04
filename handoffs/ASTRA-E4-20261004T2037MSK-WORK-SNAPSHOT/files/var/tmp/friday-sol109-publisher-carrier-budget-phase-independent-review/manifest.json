@@ -1,0 +1,266 @@
+{
+  "schema": "friday.sol109.independent-review.manifest.v1",
+  "root": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review",
+  "assignment": "ASTRA-E4-A258-PUBLISHER-CARRIER-BUDGET-ROLE-PHASE-NONAUTHOR-SOL109",
+  "generation": 1,
+  "files": [
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/received.json",
+      "bytes": 730,
+      "sha256": "e1ee867d1fcfcd3ec50fc860ff5a53970dcc91e6b3f2390dd1c5c5f197a0f439",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135356",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "730",
+        "1791132595232948616",
+        "1791132629462887326"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/host-audit.py",
+      "bytes": 5337,
+      "sha256": "a45faf6ea2cc9b341386392e748acd21524e7318f5a6bb8b87306e3642f3b5a0",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135357",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5337",
+        "1791132650778094569",
+        "1791132650778094569"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/host-seal.py",
+      "bytes": 5031,
+      "sha256": "3195984495c3c094b777bd1d427472d74f18f09461fe51e1a478dc1893f3fea3",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135359",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5031",
+        "1791132929721893324",
+        "1791132929741894456"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/pins-and-literal-audit.json",
+      "bytes": 195329,
+      "sha256": "9befa0d5b60175512e30eded1de867db0507a217313f052a0232dc4cb5124f15",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135358",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "195329",
+        "1791132650940103744",
+        "1791132929741894456"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/hash-rejoin.json",
+      "bytes": 1454,
+      "sha256": "d9832957ed5e72a2b8d2f973331e707332351599b684ce290aceca20e6433654",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135360",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1454",
+        "1791132929827899328",
+        "1791133101233607368"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/review.json",
+      "bytes": 17559,
+      "sha256": "3429871545c3e25ac378bc07d114d43691d88887628f7c065a4b100feb3ee1c1",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135431",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17559",
+        "1791133101214606292",
+        "1791133101234607424"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/seal-check.json",
+      "bytes": 27398,
+      "sha256": "eef68a48e29d2b0f37528e806bb27ae85918f3f359c0919422f7439be23b1cfd",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135432",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27398",
+        "1791133101325612579",
+        "1791133139783790763"
+      ],
+      "stable9": true
+    }
+  ],
+  "file_count": 7,
+  "artifact_bytes": 252838,
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL109-INPUT-20261004.json",
+    "bytes": 34520,
+    "sha256": "193c71e422e3719d44c421378c1af57a433f73329afe1467319bc28113938f54",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536546",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "34520",
+      "1791132405381380269",
+      "1791132405400380676"
+    ],
+    "stable9": true
+  },
+  "candidate": {
+    "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/manifest.json",
+    "bytes": 32692,
+    "sha256": "82773d86edb14c70f82a7f5f3b31c9fb217b4097435596c93be786d697751374",
+    "identity9_decimal_strings": [
+      "2050",
+      "5010675",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32692",
+      "1791132364835513228",
+      "1791132364854513635"
+    ],
+    "stable9": true
+  },
+  "baseline": {
+    "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/manifest.json",
+    "bytes": 29378,
+    "sha256": "73f4db4fc8427e718dd5c2bc6991a7bf59d1f4dbfb775a61877923a761cdf39d",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980643",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "29378",
+      "1791130808528481691",
+      "1791130808551283927"
+    ],
+    "stable9": true
+  },
+  "decision": "REJECT_CONNECTED_BUDGET_CLOSURE_PRESERVE_SCOPED_CREDITS",
+  "review_work_complete": true,
+  "acceptance_done_when": false,
+  "scoped_credits": [
+    "carrier dispatch4-map/0-map and cumulative existing envelope subtraction",
+    "one-arg own_prepare plus optional reads and actual before_scan",
+    "owned DATA/foreign+builtins SUPPORT and historical frame phase",
+    "native capture guard/group22 MOVE and safe error retention",
+    "exact A257 hash two-hunk connected rejoin"
+  ],
+  "rejection": {
+    "grouped_root": "existing C2-R1D prospective explicit scan coverage",
+    "findings": [
+      "Source retained-list consumer header/traceback/error/Source passes not prospectively debited",
+      "actual Source-facing native namespace/support probe/reuse scans lack full-count prospective allowance"
+    ],
+    "smallest_correction": "Charge actual full consumer pass and actual namespace/support probes before their walks from same original carrier/Root; preserve cases/limits/aliases/end rules.",
+    "new_grouped_roots": 0
+  },
+  "residuals": {
+    "ordinary_native_error_end": "OPEN; retention is not completed transfer",
+    "Source_ABI": "NOT_RUN",
+    "physical_whole_cost": "UNKNOWN_NOT_ZERO",
+    "required_full_workload_fit": "UNCONFIRMED",
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false
+  },
+  "proof": {
+    "candidate57_SHA9": true,
+    "baseline57_SHA9_at_intake": true,
+    "lab57_SHA9_at_intake": true,
+    "final_candidate57_SHA9": true,
+    "final_baseline57_identity9_unchanged": true,
+    "final_lab57_identity9_unchanged": true,
+    "final_Source_inventory_exact": true,
+    "declared36_forward_inverse_exact": true,
+    "minimal_non_equal_opcodes": 59,
+    "hash_two_hunk_forward_inverse_exact": true,
+    "lab_other56_exact": true,
+    "final_pin_checks": 77
+  },
+  "timing": {
+    "accepted_msk": "2026-10-04T19:49:06.737364+03:00",
+    "review_integrity_verified_msk": "2026-10-04T19:58:21.292341+03:00",
+    "artifacts_sealed_msk": "2026-10-04T19:58:59.837775+03:00",
+    "completed_msk": "RECORDED_IN_RESULT_AFTER_FINAL_MANIFEST_VERIFICATION",
+    "elapsed_seconds": "RECORDED_IN_RESULT"
+  },
+  "resources": {
+    "budget": {
+      "wall_seconds": 2400,
+      "seal_reserve_seconds": 300,
+      "read_bytes": 268435456,
+      "RAM_bytes": 8589934592,
+      "output_bytes": 33554432,
+      "local_concurrency": 4,
+      "children": 0,
+      "heavy_runs": 0
+    },
+    "instrumented_host_read_bytes_lower_bound": 22501513,
+    "host_total_read_bytes": null,
+    "host_total_read_class": "UNKNOWN_NOT_ZERO: shell reads/helper loading/tool transport/final manifest/result reads additional; no exact total or zero assertion.",
+    "audit_host_peak_rss_bytes": 611573760,
+    "whole_turn_peak_RSS": null,
+    "artifact_output_bytes_before_manifest": 252838,
+    "Source_execution": 0,
+    "Source_edits": 0,
+    "network": 0,
+    "children": 0,
+    "heavy_runs": 0
+  },
+  "boundaries": {
+    "Source_parser": false,
+    "Source_import_or_execution": false,
+    "compiler": false,
+    "tests": false,
+    "Root_live": false,
+    "foreign_host_script_execution": false,
+    "stopped_SOL107_draft_read": false,
+    "stopped_SOL107_resume": false,
+    "guard_bypass": false,
+    "restricted_controls": "ABSTRACT_HASH_ONLY",
+    "required": true,
+    "waiver": false
+  }
+}

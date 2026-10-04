@@ -1,0 +1,31 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "active_sol111_output_read": false,
+  "changed": [
+    "native/publisher_root_entry.c",
+    "source/observer.py",
+    "source/selected_owned_values.py"
+  ],
+  "child_acceptance_claimed": false,
+  "classification": {
+    "code": [
+      "returned alias published before instance metadata",
+      "unconfirmed recovery stays STOP",
+      "phase 3 excluded from full DATA and retirement"
+    ],
+    "evidence": "literal forward and inverse replay against LAB948",
+    "qualification": "NOT_RUN"
+  },
+  "compiler_abi": "NOT_RUN",
+  "decision": "REJOINED_LAB948_MAPPING_RETURN_RECOVERY_UNKNOWN_END_WHOLE_ADMISSION_OPEN",
+  "execution": "NOT_RUN",
+  "fit": "UNCONFIRMED",
+  "lab948_preserved": true,
+  "lab949_overlaid": false,
+  "native_cost": "UNKNOWN_NOT_ZERO",
+  "schema": "friday.lab950.integration.v1",
+  "self_acceptance": false,
+  "stopped_sol107_output_read": false
+}

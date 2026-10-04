@@ -1,0 +1,15 @@
+{
+  "schema":"friday.a087.exact-mandatory-scope-preservation.v1",
+  "input_manifest":"INPUT-A079-MANIFEST.json",
+  "input_manifest_sha256":"395c6e3e0ba12324e158730d5918a1bf77e61fea95a23ba3d2b62f6bdd1dd674",
+  "exact_maps":{"216_plus8":{"file":"A071-CONTROL-COVERAGE.json","sha256":"615c6db31e76e053bbb91972b29051595f997bfc4d653f44850b89a073418d4c","inherited":216,"A051":8,"integration":"SEPARATE_UNRESOLVED_NOT_RUN"},"original_mode4_and5_HTTP_and63_guard_and_current9":{"file":"A071-FULL-CONTROLS.py","bytes":"EXACT_INPUT_SHA_BOUND_BY_DELTA_COMPLEMENT_AND_MANIFEST","original_mode":4,"HTTP_negatives":5,"guards":63,"new_runtime_DATA":9},"bill":{"file":"A071-BILL.json","sha256":"b9173a3b8eac8d0bd255081cd01fdd76f809601bcca70dccf8ba10c884e47ef5"}},
+  "unchanged_contract_counts":{"source_pins":19,"source_seal_guard_cases":18,"OS":9,"image":17,"source_OS_image_guards":63,"runtime_manifest_fd":117,"same_actual_image_fd":111},
+  "new_native_source_cases":44,"new_cases_replace_no_old_obligation":true,
+  "whole_original_sources":"All current changed original Sources archived byte-identically as INPUT-A079-CURRENT-*; unchanged Source complement and all UPSTREAM-A066-SNAPSHOT-* retained under exact original bytes.",
+  "original_limits":{"GET":3,"copies":0,"regular_files":6,"directories":3,"workers_global":4,"aggregate_RSS":268435456,"wall_sec":1200,"reserve_sec":60,"connect_sec":15,"request_sec":300,"header_bytes":65536,"body_bytes":956301312,"disk_bytes":2147483648,"retries":0},
+  "native_controls_limits":{"outer_AS":67108864,"inner":201326592,"coordinator_and_worker_AS_each":50331648,"outer_pids":1,"inner_pids":4,"wall_sec":180,"reserve_sec":10,"output_each":1048576,"GET":0,"body_files":0},
+  "historical_unsafe":"Inert copied Source/DATA only; no attack/payload/exploit/vulnerability reproduction was implemented or run.",
+  "all_runtime_native_browser_GET_image_216_gate_release":"NOT_RUN_NOT_PROVEN",
+  "Root_image_or_current_grant_absence_is_source_bug":false,
+  "full_native_cause_closed":false,"SourceReady":false,"F10_waiver":false,"GO":false
+}

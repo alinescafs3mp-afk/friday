@@ -1,0 +1,40 @@
+{
+  "files": [
+    {
+      "bytes": 3870,
+      "path": "byte-partitions.json",
+      "sha256": "ff330baa9fb4bc4fbcc6332fa54046b815019328724d8af10db3aa20fe6cf33a"
+    },
+    {
+      "bytes": 3074,
+      "path": "native/scanner_selected_parent.h",
+      "sha256": "5be5774c0640d63eba627ea142d4551290ee25925c03ef1458eb3002d2fc89ee"
+    },
+    {
+      "bytes": 190300,
+      "path": "native/source_owner.c",
+      "sha256": "92a7a8298f4c3390e83b33936755f63e0f608bdbff878f379ddbd9f960fa3493"
+    },
+    {
+      "bytes": 42602,
+      "path": "snapshot52.json",
+      "sha256": "fc8e10fe9e5869f34f7d1a61a58afbcbe879e9f0f762084ef3702ddb421a978a"
+    },
+    {
+      "bytes": 6396,
+      "path": "source-package.json",
+      "sha256": "f980478be8d663d5da00137e4835e6e98747b2e928fc52718951bb684ee4ab69"
+    },
+    {
+      "bytes": 5358,
+      "path": "static-obligations.json",
+      "sha256": "60a7bf18567456029db696b387066130d8dbde89b602865f4fb8dd83f2d73aa7"
+    },
+    {
+      "bytes": 2759,
+      "path": "result.json",
+      "sha256": "272c7e5a373523899fc38e5d45666d34b15230469626b8f95b21b1ae3bd4b295"
+    }
+  ],
+  "schema": "friday.grok.lab887.a203-pathset.v1"
+}

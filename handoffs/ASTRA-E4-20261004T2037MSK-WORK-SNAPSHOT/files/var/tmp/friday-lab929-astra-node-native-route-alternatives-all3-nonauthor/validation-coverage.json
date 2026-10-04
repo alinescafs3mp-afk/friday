@@ -1,0 +1,409 @@
+{
+  "method": "Pinned OSError_str and BaseException_str routes compared with the candidate set. No Source import or execution.",
+  "runtime": "NOT_RUN",
+  "schema": "friday.lab929.validation-coverage.v1",
+  "source_executed": false,
+  "vector_count": 16,
+  "vectors": [
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        23,
+        31,
+        17
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 17,
+      "id": "ordinary-absent-filenames",
+      "longer_alternative_charged": false,
+      "lower": 17,
+      "max_candidate_not_charged": true,
+      "max_workspace_codepoints": 132,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "stem",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 17
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        23,
+        31,
+        17
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 23,
+      "id": "stored-None-filename",
+      "longer_alternative_charged": false,
+      "lower": 17,
+      "max_candidate_not_charged": true,
+      "max_workspace_codepoints": 132,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "one",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 23
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        22,
+        30
+      ],
+      "candidate_names": [
+        "one",
+        "two"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 22,
+      "id": "absent-second-filename",
+      "longer_alternative_charged": false,
+      "lower": 22,
+      "max_candidate_not_charged": true,
+      "max_workspace_codepoints": 131,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "one",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 22
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        22,
+        30
+      ],
+      "candidate_names": [
+        "one",
+        "two"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 30,
+      "id": "stored-None-second-filename",
+      "longer_alternative_charged": false,
+      "lower": 22,
+      "max_candidate_not_charged": false,
+      "max_workspace_codepoints": 131,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "two",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 30
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        23,
+        31,
+        17
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 31,
+      "id": "both-stored-None",
+      "longer_alternative_charged": false,
+      "lower": 17,
+      "max_candidate_not_charged": false,
+      "max_workspace_codepoints": 132,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "two",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 31
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        30,
+        17
+      ],
+      "candidate_names": [
+        "two",
+        "stem"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 17,
+      "id": "second-field-ignored-with-null-first",
+      "longer_alternative_charged": false,
+      "lower": 17,
+      "max_candidate_not_charged": true,
+      "max_workspace_codepoints": 131,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "stem",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 17
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        30,
+        17
+      ],
+      "candidate_names": [
+        "two",
+        "stem"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 30,
+      "id": "second-field-used-with-stored-None-first",
+      "longer_alternative_charged": false,
+      "lower": 17,
+      "max_candidate_not_charged": false,
+      "max_workspace_codepoints": 131,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "two",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 30
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        26,
+        34,
+        20,
+        17
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem",
+        "fallback"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 20,
+      "id": "stored-None-errno",
+      "longer_alternative_charged": false,
+      "lower": 17,
+      "max_candidate_not_charged": true,
+      "max_workspace_codepoints": 135,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "stem",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 20
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        26,
+        34,
+        20,
+        17
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem",
+        "fallback"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 17,
+      "id": "deleted-errno-falls-back-to-original-args",
+      "longer_alternative_charged": false,
+      "lower": 17,
+      "max_candidate_not_charged": true,
+      "max_workspace_codepoints": 135,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "fallback",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 17
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        23,
+        31,
+        17,
+        0
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem",
+        "fallback"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 0,
+      "id": "empty-original-args",
+      "longer_alternative_charged": false,
+      "lower": 0,
+      "max_candidate_not_charged": true,
+      "max_workspace_codepoints": 139,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "fallback",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 0
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        23,
+        31,
+        17,
+        5
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem",
+        "fallback"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 5,
+      "id": "one-original-str-alias",
+      "longer_alternative_charged": false,
+      "lower": 5,
+      "max_candidate_not_charged": true,
+      "max_workspace_codepoints": 139,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "fallback",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 5
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        23,
+        31,
+        17,
+        0
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem",
+        "fallback"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 31,
+      "id": "empty-args-stored-None-both",
+      "longer_alternative_charged": false,
+      "lower": 0,
+      "max_candidate_not_charged": false,
+      "max_workspace_codepoints": 139,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "two",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 31
+    },
+    {
+      "actual_in_candidates": true,
+      "candidate_lengths": [
+        906,
+        914,
+        900
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem"
+      ],
+      "domain_lower_within_900": true,
+      "exact_all": true,
+      "expected_codepoints": 900,
+      "id": "actual-900-longer-alternatives-are-not-actual",
+      "longer_alternative_charged": false,
+      "lower": 900,
+      "max_candidate_not_charged": true,
+      "max_workspace_codepoints": 1151,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route": "stem",
+      "stock_text_matches_expected": true,
+      "type": "OSError",
+      "wire_lower_plus_delta": 900
+    },
+    {
+      "candidate_lengths": [
+        907,
+        915,
+        901
+      ],
+      "candidate_names": [
+        "one",
+        "two",
+        "stem"
+      ],
+      "exact_all": true,
+      "first_fault_retained": true,
+      "id": "actual-901-refuses-original-domain",
+      "longer_alternative_charged": false,
+      "lower": 901,
+      "max_workspace_codepoints": 1152,
+      "refusal": "lower_above_900_before_debit_and_before_str",
+      "retry": false,
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_route_codepoints": 901,
+      "stock_route_if_reached": "stem",
+      "type": "OSError"
+    },
+    {
+      "expected_codepoints": 22,
+      "expected_within_900": true,
+      "id": "nonascii-original-route-stays-enabled",
+      "preview": "NONE_RESIDUAL_STR_STAYS_ENABLED",
+      "prospective_full_factory_admission": "STILL_REQUIRED_NOT_PROVEN",
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "type": "OSError"
+    },
+    {
+      "expected_codepoints": 18,
+      "expected_within_900": true,
+      "id": "unknown-nonalias-factory-stays-original",
+      "preview": "NONE_RESIDUAL_STR_STAYS_ENABLED",
+      "prospective_full_factory_admission": "STILL_REQUIRED_NOT_PROVEN",
+      "runtime": "NOT_RUN",
+      "source_executed": false,
+      "stock_text_matches_expected": true,
+      "type": "BaseException",
+      "wire": "residual_single_debit_of_actual_length_after_str"
+    }
+  ]
+}

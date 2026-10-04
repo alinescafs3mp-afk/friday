@@ -1,0 +1,25 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "closed_in_source": [
+    "A failed retained recovery does not relabel a returned constructor as a factory failure.",
+    "The first error stays, and a confirmed return keeps the native, creation, and Source aliases.",
+    "Unresolved publication is an explicit STOP. The constructor is not run again and the clock check stays.",
+    "Phase 3 is not full mapping DATA and cannot pass ordinary retirement.",
+    "CURRENT phase 1 keeps 16 edges and the live buffer. RETIRED phase 2 keeps 15 edges and the historical bytes.",
+    "Prebirth, normal return, keeper order, confirmed historical close, and unknown-close retention credits stay."
+  ],
+  "decision": "REJOINED_LAB948_MAPPING_RETURN_RECOVERY_UNKNOWN_END_WHOLE_ADMISSION_OPEN",
+  "execution": "NOT_RUN",
+  "fit": "UNCONFIRMED",
+  "schema": "friday.lab950.inert-obligations.v1",
+  "self_acceptance": false,
+  "still_open": [
+    "First-field and creation-slot failure limits stay explicit.",
+    "SOL109 C2-R1D consumer-pass and namespace-probe rejections stay open. LAB949 was not overlaid.",
+    "Astra's native whole error-end graph stays open.",
+    "C2 full required widths, compiler ABI, workload fit, and gates stay open.",
+    "Sol107 child output was not read. Whole admission and LAB-937 native residuals stay open."
+  ]
+}

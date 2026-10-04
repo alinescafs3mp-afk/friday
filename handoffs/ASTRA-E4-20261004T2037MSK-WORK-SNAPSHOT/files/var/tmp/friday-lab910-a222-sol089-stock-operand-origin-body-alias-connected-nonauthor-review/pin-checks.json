@@ -1,0 +1,2770 @@
+{
+  "declaration_count": 148,
+  "historical_stamp_equal_now_unequal": 32,
+  "pins": [
+    {
+      "bytes": 6137,
+      "exact_decimal_strings": [
+        "2050",
+        "8532468",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6137",
+        "1791000797379193038",
+        "1791000797427195797"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A215-SENDER-ACTUAL-SELECTOR-SUPPLIER-CONNECTED-DECISION-20261003.json",
+      "sha256": "5445ae61ee8f972b3ae0261f45d00af70fdf24f83573f3a55a6b9900ed3e7b8a"
+    },
+    {
+      "bytes": 5084,
+      "exact_decimal_strings": [
+        "2050",
+        "8533572",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5084",
+        "1791013180111960457",
+        "1791013180158963147"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A220-CONNECTED-SENDER-SOURCE-AUTHORITY-B09-ORIGIN-DECISION-20261003.json",
+      "sha256": "8bdf56714a825eea983e9d186db10708cf6f5ec011665e8a4def7597ec1b9e27"
+    },
+    {
+      "bytes": 16712,
+      "exact_decimal_strings": [
+        "2050",
+        "8533413",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16712",
+        "1791010407398138431",
+        "1791010407453141588"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB905-SENDER-STOCK-FENCE-DECISION-RESULT-RECEIVED-20261003.json",
+      "sha256": "9921d41352b6d057751b9787c23979b79650636c8ab14644de928f87f85ce39c"
+    },
+    {
+      "bytes": 19903,
+      "exact_decimal_strings": [
+        "2050",
+        "8533432",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19903",
+        "1791011064678845631",
+        "1791011064742849301"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB906-SENDER-SAFE-SOURCE-REFUSAL-RESULT-RECEIVED-20261003.json",
+      "sha256": "4da8cb67519ec6f6f8234eab85f7ea49b6eb931bcd0523542044cc21ee2715a6"
+    },
+    {
+      "bytes": 17521,
+      "exact_decimal_strings": [
+        "2050",
+        "8532876",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17521",
+        "1790922427468744112",
+        "1790922427541748292"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL056-INPUT-20261002.json",
+      "sha256": "7bcca525493ca9f8b87fcc4183165ba5902bc9d97a612ad40817b4771ad1b925"
+    },
+    {
+      "bytes": 112673,
+      "exact_decimal_strings": [
+        "2050",
+        "8533508",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "112673",
+        "1790930308389919633",
+        "1790930308447922953"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL059-INPUT-20261002.json",
+      "sha256": "e65087d9f517357af913ef934d8807113a7a12de18d4d9e5b4f96f70ca13f9ce"
+    },
+    {
+      "bytes": 77393,
+      "exact_decimal_strings": [
+        "2050",
+        "8533604",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "77393",
+        "1790936235619702887",
+        "1790936235693707133"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL061-INPUT-20261002.json",
+      "sha256": "46f42cb7815efda6f88bad90b428de081c5d08ef10960a6d0f7ec9a5ec90010a"
+    },
+    {
+      "bytes": 10338,
+      "exact_decimal_strings": [
+        "2050",
+        "8532103",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10338",
+        "1790999804739273610",
+        "1790999804821278311"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL082-SENDER-CONNECTED-SOURCE-RESULT-RECEIVED-20261003.json",
+      "sha256": "7d6ece71682eeeedd5139069632cd67c25ec65a72831d59957287415f6b59115"
+    },
+    {
+      "bytes": 10548,
+      "exact_decimal_strings": [
+        "2050",
+        "8533726",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10548",
+        "1791013245984729456",
+        "1791013246031732145"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-INPUT-20261003.json",
+      "sha256": "d12c2331c1b7b59494c86f42f8195cd1255bc0622e47ee4500ad2bff3d4b23d4"
+    },
+    {
+      "bytes": 1917,
+      "exact_decimal_strings": [
+        "2050",
+        "8533703",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1917",
+        "1791013187314372553",
+        "1791013187314372553"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-PRE-TASK-COMPACT-20261003.json",
+      "sha256": "533494553bbd0be6adaf2b8ae3f48199fbeb552da145ce7026718419e7c70d2b"
+    },
+    {
+      "bytes": 1836,
+      "exact_decimal_strings": [
+        "2050",
+        "8533875",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1836",
+        "1791015686993595052",
+        "1791015686993595052"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-RESULT.json",
+      "sha256": "b7dea7c2879fb718f665b0e2e30b20667316e389e2b8c9974abdadade904a7b5"
+    },
+    {
+      "bytes": 175361,
+      "exact_decimal_strings": [
+        "2050",
+        "8533910",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "175361",
+        "1791015820762264548",
+        "1791015820831268504"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-SOURCE-RESULT-RECEIVED-20261003.json",
+      "sha256": "1282f9098702745a9b7a03b8991f65be10e8020a57ae64f8ec93518a8f1ddbc7"
+    },
+    {
+      "bytes": 19457,
+      "exact_decimal_strings": [
+        "2050",
+        "7604505",
+        "33188",
+        "0",
+        "0",
+        "1",
+        "19457",
+        "1787222518000000000",
+        "1789010692739996393"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000644",
+      "nlink": 1,
+      "path": "/usr/lib/python3.14/selectors.py",
+      "sha256": "4b8a60cfbb619d080f87dffe1578372e56e8c0ac826f043224a154cf7b77606d"
+    },
+    {
+      "bytes": 7280,
+      "exact_decimal_strings": [
+        "2050",
+        "4225642",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7280",
+        "1790956169985900491",
+        "1790956169985900491"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/manifest/manifest.json",
+      "sha256": "fd00045ff696d9c2e19782ec14bdbf7d24dcb78ec245ec2189c67869fbb30404"
+    },
+    {
+      "bytes": 65491,
+      "exact_decimal_strings": [
+        "2050",
+        "4225618",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "65491",
+        "1790956169964899288",
+        "1790956169964899288"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/caller.py",
+      "sha256": "ff6fd365165a3e94971aabb546d051e1c7cbd313273a1b8917aab0ab1bdb43cc"
+    },
+    {
+      "bytes": 30313,
+      "exact_decimal_strings": [
+        "2050",
+        "4225619",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30313",
+        "1790956169966899404",
+        "1790956169966899404"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/controller.py",
+      "sha256": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9"
+    },
+    {
+      "bytes": 38131,
+      "exact_decimal_strings": [
+        "2050",
+        "4225620",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "38131",
+        "1790956169967899461",
+        "1790956169967899461"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/native_grammar.py",
+      "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853"
+    },
+    {
+      "bytes": 91473,
+      "exact_decimal_strings": [
+        "2050",
+        "4225621",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "91473",
+        "1790956169968899518",
+        "1790956169968899518"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/ordinary_root_consumers.py",
+      "sha256": "27e0f17855fe4945a52aeee9da29829e290406271d3ff9f1c16e7f08a546fafc"
+    },
+    {
+      "bytes": 1963,
+      "exact_decimal_strings": [
+        "2050",
+        "4225622",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1963",
+        "1790956169969899575",
+        "1790956169969899575"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/receipt_physical.py",
+      "sha256": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17"
+    },
+    {
+      "bytes": 115169,
+      "exact_decimal_strings": [
+        "2050",
+        "4225623",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "115169",
+        "1790956169970899632",
+        "1790956169970899632"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/root_native_launcher.py",
+      "sha256": "567fd7b16329ddb8987413b986ae5086b733367d8b5dccec62c3d2875b8eeff6"
+    },
+    {
+      "bytes": 127594,
+      "exact_decimal_strings": [
+        "2050",
+        "4225624",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "127594",
+        "1790956169971899690",
+        "1790956169971899690"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/source_grammar.py",
+      "sha256": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a"
+    },
+    {
+      "bytes": 65443,
+      "exact_decimal_strings": [
+        "2050",
+        "4225634",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "65443",
+        "1790956169972899747",
+        "1790956169972899747"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab873-lab870-r02-sender-whole54-all96-all32-all7-connected-source-closure/source/staged_sender.py",
+      "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f"
+    },
+    {
+      "bytes": 1214,
+      "exact_decimal_strings": [
+        "2050",
+        "4226879",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1214",
+        "1790996661665123584",
+        "1790996661665123584"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/manifest/manifest.json",
+      "sha256": "3640d1973ef956cadbad7efa11ae91343f132631931beb9e21494eb188b1aac9"
+    },
+    {
+      "bytes": 93844,
+      "exact_decimal_strings": [
+        "2050",
+        "4226873",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "93844",
+        "1790996661665123584",
+        "1790996661665123584"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-lab896-a212-sender-method-error-selector-connected-source-closure/source/ordinary_root_consumers.py",
+      "sha256": "814db7af6a4183f5e7ff1f389ffea65a0ef5a02e4e21faa048350d3cca8d6e81"
+    },
+    {
+      "bytes": 2784,
+      "exact_decimal_strings": [
+        "2050",
+        "4225336",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2784",
+        "1790938372748136833",
+        "1790938372748136833"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/README.txt",
+      "sha256": "1c1dda6ad07c0570c7ab050cad98d062d96ad43fb313a33d445e4ba7ee693fa1"
+    },
+    {
+      "bytes": 7799,
+      "exact_decimal_strings": [
+        "2050",
+        "4225337",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7799",
+        "1790938372749136891",
+        "1790938372749136891"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/RESIDUAL.txt",
+      "sha256": "00eccc0fc64e364d38a425fa1785cf7d2a14a1ea6548cfe0fa66549707a6911d"
+    },
+    {
+      "bytes": 8936,
+      "exact_decimal_strings": [
+        "2050",
+        "4225339",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8936",
+        "1790936827110631932",
+        "1790936827110631932"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/README.contract.md",
+      "sha256": "7a6f9736ccad60983f1b27d377873431ef17ac20bf258cbc8d795f9c286a6170"
+    },
+    {
+      "bytes": 406,
+      "exact_decimal_strings": [
+        "2050",
+        "4225341",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "406",
+        "1790936827110631932",
+        "1790936827110631932"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/download-only-provenance.v1.json",
+      "sha256": "5e3cee8f577ab81df7152e331fe7790c0fade27f4ee09c4e452d7cfbdc2a227e"
+    },
+    {
+      "bytes": 516,
+      "exact_decimal_strings": [
+        "2050",
+        "4225342",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "516",
+        "1790936827111631989",
+        "1790936827111631989"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/live-one-attempt.v1.json",
+      "sha256": "d805e38f99482bd430280f7605f9af0e1ac69017493b2402a429b91389f28049"
+    },
+    {
+      "bytes": 368,
+      "exact_decimal_strings": [
+        "2050",
+        "4225343",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "368",
+        "1790936827112632046",
+        "1790936827112632046"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/private-source-preparation.v1.json",
+      "sha256": "bd08daf3e720ff54bfc93fa0509230dcb96dda8d2206dd76af851db8dc6b3a5b"
+    },
+    {
+      "bytes": 459,
+      "exact_decimal_strings": [
+        "2050",
+        "4225344",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "459",
+        "1790936827114283291",
+        "1790936827114283291"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/revoke-remove.v1.json",
+      "sha256": "0eb6bc5e2cd8ddf66ad150a030c111852bb29198087c60ad1f81a5b2476764c6"
+    },
+    {
+      "bytes": 593,
+      "exact_decimal_strings": [
+        "2050",
+        "4225345",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "593",
+        "1790936827114928328",
+        "1790936827114928328"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/effects/root-install.v1.json",
+      "sha256": "c298d52846b89373eb8930b1fc7225ffaa8307f7fba0c85b31ba471bf48e6bc0"
+    },
+    {
+      "bytes": 7077,
+      "exact_decimal_strings": [
+        "2050",
+        "4225348",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7077",
+        "1790936827114928328",
+        "1790936827114928328"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/fixtures/coordination/finalize_reports.py",
+      "sha256": "abd305b3985096fafa7e6ab5299ae1a49cdd94edd188e4acd3cde8594d28d68b"
+    },
+    {
+      "bytes": 9912,
+      "exact_decimal_strings": [
+        "2050",
+        "4225350",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9912",
+        "1790936827115632218",
+        "1790936827115632218"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/affected-check-plan.v1.json",
+      "sha256": "4555a0cd305d799abe32d9243af9f20264c75db361bc44f31188b266a68f653f"
+    },
+    {
+      "bytes": 4227,
+      "exact_decimal_strings": [
+        "2050",
+        "4225351",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4227",
+        "1790938092538541328",
+        "1790938092538541328"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/attempt-runtime.v1.md",
+      "sha256": "0544f43e28eaebc9cb481ea86951218dacc246b0752d202247ad8fffceee0a0a"
+    },
+    {
+      "bytes": 1783,
+      "exact_decimal_strings": [
+        "2050",
+        "4225352",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1783",
+        "1790936827117956502",
+        "1790936827117956502"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/consumed-attempt.v1.md",
+      "sha256": "ba17e96bc2101232439d4e94b8dec3e852907b4d2cacd6c63f4ca00e08316ea7"
+    },
+    {
+      "bytes": 4139478,
+      "exact_decimal_strings": [
+        "2050",
+        "4225353",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4139478",
+        "1790936827118714046",
+        "1790936827118714046"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/control-inventory.v1.json",
+      "sha256": "e7255f04bc4fa806960fcca79b6b37b67202417170ed59c3b9101863e3e91224"
+    },
+    {
+      "bytes": 17092,
+      "exact_decimal_strings": [
+        "2050",
+        "4225354",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17092",
+        "1790936827120632504",
+        "1790936827120632504"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/inherited-evidence-pins.v1.json",
+      "sha256": "22a2b9e35f00115a9d5e4b854504544b48df863d83edfaf40ac158ddc5abb8e4"
+    },
+    {
+      "bytes": 5235,
+      "exact_decimal_strings": [
+        "2050",
+        "4225355",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5235",
+        "1790936827121632562",
+        "1790936827121632562"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/install-grant.v1.md",
+      "sha256": "9a4f1eaa41f8c2ce9f31bc28cbdaf8cd1468a6a3561853861bac3b90466557d9"
+    },
+    {
+      "bytes": 6965,
+      "exact_decimal_strings": [
+        "2050",
+        "4225356",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6965",
+        "1790936827122632619",
+        "1790936827122632619"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/install-journal.v1.md",
+      "sha256": "6d1a0aa7e77598fec73b4c594a712a679026d16313a5cd78dd0f1d8c839c476a"
+    },
+    {
+      "bytes": 2175,
+      "exact_decimal_strings": [
+        "2050",
+        "4225357",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2175",
+        "1790936827123632676",
+        "1790936827123632676"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/installed-authority.v1.md",
+      "sha256": "a4b8666e141c5376aba230c8df01c9b59f9b3eb8a58c34d3277e612a34d7002a"
+    },
+    {
+      "bytes": 1811,
+      "exact_decimal_strings": [
+        "2050",
+        "4225358",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1811",
+        "1790936827124632733",
+        "1790936827124632733"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/live-grant.v1.md",
+      "sha256": "4203704d06e50d19ecf2eadd41cdbf143a85c9ddd02d0ef6701b3d6999d3e792"
+    },
+    {
+      "bytes": 2771,
+      "exact_decimal_strings": [
+        "2050",
+        "4225359",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2771",
+        "1790936827125632791",
+        "1790936827125632791"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/material-provenance.v1.md",
+      "sha256": "9b1b072b51669e53d675455af8c7fb60cd8d8b9fcc38b05c2a366e0071488170"
+    },
+    {
+      "bytes": 1683,
+      "exact_decimal_strings": [
+        "2050",
+        "4225360",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1683",
+        "1790936827126632848",
+        "1790936827126632848"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/package-index.v1.md",
+      "sha256": "324c00248959483497c1f905951c303043d764b214168b94a367bb8c82bc7904"
+    },
+    {
+      "bytes": 6494,
+      "exact_decimal_strings": [
+        "2050",
+        "4225361",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6494",
+        "1790936827127632905",
+        "1790936827127632905"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/run-context.v1.md",
+      "sha256": "4c9ce9e7ae4eb467286cb0ccef921a87d9e7b436698564bd9dc8715ec2cf763a"
+    },
+    {
+      "bytes": 3097,
+      "exact_decimal_strings": [
+        "2050",
+        "4225362",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3097",
+        "1790936827128632963",
+        "1790936827128632963"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/snapshot-manifest.v1.md",
+      "sha256": "976a28d2364d58738593007746716d744febb0c5c335da80791be00a194b9313"
+    },
+    {
+      "bytes": 6903,
+      "exact_decimal_strings": [
+        "2050",
+        "4225363",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6903",
+        "1790936827130200307",
+        "1790936827130200307"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/terminal-evidence.v1.md",
+      "sha256": "ddc74ba41279d9067c5196514cf64c656ef581e7ffc919ac5dc5bfe2f2319ea0"
+    },
+    {
+      "bytes": 19305,
+      "exact_decimal_strings": [
+        "2050",
+        "4225365",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19305",
+        "1790936827130200307",
+        "1790936827130200307"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/archive.py",
+      "sha256": "2822df686a34ae2af042e04720600d1b6e5aecac023aa242878e62aaec1db1cf"
+    },
+    {
+      "bytes": 5879,
+      "exact_decimal_strings": [
+        "2050",
+        "4225366",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5879",
+        "1790936827130633077",
+        "1790936827130633077"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/assemble.py",
+      "sha256": "48a1ee891a42bf99ec365de40d7db956c3239ccf993b1786dca7db29861836c8"
+    },
+    {
+      "bytes": 29243,
+      "exact_decimal_strings": [
+        "2050",
+        "4225367",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "29243",
+        "1790936827131633134",
+        "1790936827131633134"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/broker_bootstrap.py",
+      "sha256": "c2c0e5bc9933321cb876201ee617aed05f071a71d373c2e0db5ce0498e4f7057"
+    },
+    {
+      "bytes": 34872,
+      "exact_decimal_strings": [
+        "2050",
+        "4225368",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "34872",
+        "1790936827133352688",
+        "1790936827133352688"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/broker_runtime.py",
+      "sha256": "225f8443684ad884f25088bb94cd1d3e02765a41a440d2e5840298595a4788aa"
+    },
+    {
+      "bytes": 7703,
+      "exact_decimal_strings": [
+        "2050",
+        "4225369",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7703",
+        "1790936827134081530",
+        "1790936827134081530"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/canonical.py",
+      "sha256": "94c4a2dbb31991bdd942a6baf366f19d286c3aa052c3031fd827f01c9340596b"
+    },
+    {
+      "bytes": 51535,
+      "exact_decimal_strings": [
+        "2050",
+        "4225370",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51535",
+        "1790936827134868576",
+        "1790936827134868576"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/custody_linux.py",
+      "sha256": "01713b1a5b0e38d0e33d45b23c4cfc5d449fb1bfcba48f0c87b42d57315b78e7"
+    },
+    {
+      "bytes": 85227,
+      "exact_decimal_strings": [
+        "2050",
+        "4225371",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "85227",
+        "1790936827135629819",
+        "1790936827135629819"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/install.py",
+      "sha256": "9bccaedf309d7fc1f0eeb9de5a3856a83e6236f431a060ef037936c60c2bb9d2"
+    },
+    {
+      "bytes": 40651,
+      "exact_decimal_strings": [
+        "2050",
+        "4225372",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "40651",
+        "1790936827135633363",
+        "1790936827135633363"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/install_bootstrap.py",
+      "sha256": "a8a488c43287dd8c990dc2fd4a16d6285afcd0d2fec34a19448228e8fb1d48fb"
+    },
+    {
+      "bytes": 8224,
+      "exact_decimal_strings": [
+        "2050",
+        "4225373",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8224",
+        "1790936827136633420",
+        "1790936827136633420"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/ledger.py",
+      "sha256": "0d37911c174e323d1e68ac046da0e03d7558bb46f0426a2ce25f15ef34d957f1"
+    },
+    {
+      "bytes": 24342,
+      "exact_decimal_strings": [
+        "2050",
+        "4225374",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24342",
+        "1790936827138347875",
+        "1790936827138347875"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/manifest.py",
+      "sha256": "12a666597c02e77ed42e5f799d3b909ea3fb90378d749a36d71520c1c5ae52f5"
+    },
+    {
+      "bytes": 36129,
+      "exact_decimal_strings": [
+        "2050",
+        "4225375",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "36129",
+        "1790936827139304231",
+        "1790936827139304231"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/pinned_fs.py",
+      "sha256": "da0d681df4cf1eb69851c183fa23061b2f928743be7b785b16859f5ff8747bcc"
+    },
+    {
+      "bytes": 23701,
+      "exact_decimal_strings": [
+        "2050",
+        "4225376",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23701",
+        "1790936827140076275",
+        "1790936827140076275"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/provenance.py",
+      "sha256": "2f4614a31fca46a27604680bf6d5b08ba8b9b3bdd9061a0ea9fcefef867721e4"
+    },
+    {
+      "bytes": 905,
+      "exact_decimal_strings": [
+        "2050",
+        "4225377",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "905",
+        "1790936827140776816",
+        "1790936827140776816"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/recover.py",
+      "sha256": "a4a419493f9b546926051c7f98a51bb0f1f824d95c1a5f907e4bf2ccd1031b4a"
+    },
+    {
+      "bytes": 11133,
+      "exact_decimal_strings": [
+        "2050",
+        "4225378",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11133",
+        "1790936827141816175",
+        "1790936827141816175"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/src/uninstall.py",
+      "sha256": "e124b9dbbb32716a521185bb53c6a7d834e0e2c416efb4cea80abb53cc98d366"
+    },
+    {
+      "bytes": 160,
+      "exact_decimal_strings": [
+        "2050",
+        "4225380",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "160",
+        "1790936827141816175",
+        "1790936827141816175"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/templates/friday-quality-gate.sudoers.in",
+      "sha256": "c750a01854e0905fef54b28871008b37447d08a4c63bebdac1633be4d5f875cd"
+    },
+    {
+      "bytes": 9574,
+      "exact_decimal_strings": [
+        "2050",
+        "4225382",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9574",
+        "1790936827142633764",
+        "1790936827142633764"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/admission_custodian.py",
+      "sha256": "bd83161d5d2b75aeedb50b6d1b887f9f78ef169eb5d9ab66ead370b0789d6864"
+    },
+    {
+      "bytes": 43302,
+      "exact_decimal_strings": [
+        "2050",
+        "4225383",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "43302",
+        "1790936827143633821",
+        "1790936827143633821"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/close_package.py",
+      "sha256": "e975a65d3e85d48af334d4598dcb672f3a0b7ea146d269353d37847b28ccaea9"
+    },
+    {
+      "bytes": 25268,
+      "exact_decimal_strings": [
+        "2050",
+        "4225384",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25268",
+        "1790936827145265173",
+        "1790936827145265173"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/execute_pair.py",
+      "sha256": "9c51275d386cbc7c13b5300603a54f051779c5c6ef4b7a055847120b2d8c1cb3"
+    },
+    {
+      "bytes": 47038,
+      "exact_decimal_strings": [
+        "2050",
+        "4225385",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47038",
+        "1790936827145937712",
+        "1790936827145937712"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/harness_selfcheck.py",
+      "sha256": "20cf1bf2d232a8093306c720cc1c75e3adbc9e3dd67fc159960f26482f5a4295"
+    },
+    {
+      "bytes": 21530,
+      "exact_decimal_strings": [
+        "2050",
+        "4225386",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21530",
+        "1790936827146692856",
+        "1790936827146692856"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/install_controls.py",
+      "sha256": "542e5f8580a1eaeb7d7b5991fbeb67d2a855372075325ea13e42da866d9c450e"
+    },
+    {
+      "bytes": 117673,
+      "exact_decimal_strings": [
+        "2050",
+        "4225387",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "117673",
+        "1790937669652022409",
+        "1790937669652022409"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/receipt_contract.py",
+      "sha256": "cf56e896e3c4f8444158b98aadbf95167bbc0a0611470171a04a43ff2513e570"
+    },
+    {
+      "bytes": 30194,
+      "exact_decimal_strings": [
+        "2050",
+        "4225388",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30194",
+        "1790936827148151640",
+        "1790936827148151640"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/run_tests.py",
+      "sha256": "835e63251186fb0f27a891af14d97d15486f00817aedb52e752b93056fdd8f47"
+    },
+    {
+      "bytes": 9623,
+      "exact_decimal_strings": [
+        "2050",
+        "4225389",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9623",
+        "1790936827148862181",
+        "1790936827148862181"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/support.py",
+      "sha256": "286d38accc22fafd92c8bf5a2c60849c14f31c96ab62047f3266038dddf0c151"
+    },
+    {
+      "bytes": 25422,
+      "exact_decimal_strings": [
+        "2050",
+        "4225390",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25422",
+        "1790936827149615524",
+        "1790936827149615524"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_archive.py",
+      "sha256": "ed4996cb5dc3865b231702ee81b7751260b6d428b1af4b9a680fde410d318546"
+    },
+    {
+      "bytes": 45495,
+      "exact_decimal_strings": [
+        "2050",
+        "4225391",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "45495",
+        "1790936827149634165",
+        "1790936827149634165"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_broker.py",
+      "sha256": "39f6f12ef1b2f49ea0a115139de47035477e79df8291d4c110de5e832cb88c4a"
+    },
+    {
+      "bytes": 10495,
+      "exact_decimal_strings": [
+        "2050",
+        "4225392",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10495",
+        "1790936827150634222",
+        "1790936827150634222"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_canonical.py",
+      "sha256": "173717c84586c05c6b943d9d29b6aa52faa82f6279341cee27f54a33746c3125"
+    },
+    {
+      "bytes": 54731,
+      "exact_decimal_strings": [
+        "2050",
+        "4225393",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "54731",
+        "1790936827152240475",
+        "1790936827152240475"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_custody.py",
+      "sha256": "ad256871e5299bbf7b28c5dbb89f9cbc8e596b0eff865457796aef90cce2cc52"
+    },
+    {
+      "bytes": 4158,
+      "exact_decimal_strings": [
+        "2050",
+        "4225394",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4158",
+        "1790936827153150927",
+        "1790936827153150927"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_effect_bills.py",
+      "sha256": "513caa87e90749cd686a1a3c32edbf9704ea65c78dc1e26bcd351f22d47a420c"
+    },
+    {
+      "bytes": 79615,
+      "exact_decimal_strings": [
+        "2050",
+        "4225395",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "79615",
+        "1790936827154038778",
+        "1790936827154038778"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_install_recovery.py",
+      "sha256": "b9d7a634f1e63b077cbfcf561e3e081e169579f702c871a48b6b6ba394c49673"
+    },
+    {
+      "bytes": 8721,
+      "exact_decimal_strings": [
+        "2050",
+        "4225396",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8721",
+        "1790936827155092839",
+        "1790936827155092839"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_ledger.py",
+      "sha256": "9e09199ab34217859416b25a451dd659fe873cf3d9f2f01e59e09b3ba1c85766"
+    },
+    {
+      "bytes": 47844,
+      "exact_decimal_strings": [
+        "2050",
+        "4225397",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47844",
+        "1790936827156009392",
+        "1790936827156009392"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_manifest.py",
+      "sha256": "1202130c8f44bc4288cb3df77f70fce0a4e5f0be4f1b71bf62b01a8ca1cd21bc"
+    },
+    {
+      "bytes": 27508,
+      "exact_decimal_strings": [
+        "2050",
+        "4225398",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27508",
+        "1790936827156826839",
+        "1790936827156826839"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_provenance.py",
+      "sha256": "699c6da03710b9360009a46e2b06acdc9a9ce047994de2bc5d9dfbfc40958e99"
+    },
+    {
+      "bytes": 33094,
+      "exact_decimal_strings": [
+        "2050",
+        "4225399",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "33094",
+        "1790936827157810395",
+        "1790936827157810395"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_uninstall.py",
+      "sha256": "15681dd81c69082c4c8536e69dfe86eb0019efd62487c3ed804e247f23b38511"
+    },
+    {
+      "bytes": 236701,
+      "exact_decimal_strings": [
+        "2050",
+        "4225400",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "236701",
+        "1790936827157810395",
+        "1790936827157810395"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/all32-current-matrix.json",
+      "sha256": "db7f0f11fdd5d91329ddc369edbf818e75aa41b6a5592d19417fab7dabdca2c4"
+    },
+    {
+      "bytes": 68368,
+      "exact_decimal_strings": [
+        "2050",
+        "4225401",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "68368",
+        "1790936827158634681",
+        "1790936827158634681"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/author-final-code-read-ledger.json",
+      "sha256": "93b45e5b385016641075c9c4e95380497cab541f275986de7ee0ff95c6b149e7"
+    },
+    {
+      "bytes": 43714,
+      "exact_decimal_strings": [
+        "2050",
+        "4225402",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "43714",
+        "1790936827159634738",
+        "1790936827159634738"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/closure-matrix.json",
+      "sha256": "eaca035ff85e31f7b8d23009d1ff77c76a9d29e0108c6542e9758fa626ebb870"
+    },
+    {
+      "bytes": 6018,
+      "exact_decimal_strings": [
+        "2050",
+        "4225403",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6018",
+        "1790936827160634795",
+        "1790936827160634795"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/consumer-interface-matrix.json",
+      "sha256": "115cce432b948de9258fe5e37534c42dea5c07c32d5c421d7c31ff2d4363e27b"
+    },
+    {
+      "bytes": 1741,
+      "exact_decimal_strings": [
+        "2050",
+        "4225404",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1741",
+        "1790936827161634852",
+        "1790936827161634852"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/cost-resource-custody-matrix.json",
+      "sha256": "0f1a58d9cfea2402c97c67118449791ac63568c6c2b351801baa0e8e41859361"
+    },
+    {
+      "bytes": 17177,
+      "exact_decimal_strings": [
+        "2050",
+        "4225405",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17177",
+        "1790936827162634909",
+        "1790936827162634909"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/effectful-method-body-correspondence.json",
+      "sha256": "8149c7932c4871c8dfad5810807513a5cd251d54a9b6a4376d03dedf81890b3b"
+    },
+    {
+      "bytes": 25868,
+      "exact_decimal_strings": [
+        "2050",
+        "4225406",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25868",
+        "1790936827163634967",
+        "1790936827163634967"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/frozen132-pure16-current.json",
+      "sha256": "8593ec452209cb78eba9b387b5bea9899c2c046a9ed91d588e21f515da70dab0"
+    },
+    {
+      "bytes": 116603,
+      "exact_decimal_strings": [
+        "2050",
+        "4225407",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "116603",
+        "1790936827165232322",
+        "1790936827165232322"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/full-byte-delta.json",
+      "sha256": "8b494b943c43b922eedc513d60d674687204c8aaa9e19145f5f18b54ec85a969"
+    },
+    {
+      "bytes": 40776,
+      "exact_decimal_strings": [
+        "2050",
+        "4885334",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "40776",
+        "1790938092557093095",
+        "1790938092557093095"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/index/full-source.json",
+      "sha256": "7e3c4bc1f24e7655dfd1f18798d77cc744fe6874081695aa652b6a0885d1a2db"
+    },
+    {
+      "bytes": 569581,
+      "exact_decimal_strings": [
+        "2050",
+        "5010469",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "569581",
+        "1790936827165635081",
+        "1790936827165635081"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-contracts/all32-contract-bindings.json",
+      "sha256": "81969f87e502a8f7fa56044830276bafe1af5c955e99d22b74014407d0c80142"
+    },
+    {
+      "bytes": 92081,
+      "exact_decimal_strings": [
+        "2050",
+        "5010470",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "92081",
+        "1790936827167635196",
+        "1790936827167635196"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-contracts/ordered-predicate-table.json",
+      "sha256": "f9a500ea7dfbfa106c352abd4e115d287eca450cf6ae9e42830e13352b621cc7"
+    },
+    {
+      "bytes": 12267,
+      "exact_decimal_strings": [
+        "2050",
+        "5135285",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12267",
+        "1790936827168635252",
+        "1790936827168635252"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/REVIEW.md",
+      "sha256": "cfc9f2734d89992d5e94a6eddca37b9f368d1a98efedd5241df9f349b58ba65b"
+    },
+    {
+      "bytes": 128219,
+      "exact_decimal_strings": [
+        "2050",
+        "5135286",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "128219",
+        "1790936827169635310",
+        "1790936827169635310"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/all32-classifications.json",
+      "sha256": "6ace31cec79affecd52db0711c6b9d1e9d51562230886b89fec8cab3c0110cdb"
+    },
+    {
+      "bytes": 10563,
+      "exact_decimal_strings": [
+        "2050",
+        "5135287",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10563",
+        "1790936827170635368",
+        "1790936827170635368"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/consumer-graph.json",
+      "sha256": "ca92b5d78bee63dfce8fd3b7be7eb5d5f4ad3720b64f259ea280440f3a1da09d"
+    },
+    {
+      "bytes": 3851,
+      "exact_decimal_strings": [
+        "2050",
+        "5135288",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3851",
+        "1790936827171635425",
+        "1790936827171635425"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/control-obligation-counts.json",
+      "sha256": "550683083ac2fa1837334a68227685523338714d41f6499e3b44f1fe8f5aa727"
+    },
+    {
+      "bytes": 47539,
+      "exact_decimal_strings": [
+        "2050",
+        "5135289",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47539",
+        "1790936827173103775",
+        "1790936827173103775"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/evidence-matrix.json",
+      "sha256": "7fc8b3ae05e9f71721eaa5e3f84ab363d9946a15891890df32838040273eddb5"
+    },
+    {
+      "bytes": 77053,
+      "exact_decimal_strings": [
+        "2050",
+        "5135290",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "77053",
+        "1790936827173950024",
+        "1790936827173950024"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/ordered-predicate-review.json",
+      "sha256": "721a957e345cc981b8d0e3437eed65086b32d8074d2f523566f7a764314e6008"
+    },
+    {
+      "bytes": 113358,
+      "exact_decimal_strings": [
+        "2050",
+        "5135291",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "113358",
+        "1790936827174722768",
+        "1790936827174722768"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/original32-causal-obligations.json",
+      "sha256": "c4d7c67e34206fd783e46eea010fb5e0fcad07efa9b8802b77be967c7a73bbf5"
+    },
+    {
+      "bytes": 35947,
+      "exact_decimal_strings": [
+        "2050",
+        "5135292",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "35947",
+        "1790936827175570917",
+        "1790936827175570917"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/resource-review.json",
+      "sha256": "dc9aea4f3cbaf54931b9a31e84b7f6f68586eb456521c28da5f819ceaebb732a"
+    },
+    {
+      "bytes": 121122,
+      "exact_decimal_strings": [
+        "2050",
+        "5135293",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "121122",
+        "1790936827176270057",
+        "1790936827176270057"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/whole54-classifications.json",
+      "sha256": "6726efbbe109096e6e241b42afe151cd5cb78857e031bf9d145086ab13084b92"
+    },
+    {
+      "bytes": 2023,
+      "exact_decimal_strings": [
+        "2050",
+        "4225410",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2023",
+        "1790936827177635768",
+        "1790936827177635768"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/method-body-read-ledger.json",
+      "sha256": "a099132e3a54a5c7509b96596a0c847cd43f12c190a5ebfa7581b7c2cf5f0e1a"
+    },
+    {
+      "bytes": 57476,
+      "exact_decimal_strings": [
+        "2050",
+        "4225411",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57476",
+        "1790936827178635825",
+        "1790936827178635825"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/original-input-current9.json",
+      "sha256": "1418b938657e1953d1635b6a45c3d27b93d606cb6df12525e1a195a2b6d9065d"
+    },
+    {
+      "bytes": 35403,
+      "exact_decimal_strings": [
+        "2050",
+        "4225412",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "35403",
+        "1790936827179635883",
+        "1790936827179635883"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/package-read-ledger.json",
+      "sha256": "7be354bc1eabe09a86553572c9283c1ef2bb8188d9a41531dc683906332d30b3"
+    },
+    {
+      "bytes": 2050,
+      "exact_decimal_strings": [
+        "2050",
+        "4225413",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2050",
+        "1790936827181282246",
+        "1790936827181282246"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/performing-body-read-ledger.json",
+      "sha256": "1125333af7bf952d3626daa2e2fb2f1b8c262f282ce407d25d4b01235d252718"
+    },
+    {
+      "bytes": 7489,
+      "exact_decimal_strings": [
+        "2050",
+        "4225414",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7489",
+        "1790936827182144696",
+        "1790936827182144696"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/prior-residual.txt",
+      "sha256": "42a5270db7cf985fc08d78879b758f5105087cc6fc8923452fb1947fa1e6abbd"
+    },
+    {
+      "bytes": 51455,
+      "exact_decimal_strings": [
+        "2050",
+        "4225408",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51455",
+        "1790936827176270057",
+        "1790936827176270057"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/manifest.json",
+      "sha256": "3708e7fc59378ac6b50c57efe69ffc24c9a553673a8ecaf590f018c2543eae01"
+    },
+    {
+      "bytes": 26581,
+      "exact_decimal_strings": [
+        "2050",
+        "4225409",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "26581",
+        "1790936827176635711",
+        "1790936827176635711"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/metadata.py",
+      "sha256": "ccf645fe5417618d7085c0474700411ae65f7ececfbdc7bcf7731c03b376c354"
+    },
+    {
+      "bytes": 1959,
+      "exact_decimal_strings": [
+        "2050",
+        "4225335",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1959",
+        "1790936827107631760",
+        "1790936827107631760"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/original-terminal.json",
+      "sha256": "bae06e11a0793a534c79974b35d789004d1dacabc057ea188440a9a26abaeed7"
+    },
+    {
+      "bytes": 136500,
+      "exact_decimal_strings": [
+        "2050",
+        "4225415",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136500",
+        "1790936827182144696",
+        "1790936827182144696"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/received.json",
+      "sha256": "ac03de1bed04e8d934c61ec972634cc41a15c846f549fb22712b01631ba87dcd"
+    },
+    {
+      "bytes": 43972,
+      "exact_decimal_strings": [
+        "2050",
+        "4225416",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "43972",
+        "1790936827182636055",
+        "1790936827182636055"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/seal.json",
+      "sha256": "af9b19ab12d4c18350f4f98968c575837a60cf1ab04e043aa237df11cfc9c943"
+    },
+    {
+      "bytes": 11877,
+      "exact_decimal_strings": [
+        "2050",
+        "4225417",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11877",
+        "1790936827183636112",
+        "1790936827183636112"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/provenance/seal_metadata.py",
+      "sha256": "a7f310f179147615ada4398bf717829765cecb81d47e2e57878df046ea50fe9b"
+    },
+    {
+      "bytes": 144462,
+      "exact_decimal_strings": [
+        "2050",
+        "4225418",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "144462",
+        "1790936827184636169",
+        "1790936827184636169"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/source-changes.patch",
+      "sha256": "10812f17453225e3ca80c7d78af5983eceaff6f3221ac42160925cc30a314c85"
+    },
+    {
+      "bytes": 115612,
+      "exact_decimal_strings": [
+        "2050",
+        "4225419",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "115612",
+        "1790936827191835053",
+        "1790936827191835053"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/whole54-current-matrix.json",
+      "sha256": "7cada6798430cf24edb834610124ffc55c6e28f857a15883c4d3e4a953b10ac9"
+    },
+    {
+      "bytes": 11600,
+      "exact_decimal_strings": [
+        "2050",
+        "4371548",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11600",
+        "1791015101935051257",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CASE_TABLE.json",
+      "sha256": "40b8e912f21cd2c69592cc30c71da38c26ba6668077027c69449855b5e1c498b"
+    },
+    {
+      "bytes": 70327,
+      "exact_decimal_strings": [
+        "2050",
+        "4371553",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "70327",
+        "1791015196090449577",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CONNECTED_LITERAL_WINDOWS.json",
+      "sha256": "375f9b8e6b36c9d7cf699cacd9a44da77c8e4eac36fbca61f8df3de3a772c8c0"
+    },
+    {
+      "bytes": 3179,
+      "exact_decimal_strings": [
+        "2050",
+        "4371554",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3179",
+        "1791015285316565280",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CONNECTED_RELATION.json",
+      "sha256": "f2636ff94098f8043ce88eec8783ccf0833620d8c391a92ae27e1ff582ba610f"
+    },
+    {
+      "bytes": 102468,
+      "exact_decimal_strings": [
+        "2050",
+        "4371546",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "102468",
+        "1791015101870047531",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/CURRENT96_SOURCE54_DEPENDENCIES.json",
+      "sha256": "6e9628dcf6bd91dd45a26821fde7a5ac4b7f76ba2c5bb8ea6e2cb445f5926b32"
+    },
+    {
+      "bytes": 3324,
+      "exact_decimal_strings": [
+        "2050",
+        "4371556",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3324",
+        "1791015477043557771",
+        "1791015477043557771"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/DATA_INTEGRITY.json",
+      "sha256": "c95897bd5b7b0cfdc010fc5e47b318916215778ebc0ee6a904b2aaa15fb478fe"
+    },
+    {
+      "bytes": 52570,
+      "exact_decimal_strings": [
+        "2050",
+        "4371545",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "52570",
+        "1791015101834045466",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/EXTERNAL_PINS.json",
+      "sha256": "53aacca37dc71d38c0d0ad0fc7c6f4c3211f5204b5ecdba8963fe548710a0e63"
+    },
+    {
+      "bytes": 15246,
+      "exact_decimal_strings": [
+        "2050",
+        "4371547",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15246",
+        "1791015101911049882",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/INTERFACE_AND_ORIGIN_CONTRACT.json",
+      "sha256": "85ffeabf3f1afe0df6e69aa50476fa51ef3f87cd6df442241c607f833a93b30b"
+    },
+    {
+      "bytes": 9343,
+      "exact_decimal_strings": [
+        "2050",
+        "4371549",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9343",
+        "1791015101956052462",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/PRESERVATION_AND_RESIDUALS.json",
+      "sha256": "603f9e3fdc5b470ad22c9ddd4d04174d7a02e044b3f611aaf44a16ccfcd687d1"
+    },
+    {
+      "bytes": 3421,
+      "exact_decimal_strings": [
+        "2050",
+        "4371555",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3421",
+        "1791015285351567287",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/README.txt",
+      "sha256": "cfa894670727635168f37bc0ddbe462636b2771042b19c8f7be05b3e2f4d4ef5"
+    },
+    {
+      "bytes": 633501,
+      "exact_decimal_strings": [
+        "2050",
+        "4371552",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "633501",
+        "1791015196029446080",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/SOURCE_LITERAL_PARTS.json",
+      "sha256": "d9a8dd8102daf20fb3fce2d2226dbdfd5da486b34fffa1bc00f49573b0efaaf8"
+    },
+    {
+      "bytes": 1044,
+      "exact_decimal_strings": [
+        "2050",
+        "4371551",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1044",
+        "1791015102002055099",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/UTILITY_NOTES.json",
+      "sha256": "fb325f051949f301eea1682cc8312b9111bfd2e4186518322be3d99f597a90d9"
+    },
+    {
+      "bytes": 1660,
+      "exact_decimal_strings": [
+        "2050",
+        "4371550",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1660",
+        "1791015101983054010",
+        "1791015285409570612"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/VALIDATION_PLAN.json",
+      "sha256": "a62d3a6534902bf739ee81e8740eea489f9ce758763c82b25173ee19de871226"
+    },
+    {
+      "bytes": 1253,
+      "exact_decimal_strings": [
+        "2050",
+        "4371557",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1253",
+        "1791015477208567231",
+        "1791015477258570098"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/completion.json",
+      "sha256": "cf2a4d3a9897d2b76939842f83a87bac6aa9e0232cf878210e2be3a4db5bbb45"
+    },
+    {
+      "bytes": 15935,
+      "exact_decimal_strings": [
+        "2050",
+        "4371559",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15935",
+        "1791015537697035266",
+        "1791015537757038706"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/manifest.json",
+      "sha256": "2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133"
+    },
+    {
+      "bytes": 950,
+      "exact_decimal_strings": [
+        "2050",
+        "4371558",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "950",
+        "1791015477418579272",
+        "1791015477481582884"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/pathset.json",
+      "sha256": "e192d4d268c6943393f6469cbe524697a046726bd8b74f7c0e41af8b0b649b55"
+    },
+    {
+      "bytes": 1488,
+      "exact_decimal_strings": [
+        "2050",
+        "4371512",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1488",
+        "1791013555117416889",
+        "1791013555170419922"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/received.json",
+      "sha256": "85249002f02de27700aff4901171ead156eed71dc1f7bb4a37d5d7ddd278ff8c"
+    },
+    {
+      "bytes": 60201,
+      "exact_decimal_strings": [
+        "2050",
+        "4371526",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "60201",
+        "1791014965571232956",
+        "1791014965571232956"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/caller.py",
+      "sha256": "58f79d594cfef987f0b30b298cc23c3cb962d4733ca7b1d01825b91b4d3b7da9"
+    },
+    {
+      "bytes": 30313,
+      "exact_decimal_strings": [
+        "2050",
+        "4371532",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30313",
+        "1791014290125514530",
+        "1791014290311525192"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/controller.py",
+      "sha256": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9"
+    },
+    {
+      "bytes": 38131,
+      "exact_decimal_strings": [
+        "2050",
+        "4371531",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "38131",
+        "1791014290102513211",
+        "1791014290311525192"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/native_grammar.py",
+      "sha256": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853"
+    },
+    {
+      "bytes": 102053,
+      "exact_decimal_strings": [
+        "2050",
+        "4371527",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "102053",
+        "1791014965433225044",
+        "1791014965433225044"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/ordinary_root_consumers.py",
+      "sha256": "96c6b6a368d8b00aae07c761d96610a0254131bff0f01ab66550adc908022244"
+    },
+    {
+      "bytes": 1963,
+      "exact_decimal_strings": [
+        "2050",
+        "4371533",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1963",
+        "1791014290252521810",
+        "1791014290311525192"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/receipt_physical.py",
+      "sha256": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17"
+    },
+    {
+      "bytes": 116415,
+      "exact_decimal_strings": [
+        "2050",
+        "4371528",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "116415",
+        "1791014290014508167",
+        "1791014290311525192"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/root_native_launcher.py",
+      "sha256": "e68f9de758ccd98b55f9663eb82cfe2283c7de65612e8eb0f7cad58bac7bae92"
+    },
+    {
+      "bytes": 31023,
+      "exact_decimal_strings": [
+        "2050",
+        "4371525",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31023",
+        "1791014779193548867",
+        "1791014779193548867"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": true,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/sender_operand_codec.py",
+      "sha256": "389575b32c9627e057d098b7a2f1efa66e646ba41c61ef73519f6afe05a3e650"
+    },
+    {
+      "bytes": 127594,
+      "exact_decimal_strings": [
+        "2050",
+        "4371530",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "127594",
+        "1791014290074511606",
+        "1791014290311525192"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+      "sha256": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a"
+    },
+    {
+      "bytes": 65443,
+      "exact_decimal_strings": [
+        "2050",
+        "4371529",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "65443",
+        "1791014290043509829",
+        "1791014290311525192"
+      ],
+      "historical_stamp_equal": true,
+      "live_stamp_equal": false,
+      "mode": "000600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py",
+      "sha256": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f"
+    }
+  ],
+  "schema": "friday.astra.lab910.sol089.stock-operand.connected-nonauthor.run.v1",
+  "stamp_inequality": 32,
+  "stamp_inequality_is_host_drift": false,
+  "unique_count": 138
+}

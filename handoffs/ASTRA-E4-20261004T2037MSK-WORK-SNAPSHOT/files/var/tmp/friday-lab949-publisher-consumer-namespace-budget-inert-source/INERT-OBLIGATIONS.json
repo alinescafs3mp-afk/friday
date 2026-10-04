@@ -1,0 +1,25 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "closed_in_source": [
+    "consume_secondary_own_cut debits the entire retained list before the first row field read, on every call.",
+    "The pass includes historical rows, traceback, error, Source, and a zero-width buffer. Frame, code, and buffer copy debits stay separate.",
+    "full_value_arena and retain_error_arena require the original carrier. A missing carrier refuses before the pass.",
+    "own_module_for_namespace debits the full registry count on the original pool before the walk. A failed debit stays an error.",
+    "The support reuse scan debits that same count before its walk. own_before stays before strong capture."
+  ],
+  "decision": "REJOINED_A258_CONSUMER_PASS_NAMESPACE_SCAN_BUDGET_WHOLE_ADMISSION_OPEN",
+  "execution": "NOT_RUN",
+  "fit": "UNCONFIRMED",
+  "schema": "friday.lab949.inert-obligations.v1",
+  "self_acceptance": false,
+  "still_open": [
+    "Cold getter and tobytes physical upper bounds stay UNKNOWN_NOT_ZERO.",
+    "Native whole error-end graph and finalizer stay with Astra.",
+    "C1-R1A, C1-R1C, C2 full required widths, ABI, and workload fit stay open.",
+    "Whole admission stays open. LAB-937 native residuals stay open.",
+    "A258 carrier, role, phase, and hash credits are preserved and not accepted by this author.",
+    "LAB948 mapping stayed outside this base. Sol107 child output was not read."
+  ]
+}

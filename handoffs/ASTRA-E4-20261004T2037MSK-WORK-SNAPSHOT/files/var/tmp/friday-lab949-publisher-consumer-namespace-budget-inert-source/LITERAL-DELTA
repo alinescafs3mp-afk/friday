@@ -1,0 +1,73 @@
+FORWARD_A258
+FILE native/publisher_root_entry.c
+@@ -3568,0 +3568,1 @@
++static int secondary_debit_scan(uint64_t,uint64_t);
+@@ -3570,0 +3571,6 @@
++    /* Full registry cardinality before this Source-facing probe. */
++    if(secondary_debit_scan(v->count,0)<0) {
++        if(Py_IsInitialized()&&!PyErr_Occurred())
++            PyErr_SetString(PyExc_RuntimeError,"own_namespace_registry_scan_refused");
++        return NULL;
++    }
+@@ -3582,0 +3589,1 @@
++    if(PyErr_Occurred())return NULL;
+@@ -3591,0 +3599,1 @@
++    if(PyErr_Occurred())return NULL;
+@@ -3622,0 +3631,1 @@
++    if(PyErr_Occurred())return NULL;
+@@ -3690,0 +3700,1 @@
++    if(secondary_debit_scan(v->count,0)<0)return NULL;
+INVERSE native/publisher_root_entry.c
+@@ -3568,1 +3568,0 @@
+-static int secondary_debit_scan(uint64_t,uint64_t);
+@@ -3571,6 +3570,0 @@
+-    /* Full registry cardinality before this Source-facing probe. */
+-    if(secondary_debit_scan(v->count,0)<0) {
+-        if(Py_IsInitialized()&&!PyErr_Occurred())
+-            PyErr_SetString(PyExc_RuntimeError,"own_namespace_registry_scan_refused");
+-        return NULL;
+-    }
+@@ -3589,1 +3582,0 @@
+-    if(PyErr_Occurred())return NULL;
+@@ -3599,1 +3591,0 @@
+-    if(PyErr_Occurred())return NULL;
+@@ -3631,1 +3622,0 @@
+-    if(PyErr_Occurred())return NULL;
+@@ -3700,1 +3690,0 @@
+-    if(secondary_debit_scan(v->count,0)<0)return NULL;
+FILE source/observer.py
+@@ -1857,0 +1857,2 @@
++        if carrier is None:
++            raise Refused('actual_prepared_full_body_carrier_required','terminal')
+INVERSE source/observer.py
+@@ -1857,2 +1857,0 @@
+-        if carrier is None:
+-            raise Refused('actual_prepared_full_body_carrier_required','terminal')
+FILE source/selected_owned_values.py
+@@ -687,1 +687,1 @@
+-    """One alias pass over the same cut list. Refusal keeps every stored original."""
++    """Alias pass over the entire retained cut list. Refusal keeps every stored original."""
+@@ -691,0 +691,9 @@
++    # Header plus the widest alias prefix, before any row field is read.
++    # Historical rows, traceback, error, Source, and a zero-width buffer are
++    # included. A later call pays this pass again. Frame, code, and buffer
++    # copies stay on their own debits.
++    count=len(rows)
++    pass_reads=_scale(count, 20 * 64, 0)
++    if pass_reads is None:
++        raise Refused('secondary_preown_original_envelope', 'terminal')
++    _secondary_before(pass_reads, 0, body_carrier)
+INVERSE source/selected_owned_values.py
+@@ -687,1 +687,1 @@
+-    """Alias pass over the entire retained cut list. Refusal keeps every stored original."""
++    """One alias pass over the same cut list. Refusal keeps every stored original."""
+@@ -691,9 +691,0 @@
+-    # Header plus the widest alias prefix, before any row field is read.
+-    # Historical rows, traceback, error, Source, and a zero-width buffer are
+-    # included. A later call pays this pass again. Frame, code, and buffer
+-    # copies stay on their own debits.
+-    count=len(rows)
+-    pass_reads=_scale(count, 20 * 64, 0)
+-    if pass_reads is None:
+-        raise Refused('secondary_preown_original_envelope', 'terminal')
+-    _secondary_before(pass_reads, 0, body_carrier)

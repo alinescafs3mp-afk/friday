@@ -1,0 +1,12 @@
+{
+  "checks": [
+    "A258 Source57 pins matched before editing the fresh copy",
+    "forward and inverse literal hunks replay",
+    "hash ledger v2 remains and v1 is absent",
+    "secondary error end, group22 move comment, and own_before capture order remain",
+    "consumer pass debit precedes the retained-row loop",
+    "registry scan debit precedes the namespace walk and the support reuse walk"
+  ],
+  "schema": "friday.lab949.inert-read-check.v1",
+  "source_execution": 0
+}

@@ -1,0 +1,182 @@
+{
+  "schema": "friday.astra.a237.node-connected-implementation.v1",
+  "assignment": "ASTRA-E4-A237-NODE-FORMAT-NATIVE-ROUTE-SET-CONNECTED",
+  "generation": 1,
+  "author": "Astra Lead Architect",
+  "started_msk": "2026-10-03T22:27:33.416965+03:00",
+  "source6": [
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+      "bytes": 212160,
+      "sha256": "ff637c2f44d26cab0bfa60c747abbfc040e5255527ad6f2bccf4efb43b43b7e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227584",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "212160",
+        "1791055955910668376",
+        "1791055955910668376"
+      ],
+      "stable9": true,
+      "name": "caller.py"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+      "bytes": 176259,
+      "sha256": "9f08d0eb19739b5fc47c42a794baf1f73f7619002ab156566ad9d8ff4f2c1fc4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227585",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "176259",
+        "1791055955781661257",
+        "1791055955781661257"
+      ],
+      "stable9": true,
+      "name": "supervisor.py"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py",
+      "bytes": 145719,
+      "sha256": "075e9114fa2adeeb6ec4da5b88faa3dea546d2aa8b41d01ae5904e18c2fa3be3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227586",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "145719",
+        "1791055955512646413",
+        "1791055955512646413"
+      ],
+      "stable9": true,
+      "name": "verifier.py"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/launch-contract.json",
+      "bytes": 51393,
+      "sha256": "21cd06037b8682fd390315e996a5665b8bb75ca9c7a98abbb3d3295f1b29102f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227587",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51393",
+        "1791055955657654414",
+        "1791055955657654414"
+      ],
+      "stable9": true,
+      "name": "launch-contract.json"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/expectations.json",
+      "bytes": 12074,
+      "sha256": "83b5a8dc9e1b6af5a54c01eacc61d479cfdefc2f1298792ca9858a134e62781c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227588",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12074",
+        "1791055955513646469",
+        "1791055955513646469"
+      ],
+      "stable9": true,
+      "name": "expectations.json"
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227589",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1791054939874372760",
+        "1791055785980851103"
+      ],
+      "stable9": true,
+      "name": "ordinary-surplus.txt"
+    }
+  ],
+  "baseline_manifest": {
+    "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/manifest.json",
+    "bytes": 6170,
+    "sha256": "b35d7b27b9820b004b3ce5f1d04a1e83c55990a73b01858419278856593e38e3",
+    "identity9_decimal_strings": [
+      "2050",
+      "4372052",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "6170",
+      "1791054939878372984",
+      "1791054939878372984"
+    ],
+    "stable9": true
+  },
+  "baseline_received": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB927-RESULT-RECEIVED-20261003.json",
+    "bytes": 13454,
+    "sha256": "9a165befbf953ed6fba2cd04cd4c279ffddf6b82bb195706e1e9d3a5cdac3351",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534939",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "13454",
+      "1791055342563824895",
+      "1791055342621828096"
+    ],
+    "stable9": true
+  },
+  "previous_scoped_Sol096_LAB922_credit": "Exact old bytes only, not inherited across changed current6.",
+  "decision": "IMPLEMENTED_AMBIGUOUS_NATIVE_ROUTE_SET_AND_ACTUAL_WIRE_DEBIT_ALL3_NOT_SOURCE_READY",
+  "actual_delta": [
+    "None now represents both legal underlying native field states, not guessed NULL; errno/strerror absent routes include actual BaseException args formatter.",
+    "Known stock str/int/None repr for legal route alternatives gives finite possible lengths; unsupported required factories stay on original path, not disabled.",
+    "Actual all3 full_stock_message consumers use minimum prospectively and exact actual-minus-minimum before graph assignment; original900 domain and complete stock content preserved. The prefix path uses the same implementation; BOTH full v2 reader code unchanged.",
+    "True unknown decimal workspace represented None, not numeric0. Visible code-point guard is not called allocator/RSS admission.",
+    "Real verifier->contract->supervisor->caller namespace/hash/size DAG updated; expectations path updated only; original surplus/cases/limits/readers/bindings unchanged."
+  ],
+  "locally_checked": {
+    "kind": "FullSHA9/exact6/literalLF-only and byte-inverse intended-delta check, no parsing/execution of Source",
+    "only_intended_delta": true,
+    "shared_all3_preflight_byte_equal": true,
+    "source6_DAG_join": true,
+    "literal_parts": 99
+  },
+  "new_ordinary_regression_vectors": 16,
+  "tests": "NOT_RUN_UNADMITTED_SOURCE",
+  "unresolved": [
+    "Independent non-author review of whole changed6 and actual caller/receiver/error compatibility is required.",
+    "Visible formatter/tuple/int/string codepoint formula is NOT qualified allocator bytes, preview own allocation, headers, retained body, CPU/RSS/implicit IO, native supply or existing master-pool admission. Full original factory C2 remains UNKNOWN_NOT_ZERO.",
+    "Required residual bytes/nonASCII/custom slot/special factories stay enabled; no provider/installed ELF/compilerABI/Root qualification inherited from vendor text.",
+    "Native/raw original object/error ownership and BOTH finite outside ends C1 still open."
+  ],
+  "network_requests": 0,
+  "Source_execution": 0,
+  "Root_execution": 0,
+  "SourceReady": false,
+  "accepted": false,
+  "independent_acceptance": "REQUIRED_NOT_RUN",
+  "GO": false
+}

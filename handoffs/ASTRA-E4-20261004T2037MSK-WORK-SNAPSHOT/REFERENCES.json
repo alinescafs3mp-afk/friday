@@ -1,0 +1,777 @@
+{
+  "rows": [
+    {
+      "original_path": "/home/jericho/.jericho",
+      "state": "DIRECTORY_PARTIALLY_CAPTURED_NOT_WHOLE",
+      "archived_path": "files/home/jericho/.jericho",
+      "referenced_by": [
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/controller.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/grok-takeover/",
+      "state": "DIRECTORY_PARTIALLY_CAPTURED_NOT_WHOLE",
+      "archived_path": "files/home/jericho/.jericho/grok-takeover/",
+      "referenced_by": [
+        "files/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/pins.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB830-NODE-SOURCE-ACCEPTED-20261001.json",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB830-ROOT-SOURCE-MATERIALIZED-20261001.json",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-OWNER-DELEGATED-PROJECT-AUTHORITY-20261001.json",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/quality-source-admission",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/controller.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/runtime/friday-toolchain22.bSt8Uu/archives/",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/runtime/subagent-lifecycle/",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+        "files/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/pins.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-WORKER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-WORKER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-WORKER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/jericho/requirements-dev.lock",
+      "state": "REPOSITORY_REFERENCE_OUTSIDE_THIS_ARCHIVE",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py"
+      ]
+    },
+    {
+      "original_path": "/home/jericho/jericho/requirements.lock",
+      "state": "REPOSITORY_REFERENCE_OUTSIDE_THIS_ARCHIVE",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py"
+      ]
+    },
+    {
+      "original_path": "/lib/apt/lists",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py"
+      ]
+    },
+    {
+      "original_path": "/lib/apt/lists/",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py"
+      ]
+    },
+    {
+      "original_path": "/lib/custody",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py"
+      ]
+    },
+    {
+      "original_path": "/lib/custody/receipt",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py"
+      ]
+    },
+    {
+      "original_path": "/lib/python3.14/lib-dynload",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py"
+      ]
+    },
+    {
+      "original_path": "/lib/python3.14/site-packages",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py"
+      ]
+    },
+    {
+      "original_path": "/lib/python3.14/site-packages/",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py"
+      ]
+    },
+    {
+      "original_path": "/lib/rootfs",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py"
+      ]
+    },
+    {
+      "original_path": "/lib/rootfs/manifest",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py"
+      ]
+    },
+    {
+      "original_path": "/lib/rootfs/manifest/manifest",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py",
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/source/actor_context.py"
+      ]
+    },
+    {
+      "original_path": "/lib/rootfs/members",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py",
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/source/actor_context.py"
+      ]
+    },
+    {
+      "original_path": "/usr/bin",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-WORKER.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A087-PUBLIC-DRIVER.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py",
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/recipe_planner.py",
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/source/operations.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-OWNED.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-WORKER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-OWNED.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-WORKER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py",
+        "files/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-OWNED.c",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/root_native_launcher.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py"
+      ]
+    },
+    {
+      "original_path": "/usr/bin/gpg",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py"
+      ]
+    },
+    {
+      "original_path": "/usr/bin/gpgv",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py",
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/pins.py",
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/source/native.py"
+      ]
+    },
+    {
+      "original_path": "/usr/bin/prlimit",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py"
+      ]
+    },
+    {
+      "original_path": "/usr/bin/python3",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1.py"
+      ]
+    },
+    {
+      "original_path": "/usr/bin/python3.14",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-COMMON.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-OWNED.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-COMMON.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-OWNED.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-COMMON.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+        "files/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-COMMON.c",
+        "files/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-OWNED.c",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/root_native_launcher.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py"
+      ]
+    },
+    {
+      "original_path": "/usr/bin/readelf",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/source/native.py"
+      ]
+    },
+    {
+      "original_path": "/usr/lib/python3.14",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/native/publisher_root_command.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-COMMON.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-COMMON.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-COMMON.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+        "files/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-COMMON.c"
+      ]
+    },
+    {
+      "original_path": "/usr/lib/python3.14/lib-dynload",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/native/publisher_root_command.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py"
+      ]
+    },
+    {
+      "original_path": "/usr/lib/python314.zip",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-RUNTIME.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-RUNTIME.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py"
+      ]
+    },
+    {
+      "original_path": "/usr/lib/x86_64-linux-gnu/",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py"
+      ]
+    },
+    {
+      "original_path": "/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/caller.py"
+      ]
+    },
+    {
+      "original_path": "/usr/lib/x86_64-linux-gnu/libfriday-a061-owned.so",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py"
+      ]
+    },
+    {
+      "original_path": "/usr/lib64",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py"
+      ]
+    },
+    {
+      "original_path": "/usr/lib64/",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py"
+      ]
+    },
+    {
+      "original_path": "/usr/share/keyrings/ubuntu-archive-keyring.gpg",
+      "state": "HOST_BINARY_ABI_NOT_ARCHIVED_OR_QUALIFIED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/pins.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/astra-e4-browser3-a061-offline-",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A087-PUBLIC-DRIVER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/astra-e4-material-fetcher-a025-offline-",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-a061-runtime-owned-",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1.py",
+      "state": "ARCHIVED_EXACT",
+      "archived_path": "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1.py",
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP",
+      "state": "DIRECTORY_PARTIALLY_CAPTURED_NOT_WHOLE",
+      "archived_path": "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP",
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTRACT.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071-CONTRACT.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-PRODUCER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071-FULL-CONTROLS.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-PRODUCER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-a099-whole-source-closure-a104-g1/source/A071-SUPERVISOR.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-PRODUCER.py",
+        "files/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-BOOTSTRAP.c"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-acquisition-20261001-a061-g1",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-acquisition-20261001-a066-g1",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-acquisition-20261001-a071-g1",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-EXECUTOR.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-full-native-control-a066-g1/A066",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-full-native-control-a066-g1/A066-CONTRACT.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-WORKER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-full-native-control-a066-g1/A066-SUPERVISOR.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-full-native-control-a066-g1/A066-WORKER.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-OWNED.c"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-CONTRACT.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-WORKER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-FULL-CONTROLS.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-PRODUCER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-SUPERVISOR.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-PRODUCER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-native-authoritative-caller-a079-g1/A071-WORKER.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-OWNED.c"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-receiving-native-controls-a091-g1/source/A071-CONTRACT.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-WORKER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-receiving-native-controls-a091-g1/source/A071-WORKER.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-OWNED.c"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-whole-control-native-a061-g1/A061",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-whole-control-native-a061-g1/A061-CONTRACT.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-whole-control-native-a061-g1/A061-SUPERVISOR.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-browser-whole-control-native-a061-g1/A061-WORKER.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1.py",
+        "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+        "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+        "files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+        "files/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/pins.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54",
+      "state": "DIRECTORY_PARTIALLY_CAPTURED_NOT_WHOLE",
+      "archived_path": "files/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54",
+      "referenced_by": [
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/controller.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/receipt_contract.py",
+      "state": "ARCHIVED_EXACT",
+      "archived_path": "files/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/receipt_contract.py",
+      "referenced_by": [
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/controller.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/index/full-source.json",
+      "state": "ARCHIVED_EXACT",
+      "archived_path": "files/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/index/full-source.json",
+      "referenced_by": [
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/controller.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/source/controller.py",
+      "state": "UNRESOLVED_OR_PRIVATE_OR_HISTORICAL_REFERENCE_NOT_FOLLOWED",
+      "archived_path": null,
+      "referenced_by": [
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/source_grammar.py",
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/staged_sender.py"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/sender_operand_codec.py",
+      "state": "ARCHIVED_EXACT",
+      "archived_path": "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/sender_operand_codec.py",
+      "referenced_by": [
+        "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/source/caller.py"
+      ]
+    }
+  ],
+  "count": 72,
+  "scanned_current_source_files": 144,
+  "scope": "Literal local references in captured current implementation .py/.c/.h only; not historical review metadata, AST/import resolution, dynamic concatenation, decoded payloads or transitive runtime closure. Unknown remains unknown. Sender's authenticated110-pin dependency inventory was subsequently reconciled explicitly; mappings here updated for supplied bodies, not a transitive Source parser audit."
+}

@@ -1,0 +1,215 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "Source_execution": 0,
+  "assignment": "ASTRA-E4-A236-NODE-NONALIAS-PROSPECTIVE-FORMAT-CONNECTED-IMPLEMENTATION-LAB-927",
+  "files": [
+    {
+      "bytes": 32761,
+      "name": "SOURCE-JOIN.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/SOURCE-JOIN.json",
+      "sha256": "56b609846271f017d1272653c2a4a1b55dac2294581931cf490e04ad400384aa",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372046",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32761",
+        "1791054939877372928",
+        "1791054939877372928"
+      ]
+    },
+    {
+      "bytes": 209925,
+      "name": "caller.py",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/caller.py",
+      "sha256": "6f7991ec6ec972b1a73962886ab20ce2c52d29b35481ccdc337da5d52a938923",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372040",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "209925",
+        "1791054939873372703",
+        "1791054939873372703"
+      ]
+    },
+    {
+      "bytes": 1162,
+      "name": "costs.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/costs.json",
+      "sha256": "2d4451d51bd437aa70c2b02e61b1300d3a29d67e275270b50ec1d322268aec35",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372048",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1162",
+        "1791054939877372928",
+        "1791054939877372928"
+      ]
+    },
+    {
+      "bytes": 12090,
+      "name": "expectations.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/expectations.json",
+      "sha256": "ea3bd7bb60fae43b2e106a8b36d3915a1344a8f0e07102d808ce2db4c86ce14e",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372041",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12090",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    },
+    {
+      "bytes": 8635,
+      "name": "implementation-result.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/implementation-result.json",
+      "sha256": "e3eb856e0b017b0aee419b2a8176d1dd98f98adb3cdf99d91e32fcf132bb5dbc",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372047",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8635",
+        "1791054939877372928",
+        "1791054939877372928"
+      ]
+    },
+    {
+      "bytes": 51457,
+      "name": "launch-contract.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/launch-contract.json",
+      "sha256": "a45f7d48f6d8318845897585bdff2d806064437b8f803d5db7c2a1bb11d18d79",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372042",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51457",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    },
+    {
+      "bytes": 158,
+      "name": "ordinary-surplus.txt",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372043",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    },
+    {
+      "bytes": 599,
+      "name": "pathset.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/pathset.json",
+      "sha256": "c4eaaf02abb7a43376f4418ca69b0d29189a8cb18432b7fa8a5efa41bf8b74a1",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372051",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "599",
+        "1791054939877372928",
+        "1791054939877372928"
+      ]
+    },
+    {
+      "bytes": 4441,
+      "name": "pins.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/pins.json",
+      "sha256": "a1a5ee3558c24bea693bca977ad39d07dde57c2b83ccd3b6c4bed99d4b831e88",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372050",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4441",
+        "1791054939877372928",
+        "1791054939877372928"
+      ]
+    },
+    {
+      "bytes": 174024,
+      "name": "supervisor.py",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/supervisor.py",
+      "sha256": "1bdbf3fd7cf66d2bfed5673773b17904513eb3d3efbfd23e5099a870debf9890",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372044",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "174024",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    },
+    {
+      "bytes": 1516,
+      "name": "validation-plan.json",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/validation-plan.json",
+      "sha256": "aa9da6a028181cbcb0cea30ab149bf3abde4261fb1021fa358e6b490ce90407d",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372049",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1516",
+        "1791054939877372928",
+        "1791054939877372928"
+      ]
+    },
+    {
+      "bytes": 143484,
+      "name": "verifier.py",
+      "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/verifier.py",
+      "sha256": "9a520ca571d8f28cc060511bc4c9573f5a15b949fe8820b60b7e8407681ebca6",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "4372045",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "143484",
+        "1791054939874372760",
+        "1791054939874372760"
+      ]
+    }
+  ],
+  "root": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source",
+  "schema": "friday.lab927.connected-inert-source.manifest.v1"
+}

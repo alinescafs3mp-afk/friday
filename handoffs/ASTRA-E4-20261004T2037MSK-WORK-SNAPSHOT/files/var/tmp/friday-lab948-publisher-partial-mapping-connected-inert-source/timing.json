@@ -1,0 +1,15 @@
+{
+  "children": 0,
+  "elapsed_ns": 511280988000,
+  "heavy_runs": 0,
+  "network": 0,
+  "read_bytes": 1937426,
+  "schema": "friday.lab948.timing.v1",
+  "seal_duration_ns": 177000,
+  "seal_ended_msk": "2026-10-04T19:56:30.307903+03:00",
+  "seal_started_msk": "2026-10-04T19:56:30.307726+03:00",
+  "source_execution": 0,
+  "timezone": "Europe/Moscow",
+  "work_ended_msk": "2026-10-04T19:56:30.307903+03:00",
+  "work_started_msk": "2026-10-04T19:47:59.026915+03:00"
+}

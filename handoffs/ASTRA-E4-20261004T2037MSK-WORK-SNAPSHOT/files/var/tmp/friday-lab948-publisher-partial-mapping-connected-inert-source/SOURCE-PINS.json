@@ -1,0 +1,24 @@
+{
+  "baseline": "A258",
+  "changed": [
+    "native/publisher_root_entry.c",
+    "source/observer.py",
+    "source/selected_owned_values.py"
+  ],
+  "identity9": [
+    "2050",
+    "5010675",
+    "33152",
+    "1000",
+    "1000",
+    "1",
+    "32692",
+    "1791132364835513228",
+    "1791132364854513635"
+  ],
+  "manifest_sha256": "82773d86edb14c70f82a7f5f3b31c9fb217b4097435596c93be786d697751374",
+  "manifest_size": 32692,
+  "mtime_equals_ctime": false,
+  "schema": "friday.lab948.source-pins.v1",
+  "source_file_count": 57
+}

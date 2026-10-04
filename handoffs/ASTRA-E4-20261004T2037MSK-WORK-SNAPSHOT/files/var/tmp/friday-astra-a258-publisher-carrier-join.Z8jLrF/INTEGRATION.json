@@ -1,0 +1,165 @@
+{
+  "schema": "friday.astra.a258.publisher.connected-carrier-join.v1",
+  "baseline": {
+    "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/manifest.json",
+    "bytes": 29378,
+    "sha256": "73f4db4fc8427e718dd5c2bc6991a7bf59d1f4dbfb775a61877923a761cdf39d",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980643",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "29378",
+      "1791130808528481691",
+      "1791130808551283927"
+    ],
+    "stable9": true
+  },
+  "lab_package": {
+    "path": "/var/tmp/friday-lab947-publisher-actual-carrier-secondary-budget-roles-inert-source/manifest.json",
+    "bytes": 35257,
+    "sha256": "6bffb2492fae26fed2eca59a0bf4ba036d96349cc5067b788a0e7da9f95cf596",
+    "identity9_decimal_strings": [
+      "2050",
+      "3558785",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "35257",
+      "1791131666035339196",
+      "1791131666035339196"
+    ],
+    "stable9": true
+  },
+  "root": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF",
+  "changed": [
+    "native/publisher_owned_custody.c",
+    "native/publisher_root_entry.c",
+    "native/publisher_root_entry.h",
+    "source/actor_bootstrap.py",
+    "source/launcher.py",
+    "source/lifetime.py",
+    "source/observer.py",
+    "source/selected_owned_values.py"
+  ],
+  "unchanged": [
+    "consumer/source/authority.py",
+    "consumer/source/bill.py",
+    "consumer/source/body_scope.py",
+    "consumer/source/canonical.py",
+    "consumer/source/capability.py",
+    "consumer/source/contract.py",
+    "consumer/source/declared_controls.py",
+    "consumer/source/document_vector.py",
+    "consumer/source/document_windows.py",
+    "consumer/source/effects.py",
+    "consumer/source/formats.py",
+    "consumer/source/ingress.py",
+    "consumer/source/material_literals.py",
+    "consumer/source/performing_contracts.py",
+    "consumer/source/pins.py",
+    "consumer/source/producer_consumer.py",
+    "consumer/source/receipt_chain.py",
+    "consumer/source/recipe_planner.py",
+    "consumer/source/resource_meter.py",
+    "consumer/source/runtime_consumer.py",
+    "consumer/source/schema_validate.py",
+    "consumer/source/semantics.py",
+    "consumer/source/whole_join.py",
+    "native/publisher_original_caller.c",
+    "native/publisher_original_caller.h",
+    "native/publisher_owned_custody.h",
+    "native/publisher_root_command.c",
+    "native/publisher_root_command.h",
+    "source/actor_context.py",
+    "source/admission.py",
+    "source/alljob_cohort.py",
+    "source/capacity.py",
+    "source/class_semantics.py",
+    "source/common.py",
+    "source/consumer_bridge.py",
+    "source/custody.py",
+    "source/existing_root_caller.py",
+    "source/extraction.py",
+    "source/fact_bridge.py",
+    "source/independent_selector.py",
+    "source/master_pool.py",
+    "source/native.py",
+    "source/normalization.py",
+    "source/operations.py",
+    "source/owned_prefix_bank.py",
+    "source/retention.py",
+    "source/roles.py",
+    "source/root_tool_adapter.py",
+    "source/snapshot_producer.py"
+  ],
+  "source_files": 57,
+  "source_bytes": 1851133,
+  "implementation": "Exact full LAB947 tree plus A257 two hash-history hunks; inverse returns exact LAB947 native entry and other56 unchanged. This integrates author material, NOT independent acceptance.",
+  "scoped_credit": {
+    "SOL108": {
+      "received": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL108-RESULT-RECEIVED-20261004.json",
+      "target": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/manifest.json",
+        "bytes": 29378,
+        "sha256": "73f4db4fc8427e718dd5c2bc6991a7bf59d1f4dbfb775a61877923a761cdf39d",
+        "identity9_decimal_strings": [
+          "2050",
+          "3980643",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29378",
+          "1791130808528481691",
+          "1791130808551283927"
+        ],
+        "stable9": true
+      },
+      "scope": "Full hash-history cardinality/overflow/prospective debit/shape source closure; whole cost NOT_RUN",
+      "changed_context": "Requires explicit rejoin on A258"
+    }
+  },
+  "known_connected_error_frontier": {
+    "invariant": "Full required owner/value/error/alias representation must reach the actual typed native consumer before confirmed retirement; every final consumer must agree on its encoding and phase.",
+    "actual_paths": [
+      "RootCommandReceive -> command_values -> sealed -> command_secondary_payload -> command_secondary_error_end -> cold_complete -> FinalReceive",
+      "Secondary seeds cleanup_error triple only, rewrites shared node metadata, appends in BFS order; final_caller_graph expects node-order edge partition.",
+      "Native primary/final FRAME9 CODE18 vs secondary FRAME5 CODE13; retention-only end blocks false retirement but does not close error completion.",
+      "Pending getter/cursor/buffer and remaining required native/Source graph must remain owned until actually represented/ended; reading raw RootStorage alone is not evidence transfer."
+    ],
+    "next": "Connected representation/consumer and original owner closure, including meaningful normal/error cases, bounded original resources and one finite error attempt. Do not just flip completion flags or relax final predicates.",
+    "ownership": "Astra final integration/native endpoint; bounded Sol/Grok tasks may implement independent permitted slices.",
+    "scope_limit": "Not a new whole audit, private-heap theorem, service or guard-stopped child continuation."
+  },
+  "remaining": [
+    "C1-R1A remains OPEN_CODE. SOL107#2 stopped by cyberPolicy; original owner-triggered recovery turn only diagnosed and sealed administrative preservation. Authenticated Source59 incomplete draft and9 explicit residuals are NOT integrated/accepted/executed. Generation2 PAUSED in both profiles, exact BLOCKER queue item consumed. Do not retry/reword/reroute rejected child action; preserve guard. Existing R1 partial journal remains current. Sol108 is a separate safe non-author arithmetic/accounting review.",
+    "C1-R1B/C remains OPEN: first-field/partial mmap and unknown-close/native Source metadata joins; full hash error-prefix/support lifetime and actual class-factory provenance. A256 adds connected native actual hash return/status vs Source metadata-error separation and both receivers, but it is authored/static only, not independently accepted or runtime-qualified.",
+    "A258 joins exact LAB947 Source/native carrier/cost/frame-role implementation, including all LAB945 retention/guard/role changes, with exact independently accepted A257 hash-history hunks. New joined context awaits Sol109 independent review; no acceptance inherited across changed inputs. Complete ordinary codec-error graph and finite endpoint remain OPEN.",
+    "H-COST actual full-history cardinality/overflow/debit-order/shape is independently closed in source by SOL108 on A257. Physical per-row/implicit ABI/full required-workload fit remains UNCONFIRMED; A258 changed surrounding dependencies require rejoin, not blanket carry-over.",
+    "Actual native ColdPerform -> RootPerform -> CallOriginal -> CommandReceive -> cold_complete -> FinalReceive is present on success and error. Existing outside installed-image invocation and external final-evidence consumption/bindings remain UNESTABLISHED integration/qualification; absence of a second generic main is not itself a new CODE requirement. No runtime or standalone completion claimed.",
+    "Non-author connected source acceptance, then selected actual Source/Root/image/compiler ABI/provider/grants/resources/finite clocks and collect-all diagnostics; all agreed exact-release/live160/A+B/B09/R10/all30/F0-F11/build-install/restore-rollback/target/independent acceptance remain required. r5 immutable RED/no reuse; r6 absent."
+  ],
+  "validation": {
+    "checks": {
+      "LAB947_all57_complete": true,
+      "A257_hash_two_hunks_exact_rejoined": true,
+      "all_other56_exact_LAB947": true,
+      "retention_only_secondary_end": true,
+      "no_false_Source_admission": true,
+      "unchanged_cold_final_caller": true,
+      "unexposed_tuple_unchanged": true,
+      "error_graph_complete_not_claimed": true
+    },
+    "literal_hunks": 36,
+    "forward_reverse": true,
+    "Source_execution": 0
+  },
+  "independent_acceptance": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

@@ -1,0 +1,25 @@
+{
+  "Source_execution": 0,
+  "author_checks": [
+    "three preflight regions and full_stock_message bodies are byte-equal",
+    "alias class list unchanged and OSError remains outside it",
+    "residual str(original) remains",
+    "projector and original-body prefix still call the same full_stock_message",
+    "width table 1/4/6/10 unchanged",
+    "ordinary surplus byte-equal",
+    "expectations changed only the materialization path",
+    "contract changed the package path and the verifier size and sha pins",
+    "gapless LF partitions of at most 128 lines over each current6 file",
+    "no Source parser, import, compile, or execution"
+  ],
+  "independent_acceptance": "REQUIRED_NOT_RUN",
+  "required_independent_checks": [
+    "V1 original35/all6/3/GPG6/F1/F2/D1/D2/current19/B04 simultaneous 256 and confirmed reclamation, original caps and clocks",
+    "V2 alias 0/1 exact BaseException slot, including empty and one exact str, with no domain shrink",
+    "V3 OSError stock slot, both filename branches, errno decimal, ASCII repr and the writer formula against the pinned C text, before str",
+    "V4 exact wire debit equals the message length and does not reserve workspace or 900 against a fitting graph",
+    "V5 prefix widths 1/4/6/10 and both v2 decoders, no clip and no retry after the first fault",
+    "V6 bytes, non-ASCII, multiarg, changed slot, longobject buffer, headers, RSS, ELF ifdef and provider remain open"
+  ],
+  "schema": "friday.lab927.required-author-and-independent-validation.v1"
+}

@@ -1,0 +1,142 @@
+{
+  "schema": "friday.astra.a226.browser.prospective-complete-wire.integration.v1",
+  "assignment": "ASTRA-E4-A226-BROWSER-PROSPECTIVE-COMPLETE-WIRE-PRODUCER-BOTH-DECODER-CONNECTED-SOURCE",
+  "generation": 1,
+  "owner": "Astra active Lead Architect epoch4",
+  "author": "Astra",
+  "accepted_msk": "2026-10-03T12:56:02.122166+03:00",
+  "scope": "Existing Browser C2 late/unbounded full DATA graph construction; SAME common sol069_runs/sol069_encode body in G1, codec, supervisor, public driver; actual G1R4/executor/worker hash/path loaders and ABI/build/contract current Source bindings. No native implementation, new role/grant, unsafe control or original case/schema/cap/oracle reduction.",
+  "invariant": "A complete bounded original DS69 value/alias/body frame, not a prefix/hash. Before variable-size graph builders, a necessary complete-wire lower bound must refuse only a frame which cannot satisfy the same original exact cap. Individually converted raw bodies retain the original16MiB expanded bound. Actual decoder and final full JSON/frame seal remain unchanged.",
+  "actual_prior_failure": {
+    "function": "sol069_encode",
+    "actual_path": "visit builds full list/dict/ref/node/body metadata, materializes str/bytearray bytes, then json.dumps creates the complete head; the original cap is checked only after these growing allocations. sol069_runs appended a final abandoned 5-byte run before selecting raw.",
+    "class": "harness",
+    "existing_grouped_root": "Browser C2",
+    "new_grouped_root": false
+  },
+  "connected_callers": [
+    {
+      "source": "A025-G1.py",
+      "path": "emit -> sol069_encode(event,a201_encode_cap(131068),require) -> preowned complete original/explicit worker reference -> existing event reader sol069_decode"
+    },
+    {
+      "source": "A071-SUPERVISOR.py",
+      "path": "full_DATA_encode -> same sol069_encode(PIPE_CAP) -> complete frame -> full_DATA_decode -> same unchanged sol069_decode"
+    },
+    {
+      "source": "A087-PUBLIC-DRIVER.py",
+      "path": "actual resource receiver full_DATA_encode -> complete preowned bound/unchanged full_DATA_copy/equal -> BOTH full_DATA decoders; no isolated helper acceptance"
+    }
+  ],
+  "actual_changes": [
+    "Necessary byte floor53 before any graph collections; debit each empty typed node, reference/scalar, pair/comma, complete fixed SHA256 descriptor and stored full body before the corresponding growing graph cell.",
+    "Integer bit-length//4 lower decimal digit floor and one-character float floor never claimed exact factory cost; exact json.dumps ensure_ascii/allow_nan and final complete cap remain mandatory.",
+    "Before UTF8/bytearray conversion, ORIGINAL16MiB single body constraint checked; surrogatepass byte width counted without materializing bytes. Dedup/global expanded body accounting remains complete and unchanged, no fields cut.",
+    "Same raw/RLE choice with last abandoned run refused BEFORE its5byteallocation; empty body/complete digest/value reconstruction retained.",
+    "All four literal codec bodies identical; both decoder bodies byte-equal. Three loader wrappers only exact G1/R4 hash/path bindings; three existing JSONs only exact active pins, historical-only values preserved."
+  ],
+  "static_literal_floor_proof": {
+    "header_without_root": 45,
+    "physical_prefix": 8,
+    "initial_total": 53,
+    "node_empty": {
+      "str": 23,
+      "bytes": 25,
+      "bytearray": 29,
+      "list": 26,
+      "dict": 26
+    },
+    "complete_body_zero_width_descriptor_including_SHA256": 112,
+    "reference_base_punctuation": 6,
+    "pair_base_punctuation": 3,
+    "commas": 1,
+    "decimal_floor": "max(1,bit_length//4) <= decimal integer magnitude characters; negative sign separately debited",
+    "expanded_zero_is_floor": true,
+    "root_and_each_reference_counted_once": true,
+    "wire_lower_bound_not_greater_than_complete_original_frame": "AUTHOR_STATIC_ALGEBRA_REQUIRES_NONAUTHOR_REJOIN_NOT_EXECUTION",
+    "raw_RLE_choice": "len(out)+5>=len(raw) returns same original raw before abandoned append",
+    "UTF8": "stock exact str ordinal1/2/3/4 bytes includes surrogatepass; any individually encoded body>16MiB could not have been originally admitted even after dedup"
+  },
+  "literal_validation": {
+    "checks": [
+      {
+        "name": "A025-G1-R4.py",
+        "exact_declared_hash_path_wrapper_rebind_only": true
+      },
+      {
+        "name": "A025-G1.py",
+        "only_shared_runs_encoder_change": true,
+        "decoder_byte_equal": true,
+        "EOF_normalization_explicit": true
+      },
+      {
+        "name": "A069-DATA-CODEC.py",
+        "only_shared_runs_encoder_change": true,
+        "decoder_byte_equal": true,
+        "EOF_normalization_explicit": true
+      },
+      {
+        "name": "A071-ABI-MAPPING.json",
+        "only_exact_active_pin_replacements": true,
+        "historical_sections_byte_values_preserved": true
+      },
+      {
+        "name": "A071-BUILD-RECIPE.json",
+        "only_exact_active_pin_replacements": true,
+        "historical_sections_byte_values_preserved": true
+      },
+      {
+        "name": "A071-EXECUTOR.py",
+        "exact_declared_hash_path_wrapper_rebind_only": true
+      },
+      {
+        "name": "A071-SUPERVISOR.py",
+        "only_shared_runs_encoder_change": true,
+        "decoder_byte_equal": true,
+        "EOF_normalization_explicit": true
+      },
+      {
+        "name": "A071-WORKER.py",
+        "exact_declared_hash_path_wrapper_rebind_only": true
+      },
+      {
+        "name": "A087-PUBLIC-DRIVER.py",
+        "only_shared_runs_encoder_change": true,
+        "decoder_byte_equal": true,
+        "EOF_normalization_explicit": true
+      },
+      {
+        "name": "A118-CONNECTED-CONTRACT.json",
+        "only_exact_active_pin_replacements": true,
+        "historical_sections_byte_values_preserved": true
+      }
+    ],
+    "read_bytes": 1671957,
+    "JSON_exact_pin_leaf_edits": 375,
+    "Source_execution": 0,
+    "parser_AST_compiler_exec_tests": false
+  },
+  "JSON_exact_pin_leaf_edits": 375,
+  "unchanged": {
+    "receiving_decoders": true,
+    "copy_and_mutable_alias_bijection": true,
+    "complete_SHA256_preimage_check": true,
+    "final_full_frame_cap_and_prefix": true,
+    "actor_original_event_custody_and_receivers": true,
+    "ordinary_error_and_once_publication_retirement_paths": true,
+    "native_C_H_sources": true,
+    "original_caps_schema_cases_positive_negative_obligations": true
+  },
+  "still_open": [
+    "Native/stock/raw/preencode/error body and aliases/BOTH outside finite endpoint custody C1 CODE not implemented by this Python guard.",
+    "Whole factory/formatter/allocator/decoder/end/CPU repeated conversion/implicit IO/RSS overlap C2 UNKNOWN_NOT_ZERO. Prospective lower bound is not measured memory, full fit or native authenticity.",
+    "Stock image/compilerABI/provider/grants/resources/finite clocks and Source/Root admission not established. Current source/candidate execution still forbidden until admitted.",
+    "Independent changed-producer/context qualification required before reusing prior E01-E04 scoped credit; no author self-acceptance or isolated helper whole approval."
+  ],
+  "original_scope": "Original216/all29/all6/all9/Source19/capsule848/packet96/child32/outer268435456/inner201326592/expanded16MiB/wire1MiB and worker131072, all native/raw bodies/both ends and positive/negative obligations remain required. No F10 waiver/external-search PASS.",
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false"
+}

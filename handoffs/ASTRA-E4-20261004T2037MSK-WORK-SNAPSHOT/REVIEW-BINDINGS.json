@@ -1,0 +1,199 @@
+[
+  {
+    "component": "Browser",
+    "review": "LAB915",
+    "evaluated_package": "Browser-A226",
+    "package_identity": {
+      "archived_path": "files/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/manifest.json",
+      "sha256": "b5e7874b3d911f0292ed0f68d95b5d205cf1628ccfca79d97cb087c08dee73f1"
+    },
+    "scope": "Seven changed-context producer/decoder/caller/pin-DAG properties; not whole/native/C2 acceptance",
+    "target_runtime_verified": false,
+    "evidence_paths": [
+      "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/manifest.json",
+      "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/bound.json",
+      "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/bound.txt",
+      "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/pathset.json",
+      "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/payload.json",
+      "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/pin-checks.json",
+      "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/relation.json",
+      "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/result.json",
+      "/var/tmp/friday-lab915-a226-browser-prospective-complete-wire-both-decoder-connected-nonauthor-review/validation-plan.txt",
+      "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB915-BROWSER-SOURCE-REVIEW-RESULT-RECEIVED-20261003.json"
+    ],
+    "historical_package_body_if_not_here": {
+      "snapshot": "handoffs/ASTRA-E4-20261003T1909MSK-WORK-SNAPSHOT",
+      "commit": "a7599e2f491d7ed29bbb633fb9f8f36d59232cc8",
+      "meaning": "Previously published exact historical body, not a current whole-source credit"
+    }
+  },
+  {
+    "component": "Browser",
+    "review": "SOL083",
+    "evaluated_package": "Browser-A226-SUPERSEDED-BASE",
+    "package_identity": {
+      "original_path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/manifest.json",
+      "archived_path": "files/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/manifest.json",
+      "sha256": "b48767637bddf842ae1d2cd1e1afe01af0970c17ba590cfc6f4773ca6d18fc66"
+    },
+    "scope": "Historical A214 FD generation source review; not automatic whole-current credit",
+    "target_runtime_verified": false,
+    "evidence_paths": [
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/manifest.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/REVIEW.txt",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/current-source-rejoin.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/effects-and-costs.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/final-external-snapshot.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/full-gapless-parts.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/initial-pin-checks.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/literal-context-rejoin.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/evidence/review-matrix.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/pathset.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/received.json",
+      "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review/result.json",
+      "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL083-BROWSER-FD-GENERATION-SOURCE-RESULT-RECEIVED-20261003.json"
+    ],
+    "historical_package_body_if_not_here": {
+      "snapshot": "handoffs/ASTRA-E4-20261003T1909MSK-WORK-SNAPSHOT",
+      "commit": "a7599e2f491d7ed29bbb633fb9f8f36d59232cc8",
+      "meaning": "Previously published exact historical body, not a current whole-source credit"
+    }
+  },
+  {
+    "component": "Scanner",
+    "review": "A205",
+    "evaluated_package": "Scanner-LAB887",
+    "package_identity": {
+      "archived_path": "files/var/tmp/friday-lab887-a203-a202-scanner-actual-original-parent-factory-caller-finite-end-connected-source-closure/manifest.json",
+      "sha256": "3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee"
+    },
+    "scope": "R02/R03 scoped source closure only; both native endpoints/factory remain open",
+    "target_runtime_verified": false,
+    "evidence_paths": [
+      "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A205-LAB887-SCANNER-SCOPED-NON-AUTHOR-SOURCE-REVIEW-20261003.json"
+    ],
+    "historical_package_body_if_not_here": {
+      "snapshot": "handoffs/ASTRA-E4-20261003T1909MSK-WORK-SNAPSHOT",
+      "commit": "a7599e2f491d7ed29bbb633fb9f8f36d59232cc8",
+      "meaning": "Previously published exact historical body, not a current whole-source credit"
+    }
+  },
+  {
+    "component": "Sender",
+    "review": "LAB910",
+    "evaluated_package": "Sender-SOL089",
+    "package_identity": {
+      "archived_path": "files/var/tmp/friday-sol089-sender-stock-python-origin-body-alias-connected-inert-source/manifest.json",
+      "sha256": "2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133"
+    },
+    "scope": "Stock Python birth/body/alias/read-only replay scoped credit; no native/whole acceptance",
+    "target_runtime_verified": false,
+    "evidence_paths": [
+      "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/manifest.json",
+      "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/bound.json",
+      "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/bound.txt",
+      "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/pathset.json",
+      "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/payload.json",
+      "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/pin-checks.json",
+      "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/relation.json",
+      "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/result.json",
+      "/var/tmp/friday-lab910-a222-sol089-stock-operand-origin-body-alias-connected-nonauthor-review/validation-plan.txt",
+      "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB910-SENDER-NONAUTHOR-SOURCE-RESULT-RECEIVED-20261003.json"
+    ],
+    "historical_package_body_if_not_here": {
+      "snapshot": "handoffs/ASTRA-E4-20261003T1909MSK-WORK-SNAPSHOT",
+      "commit": "a7599e2f491d7ed29bbb633fb9f8f36d59232cc8",
+      "meaning": "Previously published exact historical body, not a current whole-source credit"
+    }
+  },
+  {
+    "component": "Publisher",
+    "review": "SOL108",
+    "evaluated_package": "Publisher-A257",
+    "package_identity": {
+      "archived_path": "files/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/manifest.json",
+      "sha256": "73f4db4fc8427e718dd5c2bc6991a7bf59d1f4dbfb775a61877923a761cdf39d"
+    },
+    "review_manifest": {
+      "archived_path": "files/var/tmp/friday-sol108-publisher-hash-history-independent-review/manifest.json",
+      "sha256": "969efa60d9e0df4a68a17d0297ab39877683857c209e2fb2ccba4973b8a7f463"
+    },
+    "scope": "Exact hash-history full count/overflow/prospective debit/shape closure; current context separately reviewed.",
+    "decision": "SCOPED_ACCEPT_NOT_WHOLE",
+    "execution": "NOT_RUN",
+    "whole_accepted": false,
+    "target_verified": false
+  },
+  {
+    "component": "Publisher",
+    "review": "SOL109",
+    "evaluated_package": "Publisher-A258",
+    "package_identity": {
+      "archived_path": "files/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/manifest.json",
+      "sha256": "82773d86edb14c70f82a7f5f3b31c9fb217b4097435596c93be786d697751374"
+    },
+    "review_manifest": {
+      "archived_path": "files/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/manifest.json",
+      "sha256": "3c4a0e154d58551e6aa2b69c1687951eebd5170ca40d166df3fb5f7dc17e683a"
+    },
+    "scope": "Actual carriers/roles/phases/hash rejoin credited; two scan-debit paths rejected.",
+    "decision": "REJECT_CONNECTED_BUDGET_PRESERVE_CREDITS",
+    "execution": "NOT_RUN",
+    "whole_accepted": false,
+    "target_verified": false
+  },
+  {
+    "component": "Publisher",
+    "review": "SOL110",
+    "evaluated_package": "Publisher-LAB948",
+    "package_identity": {
+      "archived_path": "files/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/manifest.json",
+      "sha256": "9eba2d683ad67d0a481b6175f2b398d70dbd60da30a6747a1718fffaa6698314"
+    },
+    "review_manifest": {
+      "archived_path": "files/var/tmp/friday-sol110-publisher-partial-mapping-independent-review/manifest.json",
+      "sha256": "0e14e819ce477a6a0517ba63488f987caacf1547a3faff1c685dd71b44509c34"
+    },
+    "scope": "Mapping actual returned alias, keeper/confirmed historical body/unknown retention credits; recovery classification and phase3 DATA/end rejected.",
+    "decision": "REJECT_PARTIAL_MAPPING_PRESERVE_CREDITS",
+    "execution": "NOT_RUN",
+    "whole_accepted": false,
+    "target_verified": false
+  },
+  {
+    "component": "Publisher",
+    "review": "SOL111",
+    "evaluated_package": "Publisher-A259",
+    "package_identity": {
+      "archived_path": "files/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/manifest.json",
+      "sha256": "5315a671f170e7be3bdea4395ffac62c7db01ee0955dffe38b1952e957f615c3"
+    },
+    "review_manifest": {
+      "archived_path": "files/var/tmp/friday-sol111-publisher-error-budget-independent-review/manifest.json",
+      "sha256": "ce3fc2ffc4774f3b827973e6353afa5d349cb2941132fe1a4946f655e2c349d5"
+    },
+    "scope": "Append partition/all-owner reachability/shape/same end credited; Source full retained-pass budget accepted. Historical-current error TB join and nested class namespace walk CODE remain.",
+    "decision": "REJECT_CONNECTED_C1_C2_PRESERVE_SCOPED_CREDITS",
+    "execution": "NOT_RUN",
+    "whole_accepted": false,
+    "target_verified": false
+  },
+  {
+    "component": "Node",
+    "review": "LAB929",
+    "evaluated_package": "Node-A237",
+    "package_identity": {
+      "archived_path": "files/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/manifest.json",
+      "sha256": "8e9f2f157ea87785761578fd4ab3795b327c45016be8d29c43a55fe7d184f35f"
+    },
+    "review_manifest": {
+      "archived_path": "files/var/tmp/friday-lab929-astra-node-native-route-alternatives-all3-nonauthor/manifest.json",
+      "sha256": "a1191bf0fef7542de9b3c3f5bcd9455cb6f405ae421b5b14b31043f4a5fc91ab"
+    },
+    "scope": "Finite changed-context review of all3 actual OSError routes and bounds; no concrete defect reported, independent_acceptance NOT_GRANTED.",
+    "decision": "FINITE_STATIC_NOT_WHOLE_ACCEPTED",
+    "execution": "NOT_RUN",
+    "whole_accepted": false,
+    "target_verified": false
+  }
+]

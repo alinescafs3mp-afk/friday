@@ -1,0 +1,281 @@
+{
+  "schema": "friday.astra.sol109.received.v1",
+  "assignment": "ASTRA-E4-A258-PUBLISHER-CARRIER-BUDGET-ROLE-PHASE-NONAUTHOR-SOL109",
+  "generation": 1,
+  "event": "SOL-SOL109-R1",
+  "queue_item": "01a107db-3685-74f1-8e8a-9def4dab4ce1",
+  "received_msk": "2026-10-04T20:10:07.433464+03:00",
+  "result": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL109-RESULT.json",
+    "bytes": 1601,
+    "sha256": "364fc09a378fbd15894c022b4936dbf3a055fc554fd26e2ba1bbd63fb4acc54e",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536551",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1601",
+      "1791133168491416693",
+      "1791133168509417713"
+    ],
+    "stable9": true
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/manifest.json",
+    "bytes": 8201,
+    "sha256": "3c4a0e154d58551e6aa2b69c1687951eebd5170ca40d166df3fb5f7dc17e683a",
+    "identity9_decimal_strings": [
+      "2050",
+      "5135433",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "8201",
+      "1791133139874795918",
+      "1791133139893796994"
+    ],
+    "stable9": true
+  },
+  "pins": [
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/manifest.json",
+      "bytes": 8201,
+      "sha256": "3c4a0e154d58551e6aa2b69c1687951eebd5170ca40d166df3fb5f7dc17e683a",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135433",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8201",
+        "1791133139874795918",
+        "1791133139893796994"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/received.json",
+      "bytes": 730,
+      "sha256": "e1ee867d1fcfcd3ec50fc860ff5a53970dcc91e6b3f2390dd1c5c5f197a0f439",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135356",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "730",
+        "1791132595232948616",
+        "1791132629462887326"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/host-audit.py",
+      "bytes": 5337,
+      "sha256": "a45faf6ea2cc9b341386392e748acd21524e7318f5a6bb8b87306e3642f3b5a0",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135357",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5337",
+        "1791132650778094569",
+        "1791132650778094569"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/host-seal.py",
+      "bytes": 5031,
+      "sha256": "3195984495c3c094b777bd1d427472d74f18f09461fe51e1a478dc1893f3fea3",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135359",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5031",
+        "1791132929721893324",
+        "1791132929741894456"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/pins-and-literal-audit.json",
+      "bytes": 195329,
+      "sha256": "9befa0d5b60175512e30eded1de867db0507a217313f052a0232dc4cb5124f15",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135358",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "195329",
+        "1791132650940103744",
+        "1791132929741894456"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/hash-rejoin.json",
+      "bytes": 1454,
+      "sha256": "d9832957ed5e72a2b8d2f973331e707332351599b684ce290aceca20e6433654",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135360",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1454",
+        "1791132929827899328",
+        "1791133101233607368"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/review.json",
+      "bytes": 17559,
+      "sha256": "3429871545c3e25ac378bc07d114d43691d88887628f7c065a4b100feb3ee1c1",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135431",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17559",
+        "1791133101214606292",
+        "1791133101234607424"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/seal-check.json",
+      "bytes": 27398,
+      "sha256": "eef68a48e29d2b0f37528e806bb27ae85918f3f359c0919422f7439be23b1cfd",
+      "identity9_decimal_strings": [
+        "2050",
+        "5135432",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27398",
+        "1791133101325612579",
+        "1791133139783790763"
+      ],
+      "stable9": true
+    }
+  ],
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL109-INPUT-20261004.json",
+    "bytes": 34520,
+    "sha256": "193c71e422e3719d44c421378c1af57a433f73329afe1467319bc28113938f54",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536546",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "34520",
+      "1791132405381380269",
+      "1791132405400380676"
+    ],
+    "stable9": true
+  },
+  "decision": "REJECT_CONNECTED_BUDGET_CLOSURE_PRESERVE_SCOPED_CREDITS",
+  "review_work_complete": true,
+  "acceptance_done_when": false,
+  "code_residuals": [
+    {
+      "id": "C2-R1D-CONSUMER-PASS",
+      "state": "REJECT_CODE",
+      "class": "existing C2-R1D explicit Source scan coverage",
+      "severity": "blocking for scoped budget acceptance",
+      "paths": [
+        "source/observer.py:174",
+        "source/observer.py:1856",
+        "source/selected_owned_values.py:423",
+        "source/selected_owned_values.py:686",
+        "source/selected_owned_values.py:699",
+        "source/selected_owned_values.py:743",
+        "source/selected_owned_values.py:750",
+        "source/selected_owned_values.py:765"
+      ],
+      "invariant": "Every actual repeated consumer traversal and alias/field read is prospectively charged to the original caller envelope before that pass, including refusal prefixes and retained historical rows.",
+      "actual_path": "full_value_arena and Meter.retain_error_arena call consume_secondary_own_cut after preown. records is the persistent entire _SECONDARY_CUTS list, not just rows registered or reached by this prewalk. consume validates/traverses rows and reads kind/original/edges/scalars before any per-pass debit. Only frame/code/buffer branches invoke _secondary_before. Traceback, error and Source rows perform their field/alias comparisons without a consumer debit. Earlier registration/prewalk is a different traversal and does not explicitly reserve this entire retained-list pass; repeated direct consumer calls also have no count-bound shared allowance. Zero buffer width likewise cannot account for row/metadata validation by a width-only debit.",
+      "evidence": "Literal lines 686-703 contain no count-linked pre-pass debit, 743-767 contain no debit. No enclosing consumer count/credit is passed by either actual new caller. Native command_read_reserved is a native command credit, not authorization for untracked repeated Source carrier passes.",
+      "smallest_correction": "Add an overflow-safe original-carrier debit for the full actual retained row/header/alias pass before entering the consumer loop (or before each row's first read with a whole-prefix bound), including traceback/error/Source and zero-body cases. Keep separate already-correct variable buffer/code debits and exact aliases; do not clear old records, narrow kinds/widths, reset/refund counters or change caps. Validate all actual callers/retained-row passes after an independently permitted qualification; execution here remains NOT_RUN."
+    },
+    {
+      "id": "C2-R1D-NAMESPACE-PROBES",
+      "state": "REJECT_CODE",
+      "class": "same existing C2-R1D explicit lookup coverage, not a new root",
+      "severity": "blocking for scoped budget acceptance",
+      "paths": [
+        "source/selected_owned_values.py:605",
+        "source/observer.py:311",
+        "native/publisher_root_entry.c:3564",
+        "native/publisher_root_entry.c:3580",
+        "native/publisher_root_entry.c:3650",
+        "native/publisher_root_entry.c:3662",
+        "native/publisher_root_entry.c:3680",
+        "native/publisher_root_entry.c:3690"
+      ],
+      "invariant": "Actual newly connected namespace/support probes must debit their real scan cardinality before the walk, not merely guard a later strong capture.",
+      "actual_path": "Owned frame prewalk/arena invokes own_binding, which immediately calls own_module_for_namespace and walks own_values.count before own_before(131072). Foreign frame arena invokes new mode3 own_support_relation, which calls own_module_for_namespace again before own_before(512), followed by another support-row reuse scan. These paths contain no count-linked read debit. The Source frame's fixed 5*64 allowance is not a demonstrated maximum over the variable native registry/repeated probes; the helper only adds allocation, not registry reads.",
+      "evidence": "The same secondary_globals_role(5924) and secondary_class_owned(6035) correctly charge own_values.count before their walks; the Source-facing ownership/support query routes above do not. Original fixed native command read reservation (4476) is present, so this is not a claim that native readers receive zero credit; no explicit repeated Source-query allocation from that command allowance is established.",
+      "smallest_correction": "Cover the actual Source-facing ownership/support query and reuse scans prospectively with the same original Root and overflow-safe full registry count (or a proved original pre-reserved per-query allowance), preserving original role proof, own_before before capture, and exact normal/error refusal. Do not invent a native pool, broaden provenance based on names, or call unknown costs zero."
+    }
+  ],
+  "scoped_credits": [
+    {
+      "id": "C2-R1D-CARRIER-ROUTES",
+      "state": "SCOPED_SOURCE_CREDIT"
+    },
+    {
+      "id": "C2-R1D-NATIVE-ENTRY-READS",
+      "state": "SCOPED_SOURCE_CREDIT"
+    },
+    {
+      "id": "C2-R1D-CHANNEL-CUMULATIVE",
+      "state": "SCOPED_SOURCE_CREDIT"
+    },
+    {
+      "id": "C2-R1D-MATERIALIZATION",
+      "state": "SCOPED_NOMINAL_ORDER_CREDIT_PHYSICAL_QUALIFICATION_OPEN"
+    },
+    {
+      "id": "C1-R1D-DATA-SUPPORT-PHASE",
+      "state": "SCOPED_CONNECTED_SOURCE_CREDIT"
+    },
+    {
+      "id": "C1-R1D-GROUP22-CUSTODY",
+      "state": "SCOPED_SAFE_RETENTION_CREDIT_ERROR_COMPLETION_OPEN"
+    },
+    {
+      "id": "H-COST-A257-REJOIN",
+      "state": "SCOPED_SOURCE_CREDIT_REJOINED_NOT_WHOLE_INHERITANCE"
+    },
+    {
+      "id": "BOUNDARIES",
+      "state": "PRESERVED"
+    }
+  ],
+  "whole_acceptance": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "Source_execution": 0
+}

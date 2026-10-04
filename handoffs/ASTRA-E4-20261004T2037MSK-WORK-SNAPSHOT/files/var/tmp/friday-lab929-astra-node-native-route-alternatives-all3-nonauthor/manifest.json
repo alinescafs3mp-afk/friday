@@ -1,0 +1,56 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accounts": {
+    "cumulative": 2158145,
+    "elapsed_sec": 699.533456,
+    "memory_hash": 35418,
+    "physical_read_bytes": 2080242,
+    "sealed_tree": 35418,
+    "transport": 42485,
+    "vmrss_kb": 22700
+  },
+  "assignment": "ASTRA-E4-A237-NODE-NATIVE-ROUTE-ALTERNATIVES-ACTUAL-WIRE-ALL3-NONAUTHOR-LAB-929",
+  "compiler_ABI": "NOT_RUN",
+  "concrete_defect": null,
+  "decision": "AMBIGUOUS_NONE_ROUTES_MIN_LOWER_PLUS_ACTUAL_DELTA_LONGER_ALTERNATIVE_NOT_CHARGED",
+  "delivery_id": "del_6b35d89e75ec47048cb2dd70f1bde153",
+  "gates": "NOT_RUN",
+  "job_id": "job_ccd8c5ef47ea401db4ffa4775896f533",
+  "members": [
+    {
+      "bytes": 15472,
+      "name": "pins.json",
+      "sha256": "543c86e6e1c9eda6076b6e99d9aada257e5cc80c5fdc2b2c0097260be98310e7"
+    },
+    {
+      "bytes": 7067,
+      "name": "review.json",
+      "sha256": "fa2bdb965a803e2fa72e6bbabcc5769e01b2fe89cd8f52f864d4c058888baab2"
+    },
+    {
+      "bytes": 10560,
+      "name": "validation-coverage.json",
+      "sha256": "a872113d30268fcdce35fc552def29bb716a4598e099ca8612f47c302c1c772f"
+    },
+    {
+      "bytes": 475,
+      "name": "timing.json",
+      "sha256": "761228cb59cb681994263c99f31a6aff3dae2e9f564b956624246e4ed0f2ae8b"
+    }
+  ],
+  "pathset": {
+    "pins": "pins.json",
+    "review": "review.json",
+    "root": "/var/tmp/friday-lab929-astra-node-native-route-alternatives-all3-nonauthor",
+    "timing": "timing.json",
+    "validation_coverage": "validation-coverage.json"
+  },
+  "review_key": "ASTRA_A237_NATIVE_ROUTE_ALTERNATIVES_ACTUAL_WIRE_ALL3_SOURCE6",
+  "run_message_id": "msg_bf1cc80d0bab4898ad93c02ac9fa8bc3",
+  "runtime": "NOT_RUN",
+  "schema": "friday.astra.lab929.nonauthor-run.manifest.v1",
+  "source_execution": 0,
+  "verdict": "FINITE_STATIC_CHANGED_CONTEXT_NOT_WHOLE_ACCEPTED"
+}

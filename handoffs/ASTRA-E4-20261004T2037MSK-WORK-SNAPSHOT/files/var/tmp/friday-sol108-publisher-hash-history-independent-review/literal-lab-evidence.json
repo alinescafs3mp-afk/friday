@@ -1,0 +1,250 @@
+{
+  "schema": "friday.sol108.literal-lab-evidence.v1",
+  "author_hunks": 2,
+  "forward_exact": true,
+  "inverse_exact": true,
+  "LAB946_files_and_manifest_verified": [
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/manifest.json",
+      "bytes": 1014,
+      "sha256": "7ad22e0920ff5f8e51d070dd4034596b581e5af3691ceb5e53c4fb8ca38778e0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714968",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1014",
+        "1791129887041410391",
+        "1791129887041410391"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/README.txt",
+      "bytes": 467,
+      "sha256": "64f1c946e2d70dbc278af4c55c2ecc72a39067624af44f0e34f70fbb522dcc8e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714963",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "467",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/obligations.json",
+      "bytes": 2254,
+      "sha256": "2924db2d8425929ff2d55954df6539a8a328ab1ef72500af540001609d69ad1e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714966",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2254",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/pins.json",
+      "bytes": 1682,
+      "sha256": "4c33a31e9bb330de446f5736dd6c762f3de946e4c0bc2e56fa2230ecdf340a14",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714964",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1682",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/review.json",
+      "bytes": 8094,
+      "sha256": "f911e732d9fbb17a0b650e4b753060a6cc1bbf141ff1dfcbd43be9363ada0b44",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714965",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8094",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/timing.json",
+      "bytes": 415,
+      "sha256": "064f3379aec8b7cd4e6b897b3067ac3f8318cc53268ccac7e053f1c8ab742918",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714967",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "415",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    }
+  ],
+  "counted_host_read_bytes": 839642,
+  "source_execution": 0,
+  "source_pins": [
+    {
+      "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_root_entry.c",
+      "bytes": 412436,
+      "sha256": "15ac8b60f733ea4869308133f907c66dbab6a8dba2a1988d79025cc506b6e11a",
+      "identity9_decimal_strings": [
+        "2050",
+        "5010626",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "412436",
+        "1791129207558656060",
+        "1791129207558656060"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_root_entry.c",
+      "bytes": 413280,
+      "sha256": "2f7a8fa32dee8a91330a2975e8826bb487b59690a03e81496c0a3276082cfc7a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229218",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "413280",
+        "1791130708211803917",
+        "1791130708211803917"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/manifest.json",
+      "bytes": 1014,
+      "sha256": "7ad22e0920ff5f8e51d070dd4034596b581e5af3691ceb5e53c4fb8ca38778e0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714968",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1014",
+        "1791129887041410391",
+        "1791129887041410391"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/README.txt",
+      "bytes": 467,
+      "sha256": "64f1c946e2d70dbc278af4c55c2ecc72a39067624af44f0e34f70fbb522dcc8e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714963",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "467",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/obligations.json",
+      "bytes": 2254,
+      "sha256": "2924db2d8425929ff2d55954df6539a8a328ab1ef72500af540001609d69ad1e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714966",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2254",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/pins.json",
+      "bytes": 1682,
+      "sha256": "4c33a31e9bb330de446f5736dd6c762f3de946e4c0bc2e56fa2230ecdf340a14",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714964",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1682",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/review.json",
+      "bytes": 8094,
+      "sha256": "f911e732d9fbb17a0b650e4b753060a6cc1bbf141ff1dfcbd43be9363ada0b44",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714965",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8094",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/timing.json",
+      "bytes": 415,
+      "sha256": "064f3379aec8b7cd4e6b897b3067ac3f8318cc53268ccac7e053f1c8ab742918",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714967",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "415",
+        "1791129887040410334",
+        "1791129887040410334"
+      ],
+      "stable9": true
+    }
+  ]
+}

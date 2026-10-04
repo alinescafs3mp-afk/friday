@@ -1,0 +1,255 @@
+{
+  "schema": "friday.sol083.literal-context-proof.v1",
+  "contexts": [
+    {
+      "id": "prospective_acquire",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 81,
+      "end_line": 104,
+      "offset": 3882,
+      "end_offset": 5041,
+      "bytes": 1159,
+      "sha256": "3820837263c9e64203a6b02490b64a7e7f630161c071f92bece3f3d47964ce94",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "once_close",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 106,
+      "end_line": 141,
+      "offset": 5042,
+      "end_offset": 6747,
+      "bytes": 1705,
+      "sha256": "35de818c4daacfe2e471dcd499533e1f7d373173e7503156548594ba456967eb",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "same_run_close_boolean",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 167,
+      "end_line": 177,
+      "offset": 7909,
+      "end_offset": 8264,
+      "bytes": 355,
+      "sha256": "423601beefa9b43eda866925e1dfe70f1ad4d518353c1885bffed6465d6866e6",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "actual_loaded_R4_set",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 53,
+      "end_line": 59,
+      "offset": 2766,
+      "end_offset": 3095,
+      "bytes": 329,
+      "sha256": "add2bad45d39443f33add2c9a6670166fa8bc766d1bd0600f4f88ec7085beea2",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "actual_close_binding",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 261,
+      "end_line": 288,
+      "offset": 12099,
+      "end_offset": 13638,
+      "bytes": 1539,
+      "sha256": "a640cd257bbfaff7f3c6c3fb3d42f027a0a46f3c3161ab34c8acfc4d73f10f7b",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "output_prospective_producer",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 695,
+      "end_line": 771,
+      "offset": 35395,
+      "end_offset": 39006,
+      "bytes": 3611,
+      "sha256": "d2791c726317cdcd543d16b2a008bec23f1005edcf8400127941561ff13b70bc",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "output_final_close",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 790,
+      "end_line": 801,
+      "offset": 39823,
+      "end_offset": 40216,
+      "bytes": 393,
+      "sha256": "1d01591378ab3708105874e085d14c7cfabe265cb9a0c5d94a759d7df1768bf4",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "actual_readback_acquire",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 907,
+      "end_line": 938,
+      "offset": 44576,
+      "end_offset": 46818,
+      "bytes": 2242,
+      "sha256": "f526b9ccb28ea724f4860e4c48636d4dd810862257262650918f962299b3dccf",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "actual_error_cleanup",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 963,
+      "end_line": 1015,
+      "offset": 48401,
+      "end_offset": 50740,
+      "bytes": 2339,
+      "sha256": "b6acb7ffd6ccd4c105c07c2083e14203ea1a066b8bf2ec1d3721555c57487575",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "ordinary_end_and_demotion",
+      "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+      "start_line": 1016,
+      "end_line": 1047,
+      "offset": 50740,
+      "end_offset": 53008,
+      "bytes": 2268,
+      "sha256": "c90b1e17db10c245a81f5a8e07ddc6a409bc2d588fb347f805fd52f5b94c512e",
+      "full_file_sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78"
+    },
+    {
+      "id": "actual_owner_intent",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+      "start_line": 20,
+      "end_line": 79,
+      "offset": 525,
+      "end_offset": 4565,
+      "bytes": 4040,
+      "sha256": "c95588902572044d12778d42b427e8603e90ae53d4ec3ead33bbd7c4d8a9132e",
+      "full_file_sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440"
+    },
+    {
+      "id": "actual_owner_wave_cleanup",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+      "start_line": 107,
+      "end_line": 157,
+      "offset": 6080,
+      "end_offset": 9774,
+      "bytes": 3694,
+      "sha256": "d4a74f53849212052b0c0b241402d3024bff31c315aa41f9b044d875b0f486cd",
+      "full_file_sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440"
+    },
+    {
+      "id": "R4_sticky_uncertainty",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+      "start_line": 215,
+      "end_line": 242,
+      "offset": 9639,
+      "end_offset": 10874,
+      "bytes": 1235,
+      "sha256": "945755955c58c9989baf19489fab47074fcb352ec9c45b40eeda1511b21ae404",
+      "full_file_sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2"
+    },
+    {
+      "id": "physical_snapshot_unqualified",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+      "start_line": 575,
+      "end_line": 605,
+      "offset": 26684,
+      "end_offset": 28518,
+      "bytes": 1834,
+      "sha256": "0931d55a8c3171e04a9d034fb6dd0c62b366c94d797e7460cd32344b343259e9",
+      "full_file_sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2"
+    },
+    {
+      "id": "physical_receipt_original_stage",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+      "start_line": 648,
+      "end_line": 681,
+      "offset": 30626,
+      "end_offset": 32136,
+      "bytes": 1510,
+      "sha256": "31439ebca234ca6635fc73cd652178d688d9cb21ee86aa214f037b5146bcca7d",
+      "full_file_sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2"
+    },
+    {
+      "id": "supervisor_stream_join",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-SUPERVISOR.py",
+      "start_line": 445,
+      "end_line": 510,
+      "offset": 23260,
+      "end_offset": 27438,
+      "bytes": 4178,
+      "sha256": "fed5f645a3995f8800b8052cd305b63cab4f5a3c29592f766a3631ec0b6c5890",
+      "full_file_sha256": "c5a3d1ead2990e2482c1c30b7eac0ff785e63452e39e3c89678d24625f99206d"
+    },
+    {
+      "id": "supervisor_failed_prefix_guard",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-SUPERVISOR.py",
+      "start_line": 610,
+      "end_line": 651,
+      "offset": 32786,
+      "end_offset": 35372,
+      "bytes": 2586,
+      "sha256": "aa2aa184c995d8a13ea0a4ba4d88af57e2e6ea5caaecc576656c53f963bcca98",
+      "full_file_sha256": "c5a3d1ead2990e2482c1c30b7eac0ff785e63452e39e3c89678d24625f99206d"
+    },
+    {
+      "id": "supervisor_actual_terminal_invocation",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-SUPERVISOR.py",
+      "start_line": 940,
+      "end_line": 957,
+      "offset": 49939,
+      "end_offset": 51253,
+      "bytes": 1314,
+      "sha256": "8f8334bf55f6d89d7a87472a19ea803b3b519412eb06c8a9aab5f20382b857d5",
+      "full_file_sha256": "c5a3d1ead2990e2482c1c30b7eac0ff785e63452e39e3c89678d24625f99206d"
+    },
+    {
+      "id": "public_stream_join",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+      "start_line": 146,
+      "end_line": 211,
+      "offset": 7424,
+      "end_offset": 11602,
+      "bytes": 4178,
+      "sha256": "fed5f645a3995f8800b8052cd305b63cab4f5a3c29592f766a3631ec0b6c5890",
+      "full_file_sha256": "a1d2097212ae19c585f8fa696c32c80eab73ba411542b44441f6799883ac8d86"
+    },
+    {
+      "id": "public_failed_prefix_guard",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+      "start_line": 311,
+      "end_line": 353,
+      "offset": 16950,
+      "end_offset": 19537,
+      "bytes": 2587,
+      "sha256": "fb5ed3c13e9672c081615921b5553a07066e559fc1001d00d99b7fd1c947ea11",
+      "full_file_sha256": "a1d2097212ae19c585f8fa696c32c80eab73ba411542b44441f6799883ac8d86"
+    },
+    {
+      "id": "public_actual_decoder_invocation",
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+      "start_line": 357,
+      "end_line": 363,
+      "offset": 19581,
+      "end_offset": 19922,
+      "bytes": 341,
+      "sha256": "29810211cf9ec760fa7f31b00a2b96539379cd1c5351a2390bcfb70820b71abf",
+      "full_file_sha256": "a1d2097212ae19c585f8fa696c32c80eab73ba411542b44441f6799883ac8d86"
+    },
+    {
+      "id": "original_deadline_selector",
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTROLS.py",
+      "start_line": 954,
+      "end_line": 976,
+      "offset": 179549,
+      "end_offset": 181141,
+      "bytes": 1592,
+      "sha256": "35837607556a9040d0b10631814ea550086d508bc767ddc5ae0c328fa045dcac",
+      "full_file_sha256": "315c95540e0472c0c07240a16718d3f6dd991ef500a7096b6c9223afdc1acb5b"
+    }
+  ],
+  "context_count": 22,
+  "selected_context_bytes": 45029,
+  "full_unique_files_read_bytes": 742195,
+  "BOTH_stream_join_byte_equal": {
+    "bytes": 4178,
+    "sha256": "fed5f645a3995f8800b8052cd305b63cab4f5a3c29592f766a3631ec0b6c5890"
+  },
+  "AST_parse_import_compile_eval_tests": "NOT_RUN"
+}

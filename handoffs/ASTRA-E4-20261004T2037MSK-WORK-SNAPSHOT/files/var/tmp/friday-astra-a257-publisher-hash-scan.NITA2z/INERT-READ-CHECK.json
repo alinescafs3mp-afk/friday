@@ -1,0 +1,25 @@
+{
+  "schema": "friday.astra.a257.inert-read-check.v1",
+  "checks": {
+    "only_actual_native_hash_reader_changed": true,
+    "all56_other_source_identical": true,
+    "unchanged_native_layout": true,
+    "ledger_debit_before_lookup": true,
+    "ledger_shape_before_lookup": true,
+    "actual_full_row_count": true,
+    "multiply_overflow_before_debit": true,
+    "full_history_prepaid_before_iteration": true,
+    "seven_field_shape_before_row_walk": true,
+    "original_false_completion_and_counters": true,
+    "same_v2_producer_and_typed_reader": true,
+    "no_new_pool_cap_grant": true
+  },
+  "checked_msk": "2026-10-04T19:19:27.714023+03:00",
+  "changed": [
+    "native/publisher_root_entry.c"
+  ],
+  "unchanged_count": 56,
+  "literal_hunks": 2,
+  "Source_execution": 0,
+  "kind": "HOST_LITERAL_NOT_SOURCE_PARSER_SYNTAX_ABI_RUNTIME"
+}

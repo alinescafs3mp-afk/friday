@@ -1,0 +1,37 @@
+{
+  "schema": "friday.sol089.exact-private-pathset.v1",
+  "files": [
+    "CASE_TABLE.json",
+    "CONNECTED_LITERAL_WINDOWS.json",
+    "CONNECTED_RELATION.json",
+    "CURRENT96_SOURCE54_DEPENDENCIES.json",
+    "DATA_INTEGRITY.json",
+    "EXTERNAL_PINS.json",
+    "INTERFACE_AND_ORIGIN_CONTRACT.json",
+    "PRESERVATION_AND_RESIDUALS.json",
+    "README.txt",
+    "SOURCE_LITERAL_PARTS.json",
+    "UTILITY_NOTES.json",
+    "VALIDATION_PLAN.json",
+    "completion.json",
+    "manifest.json",
+    "pathset.json",
+    "received.json",
+    "source/caller.py",
+    "source/controller.py",
+    "source/native_grammar.py",
+    "source/ordinary_root_consumers.py",
+    "source/receipt_physical.py",
+    "source/root_native_launcher.py",
+    "source/sender_operand_codec.py",
+    "source/source_grammar.py",
+    "source/staged_sender.py"
+  ],
+  "dirs": [
+    ".",
+    "source"
+  ],
+  "private_regular_nlink1": true,
+  "sources9": true,
+  "source_execution": 0
+}

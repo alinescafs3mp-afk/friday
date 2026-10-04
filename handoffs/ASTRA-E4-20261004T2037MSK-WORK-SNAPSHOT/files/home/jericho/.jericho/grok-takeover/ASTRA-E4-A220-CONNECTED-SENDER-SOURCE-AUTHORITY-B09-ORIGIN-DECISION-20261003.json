@@ -1,0 +1,94 @@
+{
+  "schema": "friday.astra.a220.connected-source-authority-and-b09-origin.decision.v1",
+  "recorded_utc": "2026-10-03T07:39:40Z",
+  "owner": "Astra active Lead Architect epoch4",
+  "does_not_change_owner_authority_models_guards_runtime_or_stock_fence": true,
+  "Sender": {
+    "decision": "Existing Source authoring authority permits coherent producer/receiver/schema changes. Current decoder whitelist is implementation, not owner-only permission. Withdraw ONLY the self-imposed 'existing decoder shapes only' reading; no permission for private/opaque/class/FD body substitute or native scope enlargement.",
+    "original_authority": [
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL056-INPUT-20261002.json",
+        "bytes": 17521,
+        "sha256": "7bcca525493ca9f8b87fcc4183165ba5902bc9d97a612ad40817b4771ad1b925",
+        "identity9_decimal_strings": [
+          "2050",
+          "8532876",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17521",
+          "1790922427468744112",
+          "1790922427541748292"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL061-INPUT-20261002.json",
+        "bytes": 77393,
+        "sha256": "46f42cb7815efda6f88bad90b428de081c5d08ef10960a6d0f7ec9a5ec90010a",
+        "identity9_decimal_strings": [
+          "2050",
+          "8533604",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "77393",
+          "1790936235619702887",
+          "1790936235693707133"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL059-INPUT-20261002.json",
+        "bytes": 112673,
+        "sha256": "e65087d9f517357af913ef934d8807113a7a12de18d4d9e5b4f96f70ca13f9ce",
+        "identity9_decimal_strings": [
+          "2050",
+          "8533508",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "112673",
+          "1790930308389919633",
+          "1790930308447922953"
+        ],
+        "stable9": true
+      }
+    ],
+    "new_actual_path": "FullEventJournal.call248-267 notes selector.create.begin before actual initializer. Attached Producer.note1215-1238 calls value(arguments), and value1154-1158 calls fileno for matching objects or throws TypeError. Stock Python preinit and later native kernel birth stay distinct; no declared body/alias shape exists, so legitimate positive path is already blocked at producer, not only consumer.",
+    "required": "Actual stock-bound, origin-tied full Python body/alias capture->readOnly rehydration->unchanged same_typed->original success/error/finite end, including begin/end/post-state cuts. Pure Python replay allocation may be authored within exact existing stock fence if qualified to have no kernel/native constructor effect; no constructors executed during Source work. Later native/raw/error/BOTH-end/C1 obligations not waived or hidden. Actual future stock/MRO/metaclass/image/ABI/resources are qualification, not permission-to-author Code.",
+    "not_new_product_root": "Existing Sender E01/C1 producer-consumer root, not another audit or separately counted defect",
+    "unsafe": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false; Scanner denied action never retried/rephrased/delegated/routed around"
+  },
+  "B09": {
+    "decision": "Select for FUTURE Source implementation the EXISTING native_queue.start_exact actual response and raw actual exact queued input as origin producer, retained only in existing preregistered B09 private evidence path. No new service/controller/ledger/runtime helper/hook edits.",
+    "basis": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL088-B09-CONTRACT-RESULT-RECEIVED-20261003.json",
+      "bytes": 41880,
+      "sha256": "b314ecd65993cc401abb5599c6c1ab46f2b9f5c7c1b7725b65e30d234c0f2cd8",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533569",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "41880",
+        "1791013073483859592",
+        "1791013073538862739"
+      ],
+      "stable9": true
+    },
+    "source_only_not_dispatch_or_evidence_admission": true,
+    "required": "Preserve ordinary native lifecycle/epochs/compaction/dedup/writer lock and exactly-one queue. Reconcile queue-only/enqueue->exact start serialization using existing authorized native path before functionality/admission; no auto-started Task replay or raced duplicate. Actual transient native event/queued_id/turn_id response must be captured in same invocation with original raw notice, not copied expected data. Strict completed turn remains separate. Fix actual S1 neverAck unknown-ACK/effects/generation closure path; after-ACK loss absent authority stays honest unavailable.",
+    "current_primary": "Grok primary currently available, native fallback conditional readiness not current full-release blocker",
+    "no_keys_signing_content_dispatch_now": true
+  },
+  "Source_execution": 0,
+  "Root_admission": false,
+  "SourceReady": false,
+  "GO": false
+}

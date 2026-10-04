@@ -1,0 +1,1041 @@
+{
+  "Source_execution": 0,
+  "assignment": "ASTRA-E4-A236-NODE-NONALIAS-PROSPECTIVE-FORMAT-CONNECTED-IMPLEMENTATION-LAB-927",
+  "files": [
+    {
+      "line_count": 4343,
+      "new": {
+        "bytes": 209925,
+        "name": "caller.py",
+        "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/caller.py",
+        "sha256": "6f7991ec6ec972b1a73962886ab20ce2c52d29b35481ccdc337da5d52a938923",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "4372040",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "209925",
+          "1791054939873372703",
+          "1791054939873372703"
+        ]
+      },
+      "old": {
+        "bytes": 203294,
+        "mtime_equals_ctime": true,
+        "name": "caller.py",
+        "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/caller.py",
+        "sha256": "1415ae7274d93f712958d88cb5c4b8b08252b71f90d691514244380d87061c60",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "3714942",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "203294",
+          "1791047458157876548",
+          "1791047458157876548"
+        ]
+      },
+      "partition_rule": "gapless LF byte segments, at most 128 lines; no Source parser",
+      "parts": [
+        {
+          "byte_after": 6596,
+          "byte_first": 0,
+          "bytes": 6596,
+          "line_first": 1,
+          "line_last": 128,
+          "sha256": "a1e9d7fb3b72e64bb929b9003ac3b7dbd4ed73ebf206c57a54da057baad6c64c"
+        },
+        {
+          "byte_after": 13267,
+          "byte_first": 6596,
+          "bytes": 6671,
+          "line_first": 129,
+          "line_last": 256,
+          "sha256": "44ae41a169c5a01fcfb2dee6a4e1341d7bc1b0a127c1a828830d852e06c83dbf"
+        },
+        {
+          "byte_after": 18991,
+          "byte_first": 13267,
+          "bytes": 5724,
+          "line_first": 257,
+          "line_last": 384,
+          "sha256": "9df8d09d80c9ef8ff00a090d369d1c1a6600be0964ceb0f03f4061f082b0e6be"
+        },
+        {
+          "byte_after": 24782,
+          "byte_first": 18991,
+          "bytes": 5791,
+          "line_first": 385,
+          "line_last": 512,
+          "sha256": "23896de34ee2d1c35b37cc20ced73d6afc214aed47a9090370203f31779bf478"
+        },
+        {
+          "byte_after": 29623,
+          "byte_first": 24782,
+          "bytes": 4841,
+          "line_first": 513,
+          "line_last": 640,
+          "sha256": "a5ea92210d8dcbfb3567d3c79777a1dbfba8200ff7f961108a0f1a6cc737b5b0"
+        },
+        {
+          "byte_after": 34783,
+          "byte_first": 29623,
+          "bytes": 5160,
+          "line_first": 641,
+          "line_last": 768,
+          "sha256": "2260f94b6429e5ced06821e849c78b610a1b64a70dfb28cfd42c9f515c340ff1"
+        },
+        {
+          "byte_after": 40312,
+          "byte_first": 34783,
+          "bytes": 5529,
+          "line_first": 769,
+          "line_last": 896,
+          "sha256": "a6919a8766e52115babe883377461ad30ce209ae9a595adc1f26990187c263d3"
+        },
+        {
+          "byte_after": 45622,
+          "byte_first": 40312,
+          "bytes": 5310,
+          "line_first": 897,
+          "line_last": 1024,
+          "sha256": "3facf76f45189ffbef566e71200b6f1a3dcc496151218656a5464d31ffc1f510"
+        },
+        {
+          "byte_after": 50705,
+          "byte_first": 45622,
+          "bytes": 5083,
+          "line_first": 1025,
+          "line_last": 1152,
+          "sha256": "308f9ef6b3dcb613e18b03d806a87e22162020c606b67cc92eb1ce2802139a3e"
+        },
+        {
+          "byte_after": 56270,
+          "byte_first": 50705,
+          "bytes": 5565,
+          "line_first": 1153,
+          "line_last": 1280,
+          "sha256": "5610f5cea86561f7243aed33d07ab8751213e51bd572ce43f1ce76d28f320463"
+        },
+        {
+          "byte_after": 61178,
+          "byte_first": 56270,
+          "bytes": 4908,
+          "line_first": 1281,
+          "line_last": 1408,
+          "sha256": "6d0f0b15b46c0f370bef27ad41cfc58a1304c0198360273ec9f8adf4068b5c10"
+        },
+        {
+          "byte_after": 67292,
+          "byte_first": 61178,
+          "bytes": 6114,
+          "line_first": 1409,
+          "line_last": 1536,
+          "sha256": "1e8cba312e246028b3f18feaea594b343a1ddb953fdcd3b1ffcbada53954f4ac"
+        },
+        {
+          "byte_after": 73837,
+          "byte_first": 67292,
+          "bytes": 6545,
+          "line_first": 1537,
+          "line_last": 1664,
+          "sha256": "13d7d313e2e8538e79178df34d43a36f1f71203d11c39470d2a91ab4e7a37030"
+        },
+        {
+          "byte_after": 79200,
+          "byte_first": 73837,
+          "bytes": 5363,
+          "line_first": 1665,
+          "line_last": 1792,
+          "sha256": "3491559462a05c07a967acff3c9c31f69e967c9a32f5f62566e54bc104b41ebf"
+        },
+        {
+          "byte_after": 85630,
+          "byte_first": 79200,
+          "bytes": 6430,
+          "line_first": 1793,
+          "line_last": 1920,
+          "sha256": "0dbd224b9111607e7bbc18bdba2a34b01c389e5488cca3a1c54acbe2b7b933e0"
+        },
+        {
+          "byte_after": 92211,
+          "byte_first": 85630,
+          "bytes": 6581,
+          "line_first": 1921,
+          "line_last": 2048,
+          "sha256": "a75cb7ef122a639f75d16f2fa2680fff89c774bf80dd211a38c3206c02aab281"
+        },
+        {
+          "byte_after": 97256,
+          "byte_first": 92211,
+          "bytes": 5045,
+          "line_first": 2049,
+          "line_last": 2176,
+          "sha256": "07bf0fc2279f933a9f2a4e2780246b52dafb005b40957db846a410263f249e4a"
+        },
+        {
+          "byte_after": 102446,
+          "byte_first": 97256,
+          "bytes": 5190,
+          "line_first": 2177,
+          "line_last": 2304,
+          "sha256": "504de32a97cfb619cd111621bdf81b41d3308441c5851eec85582bf744bbaf7e"
+        },
+        {
+          "byte_after": 107997,
+          "byte_first": 102446,
+          "bytes": 5551,
+          "line_first": 2305,
+          "line_last": 2432,
+          "sha256": "941ec05b89551dbf997d2a26b619a82a15bf3e4c5a008e9f4fddc167f2238e45"
+        },
+        {
+          "byte_after": 114634,
+          "byte_first": 107997,
+          "bytes": 6637,
+          "line_first": 2433,
+          "line_last": 2560,
+          "sha256": "e6e6612d4062bf2c816df55bc6e0008fa0f66d6851800f5f5a45e90275a6ebe3"
+        },
+        {
+          "byte_after": 120763,
+          "byte_first": 114634,
+          "bytes": 6129,
+          "line_first": 2561,
+          "line_last": 2688,
+          "sha256": "b02805a77249fb8ffc9c7645af69437372d2585b2b2ec06cb9adabe581fc112c"
+        },
+        {
+          "byte_after": 126983,
+          "byte_first": 120763,
+          "bytes": 6220,
+          "line_first": 2689,
+          "line_last": 2816,
+          "sha256": "cb4a0401a58686e351f938bb34fcb60a3858e69a9458ea75ae8af7dad3b94476"
+        },
+        {
+          "byte_after": 132351,
+          "byte_first": 126983,
+          "bytes": 5368,
+          "line_first": 2817,
+          "line_last": 2944,
+          "sha256": "8acede9404c04a33edac9d2eeb1d6b6e008a87a271e539ee05ec07f33da750b6"
+        },
+        {
+          "byte_after": 138922,
+          "byte_first": 132351,
+          "bytes": 6571,
+          "line_first": 2945,
+          "line_last": 3072,
+          "sha256": "1136981d6a85f96f7e9a68769ffa8da2c3b0fad3e3f4854f58d9863cfb61c8d2"
+        },
+        {
+          "byte_after": 145221,
+          "byte_first": 138922,
+          "bytes": 6299,
+          "line_first": 3073,
+          "line_last": 3200,
+          "sha256": "73b6541bd53b5bbd1380274956b4a6685e8670faaeb07bf4d73cf5a9d32d6652"
+        },
+        {
+          "byte_after": 152448,
+          "byte_first": 145221,
+          "bytes": 7227,
+          "line_first": 3201,
+          "line_last": 3328,
+          "sha256": "981ce329eecde9412d7ded48c40afcaed373103ed58d58ac6384b81938253d35"
+        },
+        {
+          "byte_after": 159724,
+          "byte_first": 152448,
+          "bytes": 7276,
+          "line_first": 3329,
+          "line_last": 3456,
+          "sha256": "68ea26b68b30cf36ff6c196fff31873be7e4dbf588f0a4f67d391ace2607e438"
+        },
+        {
+          "byte_after": 167087,
+          "byte_first": 159724,
+          "bytes": 7363,
+          "line_first": 3457,
+          "line_last": 3584,
+          "sha256": "c70419cb2e766dc05eff6328689c0a85f1e34efd6867c5eea4d09776bd846dbf"
+        },
+        {
+          "byte_after": 175891,
+          "byte_first": 167087,
+          "bytes": 8804,
+          "line_first": 3585,
+          "line_last": 3712,
+          "sha256": "a04a2a58c21f3795f624036240dbf30df42b96cc42321b77ca92b3f96fc9acdf"
+        },
+        {
+          "byte_after": 183459,
+          "byte_first": 175891,
+          "bytes": 7568,
+          "line_first": 3713,
+          "line_last": 3840,
+          "sha256": "6068b2a46744255fcf6d2f7ef93d425882de4f9865ec3545368540118af8774a"
+        },
+        {
+          "byte_after": 190060,
+          "byte_first": 183459,
+          "bytes": 6601,
+          "line_first": 3841,
+          "line_last": 3968,
+          "sha256": "4af3e80126bdd9a70601752d4ed32b2a492808f69ecc3be8b18893017ca9597f"
+        },
+        {
+          "byte_after": 198337,
+          "byte_first": 190060,
+          "bytes": 8277,
+          "line_first": 3969,
+          "line_last": 4096,
+          "sha256": "4b917b4a2f1dae4683d4aebb3418f175abaa999465492dec7f1b1f19a07ad192"
+        },
+        {
+          "byte_after": 204638,
+          "byte_first": 198337,
+          "bytes": 6301,
+          "line_first": 4097,
+          "line_last": 4224,
+          "sha256": "40784ed9e2f767ec93164cd6bba7fe7148ac0d15b4de0c17f6ac4488d301bb8d"
+        },
+        {
+          "byte_after": 209925,
+          "byte_first": 204638,
+          "bytes": 5287,
+          "line_first": 4225,
+          "line_last": 4343,
+          "sha256": "9d07b783f47f4730aae7b93426ae73c6c221df5d94ab096da3109b70c8568824"
+        }
+      ]
+    },
+    {
+      "line_count": 3598,
+      "new": {
+        "bytes": 174024,
+        "name": "supervisor.py",
+        "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/supervisor.py",
+        "sha256": "1bdbf3fd7cf66d2bfed5673773b17904513eb3d3efbfd23e5099a870debf9890",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "4372044",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "174024",
+          "1791054939874372760",
+          "1791054939874372760"
+        ]
+      },
+      "old": {
+        "bytes": 167386,
+        "mtime_equals_ctime": true,
+        "name": "supervisor.py",
+        "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/supervisor.py",
+        "sha256": "98a8b473d1c662f67f15d9edf0f430fcb8a5adef812eb780b23ad5ffd1cdb03f",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "3714946",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "167386",
+          "1791047457891861488",
+          "1791047457891861488"
+        ]
+      },
+      "partition_rule": "gapless LF byte segments, at most 128 lines; no Source parser",
+      "parts": [
+        {
+          "byte_after": 6011,
+          "byte_first": 0,
+          "bytes": 6011,
+          "line_first": 1,
+          "line_last": 128,
+          "sha256": "bfbd12dc5425dca7ad7fa54f2db2f701a136d846bb805717aad9cf1d144086ae"
+        },
+        {
+          "byte_after": 11108,
+          "byte_first": 6011,
+          "bytes": 5097,
+          "line_first": 129,
+          "line_last": 256,
+          "sha256": "7a44066c14d8fa38ec5a3cf2e4c823d5a6e8acf9138d87ded404993f80cfdd7d"
+        },
+        {
+          "byte_after": 15654,
+          "byte_first": 11108,
+          "bytes": 4546,
+          "line_first": 257,
+          "line_last": 384,
+          "sha256": "75e49be450abd2185425387e7287097d03902e9847d47c4d522b5b7039c25b78"
+        },
+        {
+          "byte_after": 21895,
+          "byte_first": 15654,
+          "bytes": 6241,
+          "line_first": 385,
+          "line_last": 512,
+          "sha256": "4bdf8358afef97b505001d5ea7c8ce217f675b3281c9036869dba245b40c8ca7"
+        },
+        {
+          "byte_after": 26434,
+          "byte_first": 21895,
+          "bytes": 4539,
+          "line_first": 513,
+          "line_last": 640,
+          "sha256": "12ae8056f59045329cd9ba5510c9ef178b1614fc7d77590a19728d130dc35ac9"
+        },
+        {
+          "byte_after": 31884,
+          "byte_first": 26434,
+          "bytes": 5450,
+          "line_first": 641,
+          "line_last": 768,
+          "sha256": "de7773b12782cca0f34697335f21f5866971e292ec336a3ac4279f3f2790f337"
+        },
+        {
+          "byte_after": 37126,
+          "byte_first": 31884,
+          "bytes": 5242,
+          "line_first": 769,
+          "line_last": 896,
+          "sha256": "31151c73fb763c65a803a3c4421ee7327ad3e64845a09801f2f24d7f66f41a46"
+        },
+        {
+          "byte_after": 42623,
+          "byte_first": 37126,
+          "bytes": 5497,
+          "line_first": 897,
+          "line_last": 1024,
+          "sha256": "8ba76c33a23c22743d91107828450ec6d4e24dce82aa39d7d63f741a6136542d"
+        },
+        {
+          "byte_after": 48123,
+          "byte_first": 42623,
+          "bytes": 5500,
+          "line_first": 1025,
+          "line_last": 1152,
+          "sha256": "f731556587f29efad8287ec18a843f35c57cb288c8b511c9465b8a556561ebea"
+        },
+        {
+          "byte_after": 55073,
+          "byte_first": 48123,
+          "bytes": 6950,
+          "line_first": 1153,
+          "line_last": 1280,
+          "sha256": "357d1a899f0fc40e59b5a61bf14325971ec4ba60e8c311f2e3a6aa4f9f108313"
+        },
+        {
+          "byte_after": 60104,
+          "byte_first": 55073,
+          "bytes": 5031,
+          "line_first": 1281,
+          "line_last": 1408,
+          "sha256": "c5de231fe283764bf83e851facbb98de6e9f0d952f182302a85e0f55c743df06"
+        },
+        {
+          "byte_after": 66476,
+          "byte_first": 60104,
+          "bytes": 6372,
+          "line_first": 1409,
+          "line_last": 1536,
+          "sha256": "88ff4b1e0b6ad0d07be49d1a3728ae80867172716aa083b8fe72810ceaf1b4fa"
+        },
+        {
+          "byte_after": 73248,
+          "byte_first": 66476,
+          "bytes": 6772,
+          "line_first": 1537,
+          "line_last": 1664,
+          "sha256": "f19fd34a7facbf493ce6ae2f9d0bb6ce377319596c212c39a3daac7b371e06b5"
+        },
+        {
+          "byte_after": 78601,
+          "byte_first": 73248,
+          "bytes": 5353,
+          "line_first": 1665,
+          "line_last": 1792,
+          "sha256": "532d84c03aacba41c6c2c5b79a41bf826fdfacb0aa21dde80c674cf6f3e82363"
+        },
+        {
+          "byte_after": 83418,
+          "byte_first": 78601,
+          "bytes": 4817,
+          "line_first": 1793,
+          "line_last": 1920,
+          "sha256": "69fa47233ea9166b6457a7cc76d0e16cbe263f369da111c05d0a788731289284"
+        },
+        {
+          "byte_after": 89101,
+          "byte_first": 83418,
+          "bytes": 5683,
+          "line_first": 1921,
+          "line_last": 2048,
+          "sha256": "a1abd6f2c7741cb8af9c95c6b42905a798100007c7863854a8134e9cb918b31f"
+        },
+        {
+          "byte_after": 95746,
+          "byte_first": 89101,
+          "bytes": 6645,
+          "line_first": 2049,
+          "line_last": 2176,
+          "sha256": "7fa13deadcd5442d869abad3c7793db7a12e3661c371b6ee8057bfd989695eb0"
+        },
+        {
+          "byte_after": 103093,
+          "byte_first": 95746,
+          "bytes": 7347,
+          "line_first": 2177,
+          "line_last": 2304,
+          "sha256": "29b7d3310a19c8ccc80925ffeb8e69ceb7ce77f644c3a0d4960b5e049d8310ec"
+        },
+        {
+          "byte_after": 108779,
+          "byte_first": 103093,
+          "bytes": 5686,
+          "line_first": 2305,
+          "line_last": 2432,
+          "sha256": "a0681598fcb10e77a4a52f8a7dd867c63aca5e3ce17c11d80d5569bdc9f28920"
+        },
+        {
+          "byte_after": 116086,
+          "byte_first": 108779,
+          "bytes": 7307,
+          "line_first": 2433,
+          "line_last": 2560,
+          "sha256": "922d54778d10d74e4366e8febf8e0acd4cd0b31995a17aa8689a21172a1fba72"
+        },
+        {
+          "byte_after": 123179,
+          "byte_first": 116086,
+          "bytes": 7093,
+          "line_first": 2561,
+          "line_last": 2688,
+          "sha256": "73ae6a58372ce2161e739e6ccd4f100a0f2b1d7830b6f4be26de2837d7dcfafc"
+        },
+        {
+          "byte_after": 130519,
+          "byte_first": 123179,
+          "bytes": 7340,
+          "line_first": 2689,
+          "line_last": 2816,
+          "sha256": "af7b903977834b4fc1b7c4f51e821e2a950a65ba60906c5a734dda1f643d11af"
+        },
+        {
+          "byte_after": 137504,
+          "byte_first": 130519,
+          "bytes": 6985,
+          "line_first": 2817,
+          "line_last": 2944,
+          "sha256": "f40f329e196fa9590daf329aac8d2294f12730a45415bfab49c957e70a5afa89"
+        },
+        {
+          "byte_after": 145245,
+          "byte_first": 137504,
+          "bytes": 7741,
+          "line_first": 2945,
+          "line_last": 3072,
+          "sha256": "a3470968b15c5d8d636b629a4191a3854ac6a2c7d4e3aa1963dbf9c584bbe7d4"
+        },
+        {
+          "byte_after": 154675,
+          "byte_first": 145245,
+          "bytes": 9430,
+          "line_first": 3073,
+          "line_last": 3200,
+          "sha256": "cdee7afd217890b598ca6a3678e19ed2158d2dd76bef85116b68e0e14d37a670"
+        },
+        {
+          "byte_after": 161085,
+          "byte_first": 154675,
+          "bytes": 6410,
+          "line_first": 3201,
+          "line_last": 3328,
+          "sha256": "26474a532b585dbf0b22960deb7a2d1e46c75ca47368af2c982afcfb4f1bcee9"
+        },
+        {
+          "byte_after": 167981,
+          "byte_first": 161085,
+          "bytes": 6896,
+          "line_first": 3329,
+          "line_last": 3456,
+          "sha256": "66be0871c702eafb8dfe47bbfa5d0251facf5badf3dd9558604ea5812d06c4f4"
+        },
+        {
+          "byte_after": 173469,
+          "byte_first": 167981,
+          "bytes": 5488,
+          "line_first": 3457,
+          "line_last": 3584,
+          "sha256": "29cd80863cf6df48f9c088d031fc3222ffc72d02151397c929b8426822346eff"
+        },
+        {
+          "byte_after": 174024,
+          "byte_first": 173469,
+          "bytes": 555,
+          "line_first": 3585,
+          "line_last": 3598,
+          "sha256": "247de0d4638a1efd7c2ada53fb11bace0d175e57b7473a7d176588967ba435a9"
+        }
+      ]
+    },
+    {
+      "line_count": 3074,
+      "new": {
+        "bytes": 143484,
+        "name": "verifier.py",
+        "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/verifier.py",
+        "sha256": "9a520ca571d8f28cc060511bc4c9573f5a15b949fe8820b60b7e8407681ebca6",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "4372045",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "143484",
+          "1791054939874372760",
+          "1791054939874372760"
+        ]
+      },
+      "old": {
+        "bytes": 136850,
+        "mtime_equals_ctime": true,
+        "name": "verifier.py",
+        "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/verifier.py",
+        "sha256": "be71c48663ca35b1a104c1f84b1f8c9fa5c26df62bc2e9fbb6630bb2f6b53c14",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "3714947",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "136850",
+          "1791047457354831084",
+          "1791047457354831084"
+        ]
+      },
+      "partition_rule": "gapless LF byte segments, at most 128 lines; no Source parser",
+      "parts": [
+        {
+          "byte_after": 5154,
+          "byte_first": 0,
+          "bytes": 5154,
+          "line_first": 1,
+          "line_last": 128,
+          "sha256": "8ed938f656398a332d2b7b5df56879d171e649e5a1ac9356404e73a8f78d7d0e"
+        },
+        {
+          "byte_after": 9838,
+          "byte_first": 5154,
+          "bytes": 4684,
+          "line_first": 129,
+          "line_last": 256,
+          "sha256": "4ee8ec121f1fddd64e913d99863e0363c87f107dc4510fe22a3128bf84b6aada"
+        },
+        {
+          "byte_after": 14440,
+          "byte_first": 9838,
+          "bytes": 4602,
+          "line_first": 257,
+          "line_last": 384,
+          "sha256": "93fc852d3277bd1aadb5e4fcd849a19638bff3127f5b4acde4b838930e06b668"
+        },
+        {
+          "byte_after": 20249,
+          "byte_first": 14440,
+          "bytes": 5809,
+          "line_first": 385,
+          "line_last": 512,
+          "sha256": "af6e7c21f30e18859f848251e9b478164520f0b5ee4afb529a3ff7b9ce047274"
+        },
+        {
+          "byte_after": 25149,
+          "byte_first": 20249,
+          "bytes": 4900,
+          "line_first": 513,
+          "line_last": 640,
+          "sha256": "5794222aa55db1afb787b3752b92c720f16fac42ec8c780d29040f2320ad1162"
+        },
+        {
+          "byte_after": 30669,
+          "byte_first": 25149,
+          "bytes": 5520,
+          "line_first": 641,
+          "line_last": 768,
+          "sha256": "c73688cfc31ce4e16d0d71f4cfe9b0f3dcd961c8bcdff5847120d3bb565bf34f"
+        },
+        {
+          "byte_after": 36085,
+          "byte_first": 30669,
+          "bytes": 5416,
+          "line_first": 769,
+          "line_last": 896,
+          "sha256": "7df5f4ebc6ae4e475038c4e84b7005176165b97a64108d536c01f707d91b3dc2"
+        },
+        {
+          "byte_after": 41881,
+          "byte_first": 36085,
+          "bytes": 5796,
+          "line_first": 897,
+          "line_last": 1024,
+          "sha256": "32f9af9ab5b4a2b5934b624a1c50a171adb733fede3070b4fb470cd210ad4882"
+        },
+        {
+          "byte_after": 46630,
+          "byte_first": 41881,
+          "bytes": 4749,
+          "line_first": 1025,
+          "line_last": 1152,
+          "sha256": "b1c5e84182a1cf64fcfdd499d3a1075b526156348dbfaa733e7388d2e0b7a47f"
+        },
+        {
+          "byte_after": 53427,
+          "byte_first": 46630,
+          "bytes": 6797,
+          "line_first": 1153,
+          "line_last": 1280,
+          "sha256": "231ecb0561e647906ea89a857dd8adc5e2d2663bd3f1ff224d9f10d6232dfac0"
+        },
+        {
+          "byte_after": 58846,
+          "byte_first": 53427,
+          "bytes": 5419,
+          "line_first": 1281,
+          "line_last": 1408,
+          "sha256": "b1ba6dd9c0e65884834dc84205b26cfedf6bfd349d02775f25ba82c7818c8bf7"
+        },
+        {
+          "byte_after": 64653,
+          "byte_first": 58846,
+          "bytes": 5807,
+          "line_first": 1409,
+          "line_last": 1536,
+          "sha256": "b9046da869259a636909fbcae84142531f8af96b6fac6ab8b9b15e35fd9b978e"
+        },
+        {
+          "byte_after": 71642,
+          "byte_first": 64653,
+          "bytes": 6989,
+          "line_first": 1537,
+          "line_last": 1664,
+          "sha256": "4b73d8669d346b059068dc8cb7677f16bbf19133e826a81f1682a87b17190d2f"
+        },
+        {
+          "byte_after": 76934,
+          "byte_first": 71642,
+          "bytes": 5292,
+          "line_first": 1665,
+          "line_last": 1792,
+          "sha256": "059b2dd67b6d7be3338aa417d7ecaac466b9272478310f7c56c9bdf07e738e62"
+        },
+        {
+          "byte_after": 82086,
+          "byte_first": 76934,
+          "bytes": 5152,
+          "line_first": 1793,
+          "line_last": 1920,
+          "sha256": "eff57e1948dfa8db4f7aafb8c08fb02353f4cba2c89db16449472819f6c6a791"
+        },
+        {
+          "byte_after": 87501,
+          "byte_first": 82086,
+          "bytes": 5415,
+          "line_first": 1921,
+          "line_last": 2048,
+          "sha256": "3dd77c0708814d772075f9090bc4ce34f674dccaaf5185509dd4a4b09dc53d63"
+        },
+        {
+          "byte_after": 93467,
+          "byte_first": 87501,
+          "bytes": 5966,
+          "line_first": 2049,
+          "line_last": 2176,
+          "sha256": "279189fbb68712a8d816b92f1abf548a8607af48b5b987ec7a86fa34aaf082bf"
+        },
+        {
+          "byte_after": 99407,
+          "byte_first": 93467,
+          "bytes": 5940,
+          "line_first": 2177,
+          "line_last": 2304,
+          "sha256": "ed0ad78ee818fbb2df600de7fab161ba629d40d86d1506e42e14e2d15e93164b"
+        },
+        {
+          "byte_after": 106873,
+          "byte_first": 99407,
+          "bytes": 7466,
+          "line_first": 2305,
+          "line_last": 2432,
+          "sha256": "42c9951338f0269885c464c55a85345786b42d7b446becaf1db48bea1b6d498e"
+        },
+        {
+          "byte_after": 113186,
+          "byte_first": 106873,
+          "bytes": 6313,
+          "line_first": 2433,
+          "line_last": 2560,
+          "sha256": "9348fc8330da88a06028fe06450a31efc50cec610d9f6fd5e9a0361db76e7494"
+        },
+        {
+          "byte_after": 119423,
+          "byte_first": 113186,
+          "bytes": 6237,
+          "line_first": 2561,
+          "line_last": 2688,
+          "sha256": "e388914ba88c96717e02605ce11bae41713484a04af49c053d2bc7bd96fd6a72"
+        },
+        {
+          "byte_after": 128230,
+          "byte_first": 119423,
+          "bytes": 8807,
+          "line_first": 2689,
+          "line_last": 2816,
+          "sha256": "924169efe75828048159da9076cbf9b8ebe1bea08eb9aff4e084f29d3b260d52"
+        },
+        {
+          "byte_after": 137280,
+          "byte_first": 128230,
+          "bytes": 9050,
+          "line_first": 2817,
+          "line_last": 2944,
+          "sha256": "77835ba73a5d527837065483d240f368e61713b79d6af0626867fb5c71d217af"
+        },
+        {
+          "byte_after": 143357,
+          "byte_first": 137280,
+          "bytes": 6077,
+          "line_first": 2945,
+          "line_last": 3072,
+          "sha256": "3e9e66743d9ff4e1c2a6218be43bce84893c323d2aa5955f846705f0aa938ff5"
+        },
+        {
+          "byte_after": 143484,
+          "byte_first": 143357,
+          "bytes": 127,
+          "line_first": 3073,
+          "line_last": 3074,
+          "sha256": "0944f47a986781cca10e4ebe79faaa1f162a6dce88b696216aa5296fa735337a"
+        }
+      ]
+    },
+    {
+      "line_count": 757,
+      "new": {
+        "bytes": 51457,
+        "name": "launch-contract.json",
+        "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/launch-contract.json",
+        "sha256": "a45f7d48f6d8318845897585bdff2d806064437b8f803d5db7c2a1bb11d18d79",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "4372042",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51457",
+          "1791054939874372760",
+          "1791054939874372760"
+        ]
+      },
+      "old": {
+        "bytes": 51469,
+        "mtime_equals_ctime": true,
+        "name": "launch-contract.json",
+        "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/launch-contract.json",
+        "sha256": "0c45d8a7c09cffa6299644491de15b586b6c8ea28177b8eeb41b9ebb9ff3268a",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "3714944",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51469",
+          "1791047457602381854",
+          "1791047457602381854"
+        ]
+      },
+      "partition_rule": "gapless LF byte segments, at most 128 lines; no Source parser",
+      "parts": [
+        {
+          "byte_after": 12336,
+          "byte_first": 0,
+          "bytes": 12336,
+          "line_first": 1,
+          "line_last": 128,
+          "sha256": "3758b2ef7e94c546945b7f55fb0583ac74437960a7b0ad4d8bd1d29d499674de"
+        },
+        {
+          "byte_after": 15879,
+          "byte_first": 12336,
+          "bytes": 3543,
+          "line_first": 129,
+          "line_last": 256,
+          "sha256": "8b42c8a2a24999159d834c006e28eb8c5d03f2317908ccce9f268441fb38d82b"
+        },
+        {
+          "byte_after": 19786,
+          "byte_first": 15879,
+          "bytes": 3907,
+          "line_first": 257,
+          "line_last": 384,
+          "sha256": "34d97edb2eabeade3ec0a265709db3992aaa2ebe2a54c4c906caaffeb004447d"
+        },
+        {
+          "byte_after": 29379,
+          "byte_first": 19786,
+          "bytes": 9593,
+          "line_first": 385,
+          "line_last": 512,
+          "sha256": "260c78d128e5879831c906ce33c81fe2678c8cde69f91c2601da7688b829efd5"
+        },
+        {
+          "byte_after": 43123,
+          "byte_first": 29379,
+          "bytes": 13744,
+          "line_first": 513,
+          "line_last": 640,
+          "sha256": "22d40fee00aa37105c63a80a63032ab6ca1b31bd25f6bdbe26e229a55e19b714"
+        },
+        {
+          "byte_after": 51457,
+          "byte_first": 43123,
+          "bytes": 8334,
+          "line_first": 641,
+          "line_last": 757,
+          "sha256": "4b6ecd9a58ff4508b679df5d0c7f0a8ee66ef4e990cd466f4dc9f23d664fe333"
+        }
+      ]
+    },
+    {
+      "line_count": 285,
+      "new": {
+        "bytes": 12090,
+        "name": "expectations.json",
+        "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/expectations.json",
+        "sha256": "ea3bd7bb60fae43b2e106a8b36d3915a1344a8f0e07102d808ce2db4c86ce14e",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "4372041",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12090",
+          "1791054939874372760",
+          "1791054939874372760"
+        ]
+      },
+      "old": {
+        "bytes": 12093,
+        "mtime_equals_ctime": true,
+        "name": "expectations.json",
+        "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/expectations.json",
+        "sha256": "1960b81fa04af752db55787b7f6135beef9a50b5e4736273a48a0f3311da7fd8",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "3714943",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12093",
+          "1791047340683225888",
+          "1791047340683225888"
+        ]
+      },
+      "partition_rule": "gapless LF byte segments, at most 128 lines; no Source parser",
+      "parts": [
+        {
+          "byte_after": 4358,
+          "byte_first": 0,
+          "bytes": 4358,
+          "line_first": 1,
+          "line_last": 128,
+          "sha256": "141e52e9f68a80cb0f08930802fab9fb082672e7c468cf4de98e5a7f145dc3ab"
+        },
+        {
+          "byte_after": 10478,
+          "byte_first": 4358,
+          "bytes": 6120,
+          "line_first": 129,
+          "line_last": 256,
+          "sha256": "5f15dd39a15d70aad33cbe497944ca5f9ed8ba6ca290e116078d2348681a7e7b"
+        },
+        {
+          "byte_after": 12090,
+          "byte_first": 10478,
+          "bytes": 1612,
+          "line_first": 257,
+          "line_last": 285,
+          "sha256": "ce3980d97ef1569cbeab2605c015d41ed67becfbc5d607634ab6d11714be7bb0"
+        }
+      ]
+    },
+    {
+      "line_count": 2,
+      "new": {
+        "bytes": 158,
+        "name": "ordinary-surplus.txt",
+        "path": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source/ordinary-surplus.txt",
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "4372043",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1791054939874372760",
+          "1791054939874372760"
+        ]
+      },
+      "old": {
+        "bytes": 158,
+        "mtime_equals_ctime": false,
+        "name": "ordinary-surplus.txt",
+        "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/ordinary-surplus.txt",
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "stat_nine_decimal_strings": [
+          "2050",
+          "3714945",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1791047159551971381",
+          "1791047159663977722"
+        ]
+      },
+      "partition_rule": "gapless LF byte segments, at most 128 lines; no Source parser",
+      "parts": [
+        {
+          "byte_after": 158,
+          "byte_first": 0,
+          "bytes": 158,
+          "line_first": 1,
+          "line_last": 2,
+          "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+        }
+      ]
+    }
+  ],
+  "new_root": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source",
+  "old_root": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source",
+  "ordinary_surplus_byte_equal": true,
+  "schema": "friday.lab927.current6.source-join.v1",
+  "shared_preflight_byte_equal": true
+}

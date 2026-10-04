@@ -1,0 +1,264 @@
+{
+  "schema": "friday.sol109.independent-connected-review.v1",
+  "assignment": "ASTRA-E4-A258-PUBLISHER-CARRIER-BUDGET-ROLE-PHASE-NONAUTHOR-SOL109",
+  "generation": 1,
+  "reviewer": "Sol; non-author of LAB945/LAB947 changes",
+  "accepted_msk": "2026-10-04T19:49:06.737364+03:00",
+  "review_key": {
+    "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/manifest.json",
+    "bytes": 32692,
+    "sha256": "82773d86edb14c70f82a7f5f3b31c9fb217b4097435596c93be786d697751374",
+    "identity9_decimal_strings": [
+      "2050",
+      "5010675",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32692",
+      "1791132364835513228",
+      "1791132364854513635"
+    ],
+    "stable9": true
+  },
+  "baseline": {
+    "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/manifest.json",
+    "bytes": 29378,
+    "sha256": "73f4db4fc8427e718dd5c2bc6991a7bf59d1f4dbfb775a61877923a761cdf39d",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980643",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "29378",
+      "1791130808528481691",
+      "1791130808551283927"
+    ],
+    "stable9": true
+  },
+  "decision": "REJECT_CONNECTED_BUDGET_CLOSURE_PRESERVE_SCOPED_CREDITS",
+  "review_work_complete": true,
+  "acceptance_done_when": false,
+  "whole_acceptance": false,
+  "scope": "Exact A258 eight changed files and actual carrier/frame/error/hash dependencies; not certification of the unchanged project or prior Sol-authored implementation.",
+  "inventory": {
+    "files": 57,
+    "bytes": 1851133,
+    "changed": 8,
+    "unchanged": 49,
+    "added": 0,
+    "removed": 0,
+    "declared_literal_hunks": 36,
+    "minimal_diff_opcodes": 59,
+    "forward_inverse_exact": true,
+    "lab947_other56_exact": true,
+    "hash_A257_two_hunks_rejoined": true
+  },
+  "findings": [
+    {
+      "id": "C2-R1D-CARRIER-ROUTES",
+      "state": "SCOPED_SOURCE_CREDIT",
+      "paths": [
+        "source/selected_owned_values.py:452",
+        "source/owned_prefix_bank.py:172",
+        "source/owned_prefix_bank.py:200",
+        "source/owned_prefix_bank.py:259",
+        "source/observer.py:174",
+        "source/observer.py:1856",
+        "source/lifetime.py:560",
+        "source/actor_bootstrap.py:1065",
+        "source/launcher.py:160"
+      ],
+      "fact": "Actual body_carrier is threaded through both new prewalk/consumer calls. PreparedFullBody uses its hold, parent PrefixBodyMailbox its publication_credit, bound fork child its existing child_quota, NativeMemoryBody its original receiver/context, Stock/Control/Fork the existing binding. No mapping-birth singleton is selected. Unchanged four-cut parent publication is retained; zero-mapping stock dispatch does not depend on a birth count. No added pool, reset, refund or grant was found in the reviewed delta.",
+      "limit": "Dispatch/envelope source credit only; complete per-pass debit and real full required-workload fit are not accepted."
+    },
+    {
+      "id": "C2-R1D-NATIVE-ENTRY-READS",
+      "state": "SCOPED_SOURCE_CREDIT",
+      "paths": [
+        "native/publisher_owned_custody.c:201",
+        "native/publisher_owned_custody.c:611",
+        "native/publisher_owned_custody.c:630",
+        "native/publisher_owned_custody.c:653",
+        "native/publisher_root_entry.c:3733",
+        "source/existing_root_caller.py:56",
+        "source/selected_owned_values.py:492",
+        "native/publisher_root_entry.c:4540"
+      ],
+      "fact": "Existing positive one-argument own_prepare remains allocation; optional second argument is reads (K|K, METH_VARARGS). Source skips native call for both zero. Original PID/Root/admission/phase guard remains; MasterBefore checks aggregate original accounting before adding spent. NativeMemoryBody before_scan uses context active-run/enrollment check and existing bindings.before wired to the same root_storage.pool; charged_allocation overflow/prepaid-RAM checked before increment. These are real entry/caller connections, not a mock.",
+      "limit": "Compiled ABI/provider invocation NOT_RUN; no interpretation of nominal reserve as measured physical upper."
+    },
+    {
+      "id": "C2-R1D-CHANNEL-CUMULATIVE",
+      "state": "SCOPED_SOURCE_CREDIT",
+      "paths": [
+        "source/selected_owned_values.py:429",
+        "source/selected_owned_values.py:497",
+        "source/actor_bootstrap.py:801",
+        "source/launcher.py:50",
+        "source/lifetime.py:491"
+      ],
+      "fact": "_u64/_room/_scale reject bool/negative/overflow and subtraction avoids wrap. Stock/Control cumulative scan counters share existing reads/allocation with 4*body_count and 6*body_count+131072. Fork includes its original body_transport and 3*body_count relation. add checks the scan counters before snapshot/chunks and does not refund them. Existing output/hash/wire constraints remain. Empty body uses no variable body-byte charge; later nonempty body still requires the original header/whole-body allowance.",
+      "limit": "This closes disappearance/overlap of recorded scan debits at these add sites, not coverage of every scan that should be recorded."
+    },
+    {
+      "id": "C2-R1D-CONSUMER-PASS",
+      "state": "REJECT_CODE",
+      "class": "existing C2-R1D explicit Source scan coverage",
+      "severity": "blocking for scoped budget acceptance",
+      "paths": [
+        "source/observer.py:174",
+        "source/observer.py:1856",
+        "source/selected_owned_values.py:423",
+        "source/selected_owned_values.py:686",
+        "source/selected_owned_values.py:699",
+        "source/selected_owned_values.py:743",
+        "source/selected_owned_values.py:750",
+        "source/selected_owned_values.py:765"
+      ],
+      "invariant": "Every actual repeated consumer traversal and alias/field read is prospectively charged to the original caller envelope before that pass, including refusal prefixes and retained historical rows.",
+      "actual_path": "full_value_arena and Meter.retain_error_arena call consume_secondary_own_cut after preown. records is the persistent entire _SECONDARY_CUTS list, not just rows registered or reached by this prewalk. consume validates/traverses rows and reads kind/original/edges/scalars before any per-pass debit. Only frame/code/buffer branches invoke _secondary_before. Traceback, error and Source rows perform their field/alias comparisons without a consumer debit. Earlier registration/prewalk is a different traversal and does not explicitly reserve this entire retained-list pass; repeated direct consumer calls also have no count-bound shared allowance. Zero buffer width likewise cannot account for row/metadata validation by a width-only debit.",
+      "evidence": "Literal lines 686-703 contain no count-linked pre-pass debit, 743-767 contain no debit. No enclosing consumer count/credit is passed by either actual new caller. Native command_read_reserved is a native command credit, not authorization for untracked repeated Source carrier passes.",
+      "smallest_correction": "Add an overflow-safe original-carrier debit for the full actual retained row/header/alias pass before entering the consumer loop (or before each row's first read with a whole-prefix bound), including traceback/error/Source and zero-body cases. Keep separate already-correct variable buffer/code debits and exact aliases; do not clear old records, narrow kinds/widths, reset/refund counters or change caps. Validate all actual callers/retained-row passes after an independently permitted qualification; execution here remains NOT_RUN."
+    },
+    {
+      "id": "C2-R1D-NAMESPACE-PROBES",
+      "state": "REJECT_CODE",
+      "class": "same existing C2-R1D explicit lookup coverage, not a new root",
+      "severity": "blocking for scoped budget acceptance",
+      "paths": [
+        "source/selected_owned_values.py:605",
+        "source/observer.py:311",
+        "native/publisher_root_entry.c:3564",
+        "native/publisher_root_entry.c:3580",
+        "native/publisher_root_entry.c:3650",
+        "native/publisher_root_entry.c:3662",
+        "native/publisher_root_entry.c:3680",
+        "native/publisher_root_entry.c:3690"
+      ],
+      "invariant": "Actual newly connected namespace/support probes must debit their real scan cardinality before the walk, not merely guard a later strong capture.",
+      "actual_path": "Owned frame prewalk/arena invokes own_binding, which immediately calls own_module_for_namespace and walks own_values.count before own_before(131072). Foreign frame arena invokes new mode3 own_support_relation, which calls own_module_for_namespace again before own_before(512), followed by another support-row reuse scan. These paths contain no count-linked read debit. The Source frame's fixed 5*64 allowance is not a demonstrated maximum over the variable native registry/repeated probes; the helper only adds allocation, not registry reads.",
+      "evidence": "The same secondary_globals_role(5924) and secondary_class_owned(6035) correctly charge own_values.count before their walks; the Source-facing ownership/support query routes above do not. Original fixed native command read reservation (4476) is present, so this is not a claim that native readers receive zero credit; no explicit repeated Source-query allocation from that command allowance is established.",
+      "smallest_correction": "Cover the actual Source-facing ownership/support query and reuse scans prospectively with the same original Root and overflow-safe full registry count (or a proved original pre-reserved per-query allowance), preserving original role proof, own_before before capture, and exact normal/error refusal. Do not invent a native pool, broaden provenance based on names, or call unknown costs zero."
+    },
+    {
+      "id": "C2-R1D-MATERIALIZATION",
+      "state": "SCOPED_NOMINAL_ORDER_CREDIT_PHYSICAL_QUALIFICATION_OPEN",
+      "paths": [
+        "source/selected_owned_values.py:553",
+        "source/selected_owned_values.py:610",
+        "source/selected_owned_values.py:625",
+        "source/selected_owned_values.py:707",
+        "source/selected_owned_values.py:717",
+        "source/selected_owned_values.py:736",
+        "native/publisher_root_entry.c:5022"
+      ],
+      "fact": "Frame locals has a nominal pre-getter debit, proxy items are charged before insertion. Code attribute extraction has nominal pre-getter 11*64 credit; full co_code length debit follows the getter. Both buffer producer and consumer debit nbytes before tobytes. Repeated frame/code/buffer branches do debit again. This is improvement over discarded reads; it is not absence of all pre-getter credit.",
+      "limit": "Cold co_code/co_varnames/freevars/cellvars and f_locals implicit materialization, tobytes plus full comparison/metadata costs need actual selected ABI/provider bounds. Fixed nominal constants and post-getter byte-length posting are not a physical variable-width fit witness. Classify this remaining upper-bound requirement as UNKNOWN_NOT_ZERO/qualification, not a second claim of totally uncharged getters."
+    },
+    {
+      "id": "C1-R1D-DATA-SUPPORT-PHASE",
+      "state": "SCOPED_CONNECTED_SOURCE_CREDIT",
+      "paths": [
+        "source/selected_owned_values.py:592",
+        "source/selected_owned_values.py:605",
+        "source/selected_owned_values.py:704",
+        "source/observer.py:311",
+        "source/observer.py:326",
+        "source/observer.py:701",
+        "source/observer.py:795",
+        "native/publisher_root_entry.c:3662",
+        "native/publisher_root_entry.c:3724",
+        "native/publisher_root_entry.c:5041",
+        "native/publisher_root_entry.c:5924",
+        "native/publisher_root_entry.c:6119",
+        "native/publisher_root_entry.c:6343"
+      ],
+      "fact": "Actual retained own_binding namespace enters the prewalk and arena as DATA. Exact foreign frame globals use mode3 retained origin/code/globals identity and no fabricated module binding, then runtime-support token and reader recheck. Native primary command_attr clears foreign f_globals edge role and marks SUPPORT; builtins SUPPORT. Secondary group22 requirement/writer/checker use the same owned-namespace decision. This credit therefore is not based on seeing the secondary helper alone. Source consumer retains code/globals/builtins/locals/trace aliases and trace flags, but does not compare historical f_lasti/f_lineno to a later live frame. Native secondary writer/checker uses cut scalars and edges; current primary/frame-arena fields remain current-phase facts.",
+      "limit": "When actual runtime namespace/support relation is unavailable, Source retains explicit unproven incompleteness rather than inferring DATA/SUPPORT from a label. No acceptance of absent provider/ABI, private foreign heap or stock route as fully qualified. Nominal phase/role correction accepted; budget findings above remain."
+    },
+    {
+      "id": "C1-R1D-GROUP22-CUSTODY",
+      "state": "SCOPED_SAFE_RETENTION_CREDIT_ERROR_COMPLETION_OPEN",
+      "paths": [
+        "native/publisher_root_entry.c:5945",
+        "native/publisher_root_entry.c:5974",
+        "native/publisher_root_entry.c:4783",
+        "native/publisher_root_entry.c:6994",
+        "native/publisher_root_entry.c:7028",
+        "native/publisher_root_entry.c:7087",
+        "native/publisher_root_entry.c:7269",
+        "native/publisher_root_entry.c:7294",
+        "native/publisher_root_entry.c:7312",
+        "native/publisher_root_entry.c:7438"
+      ],
+      "fact": "Registration probe/copy/count debits precede actual Py_NewRef; own_before enforces same original Root/admission/pre-command phase. Group22 keeps real MOVE ordinals, required_mask and borrowed views; failed MOVE leaves unmoved pointer strong. Success validates original/node/owner/mask relation before borrower invalidation and later strong release. Error end only end_attempted and retains group22; sealed inventory accounts moved/unmoved originals and eligibility requires actual end_confirmed+borrowers_end_confirmed. Final reader rechecks ended links. No old unsafe decrement/false success was reintroduced.",
+      "limit": "Retention is not lawful completed handover. Full ordinary-error graph/encoding/finite native endpoint remains OPEN as TASK explicitly requires. No original/secondary error graph or raw RootStorage claimed complete; no implementation attempted."
+    },
+    {
+      "id": "H-COST-A257-REJOIN",
+      "state": "SCOPED_SOURCE_CREDIT_REJOINED_NOT_WHOLE_INHERITANCE",
+      "paths": [
+        "native/publisher_root_entry.c:5635",
+        "native/publisher_root_entry.c:5664",
+        "native/publisher_root_entry.c:5688",
+        "native/publisher_root_entry.c:5693",
+        "native/publisher_root_entry.c:5752",
+        "native/publisher_root_entry.c:5803",
+        "source/observer.py:849",
+        "consumer/source/resource_meter.py:519"
+      ],
+      "fact": "Two exact A257 authored hash hunks replay onto authenticated LAB947 native entry and inverse returns exact LAB947. All other56 exact LAB947; constructor/updater/copier/typed reader remain exact A257. Changed command context still reaches own_hash consumer from command_graph_consumer before required completion. Exact14 constructor shape precedes walks; actual full updates count and divide-overflow guard precede original MasterBefore(24576*N) and every exact7 row. Zero rows retain constructor debit. Original-vs-metadata error, false-completion, actual count and copy-prefix checks unchanged. Group21 hash aliases/errors and new group22 owner relations remain separate; new retention-only error endpoint is not completion.",
+      "limit": "Reuse SOL108 credit only for exact hash count/order/schema and its rejoined incoming relation. 24576 is an explicit allowance, not measured physical cost; complete release, whole cost, ABI and required workload fit NOT_RUN/UNCONFIRMED."
+    },
+    {
+      "id": "BOUNDARIES",
+      "state": "PRESERVED",
+      "fact": "No Source edits/parser/AST/preprocess/compiler/import/eval/exec/tests/Root/runtime/live/network/model/install/simulation/children/heavy run. Only own host JSON/stat/fullSHA9/literal-LF helpers ran. No foreign supplied host script executed. Stopped SOL107 output not read, resumed, reworded or routed. ABSTRACT_HASH_ONLY required=true waiver=false. No self-acceptance of unchanged Sol-authored Source."
+    }
+  ],
+  "obligations": {
+    "existing_grouped_CODE_roots_open": [
+      "C2-R1D prospective Source/native scan coverage"
+    ],
+    "smallest_correction_sites": [
+      "consume_secondary_own_cut retained-list pass",
+      "Source-facing namespace/support probes"
+    ],
+    "preserve": [
+      "original4-map/0-map carriers and limits",
+      "optional own_prepare reads and existing before_scan",
+      "DATA/SUPPORT namespace identities",
+      "historical frame scalars",
+      "native own_before strong-capture guard",
+      "group22 MOVE/borrower retention",
+      "exact A257 hash-history debit/schema credit"
+    ],
+    "known_error_end": "OPEN; outside acceptance and no Source implementation",
+    "ABI": "NOT_RUN",
+    "fit": "UNCONFIRMED",
+    "physical_cost": "UNKNOWN_NOT_ZERO",
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false,
+    "required": true,
+    "waiver": false,
+    "restricted_controls": "ABSTRACT_HASH_ONLY"
+  },
+  "safeguards": {
+    "Source_edits": 0,
+    "Source_execution": 0,
+    "Source_parsing": 0,
+    "network": 0,
+    "children": 0,
+    "heavy_runs": 0,
+    "stopped_SOL107_draft_read": false
+  },
+  "evidence": [
+    "pins-and-literal-audit.json",
+    "hash-rejoin.json",
+    "seal-check.json"
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "schema": "friday.sol089.metadata-literal-data-integrity.v1",
+  "written_snapshot_files": 21,
+  "current_written_byte_checks": "PASSED_DATA_ONLY_NOT_SOURCE_EXECUTION",
+  "external_full_SHA9_count": 110,
+  "external_named_bytes": 8589314,
+  "owned_named_bytes": 1478983,
+  "source_named_bytes": 573136,
+  "checks": {
+    "schema": "friday.sol089.exact-written-literal-checks.v1",
+    "same_typed_unchanged": true,
+    "exact_matcher_clause_unchanged": true,
+    "source_error_unchanged": true,
+    "effect_error_constructor_restore_unchanged": true,
+    "producer_class_moved_unchanged": true,
+    "actor_attachment_functions_moved_unchanged": true,
+    "equal_dependencies": [
+      {
+        "name": "controller.py",
+        "full_text_equal": true
+      },
+      {
+        "name": "source_grammar.py",
+        "full_text_equal": true
+      },
+      {
+        "name": "native_grammar.py",
+        "full_text_equal": true
+      },
+      {
+        "name": "staged_sender.py",
+        "full_text_equal": true
+      },
+      {
+        "name": "receipt_physical.py",
+        "full_text_equal": true
+      }
+    ],
+    "caller_cap": true,
+    "sender_cap": true,
+    "native_source_cap": true,
+    "compiler_AST": 0,
+    "Source_execution": 0,
+    "qualification_credit": false
+  },
+  "source_full_literal_count": 7,
+  "gapless_literal_parts": 128,
+  "sourceParts_validation": "Exact joined Source strings, not AST/compiler/behavior/independent proof",
+  "known_author_reads": {
+    "initial_pin_verification_bytes": 453047,
+    "baseline97_verification_bytes": 8199841,
+    "current_full_external_verification_bytes": 8589314,
+    "current_owned_metadata_validation_bytes": 1478983,
+    "source_full_literal_fetch_bytes": 573136,
+    "meaning": "named actual full-file read phases only, not whole cumulative IO. Earlier sed/rg/tool/runtime admin partial IO was not instrumented end-to-end"
+  },
+  "author_total_physical_IO": "UNKNOWN_NOT_ZERO_UNMETERED_PARTIAL_READS_SEPARATE_FROM_KNOWN_FULL_PHASES",
+  "author_peak_RSS": "UNKNOWN_NOT_ZERO",
+  "Source_prospective_C2": "UNKNOWN_NOT_ZERO_NO_CAPACITY_PASS",
+  "caps": {
+    "deadline_sec": 4200,
+    "seal_sec": 600,
+    "read_bytes": 268435456,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 33554432,
+    "local": 4,
+    "children": 0,
+    "network": 0,
+    "retry": 0,
+    "friday": 0
+  },
+  "original_product_caps": {
+    "caller": 65536,
+    "sender": 65536,
+    "native": 262144,
+    "Source_AS": 67108864,
+    "Source_CPU_s": 300,
+    "sender_read": 33554432,
+    "shared_read": 16777216,
+    "whole_RAM": 8589934592,
+    "canonical": 4,
+    "retry": 0,
+    "dual_ends": "ORIGINAL_UNCHANGED"
+  },
+  "source_snapshot_reference": "Source9 pins in CURRENT96_SOURCE54_DEPENDENCIES.json plus final seal pins; metadata added after this check are checked at final seal",
+  "accepted_epoch_ms": 1791013555068,
+  "source_deadline_epoch_ms": 1791017755068,
+  "source_seal_cutoff_epoch_ms": 1791017155068,
+  "Source_execution": 0,
+  "compiler_AST": "NOT_RUN",
+  "compiler_ABI": "NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "independent_changed_dependency_review": "REQUIRED_NOT_RUN",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

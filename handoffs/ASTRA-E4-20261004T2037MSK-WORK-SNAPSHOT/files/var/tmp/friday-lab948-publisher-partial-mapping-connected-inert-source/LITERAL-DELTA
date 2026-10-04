@@ -1,0 +1,495 @@
+FORWARD_A258
+FILE native/publisher_root_entry.c
+@@ -3811,1 +3811,1 @@
+-static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p) {
++static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p,int cohort) {
+@@ -3886,1 +3886,1 @@
+-        "closed",Py_False,"full_bytes",cut->refs[2],"cohort_before_effect",Py_False);
++        "closed",Py_False,"full_bytes",cut->refs[2],"cohort_before_effect",cohort?Py_True:Py_False);
+@@ -3903,0 +3903,12 @@
++        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers)||
++           !ascii(own_plain_field(cut,"schema"),"friday.sol106.actual-mmap-constructor.v1")||
++           own_plain_field(cut,"row")!=row||own_plain_field(cut,"credit")!=credit||
++           own_plain_field(cut,"returned_mapping")!=Py_None||
++           own_plain_field(cut,"returned")!=Py_False||
++           own_plain_field(cut,"attempted")!=Py_False||
++           own_plain_field(cut,"state_complete")!=Py_False||
++           own_plain_field(cut,"original_error")!=Py_None||
++           own_plain_field(cut,"metadata_error")!=Py_None||
++           own_plain_field(cut,"prebirth_error")!=Py_None||
++           !own_plain_field(cut,"birth"))
++            return FridayPublisherMasterFault(&root_storage.pool,"own_mapping_actual_birth_inputs"),NULL;
+@@ -3904,2 +3916,0 @@
+-        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers))
+-            return FridayPublisherMasterFault(&root_storage.pool,"own_mapping_actual_birth_inputs"),NULL;
+@@ -3948,0 +3958,5 @@
++        if(!p->refs[7]||PyDict_SetItemString(p->refs[7],"mapping",p->refs[6])<0||
++           PyDict_SetItemString(cut,"returned_mapping",p->refs[6])<0||
++           PyDict_SetItemString(cut,"returned",Py_True)<0) {
++            p->confirmed=1;return own_error(p),NULL;
++        }
+@@ -3954,0 +3969,4 @@
++    if(!strcmp(action,"retained")) {
++        if(!p->refs[6])Py_RETURN_NONE;
++        return Py_NewRef(p->refs[6]);
++    }
+@@ -3955,1 +3974,2 @@
+-    if(!strcmp(action,"cut"))return own_mapping_current_cut(p);
++    if(!strcmp(action,"cut")||!strcmp(action,"cohort-cut"))
++        return own_mapping_current_cut(p,!strcmp(action,"cohort-cut"));
+@@ -4032,0 +4052,1 @@
++        if(p->attempts>=3||(p->flags&4))return FridayPublisherMasterFault(&root_storage.pool,"own_mapping_close_outcome_unknown"),NULL;
+@@ -4038,1 +4059,1 @@
+-        if(!closed)return own_error(p),NULL;
++        if(!closed){p->flags|=4;return own_error(p),NULL;}
+@@ -4040,1 +4061,1 @@
+-        if(!confirmed)return FridayPublisherMasterFault(&root_storage.pool,"own_mapping_actual_closed"),NULL;
++        if(!confirmed){p->flags|=4;return FridayPublisherMasterFault(&root_storage.pool,"own_mapping_close_unconfirmed"),NULL;}
+@@ -5158,0 +5179,1 @@
++    if(p->attempts>=3&&(p->flags&4)&&p->confirmed!=3)return 3;
+@@ -5174,0 +5196,5 @@
++        if(expected&&(bytes!=sizeof(phase)||r->nodes[r->active_node-1].edges!=15))return -1;
++        return 0;
++    }
++    if(phase==3) {
++        /* Unknown close stays off CURRENT16 and RETIRED15. No buffer, tell, or fstat. */
+INVERSE native/publisher_root_entry.c
+@@ -3811,1 +3811,1 @@
+-static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p,int cohort) {
++static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p) {
+@@ -3886,1 +3886,1 @@
+-        "closed",Py_False,"full_bytes",cut->refs[2],"cohort_before_effect",cohort?Py_True:Py_False);
++        "closed",Py_False,"full_bytes",cut->refs[2],"cohort_before_effect",Py_False);
+@@ -3903,11 +3903,2 @@
+-        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers)||
+-           !ascii(own_plain_field(cut,"schema"),"friday.sol106.actual-mmap-constructor.v1")||
+-           own_plain_field(cut,"row")!=row||own_plain_field(cut,"credit")!=credit||
+-           own_plain_field(cut,"returned_mapping")!=Py_None||
+-           own_plain_field(cut,"returned")!=Py_False||
+-           own_plain_field(cut,"attempted")!=Py_False||
+-           own_plain_field(cut,"state_complete")!=Py_False||
+-           own_plain_field(cut,"original_error")!=Py_None||
+-           own_plain_field(cut,"metadata_error")!=Py_None||
+-           own_plain_field(cut,"prebirth_error")!=Py_None||
+-           !own_plain_field(cut,"birth"))
++        p=own_birth(OWN_MAPPING);if(!p)return NULL;
++        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers))
+@@ -3915,1 +3906,0 @@
+-        p=own_birth(OWN_MAPPING);if(!p)return NULL;
+@@ -3958,5 +3948,0 @@
+-        if(!p->refs[7]||PyDict_SetItemString(p->refs[7],"mapping",p->refs[6])<0||
+-           PyDict_SetItemString(cut,"returned_mapping",p->refs[6])<0||
+-           PyDict_SetItemString(cut,"returned",Py_True)<0) {
+-            p->confirmed=1;return own_error(p),NULL;
+-        }
+@@ -3969,4 +3954,0 @@
+-    if(!strcmp(action,"retained")) {
+-        if(!p->refs[6])Py_RETURN_NONE;
+-        return Py_NewRef(p->refs[6]);
+-    }
+@@ -3974,2 +3955,1 @@
+-    if(!strcmp(action,"cut")||!strcmp(action,"cohort-cut"))
+-        return own_mapping_current_cut(p,!strcmp(action,"cohort-cut"));
++    if(!strcmp(action,"cut"))return own_mapping_current_cut(p);
+@@ -4052,1 +4032,0 @@
+-        if(p->attempts>=3||(p->flags&4))return FridayPublisherMasterFault(&root_storage.pool,"own_mapping_close_outcome_unknown"),NULL;
+@@ -4059,1 +4038,1 @@
+-        if(!closed){p->flags|=4;return own_error(p),NULL;}
++        if(!closed)return own_error(p),NULL;
+@@ -4061,1 +4040,1 @@
+-        if(!confirmed){p->flags|=4;return FridayPublisherMasterFault(&root_storage.pool,"own_mapping_close_unconfirmed"),NULL;}
++        if(!confirmed)return FridayPublisherMasterFault(&root_storage.pool,"own_mapping_actual_closed"),NULL;
+@@ -5179,1 +5158,0 @@
+-    if(p->attempts>=3&&(p->flags&4)&&p->confirmed!=3)return 3;
+@@ -5196,5 +5174,0 @@
+-        if(expected&&(bytes!=sizeof(phase)||r->nodes[r->active_node-1].edges!=15))return -1;
+-        return 0;
+-    }
+-    if(phase==3) {
+-        /* Unknown close stays off CURRENT16 and RETIRED15. No buffer, tell, or fstat. */
+FILE source/observer.py
+@@ -196,0 +196,4 @@
++        elif selected_mapping is not None and selected_mapping.close_attempted and not selected_mapping.closed_confirmed:
++            unsupported.append({'identity':str(key),'module':'mmap','class':'mmap',
++                'reason':'mapping_close_outcome_unknown'})
++            row=['unsupported','mapping_close_outcome_unknown']
+@@ -870,0 +874,2 @@
++        elif kind=='unsupported' and body=='mapping_close_outcome_unknown':
++            raise Refused('mapping_close_outcome_unknown','terminal')
+INVERSE source/observer.py
+@@ -196,4 +196,0 @@
+-        elif selected_mapping is not None and selected_mapping.close_attempted and not selected_mapping.closed_confirmed:
+-            unsupported.append({'identity':str(key),'module':'mmap','class':'mmap',
+-                'reason':'mapping_close_outcome_unknown'})
+-            row=['unsupported','mapping_close_outcome_unknown']
+@@ -874,2 +870,0 @@
+-        elif kind=='unsupported' and body=='mapping_close_outcome_unknown':
+-            raise Refused('mapping_close_outcome_unknown','terminal')
+FILE source/selected_owned_values.py
+@@ -143,1 +143,2 @@
+-        # this constructor. Initialize its custody before fallible validation.
++        # this constructor. The creation record is that preowned slot.
++        # A failed check writes the error there and does not allocate a map.
+@@ -148,0 +149,1 @@
++        self.metadata_error=None;self.state_complete=False
+@@ -149,24 +151,36 @@
+-            'fd':prepared.fd,'width':width,'access':mmap.ACCESS_WRITE,
+-            'attempted':False,'returned':False,'original_error':None}
+-        prepared._owned()
+-        row=prepared.store.fdjournal._row(prepared.fd)
+-        if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:
+-            raise Refused('selected_mapping_actual_prepared_row','terminal')
+-        self.fd=prepared.fd;self.row=row;self.credit=prepared.hold
+-        self.owner_pid=os.getpid();self.width=width;self.role=role
+-        self.binding=prepared.binding()
+-        self.birth=identity9(os.fstat(self.fd))
+-        self.cuts=[];self.child_reads=0;self.child_allocation=0
+-        self.borrowed=False
+-        # Debit before mmap allocation. Mapping is not a newly granted role.
+-        if self.binding['allocation']<width+131072:
+-            raise Refused('selected_mapping_original_RAM_before_birth','terminal')
+-        charge_selected_allocation(self.credit,width+131072)
+-        self._own_registry=_own_native()
+-        if self._own_registry is not None:
+-            self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)
+-        # Record the BIRTH identity before mmap, not an allocating registration
+-        # after return. A returned map is reachable even if metadata later fails.
+-        key=(os.getpid(),id(self))
+-        if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')
+-        _MAP_BIRTHS[key]=self
++            'fd':None,'width':width,'access':mmap.ACCESS_WRITE,
++            'attempted':False,'returned':False,'returned_mapping':None,
++            'original_error':None,'metadata_error':None,'prebirth_error':None,
++            'row':None,'credit':None,'birth':None,'state_complete':False}
++        try:
++            prepared._owned()
++            row=prepared.store.fdjournal._row(prepared.fd)
++            if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:
++                raise Refused('selected_mapping_actual_prepared_row','terminal')
++            self.fd=prepared.fd;self.row=row;self.credit=prepared.hold
++            self.owner_pid=os.getpid();self.width=width;self.role=role
++            self.binding=prepared.binding()
++            self.creation['fd']=self.fd
++            self.creation['row']=row
++            self.creation['credit']=self.credit
++            if self.binding['allocation']<width+131072:
++                raise Refused('selected_mapping_original_RAM_before_birth','terminal')
++            charge_selected_allocation(self.credit,width+131072)
++            if row.get('status') not in ('ACQUIRED','HELD') or row.get('attempted_close') not in (None,'NOT_ATTEMPTED'):
++                raise Refused('selected_mapping_keeper_still_owned','terminal')
++            self.birth=identity9(os.fstat(self.fd))
++            self.creation['birth']=self.birth
++            self.cuts=[];self.child_reads=0;self.child_allocation=0
++            self.borrowed=False
++            self._own_registry=_own_native()
++            if self._own_registry is not None:
++                self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)
++            key=(os.getpid(),id(self))
++            if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')
++            _MAP_BIRTHS[key]=self
++        except BaseException as error:
++            self.creation['prebirth_error']=error
++            self.creation['state_complete']=False
++            self.state_complete=False
++            self.creation_error=error
++            raise
+@@ -174,1 +188,1 @@
+-        if self.created or self.mapping is not None or os.getpid()!=self.owner_pid:
++        if self.created or self.mapping is not None or self.creation.get('returned') is True or os.getpid()!=self.owner_pid:
+@@ -176,1 +190,2 @@
+-        self.created=True
++        if self.creation.get('prebirth_error') is not None:
++            raise Refused('selected_mapping_prebirth_incomplete','terminal')
+@@ -180,1 +195,4 @@
+-                self.mapping=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)
++                result=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)
++                self.mapping=result
++                self.creation['returned_mapping']=result
++                self.creation['returned']=True
+@@ -182,3 +200,3 @@
+-                # SAME constructor, now the actual native recipient retains
+-                # the returned object before any Source metadata operation.
+-                self.mapping=self._own_registry.own_mapping('create',self,None,
++                # Native retains the constructor return in its row and in this
++                # preowned record before Source metadata below can fail.
++                result=self._own_registry.own_mapping('create',self,None,
+@@ -186,1 +204,14 @@
+-            self.creation['returned']=True
++                if result is None:
++                    result=self._own_registry.own_mapping('retained',self,None,
++                        self.creation,self.cuts,self.row,self.credit)
++                if self.mapping is None and result is not None:
++                    self.mapping=result
++                    self.creation['returned_mapping']=result
++                    self.creation['returned']=True
++                if (result is None or self.mapping is not result
++                        or self.creation.get('returned_mapping') is not result
++                        or self.creation.get('returned') is not True):
++                    raise Refused('selected_mapping_returned_alias','terminal')
++            self.created=True
++            self.state_complete=True
++            self.creation['state_complete']=True
+@@ -188,1 +219,22 @@
+-            self.creation_error=error;self.creation['original_error']=error
++            if self.mapping is None and self._own_registry is not None:
++                held=None
++                try:
++                    held=self._own_registry.own_mapping('retained',self,None,
++                        self.creation,self.cuts,self.row,self.credit)
++                except BaseException:
++                    held=None
++                if held is not None:
++                    self.mapping=held
++                    self.creation['returned_mapping']=held
++                    self.creation['returned']=True
++            if self.mapping is not None and self.creation.get('returned_mapping') is None:
++                self.creation['returned_mapping']=self.mapping
++                self.creation['returned']=True
++            self.state_complete=False
++            self.creation['state_complete']=False
++            if self.creation.get('returned') is True or self.mapping is not None:
++                self.metadata_error=error
++                self.creation['metadata_error']=error
++            else:
++                self.creation_error=error
++                self.creation['original_error']=error
+@@ -191,0 +243,5 @@
++    def _require_owned_body_fd(self):
++        row=self.row
++        if (type(row) is not dict or row.get('status') not in ('ACQUIRED','HELD')
++                or row.get('attempted_close') not in (None,'NOT_ATTEMPTED')):
++            raise Refused('selected_mapping_keeper_still_owned','terminal')
+@@ -205,1 +262,3 @@
+-        if mapping is None or mapping.closed or self.close_attempted:
++        if mapping is None or self.close_attempted or mapping.closed:
++            if self.close_attempted and not self.closed_confirmed:
++                raise Refused('selected_mapping_close_outcome_unknown','terminal')
+@@ -222,0 +281,1 @@
++        self._require_owned_body_fd()
+@@ -244,2 +304,4 @@
+-        if (self.mapping is not None and self.mapping.closed
+-                and self.close_attempted and self.closed_confirmed and self.close_error is None):
++        if self.close_attempted and not (self.closed_confirmed and self.close_error is None and self.close_returned):
++            raise Refused('selected_mapping_close_outcome_unknown','terminal')
++        if (self.mapping is not None and self.closed_confirmed and self.close_attempted
++                and self.close_error is None and self.close_returned and self.mapping.closed):
+@@ -256,1 +318,1 @@
+-        if not any(item is cut for item in self.cuts) or self.mapping is None or self.mapping.closed:
++        if not any(item is cut for item in self.cuts) or self.mapping is None or self.close_attempted:
+@@ -261,0 +323,1 @@
++            self._require_owned_body_fd()
+@@ -272,0 +335,1 @@
++        self._require_owned_body_fd()
+@@ -280,0 +344,2 @@
++            if self.close_attempted and not self.closed_confirmed:
++                raise Refused('selected_mapping_close_outcome_unknown','terminal')
+@@ -287,0 +353,1 @@
++        self._require_owned_body_fd()
+@@ -305,0 +372,2 @@
++        if self.close_returned or self.close_error is not None or self.closed_confirmed:
++            raise Refused('selected_mapping_close_outcome_unknown','terminal')
+@@ -311,1 +380,1 @@
+-        if self.close_attempted:return self.closed_confirmed
++        if self.close_attempted:return self.closed_confirmed and self.close_error is None
+@@ -351,0 +420,2 @@
++        if self.close_attempted:
++            raise Refused('selected_mapping_close_outcome_unknown','terminal')
+@@ -352,0 +423,12 @@
++        if self._own_registry is not None and os.getpid()==self.owner_pid:
++            cut=self._own_registry.own_mapping('cohort-cut',self,mapping,None,None,self.row,self.credit)
++            if cut.get('cohort_before_effect') is not True or type(cut.get('full_bytes')) is not bytes:
++                raise Refused('selected_mapping_cohort_keeper_cut','terminal')
++            self.before_effect_raw=cut['full_bytes']
++            self.before_effect_cut=cut
++            if not hasattr(carrier,'selected_mapping_cuts'):carrier.selected_mapping_cuts=[]
++            carrier.selected_mapping_cuts.append((self,cut))
++            if not hasattr(carrier,'cohort_before_effect'):carrier.cohort_before_effect=[]
++            carrier.cohort_before_effect.append(cut)
++            return cut
++        self._require_owned_body_fd()
+@@ -375,1 +458,0 @@
+-
+INVERSE source/selected_owned_values.py
+@@ -143,2 +143,1 @@
+-        # this constructor. The creation record is that preowned slot.
+-        # A failed check writes the error there and does not allocate a map.
++        # this constructor. Initialize its custody before fallible validation.
+@@ -149,1 +148,0 @@
+-        self.metadata_error=None;self.state_complete=False
+@@ -151,36 +149,24 @@
+-            'fd':None,'width':width,'access':mmap.ACCESS_WRITE,
+-            'attempted':False,'returned':False,'returned_mapping':None,
+-            'original_error':None,'metadata_error':None,'prebirth_error':None,
+-            'row':None,'credit':None,'birth':None,'state_complete':False}
+-        try:
+-            prepared._owned()
+-            row=prepared.store.fdjournal._row(prepared.fd)
+-            if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:
+-                raise Refused('selected_mapping_actual_prepared_row','terminal')
+-            self.fd=prepared.fd;self.row=row;self.credit=prepared.hold
+-            self.owner_pid=os.getpid();self.width=width;self.role=role
+-            self.binding=prepared.binding()
+-            self.creation['fd']=self.fd
+-            self.creation['row']=row
+-            self.creation['credit']=self.credit
+-            if self.binding['allocation']<width+131072:
+-                raise Refused('selected_mapping_original_RAM_before_birth','terminal')
+-            charge_selected_allocation(self.credit,width+131072)
+-            if row.get('status') not in ('ACQUIRED','HELD') or row.get('attempted_close') not in (None,'NOT_ATTEMPTED'):
+-                raise Refused('selected_mapping_keeper_still_owned','terminal')
+-            self.birth=identity9(os.fstat(self.fd))
+-            self.creation['birth']=self.birth
+-            self.cuts=[];self.child_reads=0;self.child_allocation=0
+-            self.borrowed=False
+-            self._own_registry=_own_native()
+-            if self._own_registry is not None:
+-                self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)
+-            key=(os.getpid(),id(self))
+-            if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')
+-            _MAP_BIRTHS[key]=self
+-        except BaseException as error:
+-            self.creation['prebirth_error']=error
+-            self.creation['state_complete']=False
+-            self.state_complete=False
+-            self.creation_error=error
+-            raise
++            'fd':prepared.fd,'width':width,'access':mmap.ACCESS_WRITE,
++            'attempted':False,'returned':False,'original_error':None}
++        prepared._owned()
++        row=prepared.store.fdjournal._row(prepared.fd)
++        if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:
++            raise Refused('selected_mapping_actual_prepared_row','terminal')
++        self.fd=prepared.fd;self.row=row;self.credit=prepared.hold
++        self.owner_pid=os.getpid();self.width=width;self.role=role
++        self.binding=prepared.binding()
++        self.birth=identity9(os.fstat(self.fd))
++        self.cuts=[];self.child_reads=0;self.child_allocation=0
++        self.borrowed=False
++        # Debit before mmap allocation. Mapping is not a newly granted role.
++        if self.binding['allocation']<width+131072:
++            raise Refused('selected_mapping_original_RAM_before_birth','terminal')
++        charge_selected_allocation(self.credit,width+131072)
++        self._own_registry=_own_native()
++        if self._own_registry is not None:
++            self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)
++        # Record the BIRTH identity before mmap, not an allocating registration
++        # after return. A returned map is reachable even if metadata later fails.
++        key=(os.getpid(),id(self))
++        if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')
++        _MAP_BIRTHS[key]=self
+@@ -188,1 +174,1 @@
+-        if self.created or self.mapping is not None or self.creation.get('returned') is True or os.getpid()!=self.owner_pid:
++        if self.created or self.mapping is not None or os.getpid()!=self.owner_pid:
+@@ -190,2 +176,1 @@
+-        if self.creation.get('prebirth_error') is not None:
+-            raise Refused('selected_mapping_prebirth_incomplete','terminal')
++        self.created=True
+@@ -195,4 +180,1 @@
+-                result=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)
+-                self.mapping=result
+-                self.creation['returned_mapping']=result
+-                self.creation['returned']=True
++                self.mapping=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)
+@@ -200,3 +182,3 @@
+-                # Native retains the constructor return in its row and in this
+-                # preowned record before Source metadata below can fail.
+-                result=self._own_registry.own_mapping('create',self,None,
++                # SAME constructor, now the actual native recipient retains
++                # the returned object before any Source metadata operation.
++                self.mapping=self._own_registry.own_mapping('create',self,None,
+@@ -204,14 +186,1 @@
+-                if result is None:
+-                    result=self._own_registry.own_mapping('retained',self,None,
+-                        self.creation,self.cuts,self.row,self.credit)
+-                if self.mapping is None and result is not None:
+-                    self.mapping=result
+-                    self.creation['returned_mapping']=result
+-                    self.creation['returned']=True
+-                if (result is None or self.mapping is not result
+-                        or self.creation.get('returned_mapping') is not result
+-                        or self.creation.get('returned') is not True):
+-                    raise Refused('selected_mapping_returned_alias','terminal')
+-            self.created=True
+-            self.state_complete=True
+-            self.creation['state_complete']=True
++            self.creation['returned']=True
+@@ -219,22 +188,1 @@
+-            if self.mapping is None and self._own_registry is not None:
+-                held=None
+-                try:
+-                    held=self._own_registry.own_mapping('retained',self,None,
+-                        self.creation,self.cuts,self.row,self.credit)
+-                except BaseException:
+-                    held=None
+-                if held is not None:
+-                    self.mapping=held
+-                    self.creation['returned_mapping']=held
+-                    self.creation['returned']=True
+-            if self.mapping is not None and self.creation.get('returned_mapping') is None:
+-                self.creation['returned_mapping']=self.mapping
+-                self.creation['returned']=True
+-            self.state_complete=False
+-            self.creation['state_complete']=False
+-            if self.creation.get('returned') is True or self.mapping is not None:
+-                self.metadata_error=error
+-                self.creation['metadata_error']=error
+-            else:
+-                self.creation_error=error
+-                self.creation['original_error']=error
++            self.creation_error=error;self.creation['original_error']=error
+@@ -243,5 +191,0 @@
+-    def _require_owned_body_fd(self):
+-        row=self.row
+-        if (type(row) is not dict or row.get('status') not in ('ACQUIRED','HELD')
+-                or row.get('attempted_close') not in (None,'NOT_ATTEMPTED')):
+-            raise Refused('selected_mapping_keeper_still_owned','terminal')
+@@ -262,3 +205,1 @@
+-        if mapping is None or self.close_attempted or mapping.closed:
+-            if self.close_attempted and not self.closed_confirmed:
+-                raise Refused('selected_mapping_close_outcome_unknown','terminal')
++        if mapping is None or mapping.closed or self.close_attempted:
+@@ -281,1 +222,0 @@
+-        self._require_owned_body_fd()
+@@ -304,4 +244,2 @@
+-        if self.close_attempted and not (self.closed_confirmed and self.close_error is None and self.close_returned):
+-            raise Refused('selected_mapping_close_outcome_unknown','terminal')
+-        if (self.mapping is not None and self.closed_confirmed and self.close_attempted
+-                and self.close_error is None and self.close_returned and self.mapping.closed):
++        if (self.mapping is not None and self.mapping.closed
++                and self.close_attempted and self.closed_confirmed and self.close_error is None):
+@@ -318,1 +256,1 @@
+-        if not any(item is cut for item in self.cuts) or self.mapping is None or self.close_attempted:
++        if not any(item is cut for item in self.cuts) or self.mapping is None or self.mapping.closed:
+@@ -323,1 +261,0 @@
+-            self._require_owned_body_fd()
+@@ -335,1 +272,0 @@
+-        self._require_owned_body_fd()
+@@ -344,2 +280,0 @@
+-            if self.close_attempted and not self.closed_confirmed:
+-                raise Refused('selected_mapping_close_outcome_unknown','terminal')
+@@ -353,1 +287,0 @@
+-        self._require_owned_body_fd()
+@@ -372,2 +305,0 @@
+-        if self.close_returned or self.close_error is not None or self.closed_confirmed:
+-            raise Refused('selected_mapping_close_outcome_unknown','terminal')
+@@ -380,1 +311,1 @@
+-        if self.close_attempted:return self.closed_confirmed and self.close_error is None
++        if self.close_attempted:return self.closed_confirmed
+@@ -420,2 +351,0 @@
+-        if self.close_attempted:
+-            raise Refused('selected_mapping_close_outcome_unknown','terminal')
+@@ -423,12 +352,0 @@
+-        if self._own_registry is not None and os.getpid()==self.owner_pid:
+-            cut=self._own_registry.own_mapping('cohort-cut',self,mapping,None,None,self.row,self.credit)
+-            if cut.get('cohort_before_effect') is not True or type(cut.get('full_bytes')) is not bytes:
+-                raise Refused('selected_mapping_cohort_keeper_cut','terminal')
+-            self.before_effect_raw=cut['full_bytes']
+-            self.before_effect_cut=cut
+-            if not hasattr(carrier,'selected_mapping_cuts'):carrier.selected_mapping_cuts=[]
+-            carrier.selected_mapping_cuts.append((self,cut))
+-            if not hasattr(carrier,'cohort_before_effect'):carrier.cohort_before_effect=[]
+-            carrier.cohort_before_effect.append(cut)
+-            return cut
+-        self._require_owned_body_fd()
+@@ -458,0 +375,1 @@
++

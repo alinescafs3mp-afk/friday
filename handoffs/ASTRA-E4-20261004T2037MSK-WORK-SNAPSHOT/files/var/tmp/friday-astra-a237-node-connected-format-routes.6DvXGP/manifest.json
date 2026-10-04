@@ -1,0 +1,200 @@
+{
+  "schema": "friday.astra.a237.node-connected-source-manifest.v1",
+  "root": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP",
+  "source_count": 6,
+  "physical_count_with_manifest": 12,
+  "files": [
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/README.txt",
+      "bytes": 375,
+      "sha256": "b97399dcaee2a6444adbf26abc236363c8b5359e743f6d886e5622b0f9ba24ae",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227594",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "375",
+        "1791056113438360510",
+        "1791056113497363766"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/SOURCE-JOIN.json",
+      "bytes": 30119,
+      "sha256": "ad47126ca7da9c99bc63ccf10a9ac2ba17b04f297c69310e3ae3f321303172f8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227591",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30119",
+        "1791056113436360400",
+        "1791056113497363766"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py",
+      "bytes": 212160,
+      "sha256": "ff637c2f44d26cab0bfa60c747abbfc040e5255527ad6f2bccf4efb43b43b7e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227584",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "212160",
+        "1791055955910668376",
+        "1791055955910668376"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/expectations.json",
+      "bytes": 12074,
+      "sha256": "83b5a8dc9e1b6af5a54c01eacc61d479cfdefc2f1298792ca9858a134e62781c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227588",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12074",
+        "1791055955513646469",
+        "1791055955513646469"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/implementation-result.json",
+      "bytes": 6458,
+      "sha256": "1302b72c8257905913c092aae9da5b2918af4b8adac592167cb565970421ada7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227590",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6458",
+        "1791056113436360400",
+        "1791056113497363766"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/launch-contract.json",
+      "bytes": 51393,
+      "sha256": "21cd06037b8682fd390315e996a5665b8bb75ca9c7a98abbb3d3295f1b29102f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227587",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51393",
+        "1791055955657654414",
+        "1791055955657654414"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227589",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1791054939874372760",
+        "1791055785980851103"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/pins.json",
+      "bytes": 10225,
+      "sha256": "bfb886d338ad6bc79c2f4e52c91191985c739447fa436588d787cd7017ba5ec2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227593",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10225",
+        "1791056113437360454",
+        "1791056113497363766"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/supervisor.py",
+      "bytes": 176259,
+      "sha256": "9f08d0eb19739b5fc47c42a794baf1f73f7619002ab156566ad9d8ff4f2c1fc4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227585",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "176259",
+        "1791055955781661257",
+        "1791055955781661257"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/validation-cases.json",
+      "bytes": 8638,
+      "sha256": "4df018b7db355e36bfc450dca49dd80e106bce388dd523360903322a84608217",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227592",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8638",
+        "1791056113437360454",
+        "1791056113497363766"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/verifier.py",
+      "bytes": 145719,
+      "sha256": "075e9114fa2adeeb6ec4da5b88faa3dea546d2aa8b41d01ae5904e18c2fa3be3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227586",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "145719",
+        "1791055955512646413",
+        "1791055955512646413"
+      ],
+      "stable9": true
+    }
+  ],
+  "state": "SEALED_INERT_AUTHOR_IMPLEMENTATION_REQUIRES_NONAUTHOR_REVIEW",
+  "Source_execution": 0,
+  "Root_execution": 0,
+  "SourceReady": false,
+  "GO": false
+}

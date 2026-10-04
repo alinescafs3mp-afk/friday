@@ -1,0 +1,1690 @@
+{
+  "schema": "friday.a147.frozen-original-ordered-source-predicate-table.v1",
+  "source": "source/staged_sender.py",
+  "Source_contract_checked": false,
+  "GO": false,
+  "method": "Static text locations/literal expressions only; no Source import/AST/compiler/test or generated concrete input",
+  "rows": [
+    {
+      "id": "sender.predicate.exact.1",
+      "function": "exact",
+      "ordinal": 1,
+      "line_start": 87,
+      "line_end": 87,
+      "ordered_expression": "require(type(value) is dict and set(value) == keys,\"exact_key_set\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.control_types.1",
+      "function": "control_types",
+      "ordinal": 1,
+      "line_start": 101,
+      "line_end": 101,
+      "ordered_expression": "require(all(type(key) is str for key in value),\"exact_key_set\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.control_types.2",
+      "function": "control_types",
+      "ordinal": 2,
+      "line_start": 108,
+      "line_end": 108,
+      "ordered_expression": "require(type(value) in (str,int,bool) or value is None,\"control_type\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.object_wire.pairs.1",
+      "function": "object_wire.pairs",
+      "ordinal": 1,
+      "line_start": 118,
+      "line_end": 118,
+      "ordered_expression": "require(key not in value,\"duplicate wire key\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.object_wire.1",
+      "function": "object_wire",
+      "ordinal": 1,
+      "line_start": 125,
+      "line_end": 125,
+      "ordered_expression": "require(type(raw) is bytes and 0 < len(raw) <= maximum,\"wire_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.object_wire.2",
+      "function": "object_wire",
+      "ordinal": 2,
+      "line_start": 128,
+      "line_end": 128,
+      "ordered_expression": "require(type(value) is dict,\"exact_key_set\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.object_wire.3",
+      "function": "object_wire",
+      "ordinal": 3,
+      "line_start": 130,
+      "line_end": 130,
+      "ordered_expression": "require(encode(value,telemetry=telemetry) == raw,\"canonical object wire\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.source_map.1",
+      "function": "source_map",
+      "ordinal": 1,
+      "line_start": 133,
+      "line_end": 133,
+      "ordered_expression": "require(type(value) is dict and len(value) == 54,\"source54\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.source_map.2",
+      "function": "source_map",
+      "ordinal": 2,
+      "line_start": 135,
+      "line_end": 137,
+      "ordered_expression": "require(type(name) is str and name and not name.startswith(\"/\")\n    and all(part not in (\"\",\".\",\"..\") for part in name.split(\"/\"))\n    and hex64(pin),\"source54\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.namespace_shape.1",
+      "function": "namespace_shape",
+      "ordinal": 1,
+      "line_start": 139,
+      "line_end": 139,
+      "ordered_expression": "require(type(rows) is list and len(rows) == 5,\"ancestry_spec_mismatch\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.namespace_shape.2",
+      "function": "namespace_shape",
+      "ordinal": 2,
+      "line_start": 143,
+      "line_end": 145,
+      "ordered_expression": "require(type(row[\"path\"]) is str and row[\"path\"] == path and id9(value)\n    and stat.S_ISDIR(value[2]) and stat.S_IMODE(value[2]) == mode\n    and value[3:5] == [uid,gid],\"ancestry_spec_mismatch\")",
+      "operands": [
+        "row[\"path\"]",
+        "value[2]",
+        "value[3:5]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.body_shape.1",
+      "function": "body_shape",
+      "ordinal": 1,
+      "line_start": 148,
+      "line_end": 151,
+      "ordered_expression": "require(type(body[\"schema\"]) is str and body[\"schema\"] == \"friday.a049.offline-run-admission.v1\"\n   and type(body[\"issuer\"]) is str and body[\"issuer\"] == ISSUER\n   and type(body[\"source_assignment\"]) is str and body[\"source_assignment\"] == SOURCE,\n   \"issuer_body\")",
+      "operands": [
+        "body[\"schema\"]",
+        "body[\"issuer\"]",
+        "body[\"source_assignment\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.custody_shape.1",
+      "function": "custody_shape",
+      "ordinal": 1,
+      "line_start": 157,
+      "line_end": 160,
+      "ordered_expression": "require(custody[\"schema\"] == \"friday.a056.independent-parent-custody.v1\"\n   and hex64(custody[\"expectation_sha256\"])\n   and custody[\"transport\"] == \"INDEPENDENT_PARENT_READONLY_FULLY_SEALED_HELD_OBJECTS\",\n   \"controller_report\")",
+      "operands": [
+        "custody[\"schema\"]",
+        "custody[\"expectation_sha256\"]",
+        "custody[\"transport\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.custody_shape.2",
+      "function": "custody_shape",
+      "ordinal": 2,
+      "line_start": 165,
+      "line_end": 167,
+      "ordered_expression": "require(id9(value) and stat.S_ISREG(value[2]) and stat.S_IMODE(value[2]) == 0o400\n    and value[3:6] == [1000,1000,nlink] and 0 < value[6] <= maximum,\n    \"controller_report\")",
+      "operands": [
+        "value[2]",
+        "value[3:6]",
+        "value[6]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.context_shape.1",
+      "function": "context_shape",
+      "ordinal": 1,
+      "line_start": 171,
+      "line_end": 173,
+      "ordered_expression": "require(context[\"schema\"] == \"friday.a049.offline-run-context.v1\"\n   and context[\"assignment\"] == ASSIGNMENT + \"#1\"\n   and integer(context[\"generation\"],1,1),\"phase_or_role\")",
+      "operands": [
+        "context[\"schema\"]",
+        "context[\"assignment\"]",
+        "context[\"generation\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.context_shape.2",
+      "function": "context_shape",
+      "ordinal": 2,
+      "line_start": 174,
+      "line_end": 174,
+      "ordered_expression": "require(hex64(context[\"run_id\"]),\"pin_mismatch\")",
+      "operands": [
+        "context[\"run_id\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.context_shape.3",
+      "function": "context_shape",
+      "ordinal": 3,
+      "line_start": 176,
+      "line_end": 177,
+      "ordered_expression": "require(all(type(context[\"resources\"][key]) is int and context[\"resources\"][key] == value\n    for key,value in RESOURCES.items()),\"resources_topology_changed\")",
+      "operands": [
+        "context[\"resources\"][key]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.context_shape.4",
+      "function": "context_shape",
+      "ordinal": 4,
+      "line_start": 178,
+      "line_end": 179,
+      "ordered_expression": "require(type(context[\"allowed_modes\"]) is list\n   and context[\"allowed_modes\"] == [\"affected\",\"collect\",\"selfcheck\"],\"tests_lowered\")",
+      "operands": [
+        "context[\"allowed_modes\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.context_shape.5",
+      "function": "context_shape",
+      "ordinal": 5,
+      "line_start": 180,
+      "line_end": 181,
+      "ordered_expression": "require(integer(context[\"seal_reserve_seconds\"],600,600)\n   and integer(context[\"wall_seconds\"],601,7200),\"fixed_deadline\")",
+      "operands": [
+        "context[\"seal_reserve_seconds\"]",
+        "context[\"wall_seconds\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.context_shape.6",
+      "function": "context_shape",
+      "ordinal": 6,
+      "line_start": 184,
+      "line_end": 184,
+      "ordered_expression": "require(type(context[key]) is str,\"fixed_deadline\")",
+      "operands": [
+        "context[key]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.context_shape.7",
+      "function": "context_shape",
+      "ordinal": 7,
+      "line_start": 186,
+      "line_end": 187,
+      "ordered_expression": "require(parsed.tzinfo is not None and parsed.astimezone(timezone.utc).isoformat() == context[key],\n    \"fixed_deadline\")",
+      "operands": [
+        "context[key]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.context_shape.8",
+      "function": "context_shape",
+      "ordinal": 8,
+      "line_start": 189,
+      "line_end": 189,
+      "ordered_expression": "require(stamps[1] - stamps[0] == context[\"wall_seconds\"],\"fixed_deadline\")",
+      "operands": [
+        "stamps[1]",
+        "stamps[0]",
+        "context[\"wall_seconds\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.expectation_shape.1",
+      "function": "expectation_shape",
+      "ordinal": 1,
+      "line_start": 193,
+      "line_end": 194,
+      "ordered_expression": "require(expected[\"schema\"] == \"friday.a056.independent-parent-custody.v1\"\n   and expected[\"issuer\"] == ISSUER and expected[\"source_assignment\"] == SOURCE,\"phase_or_role\")",
+      "operands": [
+        "expected[\"schema\"]",
+        "expected[\"issuer\"]",
+        "expected[\"source_assignment\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.expectation_shape.2",
+      "function": "expectation_shape",
+      "ordinal": 2,
+      "line_start": 195,
+      "line_end": 195,
+      "ordered_expression": "require(hex64(expected[\"admission_sha256\"]),\"pin_mismatch\")",
+      "operands": [
+        "expected[\"admission_sha256\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.expectation_shape.3",
+      "function": "expectation_shape",
+      "ordinal": 3,
+      "line_start": 197,
+      "line_end": 198,
+      "ordered_expression": "require(id9(ident) and stat.S_ISREG(ident[2]) and stat.S_IMODE(ident[2]) == 0o400\n   and ident[3:6] == [1000,1000,1] and 0 < ident[6] <= 65536,\"issuer_body\")",
+      "operands": [
+        "ident[2]",
+        "ident[3:6]",
+        "ident[6]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage1.1",
+      "function": "validate_stage1",
+      "ordinal": 1,
+      "line_start": 204,
+      "line_end": 205,
+      "ordered_expression": "require(value[\"schema\"] == \"friday.a081.root-native-stage1.v1\" and value[\"phase\"] == \"PREPARE\"\n   and value[\"assignment\"] == ASSIGNMENT and integer(value[\"generation\"],1,1),\"phase_or_role\")",
+      "operands": [
+        "value[\"schema\"]",
+        "value[\"phase\"]",
+        "value[\"assignment\"]",
+        "value[\"generation\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage1.2",
+      "function": "validate_stage1",
+      "ordinal": 2,
+      "line_start": 206,
+      "line_end": 208,
+      "ordered_expression": "require(value[\"origin\"] == \"external-genuine-root-native-exec-tool\"\n   and type(value[\"root_thread\"]) is str and len(value[\"root_thread\"]) <= 128\n   and value[\"root_thread\"] != \"UNISSUED\" and value[\"root_thread\"],\"external_origin_precondition\")",
+      "operands": [
+        "value[\"origin\"]",
+        "value[\"root_thread\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage1.3",
+      "function": "validate_stage1",
+      "ordinal": 3,
+      "line_start": 211,
+      "line_end": 214,
+      "ordered_expression": "require(value[\"controller\"][\"path\"] == CONTROLLER and hex64(value[\"controller\"][\"sha256\"])\n   and id9(value[\"controller\"][\"identity\"]) and integer(value[\"controller\"][\"accepted_epoch\"],1)\n   and value[\"index\"][\"path\"] == INDEX and value[\"index\"][\"sha256\"] == INDEX_SHA\n   and id9(value[\"index\"][\"identity\"]) and value[\"package_root\"] == PACKAGE,\"pin_mismatch\")",
+      "operands": [
+        "value[\"controller\"][\"path\"]",
+        "value[\"controller\"][\"sha256\"]",
+        "value[\"controller\"][\"identity\"]",
+        "value[\"controller\"][\"accepted_epoch\"]",
+        "value[\"index\"][\"path\"]",
+        "value[\"index\"][\"sha256\"]",
+        "value[\"index\"][\"identity\"]",
+        "value[\"package_root\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage1.4",
+      "function": "validate_stage1",
+      "ordinal": 4,
+      "line_start": 217,
+      "line_end": 218,
+      "ordered_expression": "require(type(root) is str and root.startswith(\"/\") and os.path.normpath(root) == root\n   and not root.startswith(ISSUER_ROOT + \"/\") and root != ISSUER_ROOT,\"caller_source_selection\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage1.5",
+      "function": "validate_stage1",
+      "ordinal": 5,
+      "line_start": 222,
+      "line_end": 222,
+      "ordered_expression": "require(hex64(pin[\"sha256\"]) and id9(pin[\"identity\"]),\"caller_source_selection\")",
+      "operands": [
+        "pin[\"sha256\"]",
+        "pin[\"identity\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage1.6",
+      "function": "validate_stage1",
+      "ordinal": 6,
+      "line_start": 225,
+      "line_end": 226,
+      "ordered_expression": "require(type(value[\"source54_identities\"]) is dict and set(value[\"source54_identities\"]) == set(pins)\n   and all(id9(v) for v in value[\"source54_identities\"].values()),\"source54\")",
+      "operands": [
+        "value[\"source54_identities\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage1.7",
+      "function": "validate_stage1",
+      "ordinal": 7,
+      "line_start": 231,
+      "line_end": 232,
+      "ordered_expression": "require(type(value[\"source_directories\"]) is dict and set(value[\"source_directories\"]) == dirs\n   and all(id9(v) for v in value[\"source_directories\"].values()),\"source54\")",
+      "operands": [
+        "value[\"source_directories\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage1.8",
+      "function": "validate_stage1",
+      "ordinal": 8,
+      "line_start": 233,
+      "line_end": 235,
+      "ordered_expression": "require(type(value[\"dispatcher_label\"]) is str\n   and re.fullmatch(r\"[A-Za-z0-9][A-Za-z0-9_.-]{0,60}\",value[\"dispatcher_label\"]) is not None,\n   \"phase_or_role\")",
+      "operands": [
+        "value[\"dispatcher_label\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage1.9",
+      "function": "validate_stage1",
+      "ordinal": 9,
+      "line_start": 236,
+      "line_end": 239,
+      "ordered_expression": "require(integer(value[\"auth_deadline_epoch\"],1)\n   and begin < value[\"auth_deadline_epoch\"] <= min(end - 600,\n    value[\"controller\"][\"accepted_epoch\"] + 6600)\n   and end <= value[\"controller\"][\"accepted_epoch\"] + 7200,\"fixed_deadline\")",
+      "operands": [
+        "value[\"auth_deadline_epoch\"]",
+        "value[\"controller\"][\"accepted_epoch\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_init.1",
+      "function": "validate_init",
+      "ordinal": 1,
+      "line_start": 244,
+      "line_end": 244,
+      "ordered_expression": "require(value[\"phase\"] == \"INIT\",\"phase_or_role\")",
+      "operands": [
+        "value[\"phase\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_init.2",
+      "function": "validate_init",
+      "ordinal": 2,
+      "line_start": 245,
+      "line_end": 250,
+      "ordered_expression": "require(value[\"assignment\"] == stage1[\"assignment\"] and integer(value[\"generation\"],1,1)\n   and value[\"root_thread\"] == stage1[\"root_thread\"]\n   and value[\"controller_sha256\"] == stage1[\"controller\"][\"sha256\"]\n   and type(value[\"init_deadline_epoch\"]) is int\n   and value[\"init_deadline_epoch\"] == stage1[\"auth_deadline_epoch\"]\n   and value[\"expectation\"] == stage1[\"expectation\"],\"claim_binding\")",
+      "operands": [
+        "value[\"assignment\"]",
+        "stage1[\"assignment\"]",
+        "value[\"generation\"]",
+        "value[\"root_thread\"]",
+        "stage1[\"root_thread\"]",
+        "value[\"controller_sha256\"]",
+        "stage1[\"controller\"][\"sha256\"]",
+        "value[\"init_deadline_epoch\"]",
+        "stage1[\"auth_deadline_epoch\"]",
+        "value[\"expectation\"]",
+        "stage1[\"expectation\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_claim.1",
+      "function": "validate_claim",
+      "ordinal": 1,
+      "line_start": 253,
+      "line_end": 253,
+      "ordered_expression": "require(value[\"status\"] == \"CUSTODY_READY\" and value[\"assignment\"] == stage1[\"assignment\"],\"phase_or_role\")",
+      "operands": [
+        "value[\"status\"]",
+        "value[\"assignment\"]",
+        "stage1[\"assignment\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_claim.2",
+      "function": "validate_claim",
+      "ordinal": 2,
+      "line_start": 254,
+      "line_end": 256,
+      "ordered_expression": "require(integer(value[\"generation\"],1,1) and integer(value[\"holder_pid\"],1)\n   and integer(value[\"holder_start_ticks\"],1) and value[\"holder_pid\"] == pid\n   and value[\"holder_start_ticks\"] == ticks,\"pid_generation\")",
+      "operands": [
+        "value[\"generation\"]",
+        "value[\"holder_pid\"]",
+        "value[\"holder_start_ticks\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_claim.3",
+      "function": "validate_claim",
+      "ordinal": 3,
+      "line_start": 257,
+      "line_end": 259,
+      "ordered_expression": "require(type(value[\"fds\"]) is list and all(type(v) is int for v in value[\"fds\"])\n   and value[\"fds\"] == [198,199] and type(value[\"identities\"]) is list\n   and len(value[\"identities\"]) == 2 and all(id9(v) for v in value[\"identities\"]),\"stale_identity\")",
+      "operands": [
+        "value[\"fds\"]",
+        "value[\"identities\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_claim.4",
+      "function": "validate_claim",
+      "ordinal": 4,
+      "line_start": 263,
+      "line_end": 270,
+      "ordered_expression": "require(hex64(value[\"expectation_sha256\"]) and value[\"expectation_sha256\"] == digest(encode(expected))\n   and hex64(value[\"admission_sha256\"]) and value[\"admission_sha256\"] == expected[\"admission_sha256\"]\n   and id9(value[\"admission_identity\"]) and value[\"admission_identity\"] == expected[\"admission_identity\"]\n   and value[\"namespace_identities\"] == expected[\"namespace_identities\"]\n   and value[\"controller_sha256\"] == stage1[\"controller\"][\"sha256\"]\n   and value[\"source54\"] == expected[\"source_hashes\"]\n   and type(value[\"init_deadline_epoch\"]) is int\n   and value[\"init_deadline_epoch\"] == stage1[\"auth_deadline_epoch\"],\"claim_binding\")",
+      "operands": [
+        "value[\"expectation_sha256\"]",
+        "value[\"admission_sha256\"]",
+        "expected[\"admission_sha256\"]",
+        "value[\"admission_identity\"]",
+        "expected[\"admission_identity\"]",
+        "value[\"namespace_identities\"]",
+        "expected[\"namespace_identities\"]",
+        "value[\"controller_sha256\"]",
+        "stage1[\"controller\"][\"sha256\"]",
+        "value[\"source54\"]",
+        "expected[\"source_hashes\"]",
+        "value[\"init_deadline_epoch\"]",
+        "stage1[\"auth_deadline_epoch\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.check_held_observation.1",
+      "function": "check_held_observation",
+      "ordinal": 1,
+      "line_start": 275,
+      "line_end": 280,
+      "ordered_expression": "require(integer(value[\"original_flags\"]) and integer(value[\"opened_flags\"])\n   and value[\"original_flags\"] & os.O_ACCMODE == os.O_RDONLY\n   and value[\"original_flags\"] & os.O_CLOEXEC == os.O_CLOEXEC\n   and value[\"opened_flags\"] & os.O_ACCMODE == os.O_RDONLY\n   and type(value[\"opened_cloexec\"]) is bool and value[\"opened_cloexec\"] is True,\n   \"fd_not_readonly\")",
+      "operands": [
+        "value[\"original_flags\"]",
+        "value[\"opened_flags\"]",
+        "value[\"opened_cloexec\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.check_held_observation.2",
+      "function": "check_held_observation",
+      "ordinal": 2,
+      "line_start": 281,
+      "line_end": 281,
+      "ordered_expression": "require(integer(value[\"seals\"]) and value[\"seals\"] & SEALS == SEALS,\"seals_incomplete\")",
+      "operands": [
+        "value[\"seals\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.check_held_observation.3",
+      "function": "check_held_observation",
+      "ordinal": 3,
+      "line_start": 283,
+      "line_end": 284,
+      "ordered_expression": "require(id9(ident) and stat.S_ISREG(ident[2]) and stat.S_IMODE(ident[2]) == 0o400\n   and ident[3:6] == [1000,1000,0] and ident[6] == len(raw),\"stale_identity\")",
+      "operands": [
+        "ident[2]",
+        "ident[3:6]",
+        "ident[6]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.check_held_observation.4",
+      "function": "check_held_observation",
+      "ordinal": 4,
+      "line_start": 285,
+      "line_end": 285,
+      "ordered_expression": "require(hex64(value[\"sha256\"]) and value[\"sha256\"] == digest(raw),\"pin_mismatch\")",
+      "operands": [
+        "value[\"sha256\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.check_held_observation.5",
+      "function": "check_held_observation",
+      "ordinal": 5,
+      "line_start": 287,
+      "line_end": 287,
+      "ordered_expression": "require(ident == expected_identity,\"stale_identity\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage2.1",
+      "function": "validate_stage2",
+      "ordinal": 1,
+      "line_start": 290,
+      "line_end": 293,
+      "ordered_expression": "require(value[\"schema\"] == \"friday.a081.root-native-stage2.v1\" and value[\"phase\"] == \"AUTHORIZE\"\n   and value[\"assignment\"] == stage1[\"assignment\"] and integer(value[\"generation\"],1,1)\n   and value[\"root_thread\"] == stage1[\"root_thread\"] and value[\"stage1_sha256\"] == stage1_sha,\n   \"phase_or_role\")",
+      "operands": [
+        "value[\"schema\"]",
+        "value[\"phase\"]",
+        "value[\"assignment\"]",
+        "stage1[\"assignment\"]",
+        "value[\"generation\"]",
+        "value[\"root_thread\"]",
+        "stage1[\"root_thread\"]",
+        "value[\"stage1_sha256\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage2.2",
+      "function": "validate_stage2",
+      "ordinal": 2,
+      "line_start": 294,
+      "line_end": 295,
+      "ordered_expression": "require(integer(value[\"holder_pid\"],1) and integer(value[\"holder_start_ticks\"],1)\n   and value[\"holder_pid\"] == pid and value[\"holder_start_ticks\"] == ticks,\"pid_generation\")",
+      "operands": [
+        "value[\"holder_pid\"]",
+        "value[\"holder_start_ticks\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage2.3",
+      "function": "validate_stage2",
+      "ordinal": 3,
+      "line_start": 298,
+      "line_end": 299,
+      "ordered_expression": "require(hex64(value[\"expected_task_sha256\"])\n   and digest(encode(task)) == value[\"expected_task_sha256\"],\"pin_mismatch\")",
+      "operands": [
+        "value[\"expected_task_sha256\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage2.4",
+      "function": "validate_stage2",
+      "ordinal": 4,
+      "line_start": 303,
+      "line_end": 305,
+      "ordered_expression": "require(task[\"schema\"] == \"friday.a056.independent-parent-run-task.v1\"\n   and task[\"issuer\"] == ISSUER and task[\"source_assignment\"] == SOURCE\n   and task[\"package_root\"] == PACKAGE,\"phase_or_role\")",
+      "operands": [
+        "task[\"schema\"]",
+        "task[\"issuer\"]",
+        "task[\"source_assignment\"]",
+        "task[\"package_root\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage2.5",
+      "function": "validate_stage2",
+      "ordinal": 5,
+      "line_start": 306,
+      "line_end": 307,
+      "ordered_expression": "require(task[\"source_hashes\"] == expected[\"source_hashes\"] and task[\"run_context\"] == expected[\"run_context\"]\n   and task[\"expectation_sha256\"] == held[0][\"sha256\"],\"pin_mismatch\")",
+      "operands": [
+        "task[\"source_hashes\"]",
+        "expected[\"source_hashes\"]",
+        "task[\"run_context\"]",
+        "expected[\"run_context\"]",
+        "task[\"expectation_sha256\"]",
+        "held[0][\"sha256\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage2.6",
+      "function": "validate_stage2",
+      "ordinal": 6,
+      "line_start": 310,
+      "line_end": 312,
+      "ordered_expression": "require(id9(task[\"expectation_identity\"]) and id9(task[\"held_admission_identity\"])\n   and task[\"expectation_identity\"] == held[0][\"identity\"]\n   and task[\"held_admission_identity\"] == held[1][\"identity\"],\"stale_identity\")",
+      "operands": [
+        "task[\"expectation_identity\"]",
+        "task[\"held_admission_identity\"]",
+        "held[0][\"identity\"]",
+        "held[1][\"identity\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage2.7",
+      "function": "validate_stage2",
+      "ordinal": 7,
+      "line_start": 313,
+      "line_end": 313,
+      "ordered_expression": "require(type(task[\"entrypoints\"]) is list and len(task[\"entrypoints\"]) == 1,\"exact_key_set\")",
+      "operands": [
+        "task[\"entrypoints\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_stage2.8",
+      "function": "validate_stage2",
+      "ordinal": 8,
+      "line_start": 316,
+      "line_end": 318,
+      "ordered_expression": "require(step[\"entrypoint\"] == \"dispatcher\" and type(step[\"arguments\"]) is list\n   and all(type(v) is str for v in step[\"arguments\"])\n   and step[\"arguments\"] == [\"--label\",stage1[\"dispatcher_label\"],\"--focused-checks\"],\"phase_or_role\")",
+      "operands": [
+        "step[\"entrypoint\"]",
+        "step[\"arguments\"]",
+        "stage1[\"dispatcher_label\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Clock.__init__.1",
+      "function": "Clock.__init__",
+      "ordinal": 1,
+      "line_start": 328,
+      "line_end": 328,
+      "ordered_expression": "require(begin <= self.now() < self.run and self.now() < self.auth <= wall0 + 300,\"fixed_deadline\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Clock.now.1",
+      "function": "Clock.now",
+      "ordinal": 1,
+      "line_start": 331,
+      "line_end": 331,
+      "ordered_expression": "require(abs(wall - self.wall0 - (time.monotonic() - self.mono0)) <= 2,\"clock drift\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Named.__init__.1",
+      "function": "Named.__init__",
+      "ordinal": 1,
+      "line_start": 343,
+      "line_end": 343,
+      "ordered_expression": "require(id9(pinned_identity) and identity(before) == pinned_identity,\"stale_identity\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Named.__init__.2",
+      "function": "Named.__init__",
+      "ordinal": 2,
+      "line_start": 344,
+      "line_end": 346,
+      "ordered_expression": "require(stat.S_ISREG(before.st_mode) and stat.S_IMODE(before.st_mode) == mode\n    and (before.st_uid,before.st_gid,before.st_nlink) == (1000,1000,1)\n    and 0 < before.st_size <= maximum,\"issuer_body\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Named.check.1",
+      "function": "Named.check",
+      "ordinal": 1,
+      "line_start": 358,
+      "line_end": 359,
+      "ordered_expression": "require(identity(os.lstat(self.path)) == self.identity and identity(os.fstat(self.fd)) == self.identity,\n    \"stale_identity\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Named.check.2",
+      "function": "Named.check",
+      "ordinal": 2,
+      "line_start": 361,
+      "line_end": 362,
+      "ordered_expression": "require(len(raw) == self.identity[6] and identity(os.fstat(self.fd)) == self.identity\n    and identity(os.lstat(self.path)) == self.identity,\"stale_identity\")",
+      "operands": [
+        "identity[6]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Named.check.3",
+      "function": "Named.check",
+      "ordinal": 3,
+      "line_start": 363,
+      "line_end": 363,
+      "ordered_expression": "require(digest(raw) == self.pin,\"pin_mismatch\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Directory.__init__.1",
+      "function": "Directory.__init__",
+      "ordinal": 1,
+      "line_start": 374,
+      "line_end": 376,
+      "ordered_expression": "require(id9(expected) and identity(info) == expected and stat.S_ISDIR(info.st_mode)\n    and stat.S_IMODE(info.st_mode) == mode and (info.st_uid,info.st_gid) == (uid,gid),\n    \"stale_identity\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Directory.check.1",
+      "function": "Directory.check",
+      "ordinal": 1,
+      "line_start": 386,
+      "line_end": 387,
+      "ordered_expression": "require(identity(os.lstat(self.path)) == self.identity and identity(os.fstat(self.fd)) == self.identity,\n    \"stale_identity\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Generation.proc_read.1",
+      "function": "Generation.proc_read",
+      "ordinal": 1,
+      "line_start": 411,
+      "line_end": 411,
+      "ordered_expression": "require(len(raw) <= cap,\"proc_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Generation.stat.1",
+      "function": "Generation.stat",
+      "ordinal": 1,
+      "line_start": 419,
+      "line_end": 419,
+      "ordered_expression": "require(int(head.split(\"(\",1)[0]) == self.pid and int(values[1]) == self.parent,\"pid_generation\")",
+      "operands": [
+        "values[1]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Generation.check.1",
+      "function": "Generation.check",
+      "ordinal": 1,
+      "line_start": 426,
+      "line_end": 426,
+      "ordered_expression": "require((allow_exited or not self.exited()) and self.stat()[1] == self.ticks,\"pid_generation\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Generation.check.2",
+      "function": "Generation.check",
+      "ordinal": 2,
+      "line_start": 430,
+      "line_end": 430,
+      "ordered_expression": "require(len(raw) <= 4096,\"proc_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Generation.check.3",
+      "function": "Generation.check",
+      "ordinal": 3,
+      "line_start": 432,
+      "line_end": 432,
+      "ordered_expression": "require(rows == [str(self.pid)],\"pid_generation\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Generation.children.1",
+      "function": "Generation.children",
+      "ordinal": 1,
+      "line_start": 440,
+      "line_end": 440,
+      "ordered_expression": "require(len(tasks) <= 32 and all(v.isdigit() for v in tasks),\"own_tree_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Generation.children.2",
+      "function": "Generation.children",
+      "ordinal": 2,
+      "line_start": 445,
+      "line_end": 445,
+      "ordered_expression": "require(all(v.isdigit() for v in values),\"own_tree_visibility\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Generation.children.3",
+      "function": "Generation.children",
+      "ordinal": 3,
+      "line_start": 447,
+      "line_end": 447,
+      "ordered_expression": "require(len(children) <= 16,\"own_tree_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Generation.children.4",
+      "function": "Generation.children",
+      "ordinal": 4,
+      "line_start": 450,
+      "line_end": 451,
+      "ordered_expression": "require(self.exited() and self.stat()[0] in (\"Z\",\"X\") and not children,\n      \"terminal_children_unconfirmed\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.__init__.1",
+      "function": "OwnScope.__init__",
+      "ordinal": 1,
+      "line_start": 477,
+      "line_end": 477,
+      "ordered_expression": "require(signal.SIGCHLD not in signal.pthread_sigmask(signal.SIG_BLOCK,[]),\"SIGCHLD_blocked\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.__init__.2",
+      "function": "OwnScope.__init__",
+      "ordinal": 2,
+      "line_start": 479,
+      "line_end": 479,
+      "ordered_expression": "require(signal.getsignal(signal.SIGCHLD) == signal.SIG_DFL,\"own_reaper_policy\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.__init__.3",
+      "function": "OwnScope.__init__",
+      "ordinal": 3,
+      "line_start": 483,
+      "line_end": 483,
+      "ordered_expression": "require(not self.children(),\"initial_own_scope_not_empty\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.proc_read.1",
+      "function": "OwnScope.proc_read",
+      "ordinal": 1,
+      "line_start": 511,
+      "line_end": 511,
+      "ordered_expression": "require(len(raw) <= maximum,\"proc_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.single_thread.1",
+      "function": "OwnScope.single_thread",
+      "ordinal": 1,
+      "line_start": 517,
+      "line_end": 518,
+      "ordered_expression": "require(rows.get(\"Threads\",\"\").strip() == \"1\" and rows.get(\"Pid\",\"\").strip() == str(os.getpid()),\n    \"own_scope_single_thread\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.runtime_check.1",
+      "function": "OwnScope.runtime_check",
+      "ordinal": 1,
+      "line_start": 521,
+      "line_end": 523,
+      "ordered_expression": "require(identity(os.fstat(r[\"fd\"])) == r[\"identity\"]\n    and fcntl.fcntl(r[\"fd\"],fcntl.F_GETFD) == fcntl.FD_CLOEXEC\n    and fcntl.fcntl(r[\"fd\"],fcntl.F_GETFL) == r[\"flags\"],\"stock_runtime_fd_drift\")",
+      "operands": [
+        "r[\"fd\"]",
+        "r[\"identity\"]",
+        "r[\"flags\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.runtime_check.2",
+      "function": "OwnScope.runtime_check",
+      "ordinal": 2,
+      "line_start": 526,
+      "line_end": 526,
+      "ordered_expression": "require(link == r[\"path\"],\"stock_runtime_fd_drift\")",
+      "operands": [
+        "r[\"path\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.check.1",
+      "function": "OwnScope.check",
+      "ordinal": 1,
+      "line_start": 531,
+      "line_end": 532,
+      "ordered_expression": "require(value == 1 and signal.getsignal(signal.SIGCHLD) == signal.SIG_DFL\n    and signal.SIGCHLD not in signal.pthread_sigmask(signal.SIG_BLOCK,[]),\"own_reaper_policy\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.children.1",
+      "function": "OwnScope.children",
+      "ordinal": 1,
+      "line_start": 536,
+      "line_end": 537,
+      "ordered_expression": "require(len(values) <= 16 and all(v.isascii() and v.isdecimal() and int(v) > 0 for v in values),\n    \"own_tree_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.terminal.1",
+      "function": "OwnScope.terminal",
+      "ordinal": 1,
+      "line_start": 542,
+      "line_end": 543,
+      "ordered_expression": "require(not before and all(gen.reaped and gen.terminal_children == [] for gen in generations.values()),\n    \"own_tree_terminal_unconfirmed\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.OwnScope.terminal.2",
+      "function": "OwnScope.terminal",
+      "ordinal": 2,
+      "line_start": 546,
+      "line_end": 546,
+      "ordered_expression": "require(not after and self.initial_empty and self.creation_started,\"own_tree_terminal_unconfirmed\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Held.__init__.1",
+      "function": "Held.__init__",
+      "ordinal": 1,
+      "line_start": 560,
+      "line_end": 561,
+      "ordered_expression": "require(self.original_flags & os.O_ACCMODE == os.O_RDONLY\n    and self.original_flags & os.O_CLOEXEC == os.O_CLOEXEC,\"fd_not_readonly\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Held.flags.1",
+      "function": "Held.flags",
+      "ordinal": 1,
+      "line_start": 573,
+      "line_end": 573,
+      "ordered_expression": "require(len(rows) == 1,\"fd_not_readonly\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Held.check.1",
+      "function": "Held.check",
+      "ordinal": 1,
+      "line_start": 578,
+      "line_end": 578,
+      "ordered_expression": "require(flags == self.original_flags,\"fd_not_readonly\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Held.check.2",
+      "function": "Held.check",
+      "ordinal": 2,
+      "line_start": 581,
+      "line_end": 581,
+      "ordered_expression": "require(before == opened and 0 < opened[6] <= self.maximum,\"stale_identity\")",
+      "operands": [
+        "opened[6]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Held.check.3",
+      "function": "Held.check",
+      "ordinal": 3,
+      "line_start": 584,
+      "line_end": 584,
+      "ordered_expression": "require(identity(os.fstat(current)) == opened,\"stale_identity\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Held.check.4",
+      "function": "Held.check",
+      "ordinal": 4,
+      "line_start": 592,
+      "line_end": 597,
+      "ordered_expression": "require(fcntl.fcntl(current,fcntl.F_GET_SEALS) & SEALS == SEALS\n     and fcntl.fcntl(current,fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDONLY\n     and raw == current_raw == self.raw and len(raw) == opened[6]\n     and identity(os.fstat(self.fd)) == opened and identity(os.fstat(current)) == opened\n     and identity(os.stat(\"fd/%d\" % self.target,dir_fd=self.generation.procfd)) == opened\n     and self.flags() == flags,\"stale_identity\")",
+      "operands": [
+        "opened[6]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Held.check.5",
+      "function": "Held.check",
+      "ordinal": 5,
+      "line_start": 599,
+      "line_end": 599,
+      "ordered_expression": "require(observation == fixed,\"stale_identity\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.terminal.1",
+      "function": "IO.terminal",
+      "ordinal": 1,
+      "line_start": 645,
+      "line_end": 646,
+      "ordered_expression": "require(type(raw) is bytes and 0 < len(raw) <= ROOT_OUT_MAX\n     and self.root_output + len(raw) <= ROOT_OUT_MAX,\"root_output_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.terminal.2",
+      "function": "IO.terminal",
+      "ordinal": 2,
+      "line_start": 652,
+      "line_end": 652,
+      "ordered_expression": "require(left > 0,\"failed_handoff_deadline\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.terminal.3",
+      "function": "IO.terminal",
+      "ordinal": 3,
+      "line_start": 655,
+      "line_end": 655,
+      "ordered_expression": "require(self.clock.handoff_left() > 0,\"failed_handoff_deadline\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.terminal.4",
+      "function": "IO.terminal",
+      "ordinal": 4,
+      "line_start": 665,
+      "line_end": 665,
+      "ordered_expression": "require(count > 0,\"failed_handoff_write\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.terminal.5",
+      "function": "IO.terminal",
+      "ordinal": 5,
+      "line_start": 671,
+      "line_end": 672,
+      "ordered_expression": "require(wall < result[\"original_wall_end\"] and mono < result[\"original_monotonic_end\"],\n     \"failed_handoff_deadline\")",
+      "operands": [
+        "result[\"original_wall_end\"]",
+        "result[\"original_monotonic_end\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.pump.1",
+      "function": "IO.pump",
+      "ordinal": 1,
+      "line_start": 682,
+      "line_end": 682,
+      "ordered_expression": "require(left > 0,\"fixed_deadline\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.write.1",
+      "function": "IO.write",
+      "ordinal": 1,
+      "line_start": 719,
+      "line_end": 719,
+      "ordered_expression": "require(type(raw) is bytes and 0 < len(raw) <= (ROOT_OUT_MAX if root else CONTROL_MAX),\"wire_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.write.2",
+      "function": "IO.write",
+      "ordinal": 2,
+      "line_start": 721,
+      "line_end": 721,
+      "ordered_expression": "require(self.root_output + len(raw) <= ROOT_OUT_MAX,\"root_output_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.write.3",
+      "function": "IO.write",
+      "ordinal": 3,
+      "line_start": 738,
+      "line_end": 738,
+      "ordered_expression": "require(count > 0,\"pipe_write\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.line.1",
+      "function": "IO.line",
+      "ordinal": 1,
+      "line_start": 747,
+      "line_end": 747,
+      "ordered_expression": "require(len(buffer) <= maximum and fd not in self.eof,\"bounded control or EOF\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.IO.line.2",
+      "function": "IO.line",
+      "ordinal": 2,
+      "line_start": 759,
+      "line_end": 759,
+      "ordered_expression": "require(index <= maximum,\"wire_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_report.1",
+      "function": "validate_report",
+      "ordinal": 1,
+      "line_start": 774,
+      "line_end": 774,
+      "ordered_expression": "require(type(value) is dict,\"controller_report\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_report.2",
+      "function": "validate_report",
+      "ordinal": 2,
+      "line_start": 777,
+      "line_end": 779,
+      "ordered_expression": "require(type(value[\"error_type\"]) is str and type(value[\"reason\"]) is str\n    and len(value[\"reason\"]) <= 512 and integer(value[\"controller_read_bytes\"])\n    and type(value[\"release_credit\"]) is bool and value[\"release_credit\"] is False,\"controller_report\")",
+      "operands": [
+        "value[\"error_type\"]",
+        "value[\"reason\"]",
+        "value[\"controller_read_bytes\"]",
+        "value[\"release_credit\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_report.3",
+      "function": "validate_report",
+      "ordinal": 3,
+      "line_start": 782,
+      "line_end": 783,
+      "ordered_expression": "require(value[\"status\"] == \"RUN_RETURNED\" and integer(value[\"controller_read_bytes\"],0,16777216)\n   and type(value[\"release_credit\"]) is bool and value[\"release_credit\"] is False,\"controller_report\")",
+      "operands": [
+        "value[\"status\"]",
+        "value[\"controller_read_bytes\"]",
+        "value[\"release_credit\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_report.4",
+      "function": "validate_report",
+      "ordinal": 4,
+      "line_start": 785,
+      "line_end": 787,
+      "ordered_expression": "require(type(usage) is list and len(usage) == 16\n   and all(type(v) in (int,float) and math.isfinite(v) and v >= 0 for v in usage[:2])\n   and all(integer(v) for v in usage[2:]),\"telemetry_type\")",
+      "operands": [
+        "usage[:2]",
+        "usage[2:]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_report.5",
+      "function": "validate_report",
+      "ordinal": 5,
+      "line_start": 789,
+      "line_end": 789,
+      "ordered_expression": "require(type(completed) is list and len(completed) == 1,\"controller_report\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_report.6",
+      "function": "validate_report",
+      "ordinal": 6,
+      "line_start": 799,
+      "line_end": 806,
+      "ordered_expression": "require(row[\"entrypoint\"] == \"dispatcher\" and type(row[\"argv\"]) is list\n   and all(type(v) is str for v in row[\"argv\"])\n   and row[\"argv\"] == [\"/usr/bin/python3.14\",\"-I\",\"-S\",\"-B\",PACKAGE + \"/tests/execute_pair.py\",\n        *stage2[\"task\"][\"entrypoints\"][0][\"arguments\"]]\n   and type(row[\"returncode\"]) is int\n   and hex64(row[\"independent_parent_task_sha256\"])\n   and row[\"independent_parent_task_sha256\"] == stage2[\"expected_task_sha256\"]\n   and binding[\"run_context\"] == stage2[\"task\"][\"run_context\"],\"controller_report\")",
+      "operands": [
+        "row[\"entrypoint\"]",
+        "row[\"argv\"]",
+        "stage2[\"task\"][\"entrypoints\"][0][\"arguments\"]",
+        "row[\"returncode\"]",
+        "row[\"independent_parent_task_sha256\"]",
+        "stage2[\"expected_task_sha256\"]",
+        "binding[\"run_context\"]",
+        "stage2[\"task\"][\"run_context\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.validate_report.7",
+      "function": "validate_report",
+      "ordinal": 7,
+      "line_start": 811,
+      "line_end": 818,
+      "ordered_expression": "require(binding[\"admission_path\"] == ISSUER_ROOT + \"/\" + expected[\"admission_sha256\"] + \".json\"\n   and binding[\"admission_sha256\"] == expected[\"admission_sha256\"] and binding[\"issuer\"] == ISSUER\n   and binding[\"source_assignment\"] == SOURCE and binding[\"source_hashes\"] == expected[\"source_hashes\"]\n   and custody == {\"schema\": expected[\"schema\"],\"expectation_sha256\": stage2[\"task\"][\"expectation_sha256\"],\n    \"expectation_identity\": stage2[\"task\"][\"expectation_identity\"],\n    \"held_admission_identity\": stage2[\"task\"][\"held_admission_identity\"],\n    \"admission_identity\": expected[\"admission_identity\"],\"namespace_identities\": expected[\"namespace_identities\"],\n    \"transport\": \"INDEPENDENT_PARENT_READONLY_FULLY_SEALED_HELD_OBJECTS\"},\"controller_report\")",
+      "operands": [
+        "binding[\"admission_path\"]",
+        "expected[\"admission_sha256\"]",
+        "binding[\"admission_sha256\"]",
+        "binding[\"issuer\"]",
+        "binding[\"source_assignment\"]",
+        "binding[\"source_hashes\"]",
+        "expected[\"source_hashes\"]",
+        "expected[\"schema\"]",
+        "stage2[\"task\"][\"expectation_sha256\"]",
+        "stage2[\"task\"][\"expectation_identity\"]",
+        "stage2[\"task\"][\"held_admission_identity\"]",
+        "expected[\"admission_identity\"]",
+        "expected[\"namespace_identities\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.fd_guard.1",
+      "function": "Session.fd_guard",
+      "ordinal": 1,
+      "line_start": 857,
+      "line_end": 857,
+      "ordered_expression": "require(name.isascii() and name.isdecimal(),\"bounded_fd_map\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.fd_guard.2",
+      "function": "Session.fd_guard",
+      "ordinal": 2,
+      "line_start": 862,
+      "line_end": 862,
+      "ordered_expression": "require(error.errno == errno.EBADF,\"bounded_fd_map\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.fd_guard.3",
+      "function": "Session.fd_guard",
+      "ordinal": 3,
+      "line_start": 864,
+      "line_end": 864,
+      "ordered_expression": "require(flags == (0 if fd < 3 else fcntl.FD_CLOEXEC),\"owned_fd_cloexec\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.fd_guard.4",
+      "function": "Session.fd_guard",
+      "ordinal": 4,
+      "line_start": 866,
+      "line_end": 866,
+      "ordered_expression": "require(actual == expected,\"exact_owned_fd_map\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.prepare_inputs.1",
+      "function": "Session.prepare_inputs",
+      "ordinal": 1,
+      "line_start": 881,
+      "line_end": 883,
+      "ordered_expression": "require(body == {\"schema\": \"friday.a049.offline-run-admission.v1\",\"issuer\": ISSUER,\n    \"source_assignment\": SOURCE,\"source_hashes\": expected[\"source_hashes\"],\n    \"run_context\": expected[\"run_context\"]},\"issuer_body\")",
+      "operands": [
+        "expected[\"source_hashes\"]",
+        "expected[\"run_context\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.prepare_inputs.2",
+      "function": "Session.prepare_inputs",
+      "ordinal": 2,
+      "line_start": 885,
+      "line_end": 886,
+      "ordered_expression": "require(type(index.get(\"mandatory_member_count\")) is int and index[\"mandatory_member_count\"] == 54\n    and index.get(\"mandatory_source_hashes\") == expected[\"source_hashes\"],\"source54\")",
+      "operands": [
+        "index[\"mandatory_member_count\"]",
+        "expected[\"source_hashes\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.prepare_inputs.3",
+      "function": "Session.prepare_inputs",
+      "ordinal": 3,
+      "line_start": 888,
+      "line_end": 889,
+      "ordered_expression": "require(re.search(rb'^ACCEPTED = ' + str(self.s1[\"controller\"][\"accepted_epoch\"]).encode(\"ascii\") + rb'$',\n      controller_raw,re.MULTILINE) is not None,\"fixed_deadline\")",
+      "operands": [
+        "s1[\"controller\"][\"accepted_epoch\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.prepare_inputs.4",
+      "function": "Session.prepare_inputs",
+      "ordinal": 4,
+      "line_start": 891,
+      "line_end": 891,
+      "ordered_expression": "require(b\"\\nROOT_THREAD = \" + thread_literal + b\"\\n\" in controller_raw,\"claim_binding\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.prepare_inputs.5",
+      "function": "Session.prepare_inputs",
+      "ordinal": 5,
+      "line_start": 899,
+      "line_end": 899,
+      "ordered_expression": "require(self.clock.left(self.clock.init) > 0,\"fixed_deadline\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.sample_tree.1",
+      "function": "Session.sample_tree",
+      "ordinal": 1,
+      "line_start": 913,
+      "line_end": 913,
+      "ordered_expression": "require(self.scope.creation_started and len(self.generations) < 16,\"own_tree_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.sample_tree.2",
+      "function": "Session.sample_tree",
+      "ordinal": 2,
+      "line_start": 916,
+      "line_end": 916,
+      "ordered_expression": "require(not gen.reaped,\"pid_generation\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.spawn.1",
+      "function": "Session.spawn",
+      "ordinal": 1,
+      "line_start": 927,
+      "line_end": 927,
+      "ordered_expression": "require(not self.scope.children(),\"initial_own_scope_not_empty\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.spawn.2",
+      "function": "Session.spawn",
+      "ordinal": 2,
+      "line_start": 928,
+      "line_end": 928,
+      "ordered_expression": "require(self.named[\"controller\"].check() == self.named[\"controller\"].raw,\"pin_mismatch\")",
+      "operands": [
+        "named[\"controller\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.prepare_custody.1",
+      "function": "Session.prepare_custody",
+      "ordinal": 1,
+      "line_start": 958,
+      "line_end": 958,
+      "ordered_expression": "require(claim[\"identities\"] == [item[\"identity\"] for item in observations],\"stale_identity\")",
+      "operands": [
+        "claim[\"identities\"]",
+        "item[\"identity\"]"
+      ],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.prepare_custody.2",
+      "function": "Session.prepare_custody",
+      "ordinal": 2,
+      "line_start": 959,
+      "line_end": 959,
+      "ordered_expression": "require(self.clock.left(self.clock.init) > 0,\"fixed_deadline\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.preauth.1",
+      "function": "Session.preauth",
+      "ordinal": 1,
+      "line_start": 972,
+      "line_end": 972,
+      "ordered_expression": "require(handle.check() == handle.raw,\"pin_mismatch\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.preauth.2",
+      "function": "Session.preauth",
+      "ordinal": 2,
+      "line_start": 980,
+      "line_end": 980,
+      "ordered_expression": "require(self.clock.left(self.clock.auth) > 0,\"fixed_deadline\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.final_namespace.1",
+      "function": "Session.final_namespace",
+      "ordinal": 1,
+      "line_start": 983,
+      "line_end": 983,
+      "ordered_expression": "require(self.clock.left(self.clock.auth) > 0,\"fixed_deadline\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.Session.cleanup.1",
+      "function": "Session.cleanup",
+      "ordinal": 1,
+      "line_start": 1041,
+      "line_end": 1041,
+      "ordered_expression": "require(pid == gen.pid,\"exact_own_wait4\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.perform_staged_send.1",
+      "function": "perform_staged_send",
+      "ordinal": 1,
+      "line_start": 1159,
+      "line_end": 1159,
+      "ordered_expression": "require(resource.getrlimit(getattr(resource,name)) == expected,\"trusted_pre_interpreter_limits\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.perform_staged_send.2",
+      "function": "perform_staged_send",
+      "ordinal": 2,
+      "line_start": 1161,
+      "line_end": 1161,
+      "ordered_expression": "require(encode(stage1) == stage1_raw,\"canonical object wire\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.perform_staged_send.3",
+      "function": "perform_staged_send",
+      "ordinal": 3,
+      "line_start": 1162,
+      "line_end": 1162,
+      "ordered_expression": "require(integer(bootstrap_read_bytes,len(stage1_raw),393216),\"read_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.perform_staged_send.4",
+      "function": "perform_staged_send",
+      "ordinal": 4,
+      "line_start": 1199,
+      "line_end": 1199,
+      "ordered_expression": "require(len(raw) <= ROOT_OUT_MAX,\"root_output_bound\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.perform_staged_send.5",
+      "function": "perform_staged_send",
+      "ordinal": 5,
+      "line_start": 1211,
+      "line_end": 1211,
+      "ordered_expression": "require(count == len(raw),\"pipe_write\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    },
+    {
+      "id": "sender.predicate.perform_staged_send.6",
+      "function": "perform_staged_send",
+      "ordinal": 6,
+      "line_start": 1214,
+      "line_end": 1214,
+      "ordered_expression": "require(wall < wall0 + 30 and mono < mono0 + 30,\"failed_handoff_deadline\")",
+      "operands": [],
+      "expectations": "Literal performing expression and same-version constants only; no supplied expected/path/type",
+      "first_fault_policy": "All actual ordered successful priors, then this first false predicate, or full original stdlib operation exception before predicate return"
+    }
+  ]
+}

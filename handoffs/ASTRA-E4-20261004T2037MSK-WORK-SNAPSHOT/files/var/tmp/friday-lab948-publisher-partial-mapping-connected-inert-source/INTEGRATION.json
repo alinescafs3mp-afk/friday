@@ -1,0 +1,30 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "a258_preserved": true,
+  "active_sol107_output_read": false,
+  "changed": [
+    "native/publisher_root_entry.c",
+    "source/observer.py",
+    "source/selected_owned_values.py"
+  ],
+  "child_acceptance_claimed": false,
+  "classification": {
+    "code": [
+      "mapping constructor alias before metadata",
+      "prebirth record before map allocation",
+      "keeper-owned before-close capture",
+      "unknown close phase distinct from current and retired"
+    ],
+    "evidence": "literal forward and inverse replay against A258",
+    "qualification": "NOT_RUN"
+  },
+  "compiler_abi": "NOT_RUN",
+  "decision": "REJOINED_A258_PARTIAL_MAPPING_RETURN_KEEPER_UNKNOWN_CLOSE_WHOLE_ADMISSION_OPEN",
+  "execution": "NOT_RUN",
+  "fit": "UNCONFIRMED",
+  "native_cost": "UNKNOWN_NOT_ZERO",
+  "schema": "friday.lab948.integration.v1",
+  "self_acceptance": false
+}

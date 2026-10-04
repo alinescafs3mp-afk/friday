@@ -1,0 +1,121 @@
+{
+  "schema": "friday.fresh-work-snapshot.index.v1",
+  "snapshot_time": "2026-10-04T20:52:03.354220+03:00",
+  "capture_started_msk": "2026-10-04T20:36:59+03:00",
+  "snapshot_directory": "handoffs/ASTRA-E4-20261004T2037MSK-WORK-SNAPSHOT",
+  "archive_inert": true,
+  "execution_authority": false,
+  "release_approval": false,
+  "product_baseline": {
+    "commit": "cecd28a92ac4fd4e34c4d3813d0c598debe09436",
+    "tree": "e7e86c7796a3db6571ffea715e666247f8876d63",
+    "version": "0.208.64",
+    "schema": 50
+  },
+  "installed_production": {
+    "recorded_version": "0.208.58",
+    "unchanged": true,
+    "final_wheel": "ABSENT"
+  },
+  "lead": {
+    "role": "Astra active Lead Architect",
+    "epoch": 4,
+    "continuity_deputy": "Kimi",
+    "model": "gpt-6-astra",
+    "reasoning": "ultra",
+    "provider": "openai_https",
+    "service_tier": null,
+    "service_tier_note": "Not exposed; not guessed/changed.",
+    "model_observed_msk": "2026-10-04T20:43:06.834425+03:00",
+    "role_record_sha256": "2cf8da83024e86b81fff7bff320e7ddc9087ef8eba4bf0add132130c7d0ed0e9"
+  },
+  "previous_published_snapshot": {
+    "commit": "a7599e2f491d7ed29bbb633fb9f8f36d59232cc8",
+    "directory": "handoffs/ASTRA-E4-20261003T1909MSK-WORK-SNAPSHOT"
+  },
+  "current_packages": {
+    "Browser": "Browser-A226",
+    "Scanner": "Scanner-LAB887",
+    "Publisher": "Publisher-A259",
+    "Sender": "Sender-SOL089",
+    "Node": "Node-A237"
+  },
+  "changes_since_previous": [
+    "Publisher: older separate SOL093/A229/LAB918 inputs superseded by coherent full A259 Source57 including preowned Root caller/storage/native return/finalizer, phase-separated mapping/data and native error graph/resource changes. Still incomplete, NOT accepted as a whole.",
+    "Publisher exact SOL108–SOL111 review targets/evidence now captured; accepted scoped hash/carrier/phase/partition/full Source-pass results and exact rejected residuals distinguished.",
+    "Latest stable LAB950 mmap correction captured separately, author-only/unintegrated under Sol112 review. No active LAB951 body included.",
+    "Node A224 replaced by actual A237 all3 native error-format source routes and local vectors; LAB929 factual review did not grant whole acceptance.",
+    "Browser A226, Scanner LAB887 and Sender SOL089 current identities unchanged; actual selected source files and safe dependencies/reviews reverified and copied, not merely local path descriptions.",
+    "Lead model changed by owner since prior snapshot; authority/team/release contract unchanged. No role takeover."
+  ],
+  "accepted_closures": [
+    "SOL108 exactA257 hash-history cardinality/overflow/debit/shape scoped source closure, rejoined by later reviews.",
+    "SOL109 exactA258 carrier/role/phase/hash-context scoped properties.",
+    "SOL110 exactLAB948 returned-alias normal path/keeper ordering/confirmed historical reads and safe uncertainty retention scopes.",
+    "SOL111 exactA259 append-only partition/history DATA/all-owner intake/encoding/same guarded end source properties; full retained Source consumer-pass debit independently accepted. Not whole error completion.",
+    "Earlier Browser LAB915 and Sender LAB910 scoped credits retained at original identities; Node LAB929 factual observations only."
+  ],
+  "remaining_blockers": {
+    "Publisher": {
+      "class": "harness/implementation",
+      "manifest": "5315a671f170e7be3bdea4395ffac62c7db01ee0955dffe38b1952e957f615c3",
+      "implemented": true,
+      "locally_checked": "Literal SHA/forward-inverse only",
+      "integrated": true,
+      "independently_accepted": false,
+      "target_verified": false,
+      "roots": [
+        "C1-R1D historical/current error traceback join; pending cursor/buffer/required factories/later cleanup and whole finite error ends",
+        "C2-R1D nested class registry scan; actual physical/ABI/full-width fit",
+        "C1-R1B LAB950 corrected author path not independently accepted/integrated",
+        "C1-R1C class-factory provenance; C1-R1A security-paused child workflow not retried"
+      ],
+      "owner": "Astra integration; Sol112 mapping non-author review; Grok LAB951 two exactSOL111 corrections"
+    },
+    "Browser": {
+      "class": "harness",
+      "root": "Native/stock/raw full custody/both finite ends C1 and whole prospective physical fit C2; no whole source/target acceptance."
+    },
+    "Scanner": {
+      "class": "harness",
+      "root": "Existing original-parent/factory/Source-main both finite endpoints unresolved; denied WIP frozen, no retry/reroute."
+    },
+    "Sender": {
+      "class": "harness",
+      "root": "Native/raw/error custody and both outside finite ends, actual image/ABI and whole cost remain open; stock-Python scoped credit not whole acceptance."
+    },
+    "Node": {
+      "class": "harness",
+      "root": "Native/raw/error custody and finite endpoints, factory/workspace/resource fit and Source/Root/image/ABI/runtime remain unestablished."
+    }
+  },
+  "execution_layers": {
+    "r5": "IMMUTABLE_RED_NO_REUSE",
+    "r6": "ABSENT",
+    "new_completed_in_this_snapshot": 0,
+    "Source_admission": "NOT_ESTABLISHED",
+    "Root_admission": "NOT_ESTABLISHED",
+    "compiler_ABI": "NOT_ESTABLISHED",
+    "runtime": "NOT_RUN",
+    "mandatory": "exact-release change+exact canonical union;160live;A+B with noB after redA;B09;R10/all30/F0-F11;build/install/restore/rollback/target/independent acceptance INCOMPLETE"
+  },
+  "next_required_release_stage": "Independently accepted connected source and stable qualified Source/Root/image/compiler ABI/provider/grants/resources/clocks, then collect-all diagnostic baseline. No gate newly executable.",
+  "capture": {
+    "source_files_stable_before_after": true,
+    "package_pathsets_stable": true,
+    "files": 869,
+    "bytes": 25396481,
+    "explicit_omissions": 43,
+    "tests_rerun": 0,
+    "Source_parsers_compilers_imports_exec": 0,
+    "Source_fixes_for_export": 0,
+    "active_work_interrupted": 0,
+    "frozen_checkout_modified": false
+  },
+  "limitations_file": "OMISSIONS.json",
+  "review_bindings_file": "REVIEW-BINDINGS.json",
+  "manifest_file": "MANIFEST.json",
+  "reference_map": "REFERENCES.json",
+  "mutable_status_register": "outer_sol/PROJECT_BACKLOG.md",
+  "forecast": "No unsupported ETA; no release date inferred from authored packages or partial source credits."
+}

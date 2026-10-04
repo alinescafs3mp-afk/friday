@@ -1,0 +1,232 @@
+{
+  "schema": "friday.sol110.mapping-connected-independent-review.v1",
+  "assignment": "ASTRA-E4-A259-PUBLISHER-PARTIAL-MAPPING-CONNECTED-NONAUTHOR-SOL110",
+  "generation": 1,
+  "decision": "REJECT_PARTIAL_MAPPING_CONNECTED_CLOSURE_PRESERVE_SCOPED_CREDITS",
+  "review_work_complete": true,
+  "acceptance_done_when": false,
+  "scope": "New LAB948 exact three-file mapping delta and actual A258-connected callers/Source+native readers/keeper/last-owner predicates only. Not self-review, not active A259 draft or stopped SOL107.",
+  "snapshot": {
+    "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/manifest.json",
+    "bytes": 17218,
+    "sha256": "9eba2d683ad67d0a481b6175f2b398d70dbd60da30a6747a1718fffaa6698314",
+    "identity9_decimal_strings": [
+      "2050",
+      "5135430",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "17218",
+      "1791132990308324798",
+      "1791132990308324798"
+    ],
+    "stable9": true
+  },
+  "baseline": {
+    "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/manifest.json",
+    "bytes": 32692,
+    "sha256": "82773d86edb14c70f82a7f5f3b31c9fb217b4097435596c93be786d697751374",
+    "identity9_decimal_strings": [
+      "2050",
+      "5010675",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32692",
+      "1791132364835513228",
+      "1791132364854513635"
+    ],
+    "stable9": true
+  },
+  "proof": {
+    "candidate_Source57_fullSHA9": true,
+    "baseline_Source57_fullSHA9": true,
+    "changed3_unchanged54": true,
+    "candidate_source_bytes": 1858091,
+    "baseline_source_bytes": 1851133,
+    "delta_bytes": 6958,
+    "LF_all57": true,
+    "declared_forward37_inverse37_hunks_replay_exact": true,
+    "independent_minimal_non_equal_opcodes": 37,
+    "all7_evidence_pinned": true
+  },
+  "rejection_grouped_root": "Existing C1-R1B-PARTIAL-MAPPING; two connected residual paths, zero new grouped roots.",
+  "rejections": [
+    {
+      "id": "C1-R1B-RETURN-RECOVERY-CLASSIFICATION",
+      "state": "REJECT_CODE",
+      "invariant": "An actual returned stock constructor and later metadata failure must remain distinguishable and joined to the same strongly retained original native/creation/Source mapping aliases, including refusal prefixes. A failed recovery query is not proof that the constructor failed.",
+      "paths": [
+        "source/owned_prefix_bank.py:223-231",
+        "source/selected_owned_values.py:202-240",
+        "native/publisher_root_entry.c:3486-3495",
+        "native/publisher_root_entry.c:3900-3923",
+        "native/publisher_root_entry.c:3953-3972",
+        "native/publisher_root_entry.c:5661-5687",
+        "native/publisher_root_entry.c:5748-5750"
+      ],
+      "actual_path": "Actual _birth retains the partial Birth then calls create. Native create stores a real constructor return in p->refs[6] before three fallible PyDict_SetItemString operations. If the FIRST publication into birth.__dict__ fails, Source mapping remains None and creation returned_mapping/returned remain None/False. Native correctly sets confirmed=1 and keeps the metadata error in its original error cell. Source's except recovery invokes retained, but this goes through own_find, which returns NULL on a failed clock/expired original deadline or scan refusal before finding even a still-owned row. The native entry then refuses original_birth_custody; Source swallows that recovery exception and sets held=None. At Source lines235-240, the still-None mapping/False returned record then categorizes the ORIGINAL metadata error as creation_error/original_error. Native still owns an actual returned mapping. This is a real connected conditional error-prefix path in the stock caller, not a hypothetical second create or malformed helper call.",
+      "validation": "On exact Source/native shapes, join the authoritative constructor-return fact and same p->refs[6] with Birth.mapping and creation.returned_mapping/returned, and validate constructor-error versus later metadata-error states before either reader grants computational/body completion. Recovery refusal must preserve an explicit unresolved return outcome, not relabel an already returned constructor as a failed factory. Native currently checks row pointers/scalars and generic graph aliases but has no mapping ledger cross-check analogous to the hash ledger's status join.",
+      "smallest_closure": "Make the actual returned-alias publication outcome-safe in the already preowned record/row before later metadata, or retain an explicit native-authoritative partial-return relation that both existing readers validate. Preserve the first exact error and all three original aliases; a clock/resource refusal remains STOP/INCOMPLETE, never bypass it or re-run the constructor. Do not replace original_error with a guessed factory failure when retained recovery itself is unconfirmed.",
+      "qualification": "Static literal path, not executed or runtime reproduced. The successful publication/recovery path receives scoped credit; all-failure closure does not."
+    },
+    {
+      "id": "C1-R1B-UNKNOWN-NATIVE-DATA-END",
+      "state": "REJECT_CODE",
+      "invariant": "Unknown-close phase3 and a historical before-close cut may represent retained uncertainty, but alone cannot establish full required CURRENT mapping data or enable terminal reference retirement as if that required body were complete. Required full evidence/custody or a separately validated lawful confirmed end is necessary; no unavailable close-result demand.",
+      "paths": [
+        "source/observer.py:196-199",
+        "source/observer.py:874-875",
+        "native/publisher_root_entry.c:5175-5202",
+        "native/publisher_root_entry.c:5237-5266",
+        "native/publisher_root_entry.c:5625-5626",
+        "native/publisher_root_entry.c:5651",
+        "native/publisher_root_entry.c:5748-5750",
+        "native/publisher_root_entry.c:5868-5888",
+        "native/publisher_root_entry.c:7127-7187",
+        "native/publisher_root_entry.c:7333-7348",
+        "native/publisher_root_entry.c:7438-7443"
+      ],
+      "actual_path": "Source explicitly emits unsupported mapping_close_outcome_unknown and its typed reader refuses. Native command_mapping_phase instead returns3 for attempts>=3, unknown flag4, confirmed!=3. command_mapping_tail's phase3 branch writes/accepts only sizeof(phase), accepts15 edges, and returns success without a current buffer, full historical-cut validation, or lawful mapping end relation. command_own_value keeps COMMAND_VALUE_MAPPING; command_builtin then sets data_read=true for every non-unsupported/non-support kind. The actual native reader calls this same phase3 tail and accepts it. Required reachability therefore does not add an unresolved node merely for this uncertain map. The resulting generic required_values_complete flag is consumed by command_retire_owners and source_owner_end_confirmed/runtime_finalization_eligible; those predicates do not add a mapping-phase/full-body/end test. The post-retirement final shape accepts either15 or16 edges and also adds no phase3 relation.",
+      "validation": "Keep the valid phase1 CURRENT16/full-buffer and phase2 RETIRED15/full historical-cut + actual confirmed close paths. For phase3, preserve original mapping/error/cut aliases but leave required body/end unresolved unless the existing contract's actual full evidence or lawful confirmed end is established. Explicitly join this distinction into native data_read, required_values_complete, both retirement predicates and post-retirement validation, not just the phase enum.",
+      "smallest_closure": "Prevent phase3-only/historical-only rows from qualifying as full required mapping DATA and flowing through the ordinary completion/retirement gate. Add the appropriate unresolved-retention/end relation in the same original receiver while preserving current15/16 layout contracts, exact errors/owners and no close retry/read/reopen. A future separately proved lawful end may qualify on its own evidence, not this phase marker.",
+      "qualification": "No actual SourceReady/Root/GO false-positive execution claimed: all remain false here and other residuals may stop a real run. This is the newly connected native coverage/predicate gap, not a demand to read an uncertain mapping or a claim that all unknown error bodies must be dropped."
+    }
+  ],
+  "scoped_credits": [
+    {
+      "id": "AUTH-DELTA",
+      "credit": "Exact LAB94864 artifacts and Source57 match pinned input; A25857 verified. Exactly3 changed/54 same, no added/removed Source. Literal forward37/inverse37 hunks reproduce each whole final/baseline file. Author claims are not independent acceptance."
+    },
+    {
+      "id": "PREBIRTH-RETENTION",
+      "paths": [
+        "source/owned_prefix_bank.py:223-231",
+        "source/selected_owned_values.py:145-186",
+        "source/root_tool_adapter.py:2108-2116",
+        "source/existing_root_caller.py:179-183",
+        "native/publisher_root_entry.c:3902-3920"
+      ],
+      "credit": "Actual caller retains the partial Birth before __init__; validation errors inside the new try populate the original creation record and stop before mmap allocation. Native birth validates actual row/credit and untouched constructor fields before allocating its own row. Existing outer caller retains exact original errors/partial Source roots. Initial attributes and creation dict are still allocated before that new try, so this is not certification that the comment 'preowned creation slot' closes every first-field/storage failure. Native whole error-end remains separately OPEN."
+    },
+    {
+      "id": "RETURN-NORMAL-PARTIAL",
+      "paths": [
+        "native/publisher_root_entry.c:3953-3972",
+        "source/selected_owned_values.py:195-217",
+        "source/selected_owned_values.py:219-240",
+        "native/publisher_root_entry.c:3479-3484"
+      ],
+      "credit": "Real native result strong in refs6 before Source bookkeeping, confirmed1 even on native metadata failure, exact original native error cell retained once. Normal native/creation/Source aliases match and successful recovery marks later errors as metadata_error/state_complete false. Does not erase RETURN-RECOVERY residual above."
+    },
+    {
+      "id": "ACTUAL-KEEPER-ORDER",
+      "paths": [
+        "native/publisher_root_entry.c:3811-3893",
+        "source/selected_owned_values.py:342-369",
+        "source/selected_owned_values.py:416-456",
+        "source/existing_root_caller.py:266-295",
+        "source/existing_root_caller.py:387-415",
+        "source/lifetime.py:458-474",
+        "native/publisher_owned_custody.c:329-357"
+      ],
+      "credit": "Native current/cohort cuts resolve actual prepared row + exact credit, reject missing/attempted/closed keeper BEFORE fstat, use the existing same-OFD keeper rather than a retired body integer, retain full width/tell/birth/cut aliases, compare full bytes and identity/position stability. Cohort marker true only for cohort-cut. Actual ordinary/publication receiver captures final live cut and full ledgers before mapping.close; four-map publication retires mappings before each backing row/keeper close. Source fallback checks still-owned original row before its fstat. If a keeper is already retired, refusal remains honest, not a recycled-FD proof. Native CommandReceive's separate error path still completes FDs before graph read; it does not reconstruct a missing Source keeper cut."
+    },
+    {
+      "id": "CONFIRMED-HISTORICAL-BOTH-READERS",
+      "paths": [
+        "source/selected_owned_values.py:303-317",
+        "source/existing_root_caller.py:17-39",
+        "source/existing_root_caller.py:300-383",
+        "source/observer.py:583-668",
+        "native/publisher_root_entry.c:5177",
+        "native/publisher_root_entry.c:5190-5197",
+        "native/publisher_root_entry.c:5748-5750"
+      ],
+      "credit": "Confirmed retirement retains exact full before-close bytes, cut inventory, original mapping/row/credit and actual close records. Source retired state/frozen validators do not get a closed buffer/tell/len or reopen/fstat retired backing FD. Native phase2 requires confirmed3/attempt3/flags3/no-unknown and full historical bytes matching width/row/credit; typed reader enforces8-byte phase tail and15 edges. CURRENT remains16 edges and actual full buffer/current position, distinct from retained historical retirement."
+    },
+    {
+      "id": "UNKNOWN-SAFE-RETENTION",
+      "paths": [
+        "native/publisher_root_entry.c:4051-4064",
+        "source/selected_owned_values.py:304-305",
+        "source/selected_owned_values.py:371-414",
+        "source/observer.py:196-199",
+        "source/observer.py:874-875"
+      ],
+      "credit": "Native close records attempt3 BEFORE one stock close, flags uncertainty on close/getattr/unconfirmed result and rejects retry. Source close_attempted/error/confirmed guards refuse reread/retry and typed Source unknown refuses completeness. Native phase3 is distinct from1/2 and does not read buffer/tell/fstat. These are safe retention/phase-distinction credits only; native full-data/end qualification remains rejected above."
+    },
+    {
+      "id": "A258-PRESERVED",
+      "credit": "Only37 mapping/observer hunks changed native/Source files; all other54 Source files exact A258. Hash-v2/full-history24576*N/zero-row/shape14/7 debit hunks are untouched, carrier4-map/0-map dispatch and original cumulative envelopes unchanged, owned DATA/foreign SUPPORT/historical-frame and native Group22 retention preserved. SOL109 existing C2-R1D consumer-pass/namespace-probe rejections remain open, not repeated or implicitly accepted."
+    },
+    {
+      "id": "RESOURCE-ORDER-NOMINAL",
+      "paths": [
+        "source/selected_owned_values.py:166-173",
+        "source/selected_owned_values.py:248-259",
+        "native/publisher_root_entry.c:3470-3474",
+        "native/publisher_root_entry.c:3929-3936",
+        "native/publisher_root_entry.c:3824-3828",
+        "native/publisher_root_entry.c:5205-5207"
+      ],
+      "credit": "Original width bounds precede actual mapping constructor; Source selected cumulative allocation/reads and native same-Root own_before/MasterBefore precede nominal factory/copy effects. No new grant/reset/refund. Actual implicit stock/kernel/provider allocations, key factories, copies and all read multiplicities remain unqualified, not priced zero."
+    }
+  ],
+  "remaining": {
+    "C1_R1B_partial_mapping": "OPEN: two above paths; first-field proof not inflated from allocated creation dict comment.",
+    "SOL109_C2_R1D": "OPEN_UNCHANGED_NOT_REAUDITED",
+    "native_whole_error_graph_end": "OPEN_SEPARATELY_ASTRA_OWNED_NOT_READ_ACTIVE_DRAFT",
+    "stopped_SOL107": "PAUSED_NOT_READ_NOT_RESUMED",
+    "compiler_ABI": "NOT_RUN",
+    "physical_whole_cost": "UNKNOWN_NOT_ZERO",
+    "required_full_workload_fit": "UNCONFIRMED",
+    "full_gates": "NOT_RUN",
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false
+  },
+  "boundaries": {
+    "Source_edits": 0,
+    "Source_execution": 0,
+    "Source_parser": false,
+    "compiler": false,
+    "tests": false,
+    "Root_live": false,
+    "foreign_host_script_execution": false,
+    "simulation": false,
+    "network": false,
+    "children": 0,
+    "heavy_runs": 0,
+    "active_A259_draft_read": false,
+    "stopped_SOL107_read_or_resume": false,
+    "guard_workaround": false,
+    "model_settings_changed": false,
+    "ABSTRACT_HASH_ONLY_required": true,
+    "waiver": false
+  },
+  "timing": {
+    "accepted_msk": "2026-10-04T20:15:32+03:00",
+    "completed_msk": "Recorded in compact RESULT after final full SHA9 seal and manifest verification",
+    "elapsed_seconds": "Recorded in RESULT"
+  },
+  "resources": {
+    "budget": {
+      "wall_seconds": 2400,
+      "seal_reserve_seconds": 300,
+      "read_bytes": 268435456,
+      "RAM_bytes": 8589934592,
+      "output_bytes": 33554432,
+      "local_concurrency": 4,
+      "children": 0,
+      "heavy_runs": 0
+    },
+    "instrumented_read_bytes_before_seal": 8496506,
+    "helper_observed_peak_rss_bytes": 611573760,
+    "whole_turn_total_reads": null,
+    "whole_turn_peak_RSS": null,
+    "unknown_resources": "UNKNOWN_NOT_ZERO; shell reads/tool transport/helper startup and final artifacts are additional, no exact total budget-compliance claim."
+  }
+}

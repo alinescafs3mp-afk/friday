@@ -1,0 +1,139 @@
+{
+  "C1": "CODE_OPEN",
+  "C2": "UNKNOWN_NOT_ZERO",
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "assignment": "ASTRA-E4-A237-NODE-NATIVE-ROUTE-ALTERNATIVES-ACTUAL-WIRE-ALL3-NONAUTHOR-LAB-929",
+  "author_decision_not_adopted": "IMPLEMENTED_AMBIGUOUS_NATIVE_ROUTE_SET_AND_ACTUAL_WIRE_DEBIT_ALL3_NOT_SOURCE_READY",
+  "authorship_boundary": "Astra authored the A237 route set and the two-stage debit. This review does not accept LAB927, does not accept the whole Node, and does not treat the author result as evidence of execution.",
+  "caller_lines": {
+    "base_exception_message_preview": 692,
+    "both_reader": 2022,
+    "bytes_call": 846,
+    "cap": 567,
+    "delta": 835,
+    "filename2_none_branch": 752,
+    "filename_none_branch": 769,
+    "full_stock_message": 794,
+    "lower": 819,
+    "percent_r_piece": 677,
+    "project_owned_error": 1900,
+    "prospective_oserror_message": 718,
+    "render_original_body": 864,
+    "reserve_call": 2013,
+    "retain": 560,
+    "snapshot": 1399
+  },
+  "caps": {
+    "caller": "AS_OUTER",
+    "role": "existing_address_space_ceiling_not_message_wire_or_allocator_admission",
+    "supervisor": "SUP_AS",
+    "values": [
+      134217728,
+      33554432,
+      117440512
+    ],
+    "verifier": "AS_PARENT"
+  },
+  "compiler_ABI": "NOT_RUN",
+  "concrete_defect": null,
+  "contract_change": "verifier_path_sha_size_and_supervisor_path_only",
+  "dag": {
+    "caller_embeds_own_sha": false,
+    "supervisor_embeds_verifier_and_contract": true,
+    "verifier_byte_occurrences_in_contract": 2,
+    "verifier_embeds_downstream": false,
+    "verifier_sha_occurrences_in_contract": 3
+  },
+  "decision": "AMBIGUOUS_NONE_ROUTES_MIN_LOWER_PLUS_ACTUAL_DELTA_LONGER_ALTERNATIVE_NOT_CHARGED",
+  "drift_outside_bindings_preflight_and_consumer": false,
+  "expectations_change": "materialization_path_only",
+  "findings": [
+    {
+      "fact": "A Python None member is both a NULL slot and a stored Py_None. The preview keeps every non-Windows OSError_str route consistent with that reading. It does not pick one pointer state.",
+      "id": "pointer-states",
+      "line": 718,
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+    },
+    {
+      "fact": "The pinned OSError_str reads filename2 only after a non-NULL filename. A proven filename2 suppresses the one-filename candidate. A NULL filename still reaches the stem or the BaseException args fallback, so the ignored filename2 is not required.",
+      "id": "filename2-ignored-when-filename-null",
+      "line": 2276,
+      "path": "/var/tmp/friday-lab923-selected-cpython314-stock-factory-source-correspondence/q-exceptions.c"
+    },
+    {
+      "fact": "When filename reads as None and errno or strerror also reads as None, the candidate set adds BaseException_str: empty string, one PyObject_Str, or the tuple repr. Stored-None errno and deleted errno share one candidate set. str selects the real route afterward.",
+      "id": "fallback",
+      "line": 692,
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+    },
+    {
+      "fact": "The returned message is the complete str result. No candidate replaces it. The 900-code-point domain is applied to the minimum, so a longer legal route does not refuse a shorter one. 900 stays in domain while 906 and 914 stay uncharged. 901 fails before debit and before str.",
+      "id": "content-and-domain",
+      "line": 794,
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+    },
+    {
+      "fact": "project_owned_error passes reserve_lower_bound. The first call adds the minimum. The second adds actual minus minimum. Their sum is the actual length. The ledger is additive. It is not the maximum, not a reset, and not a refund. GRAPH_CHARGED still receives only the later canonical JSON length.",
+      "id": "wire",
+      "line": 835,
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+    },
+    {
+      "fact": "Prefix rendering calls the same full_stock_message without a debit callback, then encodes the complete message. The snapshot keeps or overflows a whole blob. Both v2 readers are outside the changed hunks and match the baseline after binding normalization.",
+      "id": "prefix-and-readers",
+      "line": 864,
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+    },
+    {
+      "fact": "A domain failure, a membership failure, or a completion-debit failure is retained with its traceback and re-raised. A later call does not format again. The graph object is built only after every message returns.",
+      "id": "first-fault",
+      "line": 560,
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+    },
+    {
+      "fact": "Bytes, non-ASCII, a changed slot, a non-OSError, and any piece without a stock length return no preview. full_stock_message then uses the original str path. Those factories stay enabled. Their prospective admission is not proven.",
+      "id": "residual-factories",
+      "line": 718,
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+    },
+    {
+      "fact": "Visible workspace is the maximum of the exact route formulas and is compared only with the existing per-file address-space cap. In-domain alternatives in the 16 vectors stay far below that cap. This is not allocator, RSS, CPU, header, or shared-pool admission. Integer conversion cost stays unqualified.",
+      "id": "workspace-not-admission",
+      "line": 567,
+      "path": "/var/tmp/friday-astra-a237-node-connected-format-routes.6DvXGP/caller.py"
+    }
+  ],
+  "gates": "NOT_RUN",
+  "host_drift_claimed": false,
+  "image": "NOT_RUN",
+  "independent_acceptance": "NOT_GRANTED",
+  "lab927_reaccepted": false,
+  "network_requests": 0,
+  "ordinary_surplus_byte_equal": true,
+  "pre_task_compact": "FORBIDDEN_OWNER_POLICY",
+  "provider": "NOT_RUN",
+  "review_key": "ASTRA_A237_NATIVE_ROUTE_ALTERNATIVES_ACTUAL_WIRE_ALL3_SOURCE6",
+  "runtime": "NOT_RUN",
+  "schema": "friday.lab929.review.v1",
+  "shared_consumer_byte_equal": true,
+  "shared_preflight_byte_equal": true,
+  "source_execution": 0,
+  "stock_lines": {
+    "BaseException_str": 171,
+    "OSError_str": 2276
+  },
+  "supervisor_full_stock_message_line": 451,
+  "unresolved": [
+    "MS_WINDOWS WinError precedence is in the pinned exceptions text and is absent from the candidate set. Which ifdef the installed ELF compiled is NOT_RUN.",
+    "Long-integer conversion buffer, bytes filename repr, non-ASCII printability, custom slots, and other factories remain on the residual path or unqualified.",
+    "Provider, native row supply, compiler ABI, image, Root, and gates were not run.",
+    "The 16 vectors were checked as inert text against the pinned stock routes. They were not executed."
+  ],
+  "vector_count": 16,
+  "verdict": "FINITE_STATIC_CHANGED_CONTEXT_NOT_WHOLE_ACCEPTED",
+  "verifier_full_stock_message_line": 506,
+  "whole_accepted": false
+}

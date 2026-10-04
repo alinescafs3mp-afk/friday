@@ -1,0 +1,35 @@
+{
+  "schema": "friday.sol089.finite-source-package-completion.v1",
+  "assignment": "ASTRA-E4-SENDER-STOCK-PYTHON-OPERAND-ORIGIN-BODY-ALIAS-CONNECTED-SOURCE-SOL089",
+  "generation": 1,
+  "accepted_msk": "2026-10-03 10:45:55",
+  "accepted_epoch_ms": 1791013555068,
+  "source_text_completed_msk": "2026-10-03 11:17:57",
+  "source_text_completed_epoch_ms": 1791015477148,
+  "elapsed_seconds": 1922.08,
+  "finite_source_package_done": true,
+  "connected_source_implementation_submitted": true,
+  "whole_native_E01_closed": false,
+  "implementation_complete": false,
+  "files": "9 Source (3 changed, 5 exact equal, 1 new actually called codec); all current96/original54 exact dependencies declared",
+  "residuals": [
+    "E02_NATIVE_RAW_ERROR_C1 CODE",
+    "BOTH_OUTSIDE_FINITE_ENDS CODE",
+    "C2_WHOLE_COST UNKNOWN_NOT_ZERO",
+    "IMAGE_ABI_AND_NONAUTHOR_REVIEW REQUIRED_NOT_RUN"
+  ],
+  "Source_execution": 0,
+  "compiler_AST": "NOT_RUN",
+  "compiler_ABI": "NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "independent_changed_dependency_review": "REQUIRED_NOT_RUN",
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

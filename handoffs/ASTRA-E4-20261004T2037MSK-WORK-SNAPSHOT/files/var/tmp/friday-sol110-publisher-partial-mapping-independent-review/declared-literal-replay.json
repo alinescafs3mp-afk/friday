@@ -1,0 +1,64 @@
+{
+  "schema": "friday.sol110.declared-literal-replay.v1",
+  "delta_pin": {
+    "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/LITERAL-DELTA",
+    "bytes": 28224,
+    "sha256": "d79181531b54ab292a0149e6b039d7bcd0fb76b0a2cb9d33fb8eb6003e625128",
+    "identity9_decimal_strings": [
+      "2050",
+      "5135426",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "28224",
+      "1791132990307564749",
+      "1791132990307564749"
+    ],
+    "stable9": true
+  },
+  "sections": [
+    {
+      "name": "native/publisher_root_entry.c",
+      "direction": "forward",
+      "hunks": 12,
+      "whole_replay_exact": true
+    },
+    {
+      "name": "native/publisher_root_entry.c",
+      "direction": "inverse",
+      "hunks": 12,
+      "whole_replay_exact": true
+    },
+    {
+      "name": "source/observer.py",
+      "direction": "forward",
+      "hunks": 2,
+      "whole_replay_exact": true
+    },
+    {
+      "name": "source/observer.py",
+      "direction": "inverse",
+      "hunks": 2,
+      "whole_replay_exact": true
+    },
+    {
+      "name": "source/selected_owned_values.py",
+      "direction": "forward",
+      "hunks": 23,
+      "whole_replay_exact": true
+    },
+    {
+      "name": "source/selected_owned_values.py",
+      "direction": "inverse",
+      "hunks": 23,
+      "whole_replay_exact": true
+    }
+  ],
+  "forward_inverse_all3_exact": true,
+  "verified_msk": "2026-10-04T20:20:16.220612+03:00",
+  "counted_host_read_bytes": 2750982,
+  "helper_peak_rss_bytes": 611573760,
+  "Source_execution": 0,
+  "Source_edits": 0
+}

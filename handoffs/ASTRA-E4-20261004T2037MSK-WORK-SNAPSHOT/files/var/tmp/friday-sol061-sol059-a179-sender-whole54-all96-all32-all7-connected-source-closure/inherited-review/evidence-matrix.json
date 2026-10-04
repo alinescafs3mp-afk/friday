@@ -1,0 +1,557 @@
+{
+  "schema": "friday.a155.independent-all-original-causes-and-current-connected-defects.v1",
+  "review_key": "105d92a37596ad0fba79e1cc26581a5c6cfdbbd5ef009eff855099d6b68410e2:c954dff519104fa7418bd9d256f4131f7399c225dec23d63a55a5b142451dc68:WHOLE_SOURCE_ONLY_DIFFERENT_AUTHOR",
+  "original_finding_count": 12,
+  "findings": [
+    {
+      "id": "A144-F01",
+      "current_status": "STATIC_ORIGINAL_CAUSE_REPAIRED",
+      "title": "The stale controller/index/Source54 join is genuinely repaired.",
+      "original": {
+        "id": "A144-F01",
+        "classification": "CONFIRMED_SOURCE_VERSION_JOIN_DEFECT",
+        "severity": "blocking",
+        "obligation_family": "R04",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/staged_sender.py:24",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/staged_sender.py:901",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/admission_custodian.py:34"
+        ],
+        "causal_path": "Exact declared unchanged A132 controller C:14-15,178-179 consumes old54 index; sender/receiver current54 map differs changed3.",
+        "repair_boundary": "Coherent exact controller/index/Source54 graph repair, then fresh independent review.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "Current controller PACKAGE/INDEX/INDEX_SHA, Sender and pure grammar all name the new Source54 and bfc49a58873e61f83fa1764365ea5a4ed47ca1951c6d39949dcfc6756234cce7. Shared receiver receipt owner consumes the same54 mapping, not the historical A132 map.",
+      "remaining_connected_obligation": "No remaining stale-runtime-join identified. Historical original templates are obligations, not current runtime authority. Future accepted/thread/admission values remain separately Root-issued.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/controller.py:14",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/controller.py:259",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/controller.py:287",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:23",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py:20",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/admission_custodian.py:18"
+      ],
+      "repair_direction": "A coherent fresh independent snapshot binding is now present; future exact native materialization is a separate qualifier, not a Source defect.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F02",
+      "current_status": "PARTIAL_REPAIR_PROTOCOL_OPEN",
+      "title": "Actual read meter and owned same-generation inventory reuse are real improvements.",
+      "original": {
+        "id": "A144-F02",
+        "classification": "CONFIRMED_SOURCE_ACTOR_METERING_DEFECT_WITH_CONDITIONAL_CAP_CONFLICT",
+        "severity": "blocking",
+        "obligation_family": "R02",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/admission_custodian.py:34",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/admission_custodian.py:104",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/admission_custodian.py:107",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/admission_custodian.py:109",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/admission_custodian.py:124",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/receipt_contract.py:126",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/receipt_contract.py:381"
+        ],
+        "causal_path": "Receiver same-process5 full scans plus controller2 give36,440,376 B versus original16,777,216; before dispatcher26,028,840. Actual Source reads lack actor meter.",
+        "repair_boundary": "Join all actual Source reads; legally consolidate only redundant implementation work with Source-owned custody; if literal scans mandatory, retain finite unsatisfied result. Never move Source reads toRoot.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "Controller SourceReadMeter, bind_source_read_meter, full_source_inventory_generation, receiver shared owner and current held/named9 checks replace the old unconditional seven scans. Three physical current54 scans cost15,693,447 B; inventory alone can fit16MiB.",
+      "remaining_connected_obligation": "All other reads have only1,083,769 B remaining. stream.read/readinto/readline/readv/preadv do not enter the SourceReadMeter os.read/pread branch; implicit/import/recorder/internal IO and full all-path memory/event capacity have no complete bound. This is not proof that legal generation-owned caching is universally impossible.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/controller.py:34",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/controller.py:144",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/controller.py:287",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/controller.py:324",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1051",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1450",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1544"
+      ],
+      "repair_direction": "Complete same-process Source actor accounting, including internal stream/read-vector paths and all other finite reads, under original16MiB; preserve full bytes and current9 ownership.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F03",
+      "current_status": "PARTIAL_REPAIR_CONFIRMED_RESIDUAL",
+      "title": "Direct effect raw-first slots and separate recorder errors are genuinely improved.",
+      "original": {
+        "id": "A144-F03",
+        "classification": "CONFIRMED_FIRST_ERROR_MASKING_AND_RAW_RESULT_OWNER_GAP",
+        "severity": "high",
+        "obligation_family": "R03",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:635",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:643",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:646",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:1027"
+        ],
+        "causal_path": "Encoding/append can replace original function exception/result before owned raw result/error capture.",
+        "repair_boundary": "Immediate raw original-effect owner plus separate full recorder/cleanup cause owners.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "FullRootLifetime/RootLauncher.effect/Producer.call retain actual result/error before encode; raw read owners and pending slots exist.",
+      "remaining_connected_obligation": "RootLauncher.run except at1279 performs error_value(error) before an explicit raw original-error owner, and failed-prefix recording repeats that fallible encoding. Full raw memory state alone is not independently durable on recorder damage. Connected failure paths still can replace/drop original error evidence.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:92",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:918",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:1278",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1236"
+      ],
+      "repair_direction": "Preserve raw first-cause plus each distinct recorder/cleanup error throughout the existing durable owner chain before fallible representation; no new actor or grant.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F04",
+      "current_status": "ORIGINAL_LOCAL_CAUSE_REPAIRED_CONNECTED_CUSTODY_OPEN",
+      "title": "Named/Directory constructor masking and blind numeric close retry are repaired locally.",
+      "original": {
+        "id": "A144-F04",
+        "classification": "CONFIRMED_CONSTRUCTOR_FIRST_ERROR_MASKING_AMBIGUOUS_CLOSE_REPLAY",
+        "severity": "high",
+        "obligation_family": "R03",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/staged_sender.py:390",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/staged_sender.py:425",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/staged_sender.py:870",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/staged_sender.py:1150"
+        ],
+        "causal_path": "Named/Directory constructor cleanup close masks original check error; no per-generation close-attempt state before later handle.close.",
+        "repair_boundary": "Preserve first and cleanup errors separately, one attempted-close generation sticky UNKNOWN.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "AcquisitionOwner is attached before __init__, original error is retained, cleanup error separate; close-attempt state precedes close and ambiguous generation is not retried. Generation/Held handles use the same owner pattern.",
+      "remaining_connected_obligation": "Do not call the original Named/Directory bug still present. Whole constructor-failure acceptance still depends on F06/F07/F11: raw partial Popen/stream/internal generations and independent final custody must be complete, not merely an in-process owner label.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:11",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:340",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:565",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:604",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:836",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1535"
+      ],
+      "repair_direction": "Keep the genuine sticky-close repair; close the connected raw/durable constructor and internal cleanup protocol without retrying uncertain FD numbers.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F05",
+      "current_status": "ORIGINAL_LOCAL_CAUSE_REPAIRED_CONNECTED_CUSTODY_OPEN",
+      "title": "Temporary owner clearing and failed-generation reattach are repaired locally.",
+      "original": {
+        "id": "A144-F05",
+        "classification": "CONFIRMED_ATTACH_PARTIAL_OWNER_ERASURE_AND_FAILURE_RETRY",
+        "severity": "high",
+        "obligation_family": "R03",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:1199",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:814",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:819",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/receipt_contract.py:1162"
+        ],
+        "causal_path": "Temporary owner cleared before close; caller-bootstrap error tail reattaches and overwrites failed owner generation.",
+        "repair_boundary": "Explicit NEVER_ATTEMPTED/FAILED/partial ownership, no failed-generation reattachment, clear only after successful close.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "Caller and Source receipt attach retain temp/client owner, mark attempt before close, clear only on confirmed close; permanent NEVER_ATTEMPTED/FAILED state prevents bootstrap reattachment.",
+      "remaining_connected_obligation": "No duplicate attach of the failed generation was identified. Full independently durable failure/last-close custody remains open through F06/F07; local state is not an outside receipt.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:1120",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1304",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1357"
+      ],
+      "repair_direction": "Retain current one-attempt lifecycle and exact partial owners; integrate them with the qualified final tail and damage capacity.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F06",
+      "current_status": "PARTIAL_REPAIR_PROTOCOL_OPEN",
+      "title": "Raw event/result/error slots and damage veto replace the old begin-note masking.",
+      "original": {
+        "id": "A144-F06",
+        "classification": "CONFIRMED_RECORDER_DAMAGE_EVENT_CUSTODY_GAP",
+        "severity": "high",
+        "obligation_family": "R03",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:39",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:1103",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:1146",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/receipt_contract.py:1063",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/receipt_contract.py:1107"
+        ],
+        "causal_path": "Failed note retains projected failure only; call may execute after begin note damage; local full event/outcomes not independently owned.",
+        "repair_boundary": "Pre-reserved full raw event/result/firsterror and full recordererror custody; refuse next ordinary effect after damage.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "Producer and FullEventJournal keep emergency/raw_events before encoding, failed ordinary begin prevents the real ordinary call, cleanup remains possible under sticky damage.",
+      "remaining_connected_obligation": "Emergency lists, full raw objects, hex/JSON encoders, recorder-error tails and transport buffers have no complete pre-reserved all-path capacity or independent damage receipt. Damage can leave only live process memory after a broken transport; no complete code protocol qualifies that memory outside.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:54",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:1020",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1177",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1258",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:299"
+      ],
+      "repair_direction": "A complete finite damage-safe custody/capacity protocol under unchanged AS/CPU/wall/read limits, not projected failure labels or arbitrary new event caps.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F07",
+      "current_status": "PARTIAL_REPAIR_MISSING_ACTUAL_OUTSIDE_EDGE",
+      "title": "An existing-Root fsynced final tail and final-close/export ordering are real additions.",
+      "original": {
+        "id": "A144-F07",
+        "classification": "MISSING_FINAL_DURABLE_CUSTODY_PROTOCOL_WITH_CONFIRMED_SEAL_ORDER_GAPS",
+        "severity": "blocking",
+        "obligation_family": "R03",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:193",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:237",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:433",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:1015",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:1111",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:1178",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:1227",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:1255"
+        ],
+        "causal_path": "Final export/close errors occur after sealed/exported ledger, memory evidence not actual durable exit/adoption receipt.",
+        "repair_boundary": "Existing independent Root final tail/custody handoff under original reserved ends, actual outside native exit future. No new actors/signals/retry/refresh.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "ExistingRootTail owns raw slots, fsyncs tail, includes seal/export/close events and offers unresolved same-held objects; original ends remain unchanged.",
+      "remaining_connected_obligation": "adopt() returns only numeric same-process FD offers and accepted=false. No performing acceptance/FD-generation transfer edge sets acceptance. finish requires it. outside_wait4 binds only numeric pid/options, not an already independently held native PID generation. CLI closes local readers before an actual outside exit/adoption receipt. Missing current grant alone is NOT the defect; missing code edges are.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:299",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:335",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:352",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:367",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:1450",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:1499"
+      ],
+      "repair_direction": "Complete the existing outside actor's genuine same-generation native wait and actual held-FD adoption/acceptance/final-close protocol within original ends; no imaginary callback, numeric-FD transfer or Source-issued grant.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F08",
+      "current_status": "PARTIAL_REPAIR_CONFIRMED_PREFIX_CONSUMER_GAP",
+      "title": "Raw reads are retained before parsing and frames are released only after commit.",
+      "original": {
+        "id": "A144-F08",
+        "classification": "CONFIRMED_FAILED_PREFIX_REPLAY_RECIPE_GAP",
+        "severity": "high",
+        "obligation_family": "R03",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:477",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:549",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:561",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:945",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:1030"
+        ],
+        "causal_path": "Destructive frame removal before fallible commit; reconstruction ignores last actual raw read and lacks all zero/error/denial chronology.",
+        "repair_boundary": "Own original read/checkpoint before parse, commit then release; full reversible read outcomes and failed-prefix recipe.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "HeldLedger owns complete raw read bytes/errors/denials/EOF; collector buffer checkpoint precedes parse, frame deletion follows ledger admission. sideband_read_bytes describes all outcomes.",
+      "remaining_connected_obligation": "seal_incomplete_prefix sets prefix_sealed only, while sideband_read_bytes calls rows_from_held requiring sealed. The advertised failed-prefix recipe therefore cannot consume this actual failed-prefix state. Tail has additional raw ownership but no qualified complete independent failed-prefix consumer edge.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:603",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:621",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:681",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:705",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:719",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:747",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:804"
+      ],
+      "repair_direction": "Make the typed failed-prefix consumer operate on its actual held partial state with full read/result/error/denial boundaries, without promoting partial bytes to a complete ledger.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F09",
+      "current_status": "PARTIAL_REPAIR_EXACT_ORDERED_WHOLE_PROTOCOL_OPEN",
+      "title": "132 frozen Sender predicate sites and full pure-grammar stdlib replay are genuine.",
+      "original": {
+        "id": "A144-F09",
+        "classification": "MISSING_EXACT_EVERY_FIELD_FIRSTFAULT_STDLIB_CONSUMER_PROTOCOL",
+        "severity": "blocking",
+        "obligation_family": "R04",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/ordinary_root_consumers.py:196",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/ordinary_root_consumers.py:339",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/ordinary_root_consumers.py:441",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/ordinary_root_consumers.py:457",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/ordinary_root_consumers.py:599"
+        ],
+        "causal_path": "Actual copied ordered grammar partial exists, but supplied expected/path/predicate not tied to frozen original exact field; G.Refusal-only error paths.",
+        "repair_boundary": "Frozen ordered exact predicate IDs/field/constant/prior reachability; full ordinary stdlib error and native first-cause joins.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "All132 table expressions match current Sender literal source slices. 16 scoped pure functions produce grammar enter/return/error; replay compares exact typed results, successful ordered priors and full exception fields, not only Refusal. Fault input is frozen event_index/predicate_id, not arbitrary expected/path.",
+      "remaining_connected_obligation": "Method predicates (Named/Directory/Generation/OwnScope/Held/IO/Clock/Session) outside the16 pure functions are not equivalently re-executed with complete owned self-state and field/phase causality. First false family/guard or terminal confirmed=false is not complete original per-field all32 proof. Concrete Root stderr byte tag is incompatible with decode's exact sha256 schema.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/contracts/ordered-predicate-table.json:1",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:67",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:883",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py:435",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py:561",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py:86",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:69"
+      ],
+      "repair_direction": "Complete exact ordered field/operation reachability and typed representation producer-consumer joins for every current actor/method; retain genuine pure grammar repair.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F10",
+      "current_status": "PARTIAL_REPAIR_CONFIRMED_CASE_CONSUMER_DEFECTS",
+      "title": "Original TypedOrdinaryContract,12 named variable purposes and whole producer/worker streams are now connected.",
+      "original": {
+        "id": "A144-F10",
+        "classification": "MISSING_ORIGINAL_PURPOSE_VARIABLE_DOMAIN_CASE_CAUSE_PRODUCER_BYTE_JOINS",
+        "severity": "blocking",
+        "obligation_family": "R04",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/ordinary_root_consumers.py:208",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/ordinary_root_consumers.py:250",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/ordinary_root_consumers.py:519",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/ordinary_root_consumers.py:555",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:391",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:566",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:588",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/caller.py:641",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/native_grammar.py:275"
+        ],
+        "causal_path": "Any actual row equality/None NOT_REACHED insufficient; new consumer omits original captured producer/worker files and op-specific native causal checks.",
+        "repair_boundary": "Purpose-bound all12 variables, exact original domains and op errors; whole actual streams, exclusive files, stderr and original prefixes.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "All32ChronologyConsumer invokes native original typed consume, enforces domains/negative relations, fixed purpose paths, held exclusive worker files and controller/dispatcher writer-prefix joins; absence is no longer a silent zero.",
+      "remaining_connected_obligation": "NOT_REACHED is still event absence rather than proved branch reachability; fd_names accepts generic listdir and errno any error. Abstract producer receipt order/text-buffer acceptance is not a complete all-path physical-byte order proof. Strict bootstrap emission calls unbound global quoted. Root stderr tags lack required sha256. ordinary-regular-artifact-refusal original RUN_REPORTED oracle conflicts with generic RUN_REPORTED negative veto before its case-specific check.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py:211",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py:330",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py:727",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py:214",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py:230",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:691"
+      ],
+      "repair_direction": "Repair concrete case/schema contradictions and finish purpose-bound branch/native/producer byte correspondence for every original32 branch. No fabricated observed prefix, silence, bootstrap domain or F10 waiver.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F11",
+      "current_status": "PARTIAL_REPAIR_WHOLE_ACTOR_PROTOCOL_OPEN",
+      "title": "Shared canonical observed loader/global ordinary adapters now reach the Source54 graph.",
+      "original": {
+        "id": "A144-F11",
+        "classification": "MISSING_WHOLE54_TRANSITIVE_ORDINARY_ACTOR_HOOK_PROTOCOL",
+        "severity": "blocking",
+        "obligation_family": "R04",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/receipt_contract.py:126",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/receipt_contract.py:1218",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/receipt_contract.py:1246",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/execute_pair.py:109",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/run_tests.py:296",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/run_tests.py:419",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/harness_selfcheck.py:20",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/harness_selfcheck.py:58",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/fixtures/coordination/finalize_reports.py:15",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/Source54/tests/close_package.py:16"
+        ],
+        "causal_path": "One namespace selected outer proxies do not own Path/loaders/Popen/selector/internal/newly imported product/test/helper/report/terminal operations.",
+        "repair_boundary": "Shared attached producer across exact loaded modules and approved fully owned adapters, all original roles, fences unchanged.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "Receipt owner joins controller/receiver/dispatcher/workers/helpers/reports/terminal; observed_load registers partial module before execute; global os/posix/io/builtins/Popen/Selector/Thread/Pool hooks and full raw owner slots replace outer-only proxies. Original product/four-worker fences remain.",
+      "remaining_connected_obligation": "Hook installation itself imports stdlib modules before patches; receipt bootstrap/actor startup imports and loader path precede attachment. SourceGraph recursion suppression and Producer raw transport remain outside complete ordinary event accounting. Sender OwnedPopen uses stock subprocess internals while only sender-local os/time/etc are proxied; global subprocess internals are not the Source54 graph's patched process. Full allerror/internal hooks and implicit IO are not proven.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1416",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1518",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1573",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/run_tests.py:1",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/run_tests.py:539",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/execute_pair.py:17",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:64",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:932",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:911"
+      ],
+      "repair_direction": "Close the actual permitted startup/loader/constructor/internal/recorder edges under the reviewed stock-code fence, preserving all54/allroles and no arbitrary malicious interpreter/kernel premise.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    },
+    {
+      "id": "A144-F12",
+      "current_status": "STATIC_ORIGINAL_CAUSE_REPAIRED",
+      "title": "The stat_result-before-tuple identity9 representation defect is genuinely repaired.",
+      "original": {
+        "id": "A144-F12",
+        "classification": "CONFIRMED_LATENT_STAT_REPRESENTATION_ORDER_DEFECT_NOT_RUNTIME_OBSERVATION",
+        "severity": "medium",
+        "obligation_family": "R03/R04",
+        "source_references": [
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:66",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:74",
+          "/var/tmp/friday-astra-quality-a132-whole-root-collector-lifetime-all32-closure-a137-g1/source/root_native_launcher.py:78"
+        ],
+        "causal_path": "Tuple branch precedes stat_result and prevents identity9 including explicit ns representation. No reached runtime branch proved.",
+        "repair_boundary": "Represent stat_result before tuple and own complete raw failure/result.",
+        "confirmed_runtime": false,
+        "GO": false
+      },
+      "genuine_repair_credit": "Root value checks os.stat_result before tuple; Caller/Producer equivalent representation does the same. Identity includes dev/ino/mode/uid/gid/nlink/size/mtime_ns/ctime_ns as exact integer ns.",
+      "remaining_connected_obligation": "No remaining instance of the original branch-order defect identified. This is static Source credit only; actual metadata result/consumer/gates remain future NOT_RUN and surrounding typed/schema/custody gaps still matter.",
+      "source_references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:58",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:73",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:80",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1145"
+      ],
+      "repair_direction": "Preserve the repaired representation and validate only through the later authorized independent process; no current runtime success claimed.",
+      "static_only": true,
+      "confirmed_runtime": false,
+      "GO": false
+    }
+  ],
+  "additional_exact_static_defects": [
+    {
+      "id": "A155-N01",
+      "related": [
+        "A144-F10"
+      ],
+      "kind": "CONFIRMED_STATIC_BOOTSTRAP_NAME_BINDING_DEFECT",
+      "producer": "caller._bootstrap_failure",
+      "custody": "Raw original bootstrap error exists locally; NameError becomes bootstrap.write.error before native.before_delivery",
+      "consumer": "strict-inherited-fd bootstrap native contract expects a complete intended native body",
+      "references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:394",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:691",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:693",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py:705"
+      ],
+      "assertion": "quoted is only locally defined inside OrdinaryNativeContract.bootstrap_wire, not bound in _bootstrap_failure's global scope. The shown path cannot construct its intended native body.",
+      "verification_direction": "A bounded static name-binding/consumer join check, followed only later by an authorized ordinary negative control; no reproduction supplied.",
+      "runtime": "NOT_RUN",
+      "GO": false
+    },
+    {
+      "id": "A155-N02",
+      "related": [
+        "A144-F09",
+        "A144-F10"
+      ],
+      "kind": "CONFIRMED_STATIC_PRODUCER_CONSUMER_BYTE_SCHEMA_MISMATCH",
+      "producer": "Root.value bytes representation / caller.stderr.received",
+      "custody": "Root recipient holds raw bytes and encodes {type,length,raw_hex}",
+      "consumer": "ordinary.decode requires exact {type,length,raw_hex,sha256} in All32 consume and stock prelude",
+      "references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:69",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py:1224",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py:86",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py:732"
+      ],
+      "assertion": "Every nonempty captured stderr row on this producer path has a representation rejected by its connected consumer. This is conditional source logic, not a measured nonempty runtime stream.",
+      "verification_direction": "Use one consistent exact byte representation across real producer and consumer, preserving full bytes; ordinary qualified stderr control is future only.",
+      "runtime": "NOT_RUN",
+      "GO": false
+    },
+    {
+      "id": "A155-N03",
+      "related": [
+        "A144-F10"
+      ],
+      "kind": "CONFIRMED_STATIC_ORIGINAL_CASE_CONSUMER_CONTRADICTION",
+      "producer": "Sender.run accepts REFUSED_OR_FAILED controller report and returns validate_report [] without throwing",
+      "custody": "Original ordinary-regular-artifact-refusal inert oracle source_status RUN_REPORTED, native125, reached AUTH/RUN/CLEANUP/HANDOFF",
+      "consumer": "TypedOrdinaryContract.case_relation generic RUN_REPORTED veto precedes artifact-specific claim check",
+      "references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:775",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py:1007",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py:230",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py:253"
+      ],
+      "original_pin": {
+        "path": "/var/tmp/friday-sol035-quality-sol034-whole-source-closure/data/ordinary/ordinary-regular-artifact-refusal.json",
+        "bytes": 391628,
+        "sha256": "7b42c2f9028ab8598b4f13ceda02858f2cf79009aca19320b483c0bc80ba3b51",
+        "identity9_decimal_strings": [
+          "2050",
+          "4073767",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "391628",
+          "1790884738551481425",
+          "1790884738552953991"
+        ],
+        "stable9": true,
+        "before_opened_held_after_named_after_stable": true,
+        "mode": "600",
+        "uid": 1000,
+        "gid": 1000,
+        "nlink": 1
+      },
+      "assertion": "The original preserved case's declared successful Source reporting of a negative ordinary child result is not admitted by the new generic negative veto. This diagnoses an exact static contract conflict, not observed runtime or arbitrary forged child data.",
+      "verification_direction": "Reconcile the original artifact-refusal reporting domain with its operation-specific negative cause and genuine child/output/native joins; no unconditional RUN_REPORTED positive credit.",
+      "runtime": "NOT_RUN",
+      "GO": false
+    },
+    {
+      "id": "A155-N04",
+      "related": [
+        "A144-F02",
+        "A144-F11"
+      ],
+      "kind": "CONFIRMED_STATIC_METERING_DISPATCH_HOLE",
+      "producer": "OwnedStream read/read1/readinto/readinto1/readline/readlines and observed readv/preadv",
+      "custody": "SourceGraphOwner raw owner slots do exist",
+      "consumer": "SourceReadMeter dispatch is limited to exact operations os.read/os.pread",
+      "references": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1450",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1544",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py:1578"
+      ],
+      "assertion": "The new supposedly whole Source read adapter performs these reads through the generic direct function branch rather than the SourceReadMeter. Whether each path occurs in a particular authorized invocation is not asserted; the all-path protocol is incomplete.",
+      "verification_direction": "Meter actual returned bytes and reservations on these permitted paths while avoiding double charge; retain complete raw results/errors and original actor scope.",
+      "runtime": "NOT_RUN",
+      "GO": false
+    }
+  ],
+  "SourceReady": false,
+  "whole_closure": false,
+  "missing_future_current_Root_facts_are_Source_bugs": false,
+  "universal_architecture_impossibility": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}
+

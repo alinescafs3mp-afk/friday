@@ -1,0 +1,178 @@
+{
+  "GO": false,
+  "changed_consumer_schema_requires_independent_review": true,
+  "interfaces": {
+    "existing_parent_receiver": [
+      {
+        "lines": [
+          366
+        ],
+        "needle": "def select_before_birth(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/root_native_launcher.py"
+      },
+      {
+        "lines": [
+          373
+        ],
+        "needle": "def bind_native_generation(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/root_native_launcher.py"
+      },
+      {
+        "lines": [
+          381
+        ],
+        "needle": "def adopt(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/root_native_launcher.py"
+      },
+      {
+        "lines": [
+          432
+        ],
+        "needle": "def outside_wait4(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/root_native_launcher.py"
+      }
+    ],
+    "immutable_bytes": [
+      {
+        "lines": [
+          1128
+        ],
+        "needle": "receipt.Source_generation.bound_reuse",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/receipt_contract.py"
+      },
+      {
+        "lines": [
+          636
+        ],
+        "needle": "self.allowed_byte_pins={}",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/root_native_launcher.py"
+      }
+    ],
+    "loader_and_internal": [
+      {
+        "lines": [
+          1785
+        ],
+        "needle": "def source_open_code(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/receipt_contract.py"
+      },
+      {
+        "lines": [
+          1008
+        ],
+        "needle": "sender.subprocess.os=",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/caller.py"
+      }
+    ],
+    "methods": [
+      {
+        "lines": [
+          127
+        ],
+        "needle": "def method_enter(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/caller.py"
+      },
+      {
+        "lines": [
+          155
+        ],
+        "needle": "def predicate_state(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/caller.py"
+      },
+      {
+        "lines": [
+          590
+        ],
+        "needle": "class ObservedMethodReplay:",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/ordinary_root_consumers.py"
+      },
+      {
+        "lines": [
+          741
+        ],
+        "needle": "def method_sites(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/ordinary_root_consumers.py"
+      }
+    ],
+    "physical_read": [
+      {
+        "lines": [
+          149
+        ],
+        "needle": "class SourceReadMeter(_SemanticReadMeter)",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/controller.py"
+      },
+      {
+        "lines": [
+          1678
+        ],
+        "needle": "class ObservedFileIO(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/receipt_contract.py"
+      },
+      {
+        "lines": [
+          1727
+        ],
+        "needle": "class ObservedRaw(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/receipt_contract.py"
+      }
+    ],
+    "physical_writer": [
+      {
+        "lines": [
+          355
+        ],
+        "needle": "pipe_buf=os.fpathconf(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/controller.py"
+      },
+      {
+        "lines": [
+          566
+        ],
+        "needle": "def physical_pipe_merge(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/ordinary_root_consumers.py"
+      },
+      {
+        "lines": [
+          571
+        ],
+        "needle": "ordinary_actual_per_channel_physical_writer_proof",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/native_grammar.py"
+      }
+    ],
+    "prefix": [
+      {
+        "lines": [
+          892
+        ],
+        "needle": "def consume_adopted_incomplete_prefix(",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/root_native_launcher.py"
+      }
+    ],
+    "purposes": [
+      {
+        "lines": [
+          279
+        ],
+        "needle": "absence alone is never a causal NOT_REACHED proof",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/ordinary_root_consumers.py"
+      },
+      {
+        "lines": [
+          262
+        ],
+        "needle": "NO_INITIATING_ERRNO",
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/ordinary_root_consumers.py"
+      }
+    ]
+  },
+  "schemas": {
+    "incomplete_prefix": "friday.sol056.accepted-incomplete-prefix.v1 complete=false",
+    "method_state": "friday.sol056.method-state-graph.v1 complete/opaque explicit",
+    "no_initiating_errno": "reached sender.returned_outcome in original positive/nonzero/artifact-refusal domain",
+    "raw_buffer": "buffer_snapshot full kind/bytes/geometry",
+    "segments": "sequence/source-row + pid/physical_sequence/pipe_identity9/pipe_buf/physical_rank",
+    "unreached": "actual owned cut_index + method_call + full body/error replay"
+  },
+  "whole_interface_acceptance": false
+}

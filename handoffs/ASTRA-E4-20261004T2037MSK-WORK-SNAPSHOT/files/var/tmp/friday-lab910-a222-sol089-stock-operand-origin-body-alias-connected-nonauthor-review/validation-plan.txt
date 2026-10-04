@@ -1,0 +1,12 @@
+LAB-910 validation plan. Text obligations only. Nothing here was executed.
+Birth. Re-read caller _ObservedSelector: DefaultSelector.__new__, codec birth of that object, then DefaultSelector.__init__ as selector.create.
+Body. Re-read capture. A stock instance contributes its actual instance dictionary. fileno, a constructor, and an empty stand-in are not that body. Ingest accepts only the empty dictionary for selector.allocate.
+Replay. Re-read registry allocate, which calls object.__new__ only, and StrictJournal.call, which discards the function argument. selector.create replay passes None and must not invoke it. decode restore uses the later post-body.
+Matcher. Re-compare same_typed with the pinned lab873 and lab896 consumers. Stock graphs stay on the registry path.
+Error. Re-read restore_error. filename and filename2 are written only when the typed compare disagrees, and the text compare stays after that write.
+Equal modules. Re-hash the five modules against the pinned lab873 bytes before treating them as unchanged carriers.
+C1. A native, raw, or private body still needs its own supplier. NativeBodyUnavailable is a refusal, not custody.
+Ends. Both outside acceptance strings stay unconfirmed. The Python selector close is not either native end.
+ABI. The version pair (3, 14) and the pinned stock file stay short of image and compiler ABI qualification.
+C2. Do not emit a measured zero. The launcher still names the whole cost unknown and nonzero.
+Preservation inventory: 132 predicate strings in the five equal modules, preservation counts 16, 12, and 72, case table 32 and R01 through R07. Execution, gates, runtime, and compiler ABI stay NOT_RUN.

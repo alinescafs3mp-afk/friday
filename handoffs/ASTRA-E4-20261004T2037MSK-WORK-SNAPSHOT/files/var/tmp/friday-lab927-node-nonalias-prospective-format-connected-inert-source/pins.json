@@ -1,0 +1,141 @@
+{
+  "buildinfo_retrieved": false,
+  "input_bytes": 16416,
+  "input_sha256": "400064dadd873bbad6442ce52b0b4c58566bc17ee3dd9f2ce1d440a127b5d050",
+  "lab924_qualification_credit": false,
+  "old_source6": [
+    {
+      "bytes": 203294,
+      "mtime_equals_ctime": true,
+      "name": "caller.py",
+      "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/caller.py",
+      "sha256": "1415ae7274d93f712958d88cb5c4b8b08252b71f90d691514244380d87061c60",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "3714942",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "203294",
+        "1791047458157876548",
+        "1791047458157876548"
+      ]
+    },
+    {
+      "bytes": 12093,
+      "mtime_equals_ctime": true,
+      "name": "expectations.json",
+      "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/expectations.json",
+      "sha256": "1960b81fa04af752db55787b7f6135beef9a50b5e4736273a48a0f3311da7fd8",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "3714943",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12093",
+        "1791047340683225888",
+        "1791047340683225888"
+      ]
+    },
+    {
+      "bytes": 51469,
+      "mtime_equals_ctime": true,
+      "name": "launch-contract.json",
+      "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/launch-contract.json",
+      "sha256": "0c45d8a7c09cffa6299644491de15b586b6c8ea28177b8eeb41b9ebb9ff3268a",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "3714944",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "51469",
+        "1791047457602381854",
+        "1791047457602381854"
+      ]
+    },
+    {
+      "bytes": 158,
+      "mtime_equals_ctime": false,
+      "name": "ordinary-surplus.txt",
+      "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/ordinary-surplus.txt",
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "3714945",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1791047159551971381",
+        "1791047159663977722"
+      ]
+    },
+    {
+      "bytes": 167386,
+      "mtime_equals_ctime": true,
+      "name": "supervisor.py",
+      "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/supervisor.py",
+      "sha256": "98a8b473d1c662f67f15d9edf0f430fcb8a5adef812eb780b23ad5ffd1cdb03f",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "3714946",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "167386",
+        "1791047457891861488",
+        "1791047457891861488"
+      ]
+    },
+    {
+      "bytes": 136850,
+      "mtime_equals_ctime": true,
+      "name": "verifier.py",
+      "path": "/var/tmp/friday-sol096-node-error-format-prospective-bound-connected-inert-source/verifier.py",
+      "sha256": "be71c48663ca35b1a104c1f84b1f8c9fa5c26df62bc2e9fbb6630bb2f6b53c14",
+      "stat_nine_decimal_strings": [
+        "2050",
+        "3714947",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136850",
+        "1791047457354831084",
+        "1791047457354831084"
+      ]
+    }
+  ],
+  "prior_scoped_manifest_bytes": 645,
+  "prior_scoped_manifest_sha256": "b3d78eb5615dc85b13b2f821e2c97da03505ed397dc2380c2129964744e24385",
+  "schema": "friday.lab927.input-pins.v1",
+  "vendor_text_unqualified": [
+    {
+      "bytes": 133418,
+      "path": "/var/tmp/friday-lab923-selected-cpython314-stock-factory-source-correspondence/q-exceptions.c",
+      "sha256": "77385964591e0c3840675066e9610d50142a1cf0605acaf26c04e1ad69996821"
+    },
+    {
+      "bytes": 94718,
+      "path": "/var/tmp/friday-lab923-selected-cpython314-stock-factory-source-correspondence/q-object.c",
+      "sha256": "e9f19810f17357f6c059d5b9995cd633718caa1e18a040ffe860ba764aa3fdee"
+    },
+    {
+      "bytes": 34940,
+      "path": "/var/tmp/friday-lab924-required-nonalias-factory-domain-bounds/q-tupleobject.c",
+      "sha256": "81c1f950888089f3e4af0e00b7979874066d3c3f2f1ae981db7f5d63661c2cc1"
+    },
+    {
+      "bytes": 494714,
+      "path": "/var/tmp/friday-lab924-required-nonalias-factory-domain-bounds/q-unicodeobject.c",
+      "sha256": "60a5ebb5c9c76449e5118e88f1e525e86d6c6ca14f7a4b3e8618b3b2ff643831"
+    }
+  ]
+}

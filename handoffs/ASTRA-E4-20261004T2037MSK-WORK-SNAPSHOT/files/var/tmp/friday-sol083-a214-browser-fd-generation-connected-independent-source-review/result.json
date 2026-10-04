@@ -1,0 +1,35 @@
+{
+  "schema": "friday.sol083.review-result.v1",
+  "assignment": "ASTRA-E4-A214-BROWSER-FD-GENERATION-CONNECTED-NONAUTHOR-REVIEW-SOL083",
+  "generation": 1,
+  "accepted_msk": "2026-10-03T07:00:26+03:00",
+  "completion_timestamp": "Official sealed RESULT records completion after seal.",
+  "decision": "CREDIT_SCOPED_E03_FRESH_FD_GENERATION_CONNECTED_CORRECTION_NOT_WHOLE_ACCEPTED",
+  "review_complete": true,
+  "task_done": true,
+  "authorship": "First non-author Root A214 four-file correction. Sol081 predecessor author is Sol; no independent whole acceptance of own baseline.",
+  "narrow_credits": [
+    "C01-E03-FDGEN",
+    "C02-E03-CLOSE-ERROR",
+    "C03-E03-BOTH-RECEIVERS",
+    "C04-METADATA",
+    "C05-E01-E02-E04"
+  ],
+  "remaining_required": [
+    "Full native/stock/raw/pre-encode/alias/BOTH outside-end CODE",
+    "Whole inclusive fit UNKNOWN_NOT_ZERO",
+    "Original216/all29/all6/all9/Source19/C01-C08/M01/capsule848/packet96/child32 meaningful controls and final gates NOT_RUN"
+  ],
+  "artifact_root": "/var/tmp/friday-sol083-a214-browser-fd-generation-connected-independent-source-review",
+  "whole_accepted": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "Source_execution": 0,
+  "children": 0,
+  "unsafe": {
+    "status": "HASHONLY_ABSTRACT_REQUIRED_NOT_RUN",
+    "required": true,
+    "waiver": false
+  }
+}

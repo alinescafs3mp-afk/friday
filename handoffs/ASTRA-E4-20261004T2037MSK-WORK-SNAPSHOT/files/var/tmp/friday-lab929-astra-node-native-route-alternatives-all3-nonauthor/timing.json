@@ -1,0 +1,16 @@
+{
+  "children": 0,
+  "deadline_utc": "2026-10-03T20:17:48.418989Z",
+  "elapsed_sec": 699.533456,
+  "executor_ack_utc": "2026-10-03T19:37:48.416438Z",
+  "friday_calls": 0,
+  "network": 0,
+  "output_cap_bytes": 16777216,
+  "physical_read_bytes": 2080242,
+  "read_cap_bytes": 134217728,
+  "schema": "friday.lab929.timing.v1",
+  "sealed_msk": "2026-10-03T22:49:27.949894+03:00",
+  "source_execution": 0,
+  "started_msk": "2026-10-03T22:37:48.416438+03:00",
+  "vmrss_kb": 22700
+}

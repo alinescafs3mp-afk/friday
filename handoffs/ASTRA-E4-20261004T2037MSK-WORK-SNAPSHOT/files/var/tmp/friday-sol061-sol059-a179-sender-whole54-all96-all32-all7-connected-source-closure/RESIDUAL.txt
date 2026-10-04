@@ -1,0 +1,109 @@
+HISTORICAL SOL056 TEXT BELOW; NOT SOL061 CURRENT CODE CLASSIFICATION.
+Use RESIDUAL-SOL061.txt and author/all7-connected-closure.json.
+SOL056 mandatory exact attempted-code residual. WHOLE implementation NOT complete.
+Missing CODE, not missing permission to author and not an impossibility claim.
+
+R07 actual receiver/parent ownership — substantial connected attempt, still OPEN.
+ExistingRootTail.select_before_birth is CALLED before launcher/ledger/collector
+initialization and before bounded caller Popen. RootLifetime slots and actual
+partial objects are owned by that selected parent. bind_native_generation binds
+the actual partial Popen object/direct parent/held pidfd/start ticks. outside_wait4
+consumes that exact generation (not a PID-only argument), retains its actual
+wait/exit/signal result. adopt acquires REAL F_DUPFD_CLOEXEC aliases and stable9,
+fsyncs a receiver receipt, rebinds actual held readers/byte objects, and is called
+before local alias retirement. The separately called prefix consumer operates
+on those accepted live aliases/raw graph; complete=false remains mandatory.
+
+This implements ONLY the in-process already selected native parent entry.
+The external native TOOL/HELPER creation/exit/raw-memory last-close ABI is NOT
+implemented by these changes. Waiting for direct Source caller is not the outer
+helper native end. The old CLI is explicitly refused before child birth instead
+of closing and pretending numeric values transferred. No SCM_RIGHTS receiver or
+outer tool final raw-object/error receipt was implemented. Actual channel/ordinary
+driver integration for that outer boundary, plus complete partial-constructor/
+uncertain descriptor adoption qualification, remain code work. Acceptance here
+is actual same-parent custody, never external Root origin/admission/live credit.
+
+R02/R11 physical read/first startup — actual code attempt, still OPEN.
+New SourceReadMeter uses an actual lock; request reservation and successful or
+unknown-error settlement are atomic, without a release-before-charge interval.
+FileIO.read/readinto below C Buffered/Text layers use real returned bytes/counts;
+high-level readlines(hint)/text characters are not a physical-byte reservation.
+Actual vector/error buffers/None/EOF owners remain separate. Newly reached
+_io.open_code loaders and Sender subprocess.os errpipe reads have actual hooks.
+Whole54 reuse retains full Source-owned bytes and full current named/held9 under
+the existing write fence, rather than unconditionally closing and scanning again.
+
+Interpreter startup, imports needed before hook installation, raw C extension/
+preexec/subprocess internals and recorder recursion/raw transport are NOT all
+hooked from their first operation. _pyio.open validates/builds real C buffer/text
+layers on ObservedFileIO; its exact C-open exception/argument order, fdopen,
+noncontiguous/invalid vector buffers and read keyword semantics are unqualified.
+Old stdio detach/flush/unread prefix/newline/default buffering transfer is not
+fully proven lossless, and alternate startup topologies retain explicit gaps.
+Some metadata fstat/fpathconf edges use retained raw stock functions, not complete
+all-path observation. Errored calls with unreturned counts stay unknown; reserving
+their request upper is NOT a measured physical zero. Whole16MiB/RAM fit NOT_PROVEN.
+
+R03/R06/R08 raw graph/damage capacity — actual attempts, still OPEN.
+Root and receipt producers now traverse actual error cause/context/group links,
+arguments/notes/Python state and original traceback references before projection.
+Capture errors are separate and original raw exceptions remain owned. Selected
+raw partial objects, read/vector/transport/prefix generations and wrapper errors
+have real parent references; selected complete immutable byte objects can be
+reused through actual Root-held full bytes/current sealed9, not hash-only recipes.
+
+No complete pre-reserved damage-safe arena/allocator/encoding/transport capacity
+was implemented. Live lists, state nodes, snapshots, mutable native buffers,
+exception/traceback C state, retention/export/digest/memfd copies and cleanup
+errors still have no complete bound from original AS/CPU/wall/shared-read/8GiB.
+The owned cache reduces byte duplication but its Root reads, descriptor aliases,
+memory and export work are additional, not zero. Raw references alone are not
+independently durable outer-native acceptance. Prefix receiver remains incomplete;
+constructor/seal/export failures cannot be represented as full complete rows.
+
+R09 full effectful body/self-state replay — real connected attempt, still OPEN.
+Every method in Clock/Named/Directory/Generation/OwnScope/Held/IO/Session and the
+top-level perform_staged_send has a called enter/return/error/after-state wrapper;
+predicate self-state is captured at each original require. All132 expressions,
+16 pure functions and72 effectful body predicates are literal preserved. Root
+reconstructs only complete primitive/approved-class graphs, executes the copied
+BODY against exact prior reached syscall returns/errors (never native fallthrough),
+compares actual before/after aliases/state and full first error, and consumes all
+prior effects. Original cleanup runs even when snapshot/recording is damaged.
+
+Budget/ReadJournal native semantics, process/selector/library/recorder/callable
+and exception graph reconstruction remain incomplete/opaque. There is no complete
+pure Budget/failure_owner/controller_limits/native facade for all actual Session/
+perform_staged_send bodies. Set/native identity, nested method/error transition,
+stdlib argument/enum/filename distinctions and full predicted predicate-local
+correspondence still require implementation and review. Local replay is therefore
+not whole132 method qualification. No actual replay was run by this Source author.
+
+R10 full32 purpose/physical chronology — actual connected attempts, still OPEN.
+fd_names now requires actual sender Session.fd_guard /proc/self/fd, not arbitrary
+task-directory listdir; errno requires the actual case first-fault event. Actual
+no-initiating-errno and reached Refusal/None are distinct reached domains. An
+unreached purpose requires a real failed-method cut plus full body/error replay;
+event absence alone is refused. Capture/consumer schema preserves full buffer
+kind/geometry/bytes. Raw writer rows include actual held pipe9 and actor serial.
+Controller output and real pipe RawIO returns are split at actual PC_PIPE_BUF;
+the actual BufferedWriter/encoder retains and flushes the suffix. Per-pipe byte
+order must uniquely match actual reads while preserving each writer's physical
+order, not Source frame arrival. Exclusive worker stdout AND stderr stay required.
+
+Complete all32 initiating-domain/per-field purpose/branch/first-fault proof is
+NOT implemented. Incomplete method/error cuts cannot yet credit all unreached
+controls. Ambiguous equal byte prefixes, incomplete capture suffixes, vector/
+large external writes, cross-channel/cross-actor full native generation and
+new atomic-write/short-raw-return/flush/negative-error semantics need their full
+causal proof. A local strict refusal is NOT a successful ordinary scenario.
+N01/N02/N03 local repairs and original F01/F12 static/F04/F05 local repairs are
+retained; no unchanged older bug is re-alleged or F10 gate waived.
+
+Required next finite code work: real outer native custody/end ABI; first-startup
+and C/internal IO; bounded full raw graph/encoding/damage route; Budget/native/
+error replay facades and every all32 phase/purpose/physical generation join.
+This is author incompleteness after actual changes, not missing live Root facts.
+Different-author WHOLE review of final changed bytes remains required before
+any separately authorized execution. All original gates and caps are unchanged.

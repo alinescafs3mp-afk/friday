@@ -1,0 +1,24 @@
+{
+  "schema": "friday.a079.actual-fixed-native-session-source-dataflow.v1",
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "wire": "A061 v1 fixed848/208/56/1088/96B unchanged;19 roles; types1..14 unchanged",
+  "public_entry": "held110 --held-a061",
+  "new_actual_graph": [
+    "CONTRACT.startup validates full held Source/image before loading exact bridge and calling fr_session_start; no Python packet fallback",
+    "fr_session_start consumes actual FR_START; exact cap SHA/full cap bytes, actual owner birth and fixed root origin birth, SO_PEERCRED plus SCM_CREDENTIALS and same socket inode",
+    "Monotonic private request sequence begins2 after FR_START1; root registry matches the exact next sequence, increments only after actual ACK send; native increments only after exact ACK receive",
+    "CONTRACT.native_bridge declares4-argument fr_fixture_wait and native-only close/observation APIs",
+    "enable_fixture_forks.waitpid calls fr_fixture_wait instead of Python wait status + fr_fixture_reap",
+    "fr_fixture_wait chooses only actual native clone table/current coordinator",
+    "fr_own_wait consumes wait4 exact direct child; durable PRIVATE kernel_status plus public UNKNOWN/zero status precedes exact REAP_ACK",
+    "ACK checks real parent SCM_CREDENTIALS PID UID0 GID0, no SCM_RIGHTS, every packet/session/type/sequence/role/PID/owner/status/detail/birth/owner_birth/deadline field",
+    "Only exact ACK changes native record UNKNOWN -> REAPED and publishes actual status; Root borrowed receipt does not fabricate Root wait4 status",
+    "Sticky UNKNOWN permits one own pidfd signal plus finite exact direct wait4 and exact owned handle close, with public status still UNKNOWN and no ACK credit",
+    "NativeOwner uses fr_own_release; Python no longer closes a published native pidfd outside its native binding",
+    "Unknown signal/close/deadline/transaction latches fixture generation against later creation; no reset API"
+  ],
+  "legacy_symbol": "fr_fixture_reap retained but refuses caller-supplied wait status",
+  "root_service_added": false,
+  "all216_integration": "ABSENT; explicit source blocker",
+  "actual_observations": "NOT_RUN"
+}

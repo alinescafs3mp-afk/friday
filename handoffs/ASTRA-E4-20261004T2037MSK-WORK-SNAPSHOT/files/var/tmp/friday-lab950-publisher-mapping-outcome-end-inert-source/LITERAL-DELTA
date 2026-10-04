@@ -1,0 +1,329 @@
+FORWARD_LAB948
+FILE native/publisher_root_entry.c
+@@ -3893,0 +3893,2 @@
++static PyObject *own_hash_status_key(PyObject *d,const char *name);
++static int own_hash_status_replace(PyObject *d,PyObject *key,PyObject *before,PyObject *after);
+@@ -3957,4 +3959,15 @@
+-        /* Strong actual result BEFORE any post-return Source bookkeeping. */
+-        if(!p->refs[7]||PyDict_SetItemString(p->refs[7],"mapping",p->refs[6])<0||
+-           PyDict_SetItemString(cut,"returned_mapping",p->refs[6])<0||
+-           PyDict_SetItemString(cut,"returned",Py_True)<0) {
++        /* Strong actual result BEFORE any post-return Source bookkeeping.
++         * The preowned creation record receives the alias before instance
++         * metadata. A later metadata miss keeps that alias. A failed
++         * publication stays an unresolved return, not a constructor miss. */
++        if(own_before(4096)<0) {
++            p->confirmed=1;p->flags|=16;return own_error(p),NULL;
++        }
++        PyObject *returned_key=own_hash_status_key(cut,"returned_mapping");
++        PyObject *flag_key=returned_key?own_hash_status_key(cut,"returned"):NULL;
++        if(!returned_key||!flag_key||
++           own_hash_status_replace(cut,returned_key,Py_None,p->refs[6])<0||
++           own_hash_status_replace(cut,flag_key,Py_False,Py_True)<0) {
++            p->confirmed=1;p->flags|=16;return own_error(p),NULL;
++        }
++        if(!p->refs[7]||PyDict_SetItemString(p->refs[7],"mapping",p->refs[6])<0) {
+@@ -5177,2 +5190,2 @@
+-    if(p->attempts==3&&p->confirmed==3&&(p->flags&3)==3&&!(p->flags&4))return 2;
+-    if((p->attempts==1||p->attempts==2)&&p->confirmed==1&&!(p->flags&14))return 1;
++    if(p->attempts==3&&p->confirmed==3&&(p->flags&3)==3&&!(p->flags&4)&&!(p->flags&16))return 2;
++    if((p->attempts==1||p->attempts==2)&&p->confirmed==1&&!(p->flags&(14|16)))return 1;
+@@ -5180,0 +5193,40 @@
++    return 0;
++}
++static int command_mapping_return_ledger(FridayPublisherRootCommandReceipt *r) {
++    for(uint64_t i=0;i<root_storage.own_values.count;i++) {
++        if((i&1023)==0&&!command_clock(r))return -1;
++        FridayPublisherOwnValue *p=&root_storage.own_values.rows[i];
++        if(p->kind!=OWN_MAPPING||p->pid!=getpid())continue;
++        int unknown=(p->flags&4)&&p->attempts>=3&&p->confirmed!=3;
++        if((p->flags&16)||command_mapping_phase(p)==3||unknown) {
++            r->unresolved_required_nodes++;
++        }
++        if(FridayPublisherMasterBefore(&root_storage.pool,4096,0,0,0)<0)return -1;
++        PyObject *creation=p->refs[8];
++        PyObject *returned=own_plain_field(creation,"returned");
++        PyObject *alias=own_plain_field(creation,"returned_mapping");
++        PyObject *original=own_plain_field(creation,"original_error");
++        PyObject *complete=own_plain_field(creation,"state_complete");
++        if(p->refs[6]&&(p->flags&8))return -1;
++        if((p->flags&8)&&!p->refs[6]&&creation&&(returned!=Py_False||alias!=Py_None))return -1;
++        if(p->refs[6]&&!(p->flags&16)&&(returned!=Py_True||alias!=p->refs[6]))return -1;
++        if((p->flags&16)&&(complete==Py_True||(original&&original!=Py_None)||(p->flags&8)||command_mapping_phase(p)==1))return -1;
++    }
++    return 0;
++}
++static int command_mapping_retirement_blocked(const FridayPublisherRootCommandReceipt *r) {
++    for(uint64_t i=0;i<r->node_count;i++) {
++        const FridayPublisherRootValueNode *v=&r->nodes[i];
++        if(v->kind!=COMMAND_VALUE_MAPPING)continue;
++        if(!v->data_read)return 1;
++        uint64_t phase=0,prefix=7*sizeof(uint64_t)+15;
++        if(v->body_bytes<prefix+sizeof(phase))return 1;
++        memcpy(&phase,r->body+v->body_at+prefix,sizeof(phase));
++        if(!((phase==1&&v->edges==16)||(phase==2&&v->edges==15)))return 1;
++    }
++    for(uint64_t i=0;i<root_storage.own_values.count;i++) {
++        FridayPublisherOwnValue *p=&root_storage.own_values.rows[i];
++        if(p->kind!=OWN_MAPPING||p->pid!=getpid())continue;
++        int unknown=(p->flags&4)&&p->attempts>=3&&p->confirmed!=3;
++        if((p->flags&16)||command_mapping_phase(p)==3||unknown)return 1;
++    }
+@@ -5626,0 +5679,8 @@
++    if(v->kind==COMMAND_VALUE_MAPPING) {
++        uint64_t phase=0,prefix=7*sizeof(uint64_t)+15;
++        if(v->body_bytes<prefix+sizeof(phase))v->data_read=0;
++        else {
++            memcpy(&phase,r->body+v->body_at+prefix,sizeof(phase));
++            if(phase!=1&&phase!=2)v->data_read=0;
++        }
++    }
+@@ -5749,0 +5810,5 @@
++        if(FridayPublisherMasterBefore(&root_storage.pool,4096,0,0,0)<0)return -1;
++        PyObject *creation=p->refs[8];
++        PyObject *returned=own_plain_field(creation,"returned");
++        PyObject *alias=own_plain_field(creation,"returned_mapping");
++        if((p->flags&16)||(p->flags&8)||!p->refs[6]||returned!=Py_True||alias!=p->refs[6])return -1;
+@@ -5888,0 +5954,1 @@
++    if(command_mapping_return_ledger(r)<0)return -1;
+@@ -7137,1 +7204,1 @@
+-       PyErr_Occurred())return -1;
++       PyErr_Occurred()||command_mapping_retirement_blocked(r))return -1;
+@@ -7344,1 +7411,1 @@
+-        !s->source_case;
++        !s->source_case&&!command_mapping_retirement_blocked(r);
+@@ -7346,1 +7413,2 @@
+-        r->runtime_support_pending&&r->cold_runtime_bound&&command_has_owned_runtime(s);
++        r->runtime_support_pending&&r->cold_runtime_bound&&command_has_owned_runtime(s)&&
++        !command_mapping_retirement_blocked(r);
+@@ -7444,0 +7512,6 @@
++        if(v->kind==COMMAND_VALUE_MAPPING) {
++            uint64_t phase=0,prefix=7*sizeof(uint64_t)+15;
++            if(v->body_bytes<prefix+sizeof(phase))return -1;
++            memcpy(&phase,r->body+v->body_at+prefix,sizeof(phase));
++            if(!((phase==1&&v->edges==16)||(phase==2&&v->edges==15)))return -1;
++        }
+INVERSE native/publisher_root_entry.c
+@@ -3893,2 +3893,0 @@
+-static PyObject *own_hash_status_key(PyObject *d,const char *name);
+-static int own_hash_status_replace(PyObject *d,PyObject *key,PyObject *before,PyObject *after);
+@@ -3959,15 +3957,4 @@
+-        /* Strong actual result BEFORE any post-return Source bookkeeping.
+-         * The preowned creation record receives the alias before instance
+-         * metadata. A later metadata miss keeps that alias. A failed
+-         * publication stays an unresolved return, not a constructor miss. */
+-        if(own_before(4096)<0) {
+-            p->confirmed=1;p->flags|=16;return own_error(p),NULL;
+-        }
+-        PyObject *returned_key=own_hash_status_key(cut,"returned_mapping");
+-        PyObject *flag_key=returned_key?own_hash_status_key(cut,"returned"):NULL;
+-        if(!returned_key||!flag_key||
+-           own_hash_status_replace(cut,returned_key,Py_None,p->refs[6])<0||
+-           own_hash_status_replace(cut,flag_key,Py_False,Py_True)<0) {
+-            p->confirmed=1;p->flags|=16;return own_error(p),NULL;
+-        }
+-        if(!p->refs[7]||PyDict_SetItemString(p->refs[7],"mapping",p->refs[6])<0) {
++        /* Strong actual result BEFORE any post-return Source bookkeeping. */
++        if(!p->refs[7]||PyDict_SetItemString(p->refs[7],"mapping",p->refs[6])<0||
++           PyDict_SetItemString(cut,"returned_mapping",p->refs[6])<0||
++           PyDict_SetItemString(cut,"returned",Py_True)<0) {
+@@ -5190,2 +5177,2 @@
+-    if(p->attempts==3&&p->confirmed==3&&(p->flags&3)==3&&!(p->flags&4)&&!(p->flags&16))return 2;
+-    if((p->attempts==1||p->attempts==2)&&p->confirmed==1&&!(p->flags&(14|16)))return 1;
++    if(p->attempts==3&&p->confirmed==3&&(p->flags&3)==3&&!(p->flags&4))return 2;
++    if((p->attempts==1||p->attempts==2)&&p->confirmed==1&&!(p->flags&14))return 1;
+@@ -5193,40 +5180,0 @@
+-    return 0;
+-}
+-static int command_mapping_return_ledger(FridayPublisherRootCommandReceipt *r) {
+-    for(uint64_t i=0;i<root_storage.own_values.count;i++) {
+-        if((i&1023)==0&&!command_clock(r))return -1;
+-        FridayPublisherOwnValue *p=&root_storage.own_values.rows[i];
+-        if(p->kind!=OWN_MAPPING||p->pid!=getpid())continue;
+-        int unknown=(p->flags&4)&&p->attempts>=3&&p->confirmed!=3;
+-        if((p->flags&16)||command_mapping_phase(p)==3||unknown) {
+-            r->unresolved_required_nodes++;
+-        }
+-        if(FridayPublisherMasterBefore(&root_storage.pool,4096,0,0,0)<0)return -1;
+-        PyObject *creation=p->refs[8];
+-        PyObject *returned=own_plain_field(creation,"returned");
+-        PyObject *alias=own_plain_field(creation,"returned_mapping");
+-        PyObject *original=own_plain_field(creation,"original_error");
+-        PyObject *complete=own_plain_field(creation,"state_complete");
+-        if(p->refs[6]&&(p->flags&8))return -1;
+-        if((p->flags&8)&&!p->refs[6]&&creation&&(returned!=Py_False||alias!=Py_None))return -1;
+-        if(p->refs[6]&&!(p->flags&16)&&(returned!=Py_True||alias!=p->refs[6]))return -1;
+-        if((p->flags&16)&&(complete==Py_True||(original&&original!=Py_None)||(p->flags&8)||command_mapping_phase(p)==1))return -1;
+-    }
+-    return 0;
+-}
+-static int command_mapping_retirement_blocked(const FridayPublisherRootCommandReceipt *r) {
+-    for(uint64_t i=0;i<r->node_count;i++) {
+-        const FridayPublisherRootValueNode *v=&r->nodes[i];
+-        if(v->kind!=COMMAND_VALUE_MAPPING)continue;
+-        if(!v->data_read)return 1;
+-        uint64_t phase=0,prefix=7*sizeof(uint64_t)+15;
+-        if(v->body_bytes<prefix+sizeof(phase))return 1;
+-        memcpy(&phase,r->body+v->body_at+prefix,sizeof(phase));
+-        if(!((phase==1&&v->edges==16)||(phase==2&&v->edges==15)))return 1;
+-    }
+-    for(uint64_t i=0;i<root_storage.own_values.count;i++) {
+-        FridayPublisherOwnValue *p=&root_storage.own_values.rows[i];
+-        if(p->kind!=OWN_MAPPING||p->pid!=getpid())continue;
+-        int unknown=(p->flags&4)&&p->attempts>=3&&p->confirmed!=3;
+-        if((p->flags&16)||command_mapping_phase(p)==3||unknown)return 1;
+-    }
+@@ -5679,8 +5626,0 @@
+-    if(v->kind==COMMAND_VALUE_MAPPING) {
+-        uint64_t phase=0,prefix=7*sizeof(uint64_t)+15;
+-        if(v->body_bytes<prefix+sizeof(phase))v->data_read=0;
+-        else {
+-            memcpy(&phase,r->body+v->body_at+prefix,sizeof(phase));
+-            if(phase!=1&&phase!=2)v->data_read=0;
+-        }
+-    }
+@@ -5810,5 +5749,0 @@
+-        if(FridayPublisherMasterBefore(&root_storage.pool,4096,0,0,0)<0)return -1;
+-        PyObject *creation=p->refs[8];
+-        PyObject *returned=own_plain_field(creation,"returned");
+-        PyObject *alias=own_plain_field(creation,"returned_mapping");
+-        if((p->flags&16)||(p->flags&8)||!p->refs[6]||returned!=Py_True||alias!=p->refs[6])return -1;
+@@ -5954,1 +5888,0 @@
+-    if(command_mapping_return_ledger(r)<0)return -1;
+@@ -7204,1 +7137,1 @@
+-       PyErr_Occurred()||command_mapping_retirement_blocked(r))return -1;
++       PyErr_Occurred())return -1;
+@@ -7411,1 +7344,1 @@
+-        !s->source_case&&!command_mapping_retirement_blocked(r);
++        !s->source_case;
+@@ -7413,2 +7346,1 @@
+-        r->runtime_support_pending&&r->cold_runtime_bound&&command_has_owned_runtime(s)&&
+-        !command_mapping_retirement_blocked(r);
++        r->runtime_support_pending&&r->cold_runtime_bound&&command_has_owned_runtime(s);
+@@ -7512,6 +7444,0 @@
+-        if(v->kind==COMMAND_VALUE_MAPPING) {
+-            uint64_t phase=0,prefix=7*sizeof(uint64_t)+15;
+-            if(v->body_bytes<prefix+sizeof(phase))return -1;
+-            memcpy(&phase,r->body+v->body_at+prefix,sizeof(phase));
+-            if(!((phase==1&&v->edges==16)||(phase==2&&v->edges==15)))return -1;
+-        }
+FILE source/observer.py
+@@ -200,0 +200,7 @@
++        elif (selected_mapping is not None and selected_mapping.creation.get('attempted') is True
++                and selected_mapping.creation.get('returned') is not True
++                and selected_mapping.creation.get('original_error') is None
++                and selected_mapping.creation.get('metadata_error') is None):
++            unsupported.append({'identity':str(key),'module':'mmap','class':'mmap',
++                'reason':'mapping_return_recovery_unconfirmed'})
++            row=['unsupported','mapping_return_recovery_unconfirmed']
+@@ -681,0 +688,26 @@
++def validate_mapping_return_ledger(nodes,body):
++    state=fd_value_fields(nodes,body['state'])
++    if 'creation' not in state:
++        return
++    creation=fd_value_fields(nodes,state['creation'])
++    if 'schema' not in creation or nodes[creation['schema']]!=['str','friday.sol106.actual-mmap-constructor.v1']:
++        return
++    attempted=nodes[creation['attempted']]
++    returned=nodes[creation['returned']]
++    complete=nodes[creation['state_complete']]
++    original=nodes[creation['original_error']][0]
++    metadata=nodes[creation['metadata_error']][0]
++    alias=nodes[creation['returned_mapping']][0]
++    if attempted==['bool',True] and returned!=['bool',True] and original=='none' and metadata=='none':
++        raise Refused('mapping_return_recovery_unconfirmed','terminal')
++    if returned!=['bool',True] and alias!='none' and original=='none':
++        raise Refused('mapping_return_recovery_unconfirmed','terminal')
++    if complete==['bool',True] and (returned!=['bool',True] or original!='none' or metadata!='none'):
++        raise Refused('mapping_return_false_complete','terminal')
++    if returned==['bool',True]:
++        if alias=='none' or 'mapping' not in state or nodes[state['mapping']][0]=='none':
++            raise Refused('mapping_return_alias_missing','terminal')
++        if state['mapping']!=creation['returned_mapping']:
++            raise Refused('mapping_return_alias_split','terminal')
++
++
+@@ -876,0 +909,2 @@
++        elif kind=='unsupported' and body=='mapping_return_recovery_unconfirmed':
++            raise Refused('mapping_return_recovery_unconfirmed','terminal')
+@@ -879,0 +914,2 @@
++        if kind=='Source-object' and body['module']=='selected_owned_values' and body['class']=='OwnedMappingBirth':
++            validate_mapping_return_ledger(nodes,body)
+INVERSE source/observer.py
+@@ -200,7 +200,0 @@
+-        elif (selected_mapping is not None and selected_mapping.creation.get('attempted') is True
+-                and selected_mapping.creation.get('returned') is not True
+-                and selected_mapping.creation.get('original_error') is None
+-                and selected_mapping.creation.get('metadata_error') is None):
+-            unsupported.append({'identity':str(key),'module':'mmap','class':'mmap',
+-                'reason':'mapping_return_recovery_unconfirmed'})
+-            row=['unsupported','mapping_return_recovery_unconfirmed']
+@@ -688,26 +681,0 @@
+-def validate_mapping_return_ledger(nodes,body):
+-    state=fd_value_fields(nodes,body['state'])
+-    if 'creation' not in state:
+-        return
+-    creation=fd_value_fields(nodes,state['creation'])
+-    if 'schema' not in creation or nodes[creation['schema']]!=['str','friday.sol106.actual-mmap-constructor.v1']:
+-        return
+-    attempted=nodes[creation['attempted']]
+-    returned=nodes[creation['returned']]
+-    complete=nodes[creation['state_complete']]
+-    original=nodes[creation['original_error']][0]
+-    metadata=nodes[creation['metadata_error']][0]
+-    alias=nodes[creation['returned_mapping']][0]
+-    if attempted==['bool',True] and returned!=['bool',True] and original=='none' and metadata=='none':
+-        raise Refused('mapping_return_recovery_unconfirmed','terminal')
+-    if returned!=['bool',True] and alias!='none' and original=='none':
+-        raise Refused('mapping_return_recovery_unconfirmed','terminal')
+-    if complete==['bool',True] and (returned!=['bool',True] or original!='none' or metadata!='none'):
+-        raise Refused('mapping_return_false_complete','terminal')
+-    if returned==['bool',True]:
+-        if alias=='none' or 'mapping' not in state or nodes[state['mapping']][0]=='none':
+-            raise Refused('mapping_return_alias_missing','terminal')
+-        if state['mapping']!=creation['returned_mapping']:
+-            raise Refused('mapping_return_alias_split','terminal')
+-
+-
+@@ -909,2 +876,0 @@
+-        elif kind=='unsupported' and body=='mapping_return_recovery_unconfirmed':
+-            raise Refused('mapping_return_recovery_unconfirmed','terminal')
+@@ -914,2 +879,0 @@
+-        if kind=='Source-object' and body['module']=='selected_owned_values' and body['class']=='OwnedMappingBirth':
+-            validate_mapping_return_ledger(nodes,body)
+FILE source/selected_owned_values.py
+@@ -219,0 +219,1 @@
++            recovery_unconfirmed=False
+@@ -226,0 +227,1 @@
++                    recovery_unconfirmed=True
+@@ -233,0 +235,4 @@
++            published=self.creation.get('returned_mapping')
++            if (self.mapping is None and published is not None
++                    and self.creation.get('returned') is True):
++                self.mapping=published
+@@ -235,1 +241,6 @@
+-            if self.creation.get('returned') is True or self.mapping is not None:
++            returned=self.creation.get('returned') is True or self.mapping is not None
++            if recovery_unconfirmed and not returned:
++                # The recovery query missed. Keep the first error and do not
++                # relabel that returned constructor as a factory failure.
++                pass
++            elif returned:
+INVERSE source/selected_owned_values.py
+@@ -219,1 +219,0 @@
+-            recovery_unconfirmed=False
+@@ -227,1 +226,0 @@
+-                    recovery_unconfirmed=True
+@@ -235,4 +233,0 @@
+-            published=self.creation.get('returned_mapping')
+-            if (self.mapping is None and published is not None
+-                    and self.creation.get('returned') is True):
+-                self.mapping=published
+@@ -241,6 +235,1 @@
+-            returned=self.creation.get('returned') is True or self.mapping is not None
+-            if recovery_unconfirmed and not returned:
+-                # The recovery query missed. Keep the first error and do not
+-                # relabel that returned constructor as a factory failure.
+-                pass
+-            elif returned:
++            if self.creation.get('returned') is True or self.mapping is not None:

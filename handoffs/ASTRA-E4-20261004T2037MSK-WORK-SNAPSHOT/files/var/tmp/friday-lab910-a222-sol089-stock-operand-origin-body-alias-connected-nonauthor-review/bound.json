@@ -1,0 +1,31 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "changed_sha256": {
+    "caller.py": "58f79d594cfef987f0b30b298cc23c3cb962d4733ca7b1d01825b91b4d3b7da9",
+    "ordinary_root_consumers.py": "96c6b6a368d8b00aae07c761d96610a0254131bff0f01ab66550adc908022244",
+    "root_native_launcher.py": "e68f9de758ccd98b55f9663eb82cfe2283c7de65612e8eb0f7cad58bac7bae92",
+    "sender_operand_codec.py": "389575b32c9627e057d098b7a2f1efa66e646ba41c61ef73519f6afe05a3e650"
+  },
+  "classification": "NONAUTHOR_TEXT_REVIEW",
+  "decision": "STOCK_PYTHON_BIRTH_BODY_ALIAS_REPLAY_CREDITED_C1_ENDS_ABI_AND_C2_OPEN",
+  "delivery_id": "del_1bd8737634544bc18813271ecc754194",
+  "equal_sha256": {
+    "controller.py": "cfe817754bb572771c37464cf3583bbe7ba04e9305f936c722d9ed6a769bf3a9",
+    "native_grammar.py": "6964cf3720350b6312728d755838b68329bfaf802648c24ea103d5a17fa06853",
+    "receipt_physical.py": "519ed82160e947585e275992c9d219a88bd2fd7b48e266081418fd387d1e1c17",
+    "source_grammar.py": "438ea1ed888e120ebcb9a9a3660076ee22b6d07fa6cb9fe5a3077b5877c84f8a",
+    "staged_sender.py": "bc61a8541c52eaf6017ecb2fc42be1fafbbd8acfd348090938f073b6aa227a5f"
+  },
+  "input_bytes": 76907,
+  "input_sha256": "285033faef07f38de4de6dc594a298bb45e0ad6d87bfa7b12e8ebc7890ce2be0",
+  "job_id": "job_ac3f73b4245b467c99aebe467c74a40d",
+  "joined": "STOCK_OPERAND_REVIEW_NOT_ADMITTED",
+  "run_message_id": "msg_f07e8566642c4f768d384785f797b62c",
+  "schema": "friday.astra.lab910.sol089.stock-operand.connected-nonauthor.run.v1",
+  "source_execution": 0,
+  "source_proof": false,
+  "verdict": "EMPTY_PREINIT_DICT_AND_READONLY_REPLAY_LEAVE_NATIVE_C1_BOTH_ENDS_AND_C2_OPEN",
+  "whole_accepted": false
+}

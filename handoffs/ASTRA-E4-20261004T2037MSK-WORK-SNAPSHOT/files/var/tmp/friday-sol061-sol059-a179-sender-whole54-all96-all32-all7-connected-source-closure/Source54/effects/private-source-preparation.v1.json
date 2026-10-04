@@ -1,0 +1,1 @@
+{"allowed_effects":["private-package-write","source-review-index","stdlib-fake-root-tests"],"bill_id":"private-source-preparation","forbidden_effects":["download","gate","install","live","network","privilege","release","service"],"implies":[],"required_authority":"exact-source-assignment","schema":"friday.effect-bill.v1","scope":["private-output-root"],"version":1}

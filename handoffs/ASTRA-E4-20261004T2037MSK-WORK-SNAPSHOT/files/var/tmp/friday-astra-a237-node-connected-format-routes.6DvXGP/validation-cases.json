@@ -1,0 +1,223 @@
+{
+  "schema": "friday.astra.a237.node-format-route-regression-vectors.v1",
+  "purpose": "Ordinary stock-error semantic regression vectors. Inert DATA only; execution requires original independent Source/Root/provider admission. Adds cases for changed paths, does not replace original35/all6/GPG6/F1F2D1D2/current19.",
+  "status": "REQUIRED_NOT_RUN",
+  "not_release_credit": true,
+  "operation_model": "Construct the named genuine stock exception; then apply only listed ordinary own-object member writes/deletions. No other process, network, mock live output or unsafe reproduction.",
+  "cases": [
+    {
+      "id": "ordinary-absent-filenames",
+      "type": "OSError",
+      "args": [
+        2,
+        "missing"
+      ],
+      "mutations": [],
+      "expected_message": "[Errno 2] missing"
+    },
+    {
+      "id": "stored-None-filename",
+      "type": "OSError",
+      "args": [
+        2,
+        "missing"
+      ],
+      "mutations": [
+        {
+          "set": "filename",
+          "value": null
+        }
+      ],
+      "expected_message": "[Errno 2] missing: None"
+    },
+    {
+      "id": "absent-second-filename",
+      "type": "OSError",
+      "args": [
+        2,
+        "missing",
+        "a"
+      ],
+      "mutations": [],
+      "expected_message": "[Errno 2] missing: 'a'"
+    },
+    {
+      "id": "stored-None-second-filename",
+      "type": "OSError",
+      "args": [
+        2,
+        "missing",
+        "a"
+      ],
+      "mutations": [
+        {
+          "set": "filename2",
+          "value": null
+        }
+      ],
+      "expected_message": "[Errno 2] missing: 'a' -> None"
+    },
+    {
+      "id": "both-stored-None",
+      "type": "OSError",
+      "args": [
+        2,
+        "missing"
+      ],
+      "mutations": [
+        {
+          "set": "filename",
+          "value": null
+        },
+        {
+          "set": "filename2",
+          "value": null
+        }
+      ],
+      "expected_message": "[Errno 2] missing: None -> None"
+    },
+    {
+      "id": "second-field-ignored-with-null-first",
+      "type": "OSError",
+      "args": [
+        2,
+        "missing"
+      ],
+      "mutations": [
+        {
+          "set": "filename2",
+          "value": "b"
+        }
+      ],
+      "expected_message": "[Errno 2] missing"
+    },
+    {
+      "id": "second-field-used-with-stored-None-first",
+      "type": "OSError",
+      "args": [
+        2,
+        "missing"
+      ],
+      "mutations": [
+        {
+          "set": "filename",
+          "value": null
+        },
+        {
+          "set": "filename2",
+          "value": "b"
+        }
+      ],
+      "expected_message": "[Errno 2] missing: None -> 'b'"
+    },
+    {
+      "id": "stored-None-errno",
+      "type": "OSError",
+      "args": [
+        null,
+        "missing"
+      ],
+      "mutations": [],
+      "expected_message": "[Errno None] missing"
+    },
+    {
+      "id": "deleted-errno-falls-back-to-original-args",
+      "type": "OSError",
+      "args": [
+        null,
+        "missing"
+      ],
+      "mutations": [
+        {
+          "delete": "errno"
+        }
+      ],
+      "expected_message": "(None, 'missing')"
+    },
+    {
+      "id": "empty-original-args",
+      "type": "OSError",
+      "args": [],
+      "mutations": [],
+      "expected_message": ""
+    },
+    {
+      "id": "one-original-str-alias",
+      "type": "OSError",
+      "args": [
+        "plain"
+      ],
+      "mutations": [],
+      "expected_message": "plain"
+    },
+    {
+      "id": "empty-args-stored-None-both",
+      "type": "OSError",
+      "args": [],
+      "mutations": [
+        {
+          "set": "filename",
+          "value": null
+        },
+        {
+          "set": "filename2",
+          "value": null
+        }
+      ],
+      "expected_message": "[Errno None] None: None -> None"
+    },
+    {
+      "id": "actual-900-longer-alternatives-are-not-actual",
+      "type": "OSError",
+      "args": [
+        2,
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ],
+      "mutations": [],
+      "expected_message": "[Errno 2] xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected_codepoints": 900,
+      "required": "Do not refuse because other legal native routes would be906/914; wire lower+delta equalsactual900."
+    },
+    {
+      "id": "actual-901-refuses-original-domain",
+      "type": "OSError",
+      "args": [
+        2,
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ],
+      "mutations": [],
+      "expected": "Original domain refusal, original+first formatter failure+traceback retained, no partial message, no retry."
+    },
+    {
+      "id": "nonascii-original-route-stays-enabled",
+      "type": "OSError",
+      "args": [
+        2,
+        "missing",
+        "é"
+      ],
+      "mutations": [],
+      "expected_message": "[Errno 2] missing: 'é'",
+      "prospective_full_factory_admission": "STILL_REQUIRED_NOT_PROVEN"
+    },
+    {
+      "id": "unknown-nonalias-factory-stays-original",
+      "type": "BaseException",
+      "args": [
+        null,
+        3,
+        "plain"
+      ],
+      "mutations": [],
+      "expected_message": "(None, 3, 'plain')",
+      "prospective_full_factory_admission": "STILL_REQUIRED_NOT_PROVEN"
+    }
+  ],
+  "checks": [
+    "Run each admitted vector through actual all3 full_stock_message callers, project_owned_error wire lower ledger, render_original_body/prefix/full graph and BOTH real v2 receiving validators, not helper-only.",
+    "Full original message content retained and matches stock str on selected admitted provider; original field/arg/cause/context/TB aliases preserved.",
+    "Known routes: prospective lower <= actual<=max; actual len belongs to finite alternatives; lower+(actual-lower)==actual charged once; a possible longer route cannot consume observed wire credit.",
+    "Meaningful ordinary failure at initial prospective debit, single formatter call, completion-delta debit and encoding leaves first-fault original/error/traceback intact, no partial public graph or second call.",
+    "No mocks substitute required live/memory/native/end evidence; original source-admission boundary unchanged."
+  ]
+}

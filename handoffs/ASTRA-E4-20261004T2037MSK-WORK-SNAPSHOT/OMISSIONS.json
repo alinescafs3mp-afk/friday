@@ -1,0 +1,666 @@
+{
+  "schema": "friday.snapshot.explicit-omissions.v1",
+  "files": [
+    {
+      "original_path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "memberships": [
+        {
+          "component": "Publisher",
+          "package": "Publisher-A257",
+          "logical": "consumer/source/declared_controls.py",
+          "kind": "package"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "memberships": [
+        {
+          "component": "Publisher",
+          "package": "Publisher-A258",
+          "logical": "consumer/source/declared_controls.py",
+          "kind": "package"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "memberships": [
+        {
+          "component": "Publisher",
+          "package": "Publisher-A259",
+          "logical": "consumer/source/declared_controls.py",
+          "kind": "package"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/all202-identity-map.json",
+      "bytes": 298123,
+      "sha256": "ffddb01d39713c2464856b717b7512733e7d2e68da58250cfc3ff599ea552529",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "data/all202-identity-map.json",
+          "kind": "rows"
+        }
+      ],
+      "reason": "HISTORICAL_HASHONLY_REQUIRED_NOT_RUN_BODY",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-admission.json",
+      "bytes": 159,
+      "sha256": "c276309c7b4ce03626eca641e2bba42bc79036b5f63247ae0c2787eb6e61d5da",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "data/c55-admission.json",
+          "kind": "rows"
+        }
+      ],
+      "reason": "HISTORICAL_HASHONLY_REQUIRED_NOT_RUN_BODY",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-expected-output.json",
+      "bytes": 356,
+      "sha256": "7ba0a58769f20b0c69d20d66f578ceb3d25b047d96e5103cd8c51101427db126",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "data/c55-expected-output.json",
+          "kind": "rows"
+        }
+      ],
+      "reason": "HISTORICAL_HASHONLY_REQUIRED_NOT_RUN_BODY",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-held.json",
+      "bytes": 63,
+      "sha256": "ff7f06af5898b00d8fb17b129906516807ef744f2595a0c0fa0317a18a78b012",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "data/c55-held.json",
+          "kind": "rows"
+        }
+      ],
+      "reason": "HISTORICAL_HASHONLY_REQUIRED_NOT_RUN_BODY",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/data/c55-index.json",
+      "bytes": 772,
+      "sha256": "fedcc9aab0857e605f54ea869919a855eebdcab077c035df536fa8882ad9fff0",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "data/c55-index.json",
+          "kind": "rows"
+        }
+      ],
+      "reason": "HISTORICAL_HASHONLY_REQUIRED_NOT_RUN_BODY",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/input-index/index.json",
+      "bytes": 238293,
+      "sha256": "41781d9297176e57c5b222a3692c737e8953cae175eec17e2477af9a48a31197",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "input-index/index.json",
+          "kind": "rows"
+        }
+      ],
+      "reason": "HISTORICAL_HASHONLY_REQUIRED_NOT_RUN_BODY",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab878-a197-lab874-scanner-existing-allocator-physical-custody-both-endpoints-closure/source/fixtures.py",
+      "bytes": 1798,
+      "sha256": "baa60bba8f6bbb912663569e478d171f16c808ed6ccf9beb811cdd41c2a90762",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "source/fixtures.py",
+          "kind": "rows"
+        }
+      ],
+      "reason": "HISTORICAL_HASHONLY_REQUIRED_NOT_RUN_BODY",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTROL-COVERAGE.json",
+      "bytes": 331035,
+      "sha256": "615c6db31e76e053bbb91972b29051595f997bfc4d653f44850b89a073418d4c",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "A071-CONTROL-COVERAGE.json",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTROLS.py",
+      "bytes": 276107,
+      "sha256": "315c95540e0472c0c07240a16718d3f6dd991ef500a7096b6c9223afdc1acb5b",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "A071-CONTROLS.py",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-FULL-CONTROLS.py",
+      "bytes": 65233,
+      "sha256": "6efe9b3bb6a14678b2d82d1952a5fd42e80b23b2544abf396e5704cb4482a3cb",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "A071-FULL-CONTROLS.py",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-EXPECTED-CONTROLS.json",
+      "bytes": 35381,
+      "sha256": "0032135e44769f0993f0c4d2389db41485c9dec0de2cc4645fbb207804daebb4",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "A087-EXPECTED-CONTROLS.json",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A091-EXPECTED-CONTROLS.json",
+      "bytes": 9798,
+      "sha256": "6565cda0ff2a58ada0d543520c58da77aa569b7566baae5ff76236c4c8a6402c",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "A091-EXPECTED-CONTROLS.json",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTROLS.py",
+      "bytes": 8976,
+      "sha256": "69aab635f72a3bd8521f2812b034ca6fd4a4da09c0108cc1fbe4adc0fd28fc49",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "INPUT-A079-CURRENT-A071-CONTROLS.py",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROL-COVERAGE.json",
+      "bytes": 277271,
+      "sha256": "2f47b09ecd8af02f8e910b66b179bbda08412e6046dec72034f9c1c6dd9fe2ca",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "UPSTREAM-A066-SNAPSHOT-A066-CONTROL-COVERAGE.json",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+      "bytes": 704,
+      "sha256": "4904b585110926cbb5971fff88e04421a366a1c3c856e907b2af9a4f87956460",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+      "bytes": 29558,
+      "sha256": "76c717e38b909d5b41e2ff48582dc27e3c4dc82fd0643ac8206748e97b8c70d1",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROL-MATRIX.json",
+      "bytes": 3052,
+      "sha256": "ac63be0ab49795fe9d0d20b3ab212c567ba34b7ef2cc7a3986673a1d46418805",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROL-MATRIX.json",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "bytes": 78027,
+      "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+          "kind": "current209"
+        }
+      ],
+      "reason": "PREVIOUS_PUBLICATION_RESTRICTED_operational_historical_hostile_fixture_and_protocol_forgery_reproduction",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+      "bytes": 23060,
+      "sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf",
+      "memberships": [
+        {
+          "component": "Browser",
+          "package": "Browser-A226",
+          "logical": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+          "kind": "current209"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "memberships": [
+        {
+          "component": "Publisher",
+          "package": "Publisher-LAB948",
+          "logical": "consumer/source/declared_controls.py",
+          "kind": "package"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab949-publisher-consumer-namespace-budget-inert-source/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "memberships": [
+        {
+          "component": "Publisher",
+          "package": "Publisher-LAB949",
+          "logical": "consumer/source/declared_controls.py",
+          "kind": "package"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/controls/catalog.json",
+      "bytes": 12103,
+      "sha256": "a3a2c499df062b6d9c048416dc8c2dbf3aa4638b23bc47cfe5c5c219bfaa63e2",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "controls/catalog.json",
+          "kind": "rows"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/controls/independent-contract.json",
+      "bytes": 1484,
+      "sha256": "0c45acead7156172974dbf89d8a7044fe90bc420724638501d86f7f927942ca0",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "controls/independent-contract.json",
+          "kind": "rows"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/controls/whole-closure.json",
+      "bytes": 21559,
+      "sha256": "8208d4bc540dce0c0b7eabbd149d14ddc8686a68af851d8b6af22bad048aeced",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "controls/whole-closure.json",
+          "kind": "rows"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol071-a198-scanner-performing-existing-native-final-parent-connected-source-closure/source/controls.py",
+      "bytes": 9780,
+      "sha256": "1603b21d0f65c116c3e46e7611e652a8ca2bdd2aa80e273ef212838d72003aef",
+      "memberships": [
+        {
+          "component": "Scanner",
+          "package": "Scanner-LAB887",
+          "logical": "source/controls.py",
+          "kind": "rows"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body unavailable to external review. Required controls and obligations remain required, NOT_RUN/not waived; no whole coverage/acceptance claimed."
+    },
+    {
+      "original_path": "/usr/lib/python3.14/selectors.py",
+      "bytes": 19457,
+      "sha256": "4b8a60cfbb619d080f87dffe1578372e56e8c0ac826f043224a154cf7b77606d",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/usr/lib/python3.14/selectors.py",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "HOST_IMAGE_PRIVATE_OR_OUTSIDE_PROJECT_PUBLICATION_SCOPE",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL061-INPUT-20261002.json",
+      "bytes": 77393,
+      "sha256": "46f42cb7815efda6f88bad90b428de081c5d08ef10960a6d0f7ec9a5ec90010a",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL061-INPUT-20261002.json",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "PRIVATE_TASK_OR_SESSION_CONTROL_NOT_SOURCE_DEPENDENCY_PUBLICATION",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL059-INPUT-20261002.json",
+      "bytes": 112673,
+      "sha256": "e65087d9f517357af913ef934d8807113a7a12de18d4d9e5b4f96f70ca13f9ce",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL059-INPUT-20261002.json",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "PRIVATE_TASK_OR_SESSION_CONTROL_NOT_SOURCE_DEPENDENCY_PUBLICATION",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL056-INPUT-20261002.json",
+      "bytes": 17521,
+      "sha256": "7bcca525493ca9f8b87fcc4183165ba5902bc9d97a612ad40817b4771ad1b925",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL056-INPUT-20261002.json",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "PRIVATE_TASK_OR_SESSION_CONTROL_NOT_SOURCE_DEPENDENCY_PUBLICATION",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/control-inventory.v1.json",
+      "bytes": 4139478,
+      "sha256": "e7255f04bc4fa806960fcca79b6b37b67202417170ed59c3b9101863e3e91224",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/schemas/control-inventory.v1.json",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/harness_selfcheck.py",
+      "bytes": 47038,
+      "sha256": "20cf1bf2d232a8093306c720cc1c75e3adbc9e3dd67fc159960f26482f5a4295",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/harness_selfcheck.py",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "PREVIOUS_PUBLICATION_RESTRICTED_operational_audit_fence_bypass_and_hostile_hook_probe_bodies",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/install_controls.py",
+      "bytes": 21530,
+      "sha256": "542e5f8580a1eaeb7d7b5991fbeb67d2a855372075325ea13e42da866d9c450e",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/install_controls.py",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_archive.py",
+      "bytes": 25422,
+      "sha256": "ed4996cb5dc3865b231702ee81b7751260b6d428b1af4b9a680fde410d318546",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_archive.py",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "PREVIOUS_PUBLICATION_RESTRICTED_operational_hostile_archive_path_link_and_expansion_fixture_generator",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_install_recovery.py",
+      "bytes": 79615,
+      "sha256": "b9d7a634f1e63b077cbfcf561e3e081e169579f702c871a48b6b6ba394c49673",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_install_recovery.py",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "PREVIOUS_PUBLICATION_RESTRICTED_operational_install_journal_authority_lineage_forgery_and_substitution_reproduction",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_manifest.py",
+      "bytes": 47844,
+      "sha256": "1202130c8f44bc4288cb3df77f70fce0a4e5f0be4f1b71bf62b01a8ca1cd21bc",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/Source54/tests/test_manifest.py",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "PREVIOUS_PUBLICATION_RESTRICTED_operational_startup_hook_and_filesystem_identity_substitution_fixture_bodies",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/full-byte-delta.json",
+      "bytes": 116603,
+      "sha256": "8b494b943c43b922eedc513d60d674687204c8aaa9e19145f5f18b54ec85a969",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/full-byte-delta.json",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "PREVIOUS_PUBLICATION_RESTRICTED_encoded_raw_source_delta_publication_not_semantically_verified",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/control-obligation-counts.json",
+      "bytes": 3851,
+      "sha256": "550683083ac2fa1837334a68227685523338714d41f6499e3b44f1fe8f5aa727",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/inherited-review/control-obligation-counts.json",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/source-changes.patch",
+      "bytes": 144462,
+      "sha256": "10812f17453225e3ca80c7d78af5983eceaff6f3221ac42160925cc30a314c85",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/var/tmp/friday-sol061-sol059-a179-sender-whole54-all96-all32-all7-connected-source-closure/source-changes.patch",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "ENCODED_HISTORICAL_RAW_SOURCE_DELTA_NOT_CLEARED_FOR_PUBLICATION",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-PRE-TASK-COMPACT-20261003.json",
+      "bytes": 1917,
+      "sha256": "533494553bbd0be6adaf2b8ae3f48199fbeb552da145ce7026718419e7c70d2b",
+      "memberships": [
+        {
+          "component": "Sender",
+          "package": "Sender-SOL089",
+          "logical": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL089-PRE-TASK-COMPACT-20261003.json",
+          "kind": "PINNED_EXTERNAL_DEPENDENCY_OR_EVIDENCE"
+        }
+      ],
+      "reason": "PRIVATE_TASK_OR_SESSION_CONTROL_NOT_SOURCE_DEPENDENCY_PUBLICATION",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    },
+    {
+      "original_path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "memberships": [
+        {
+          "component": "Publisher",
+          "package": "Publisher-LAB950",
+          "logical": "consumer/source/declared_controls.py",
+          "kind": "package"
+        }
+      ],
+      "reason": "RESTRICTED_CONTROL_COLLECTION_ABSTRACT_HASH_ONLY_NO_OPERATIONAL_BODY_PUBLICATION",
+      "impact": "Body withheld; exact required obligation not waived or PASS. External review coverage limited."
+    }
+  ],
+  "private_categories_not_read_or_copied": [
+    "Private conversations/model session stores, credentials/private keys/auth configs and unrelated owner files.",
+    "Active Sol112 and LAB951 work trees; stopped SOL107 generation2 and Scanner SOL075 denied WIP.",
+    "Host binaries/images, package archives and live runtime/production state; no Root/Source/image ABI qualification.",
+    "Private task/compact metadata not needed for implementation review."
+  ],
+  "coverage_impacts": [
+    "Current Publisher57 selected files:56 bodies supplied, declared_controls.py hash-only. Complete actual native pair and Source callers/consumers included unchanged.",
+    "Browser Source15 and aux3 supplied; current209 inventory197 bodies,12 control/historical-fixture bodies withheld.",
+    "Scanner current52 inventory41 bodies,11 restricted controls/fixtures/input bodies withheld. Current LAB887 owned implementation/author package included; denied WIP excluded.",
+    "Sender selected9 supplied plus authenticated110 external input inventory, safe dependency/test/evidence bodies included; exact restrictions listed here.",
+    "Node current6 source files and local validation vectors supplied. Host ELF/compiler/stock image/material archives not supplied or qualified.",
+    "Publisher fixtures.py historical structural helper supplied at original path as supplemental evidence; current external binding is not thereby established.",
+    "No complete unrestricted/transitive runtime reproduction, full acceptance coverage, source admission, test success or release approval claimed. Required omissions remain obligations, not waivers."
+  ],
+  "complete_recursive_review_coverage": false
+}

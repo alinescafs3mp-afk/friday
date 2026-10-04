@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "LAB948 Source57 pins and fullSHA9 matched before editing the fresh copy",
+    "forward and inverse literal hunks replay",
+    "hash ledger v2 remains and v1 is absent",
+    "group22 retention, secondary error end, and own_before capture order remain",
+    "CURRENT16 and RETIRED15 edge counts remain",
+    "phase 3 clears data_read and blocks retirement",
+    "LAB949 consumer and namespace edits are absent"
+  ],
+  "schema": "friday.lab950.inert-read-check.v1",
+  "source_execution": 0
+}

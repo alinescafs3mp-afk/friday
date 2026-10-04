@@ -1,0 +1,26 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "closed_in_source": [
+    "Constructor return is retained before Source created/state metadata. Original constructor failure and later metadata failure stay distinct.",
+    "The returned mapping alias is the same object in the native row, the preowned creation record, and Source.",
+    "Prebirth failure writes the existing creation record and does not allocate a mapping after that failure.",
+    "Before-close capture uses the still-owned keeper. A closed or attempted body descriptor is not stat-ed.",
+    "Confirmed close keeps the retained historical bytes. Unknown close is not CURRENT and not RETIRED, and it is not retried or reread.",
+    "CURRENT stays 16 edges. RETIRED stays 15 edges. Unknown close reuses the 15-edge record with phase 3 and no buffer."
+  ],
+  "decision": "REJOINED_A258_PARTIAL_MAPPING_RETURN_KEEPER_UNKNOWN_CLOSE_WHOLE_ADMISSION_OPEN",
+  "execution": "NOT_RUN",
+  "fit": "UNCONFIRMED",
+  "schema": "friday.lab948.inert-obligations.v1",
+  "self_acceptance": false,
+  "still_open": [
+    "C1-R1A child Context, Token, compiled bindings, and both child ends stay with the stopped Sol107 work.",
+    "C1-R1C class-factory provenance stays open.",
+    "Native whole error-end graph and finalizer stay with Astra.",
+    "C2 full required widths, ABI, workload fit, and gates stay open.",
+    "Whole admission stays open. LAB-937 native residuals stay open.",
+    "A258 carrier, hash, and secondary corrections are preserved and not accepted by this author."
+  ]
+}

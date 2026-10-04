@@ -1,0 +1,866 @@
+{
+  "schema": "friday.astra.a226.browser.prospective-complete-wire.author.manifest.v1",
+  "assignment": "ASTRA-E4-A226-BROWSER-PROSPECTIVE-COMPLETE-WIRE-PRODUCER-BOTH-DECODER-CONNECTED-SOURCE",
+  "generation": 1,
+  "owner": "Astra active Lead Architect epoch4",
+  "root": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source",
+  "files_excluding_manifest": 14,
+  "files_including_manifest": 15,
+  "dirs": 3,
+  "leaves": [
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/INTEGRATION.json",
+      "bytes": 7596,
+      "sha256": "0ee72f045d37c1195dfaab134e351417361ad01818d559c55559f824dfeb067c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227401",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7596",
+        "1791022038532872939",
+        "1791022038594876496"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/README.txt",
+      "bytes": 657,
+      "sha256": "cf8761b2f380d7155af2f96979b771bfd3f3e45a62b0342408c97d72014d63e0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227403",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "657",
+        "1791022038732884415",
+        "1791022038781887227"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/VALIDATION-PLAN.json",
+      "bytes": 1366,
+      "sha256": "731b4b7b0a1df1372541a75febbc0bc6fae8b5ddcd892e0462bec05d7ac72494",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227402",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1366",
+        "1791022038632878677",
+        "1791022038692882120"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/evidence/current-source-join.json",
+      "bytes": 275303,
+      "sha256": "f9647d299339eb23713dfd076b9cf216dd44da01ad4b74c468aa9ecde1bf5d6c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227400",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "275303",
+        "1791022038413866110",
+        "1791022038492870644"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py",
+      "bytes": 57485,
+      "sha256": "b988f019866e4313dc8ccb7050ee335ae95bc8ee056ec4690e796d7c029e3b20",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227394",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57485",
+        "1791021770830512488",
+        "1791021770888515816"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1.py",
+      "bytes": 104170,
+      "sha256": "ce0be58722a8df929c53e006a1e99e4dd609ab654efcd027cbd045594a86ec55",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227390",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "104170",
+        "1791021709741007234",
+        "1791021709795010333"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A069-DATA-CODEC.py",
+      "bytes": 32422,
+      "sha256": "e3baa048fb8ee9f2fc24931d2c0031ee2bb9a516cf935de60bbd83ac5fc0e98f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227391",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32422",
+        "1791021709836012685",
+        "1791021709888015669"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-ABI-MAPPING.json",
+      "bytes": 69033,
+      "sha256": "d69e79cad2b68b78ce91abcce7f12e3f81cf530577bf90a978f1e1574aac7f56",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227397",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "69033",
+        "1791021829827897692",
+        "1791021829888901192"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-BUILD-RECIPE.json",
+      "bytes": 89298,
+      "sha256": "1fb5e09545a52c941965c9506b8c3c09427f6c53bd9ad2ac2647c1554f724232",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227398",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "89298",
+        "1791021830032909456",
+        "1791021830095913071"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+      "bytes": 75365,
+      "sha256": "74138191799eb2f3b52e556de91bcf4c1b6cd34de1545c8070705e3afe26b54f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227396",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75365",
+        "1791021771226535210",
+        "1791021771283538481"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+      "bytes": 125352,
+      "sha256": "53bcec73835334f6720afe55c832c0b72e55bac1328226aec43d5eaf2a6b2dd4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227392",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "125352",
+        "1791021709937018481",
+        "1791021709993021695"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-WORKER.py",
+      "bytes": 9557,
+      "sha256": "2937942621175d26a29248d1673f138b6fb063c231a1d68027efe56ab472276d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227395",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9557",
+        "1791021771027523792",
+        "1791021771083527005"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 202737,
+      "sha256": "60cd977c6bba64c898d28bc54664fd48962d50099fbc777456e432986d18fe23",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227393",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "202737",
+        "1791021710044024621",
+        "1791021710108028293"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A118-CONNECTED-CONTRACT.json",
+      "bytes": 75150,
+      "sha256": "55a02671cfc2dc31d04c06a5970dd09c89323d36e49d63a12f4536e1fd5a6b61",
+      "identity9_decimal_strings": [
+        "2050",
+        "4227399",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75150",
+        "1791021830236921162",
+        "1791021830288924146"
+      ],
+      "stable9": true
+    }
+  ],
+  "pathset": [
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/INTEGRATION.json",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/README.txt",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/VALIDATION-PLAN.json",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/evidence/current-source-join.json",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1.py",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A069-DATA-CODEC.py",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-ABI-MAPPING.json",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-BUILD-RECIPE.json",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-WORKER.py",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A087-PUBLIC-DRIVER.py",
+    "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A118-CONNECTED-CONTRACT.json"
+  ],
+  "borrowed_selected_source15": [
+    {
+      "name": "A025-G1-R4.py",
+      "before": {
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1-R4.py",
+        "bytes": 57488,
+        "sha256": "660d17565d3c7f45f80bc95cb07daa77cc55f8841206629a80256809fd74a1f2",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226855",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "57488",
+          "1790997245331577317",
+          "1790997245331577317"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1-R4.py",
+        "bytes": 57485,
+        "sha256": "b988f019866e4313dc8ccb7050ee335ae95bc8ee056ec4690e796d7c029e3b20",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227394",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "57485",
+          "1791021770830512488",
+          "1791021770888515816"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "A025-G1.py",
+      "before": {
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A025-G1.py",
+        "bytes": 101856,
+        "sha256": "c18c296f1c5f349a063e2657e1d2a53fd2b4c07dccabf12f7a117608281cc24f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226856",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "101856",
+          "1790997245220570954",
+          "1790997245220570954"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A025-G1.py",
+        "bytes": 104170,
+        "sha256": "ce0be58722a8df929c53e006a1e99e4dd609ab654efcd027cbd045594a86ec55",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227390",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "104170",
+          "1791021709741007234",
+          "1791021709795010333"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "A069-DATA-CODEC.py",
+      "before": {
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A069-DATA-CODEC.py",
+        "bytes": 30108,
+        "sha256": "2aa56db8c3521cf5e56ea0307bb4a5c23d3a2240830d925a790559bfb7a3ffa2",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226857",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30108",
+          "1790996337568547498",
+          "1790996337658552658"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A069-DATA-CODEC.py",
+        "bytes": 32422,
+        "sha256": "e3baa048fb8ee9f2fc24931d2c0031ee2bb9a516cf935de60bbd83ac5fc0e98f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227391",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "32422",
+          "1791021709836012685",
+          "1791021709888015669"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "A071-ABI-MAPPING.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-ABI-MAPPING.json",
+        "bytes": 69065,
+        "sha256": "9a0d3c4c7eef119ad7a568073381f81e1ec0e9a2de75ccc2e6ebb31a8b16ba54",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226931",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "69065",
+          "1790999183397660520",
+          "1790999183450663558"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-ABI-MAPPING.json",
+        "bytes": 69033,
+        "sha256": "d69e79cad2b68b78ce91abcce7f12e3f81cf530577bf90a978f1e1574aac7f56",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227397",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "69033",
+          "1791021829827897692",
+          "1791021829888901192"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "A071-BOOTSTRAP.c",
+      "before": {
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-BOOTSTRAP.c",
+        "bytes": 72935,
+        "sha256": "83c8ff4a94b9987d10ba04d8fc63432c080ccbd630357837448d57720734e622",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226790",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "72935",
+          "1790993415573904051",
+          "1790993415573904051"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-BOOTSTRAP.c",
+        "bytes": 72935,
+        "sha256": "83c8ff4a94b9987d10ba04d8fc63432c080ccbd630357837448d57720734e622",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226790",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "72935",
+          "1790993415573904051",
+          "1790993415573904051"
+        ],
+        "stable9": true
+      },
+      "changed": false
+    },
+    {
+      "name": "A071-BUILD-RECIPE.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-BUILD-RECIPE.json",
+        "bytes": 89330,
+        "sha256": "70e2488f1f08d3a98b0817362dd9f1fcb513c524b2dbcb7f6241c5319aded380",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226932",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "89330",
+          "1790999183504666653",
+          "1790999183558669748"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-BUILD-RECIPE.json",
+        "bytes": 89298,
+        "sha256": "1fb5e09545a52c941965c9506b8c3c09427f6c53bd9ad2ac2647c1554f724232",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227398",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "89298",
+          "1791021830032909456",
+          "1791021830095913071"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "A071-COMMON.c",
+      "before": {
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-COMMON.c",
+        "bytes": 15178,
+        "sha256": "83ad4f18b3887746cfcfe716e22a5032b539d28e9ec05085cef8facb2d830e14",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226792",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15178",
+          "1790993415576022602",
+          "1790993415576022602"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-COMMON.c",
+        "bytes": 15178,
+        "sha256": "83ad4f18b3887746cfcfe716e22a5032b539d28e9ec05085cef8facb2d830e14",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226792",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15178",
+          "1790993415576022602",
+          "1790993415576022602"
+        ],
+        "stable9": true
+      },
+      "changed": false
+    },
+    {
+      "name": "A071-EXECUTOR.py",
+      "before": {
+        "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A071-EXECUTOR.py",
+        "bytes": 75365,
+        "sha256": "1245d54c8e04dcb6a4b3cf95821ea962eb835070991afaaeb8f9340bbaa12a78",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226922",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "75365",
+          "1790999087116141984",
+          "1790999087168144964"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-EXECUTOR.py",
+        "bytes": 75365,
+        "sha256": "74138191799eb2f3b52e556de91bcf4c1b6cd34de1545c8070705e3afe26b54f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227396",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "75365",
+          "1791021771226535210",
+          "1791021771283538481"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "A071-NATIVE.h",
+      "before": {
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-NATIVE.h",
+        "bytes": 9301,
+        "sha256": "1060c2583e65c6c7076781437f09f9de386ec94f34860c4abf76e5964a7c2816",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226794",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9301",
+          "1790993415577904281",
+          "1790993415577904281"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-NATIVE.h",
+        "bytes": 9301,
+        "sha256": "1060c2583e65c6c7076781437f09f9de386ec94f34860c4abf76e5964a7c2816",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226794",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9301",
+          "1790993415577904281",
+          "1790993415577904281"
+        ],
+        "stable9": true
+      },
+      "changed": false
+    },
+    {
+      "name": "A071-OWNED.c",
+      "before": {
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-OWNED.c",
+        "bytes": 42771,
+        "sha256": "7a1278bfc09c900f148eb7d3318e118f463a43c1587ec9943b42133405abe95d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226795",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42771",
+          "1790993415578904338",
+          "1790993415578904338"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-lab893-lab892-browser-receipt-publication-public-pid-join-connected-source-closure/source/A071-OWNED.c",
+        "bytes": 42771,
+        "sha256": "7a1278bfc09c900f148eb7d3318e118f463a43c1587ec9943b42133405abe95d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226795",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42771",
+          "1790993415578904338",
+          "1790993415578904338"
+        ],
+        "stable9": true
+      },
+      "changed": false
+    },
+    {
+      "name": "A071-OWNER.py",
+      "before": {
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+        "bytes": 9774,
+        "sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226865",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9774",
+          "1790996759397725275",
+          "1790996759397725275"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+        "bytes": 9774,
+        "sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226865",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9774",
+          "1790996759397725275",
+          "1790996759397725275"
+        ],
+        "stable9": true
+      },
+      "changed": false
+    },
+    {
+      "name": "A071-SUPERVISOR.py",
+      "before": {
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-SUPERVISOR.py",
+        "bytes": 123038,
+        "sha256": "c5a3d1ead2990e2482c1c30b7eac0ff785e63452e39e3c89678d24625f99206d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226861",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "123038",
+          "1790997138129079962",
+          "1790997138129079962"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-SUPERVISOR.py",
+        "bytes": 125352,
+        "sha256": "53bcec73835334f6720afe55c832c0b72e55bac1328226aec43d5eaf2a6b2dd4",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227392",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "125352",
+          "1791021709937018481",
+          "1791021709993021695"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "A071-WORKER.py",
+      "before": {
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-WORKER.py",
+        "bytes": 9557,
+        "sha256": "571da66c347d9c3ec941f4c3b146be98dfacceb132eed325b135c1c2238d790e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226862",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9557",
+          "1790997245333577431",
+          "1790997245333577431"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A071-WORKER.py",
+        "bytes": 9557,
+        "sha256": "2937942621175d26a29248d1673f138b6fb063c231a1d68027efe56ab472276d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227395",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9557",
+          "1791021771027523792",
+          "1791021771083527005"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "A087-PUBLIC-DRIVER.py",
+      "before": {
+        "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+        "bytes": 200423,
+        "sha256": "a1d2097212ae19c585f8fa696c32c80eab73ba411542b44441f6799883ac8d86",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226863",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "200423",
+          "1790997138131432957",
+          "1790997138131432957"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A087-PUBLIC-DRIVER.py",
+        "bytes": 202737,
+        "sha256": "60cd977c6bba64c898d28bc54664fd48962d50099fbc777456e432986d18fe23",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227393",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "202737",
+          "1791021710044024621",
+          "1791021710108028293"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    },
+    {
+      "name": "A118-CONNECTED-CONTRACT.json",
+      "before": {
+        "path": "/var/tmp/friday-astra-a214-sol081-browser-fd-readback-generation-connected-source/source/A118-CONNECTED-CONTRACT.json",
+        "bytes": 75158,
+        "sha256": "7ca53e9d39841c90b6e9f292bf61039c6c2731887a2cddb21668937235b44b13",
+        "identity9_decimal_strings": [
+          "2050",
+          "4226933",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "75158",
+          "1790999215353853768",
+          "1790999215411495434"
+        ],
+        "stable9": true
+      },
+      "after": {
+        "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/source/A118-CONNECTED-CONTRACT.json",
+        "bytes": 75150,
+        "sha256": "55a02671cfc2dc31d04c06a5970dd09c89323d36e49d63a12f4536e1fd5a6b61",
+        "identity9_decimal_strings": [
+          "2050",
+          "4227399",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "75150",
+          "1791021830236921162",
+          "1791021830288924146"
+        ],
+        "stable9": true
+      },
+      "changed": true
+    }
+  ],
+  "full_current209_joins": {
+    "path": "/var/tmp/friday-astra-a226-browser-prospective-complete-wire-producer-both-decoder-inert-source/evidence/current-source-join.json",
+    "bytes": 275303,
+    "sha256": "f9647d299339eb23713dfd076b9cf216dd44da01ad4b74c468aa9ecde1bf5d6c",
+    "identity9_decimal_strings": [
+      "2050",
+      "4227400",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "275303",
+      "1791022038413866110",
+      "1791022038492870644"
+    ],
+    "stable9": true
+  },
+  "Source15_count": 15,
+  "current209_count": 209,
+  "aux3_count": 3,
+  "changed_Source15": 10,
+  "equal_Source15": 5,
+  "actual_code_change": "same new sol069_runs/encode in four real sources, three loader literal rebindings and three JSON active exact pins only",
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "author_accepts_own_source": false
+}

@@ -1,0 +1,187 @@
+{
+  "schema": "friday.sol108.independent-review-manifest.v1",
+  "assignment": "ASTRA-E4-A257-PUBLISHER-HASH-FULL-HISTORY-SCAN-NONAUTHOR-SOL108",
+  "generation": 1,
+  "root": "/var/tmp/friday-sol108-publisher-hash-history-independent-review",
+  "files": [
+    {
+      "name": "host-audit.py",
+      "path": "/var/tmp/friday-sol108-publisher-hash-history-independent-review/host-audit.py",
+      "bytes": 3750,
+      "sha256": "440d1f87df59169bf6a1395632c83dba6ab9beae83751858d2c3ea21b08465d1",
+      "identity9_decimal_strings": [
+        "2050",
+        "5010663",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3750",
+        "1791131191367191361",
+        "1791131191367191361"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "literal-lab-evidence.json",
+      "path": "/var/tmp/friday-sol108-publisher-hash-history-independent-review/literal-lab-evidence.json",
+      "bytes": 6639,
+      "sha256": "b9533449e1a923dfb72e2728f44548beee8562e2cbb2e60a5f278b5041ab4f02",
+      "identity9_decimal_strings": [
+        "2050",
+        "5010665",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6639",
+        "1791131263496130661",
+        "1791131263515131698"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "pins-and-literal-audit.json",
+      "path": "/var/tmp/friday-sol108-publisher-hash-history-independent-review/pins-and-literal-audit.json",
+      "bytes": 96665,
+      "sha256": "9ab7a94d382bee8ee873b2b574e5ba370827876d4535dfaa26471a0649f437ad",
+      "identity9_decimal_strings": [
+        "2050",
+        "5010664",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "96665",
+        "1791131191464241223",
+        "1791131191484197751"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "received.json",
+      "path": "/var/tmp/friday-sol108-publisher-hash-history-independent-review/received.json",
+      "bytes": 970,
+      "sha256": "1be1d95dbfbfb800a3065268335b3ab2a8264b006c84675f07c19ffe529e114c",
+      "identity9_decimal_strings": [
+        "2050",
+        "5010662",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "970",
+        "1791131148520851325",
+        "1791131148537852253"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "review.json",
+      "path": "/var/tmp/friday-sol108-publisher-hash-history-independent-review/review.json",
+      "bytes": 12760,
+      "sha256": "8940058479b68daf8e0d6b1aed56f92f507e36749999e78a00add2dae6fd2d61",
+      "identity9_decimal_strings": [
+        "2050",
+        "5010666",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12760",
+        "1791131352586996341",
+        "1791131352605997379"
+      ],
+      "stable9": true
+    },
+    {
+      "name": "seal-check.json",
+      "path": "/var/tmp/friday-sol108-publisher-hash-history-independent-review/seal-check.json",
+      "bytes": 32141,
+      "sha256": "f2437de1439b690534eff2ace44ab2cd690e0b79b0ac45ce00139edaa485dd28",
+      "identity9_decimal_strings": [
+        "2050",
+        "5010667",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32141",
+        "1791131383645692624",
+        "1791131383668693879"
+      ],
+      "stable9": true
+    }
+  ],
+  "file_count": 6,
+  "candidate": {
+    "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/manifest.json",
+    "bytes": 29378,
+    "sha256": "73f4db4fc8427e718dd5c2bc6991a7bf59d1f4dbfb775a61877923a761cdf39d",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980643",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "29378",
+      "1791130808528481691",
+      "1791130808551283927"
+    ],
+    "stable9": true
+  },
+  "baseline": {
+    "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/manifest.json",
+    "bytes": 32881,
+    "sha256": "c4ea289c4df851e3364d6d3cc802c60ee6fa0162c12e25449ee01c70fda11e86",
+    "identity9_decimal_strings": [
+      "2050",
+      "5010660",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32881",
+      "1791129359526042982",
+      "1791129359546343017"
+    ],
+    "stable9": true
+  },
+  "decision": "SCOPED_ACCEPT_A257_HASH_HISTORY_COUNT_DEBIT_SHAPE_REJOIN",
+  "Scope_DONE_WHEN": true,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "execution": "NOT_RUN",
+  "timing": {
+    "accepted_msk": "2026-10-04T19:25:04+03:00",
+    "content_verification_completed_msk": "2026-10-04T19:29:43.610737+03:00",
+    "elapsed_seconds": 279.610737,
+    "total_wall_cap_seconds": 1800,
+    "seal_reserve_seconds": 300
+  },
+  "resource_accounting": {
+    "instrumented_host_read_bytes_lower_bound": 10378705,
+    "exact_total_host_read_bytes": null,
+    "unmetered_host_shell_and_helper_startup_reads": "UNKNOWN_NOT_ZERO",
+    "host_check_peak_RSS_bytes": 19197952,
+    "whole_turn_peak_RSS_bytes": null,
+    "output_artifact_bytes_before_manifest": 152925,
+    "output_cap_bytes": 33554432,
+    "source_execution": 0,
+    "source_edits": 0,
+    "network": 0,
+    "children": 0,
+    "heavy_runs": 0
+  },
+  "evidence_boundaries": {
+    "implicit_ABI": "NOT_RUN_UNKNOWN_NOT_ZERO",
+    "full_required_workload_fit": "UNCONFIRMED",
+    "fixed_24576_bound": "explicit source accounting claim, not physical cost qualification",
+    "old_SOL107_draft_read": false,
+    "guard_workaround": false,
+    "ABSTRACT_HASH_ONLY_required": true,
+    "waiver": false
+  }
+}

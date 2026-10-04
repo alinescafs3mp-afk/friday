@@ -1,0 +1,2904 @@
+{
+  "schema": "friday.sol108.host-literal-audit.v1",
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL108-INPUT-20261004.json",
+    "bytes": 33786,
+    "sha256": "3b8a67649940ac46e5a56d72b0f3a724855cf40e966af2bb0068962a76a2ebbf",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536539",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "33786",
+      "1791130962001664580",
+      "1791130962023665782"
+    ],
+    "stable9": true
+  },
+  "candidate_manifest": {
+    "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/manifest.json",
+    "bytes": 29378,
+    "sha256": "73f4db4fc8427e718dd5c2bc6991a7bf59d1f4dbfb775a61877923a761cdf39d",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980643",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "29378",
+      "1791130808528481691",
+      "1791130808551283927"
+    ],
+    "stable9": true
+  },
+  "baseline_manifest": {
+    "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/manifest.json",
+    "bytes": 32881,
+    "sha256": "c4ea289c4df851e3364d6d3cc802c60ee6fa0162c12e25449ee01c70fda11e86",
+    "identity9_decimal_strings": [
+      "2050",
+      "5010660",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32881",
+      "1791129359526042982",
+      "1791129359546343017"
+    ],
+    "stable9": true
+  },
+  "verified_msk": "2026-10-04T19:26:31.419401+03:00",
+  "source_pins": [
+    {
+      "name": "consumer/source/authority.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/authority.py",
+        "bytes": 16580,
+        "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229189",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16580",
+          "1791055451753849833",
+          "1791130708176971929"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/authority.py",
+        "bytes": 16580,
+        "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010631",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16580",
+          "1791055451753849833",
+          "1791129096577130174"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 384,
+      "baseline_LF_count": 384
+    },
+    {
+      "name": "consumer/source/bill.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/bill.py",
+        "bytes": 24098,
+        "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229190",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24098",
+          "1791055451753849833",
+          "1791130708176992724"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/bill.py",
+        "bytes": 24098,
+        "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010632",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24098",
+          "1791055451753849833",
+          "1791129096577170302"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 643,
+      "baseline_LF_count": 643
+    },
+    {
+      "name": "consumer/source/body_scope.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/body_scope.py",
+        "bytes": 7655,
+        "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229191",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7655",
+          "1791123343504470278",
+          "1791130708177016200"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/body_scope.py",
+        "bytes": 7655,
+        "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010633",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7655",
+          "1791123343504470278",
+          "1791129096577197615"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 188,
+      "baseline_LF_count": 188
+    },
+    {
+      "name": "consumer/source/canonical.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/canonical.py",
+        "bytes": 3825,
+        "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229192",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3825",
+          "1791055451755849943",
+          "1791130708177034086"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/canonical.py",
+        "bytes": 3825,
+        "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010634",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3825",
+          "1791055451755849943",
+          "1791129096577216961"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 110,
+      "baseline_LF_count": 110
+    },
+    {
+      "name": "consumer/source/capability.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/capability.py",
+        "bytes": 11981,
+        "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229193",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11981",
+          "1791055451755849943",
+          "1791130708177050187"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/capability.py",
+        "bytes": 11981,
+        "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010635",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11981",
+          "1791055451755849943",
+          "1791129096577234903"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 277,
+      "baseline_LF_count": 277
+    },
+    {
+      "name": "consumer/source/contract.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/contract.py",
+        "bytes": 2099,
+        "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229194",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2099",
+          "1791055451757313069",
+          "1791130708177070716"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/contract.py",
+        "bytes": 2099,
+        "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010636",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2099",
+          "1791055451757313069",
+          "1791129096577256042"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 82,
+      "baseline_LF_count": 82
+    },
+    {
+      "name": "consumer/source/declared_controls.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/declared_controls.py",
+        "bytes": 39603,
+        "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229195",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "39603",
+          "1791055451757850053",
+          "1791130708177086095"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/declared_controls.py",
+        "bytes": 39603,
+        "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010637",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "39603",
+          "1791055451757850053",
+          "1791129096577274834"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 683,
+      "baseline_LF_count": 683
+    },
+    {
+      "name": "consumer/source/document_vector.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/document_vector.py",
+        "bytes": 17709,
+        "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229196",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17709",
+          "1791055451757850053",
+          "1791130708177114382"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/document_vector.py",
+        "bytes": 17709,
+        "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010638",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17709",
+          "1791055451757850053",
+          "1791129096577293517"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 269,
+      "baseline_LF_count": 269
+    },
+    {
+      "name": "consumer/source/document_windows.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/document_windows.py",
+        "bytes": 7707,
+        "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229197",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7707",
+          "1791055451788851764",
+          "1791130708177137695"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/document_windows.py",
+        "bytes": 7707,
+        "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010639",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7707",
+          "1791055451788851764",
+          "1791129096577345295"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 127,
+      "baseline_LF_count": 127
+    },
+    {
+      "name": "consumer/source/effects.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/effects.py",
+        "bytes": 690,
+        "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229198",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "690",
+          "1791055451788851764",
+          "1791130708177156905"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/effects.py",
+        "bytes": 690,
+        "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010640",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "690",
+          "1791055451788851764",
+          "1791129096577366718"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 22,
+      "baseline_LF_count": 22
+    },
+    {
+      "name": "consumer/source/formats.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/formats.py",
+        "bytes": 13628,
+        "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229199",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13628",
+          "1791055451789851819",
+          "1791130708177173549"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/formats.py",
+        "bytes": 13628,
+        "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010641",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13628",
+          "1791055451789851819",
+          "1791129096577388322"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 346,
+      "baseline_LF_count": 346
+    },
+    {
+      "name": "consumer/source/ingress.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/ingress.py",
+        "bytes": 3025,
+        "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229200",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3025",
+          "1791055451790851874",
+          "1791130708177195712"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/ingress.py",
+        "bytes": 3025,
+        "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010642",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3025",
+          "1791055451790851874",
+          "1791129096577423551"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 75,
+      "baseline_LF_count": 75
+    },
+    {
+      "name": "consumer/source/material_literals.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/material_literals.py",
+        "bytes": 5689,
+        "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229201",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5689",
+          "1791055451791851930",
+          "1791130708177213397"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/material_literals.py",
+        "bytes": 5689,
+        "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010643",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5689",
+          "1791055451791851930",
+          "1791129096577442107"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 90,
+      "baseline_LF_count": 90
+    },
+    {
+      "name": "consumer/source/performing_contracts.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/performing_contracts.py",
+        "bytes": 18209,
+        "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229202",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18209",
+          "1791055451791851930",
+          "1791130708177231074"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/performing_contracts.py",
+        "bytes": 18209,
+        "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010644",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18209",
+          "1791055451791851930",
+          "1791129096577459830"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 300,
+      "baseline_LF_count": 300
+    },
+    {
+      "name": "consumer/source/pins.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/pins.py",
+        "bytes": 9147,
+        "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229203",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9147",
+          "1791055451792851985",
+          "1791130708177254163"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/pins.py",
+        "bytes": 9147,
+        "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010645",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9147",
+          "1791055451792851985",
+          "1791129096577483532"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 165,
+      "baseline_LF_count": 165
+    },
+    {
+      "name": "consumer/source/producer_consumer.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/producer_consumer.py",
+        "bytes": 3243,
+        "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229204",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3243",
+          "1791055451792851985",
+          "1791130708177274213"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/producer_consumer.py",
+        "bytes": 3243,
+        "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010646",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3243",
+          "1791055451792851985",
+          "1791129096577503783"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 91,
+      "baseline_LF_count": 91
+    },
+    {
+      "name": "consumer/source/receipt_chain.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/receipt_chain.py",
+        "bytes": 16263,
+        "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229205",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16263",
+          "1791055451837854468",
+          "1791130708177291254"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/receipt_chain.py",
+        "bytes": 16263,
+        "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010647",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16263",
+          "1791055451837854468",
+          "1791129096577522028"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 392,
+      "baseline_LF_count": 392
+    },
+    {
+      "name": "consumer/source/recipe_planner.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/recipe_planner.py",
+        "bytes": 102799,
+        "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229206",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "102799",
+          "1791055451838854523",
+          "1791130708177320966"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/recipe_planner.py",
+        "bytes": 102799,
+        "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010648",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "102799",
+          "1791055451838854523",
+          "1791129096577542999"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 2192,
+      "baseline_LF_count": 2192
+    },
+    {
+      "name": "consumer/source/resource_meter.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/resource_meter.py",
+        "bytes": 29321,
+        "sha256": "eb49bcb0be0f1df0ec185ee285b069596c00b5e28b6fbce6a0c91533bcd7a976",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229207",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29321",
+          "1791129186824467368",
+          "1791130708177376511"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/resource_meter.py",
+        "bytes": 29321,
+        "sha256": "eb49bcb0be0f1df0ec185ee285b069596c00b5e28b6fbce6a0c91533bcd7a976",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010649",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29321",
+          "1791129186824467368",
+          "1791129186824467368"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 581,
+      "baseline_LF_count": 581
+    },
+    {
+      "name": "consumer/source/runtime_consumer.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/runtime_consumer.py",
+        "bytes": 13297,
+        "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229208",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13297",
+          "1791055451840083758",
+          "1791130708177406895"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/runtime_consumer.py",
+        "bytes": 13297,
+        "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010650",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13297",
+          "1791055451840083758",
+          "1791129096577617169"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 207,
+      "baseline_LF_count": 207
+    },
+    {
+      "name": "consumer/source/schema_validate.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/schema_validate.py",
+        "bytes": 6776,
+        "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229209",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6776",
+          "1791055451840854633",
+          "1791130708177429947"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/schema_validate.py",
+        "bytes": 6776,
+        "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010651",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6776",
+          "1791055451840854633",
+          "1791129096577642007"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 173,
+      "baseline_LF_count": 173
+    },
+    {
+      "name": "consumer/source/semantics.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/semantics.py",
+        "bytes": 2578,
+        "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229210",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2578",
+          "1791055451841854689",
+          "1791130708177462050"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/semantics.py",
+        "bytes": 2578,
+        "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010652",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2578",
+          "1791055451841854689",
+          "1791129096577662367"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 54,
+      "baseline_LF_count": 54
+    },
+    {
+      "name": "consumer/source/whole_join.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/consumer/source/whole_join.py",
+        "bytes": 18213,
+        "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229211",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18213",
+          "1791055451841854689",
+          "1791130708177478578"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/consumer/source/whole_join.py",
+        "bytes": 18213,
+        "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010653",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18213",
+          "1791055451841854689",
+          "1791129096577679638"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 435,
+      "baseline_LF_count": 435
+    },
+    {
+      "name": "native/publisher_original_caller.c",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_original_caller.c",
+        "bytes": 13800,
+        "sha256": "d228b6a5c0f33d81f884f6cb992f6f23d6638501cd69af1d4d2705b0b586d180",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229215",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13800",
+          "1791117950407454343",
+          "1791130708177608163"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_original_caller.c",
+        "bytes": 13800,
+        "sha256": "d228b6a5c0f33d81f884f6cb992f6f23d6638501cd69af1d4d2705b0b586d180",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010623",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13800",
+          "1791117950407454343",
+          "1791129096576780795"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 238,
+      "baseline_LF_count": 238
+    },
+    {
+      "name": "native/publisher_original_caller.h",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_original_caller.h",
+        "bytes": 6493,
+        "sha256": "27bf9815fb118e12c7c32943875c30c4d6cf640c53e74cb5d1ac073fbeb4b05e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229216",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6493",
+          "1791117950407454343",
+          "1791130708177628239"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_original_caller.h",
+        "bytes": 6493,
+        "sha256": "27bf9815fb118e12c7c32943875c30c4d6cf640c53e74cb5d1ac073fbeb4b05e",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010624",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6493",
+          "1791117950407454343",
+          "1791129096576803715"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 113,
+      "baseline_LF_count": 113
+    },
+    {
+      "name": "native/publisher_owned_custody.c",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_owned_custody.c",
+        "bytes": 63100,
+        "sha256": "e2c14125900b98205b20f95bf58b055a29e5c5ef8c44458962002501ad44bb5e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229213",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "63100",
+          "1791127056249321738",
+          "1791130708177546350"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_owned_custody.c",
+        "bytes": 63100,
+        "sha256": "e2c14125900b98205b20f95bf58b055a29e5c5ef8c44458962002501ad44bb5e",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010621",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "63100",
+          "1791127056249321738",
+          "1791129096576684519"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 1063,
+      "baseline_LF_count": 1063
+    },
+    {
+      "name": "native/publisher_owned_custody.h",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_owned_custody.h",
+        "bytes": 5728,
+        "sha256": "6e08b447f7dfefb119f3d894f7a6b9a8a0b4dd85e5e3ea7abb9b296101b8f7ed",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229214",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5728",
+          "1791117950408454399",
+          "1791130708177590068"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_owned_custody.h",
+        "bytes": 5728,
+        "sha256": "6e08b447f7dfefb119f3d894f7a6b9a8a0b4dd85e5e3ea7abb9b296101b8f7ed",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010622",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5728",
+          "1791117950408454399",
+          "1791129096576728155"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 100,
+      "baseline_LF_count": 100
+    },
+    {
+      "name": "native/publisher_root_command.c",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_root_command.c",
+        "bytes": 27772,
+        "sha256": "51fd8c4a662b802bc8f5910e4b34cc94804faeb89b480bfcac6c4072f2c2dc1b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229220",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27772",
+          "1791125918597100142",
+          "1791130708177826217"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_root_command.c",
+        "bytes": 27772,
+        "sha256": "51fd8c4a662b802bc8f5910e4b34cc94804faeb89b480bfcac6c4072f2c2dc1b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010628",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27772",
+          "1791125918597100142",
+          "1791129096577046472"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 523,
+      "baseline_LF_count": 523
+    },
+    {
+      "name": "native/publisher_root_command.h",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_root_command.h",
+        "bytes": 4777,
+        "sha256": "7af5c2b27f9b748f2253ac4f8235912bf5105857e1d001fc6af09b0651dcb9bd",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229219",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4777",
+          "1791125918596100084",
+          "1791130708177807857"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_root_command.h",
+        "bytes": 4777,
+        "sha256": "7af5c2b27f9b748f2253ac4f8235912bf5105857e1d001fc6af09b0651dcb9bd",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010627",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4777",
+          "1791125918596100084",
+          "1791129096577027214"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 90,
+      "baseline_LF_count": 90
+    },
+    {
+      "name": "native/publisher_root_entry.c",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_root_entry.c",
+        "bytes": 413280,
+        "sha256": "2f7a8fa32dee8a91330a2975e8826bb487b59690a03e81496c0a3276082cfc7a",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229218",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "413280",
+          "1791130708211803917",
+          "1791130708211803917"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_root_entry.c",
+        "bytes": 412436,
+        "sha256": "15ac8b60f733ea4869308133f907c66dbab6a8dba2a1988d79025cc506b6e11a",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010626",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "412436",
+          "1791129207558656060",
+          "1791129207558656060"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 7134,
+      "baseline_LF_count": 7122
+    },
+    {
+      "name": "native/publisher_root_entry.h",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_root_entry.h",
+        "bytes": 18523,
+        "sha256": "1942fb779dafa56714d17086a429520856fe213293fd410f6966b3c82200f322",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229217",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18523",
+          "1791127056249321738",
+          "1791130708177647772"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_root_entry.h",
+        "bytes": 18523,
+        "sha256": "1942fb779dafa56714d17086a429520856fe213293fd410f6966b3c82200f322",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010625",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18523",
+          "1791127056249321738",
+          "1791129096576823282"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 324,
+      "baseline_LF_count": 324
+    },
+    {
+      "name": "source/actor_bootstrap.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/actor_bootstrap.py",
+        "bytes": 60893,
+        "sha256": "07bad9dd02d162dba0e4bd8c1cd596de4c84df2a1f983d0708ffc0f7b96ddd62",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229161",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "60893",
+          "1791128255513075402",
+          "1791130708176107737"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/actor_bootstrap.py",
+        "bytes": 60893,
+        "sha256": "07bad9dd02d162dba0e4bd8c1cd596de4c84df2a1f983d0708ffc0f7b96ddd62",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010594",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "60893",
+          "1791128255513075402",
+          "1791129096575806886"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 1090,
+      "baseline_LF_count": 1090
+    },
+    {
+      "name": "source/actor_context.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/actor_context.py",
+        "bytes": 25298,
+        "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229162",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25298",
+          "1791055451890857393",
+          "1791130708176176144"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/actor_context.py",
+        "bytes": 25298,
+        "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010595",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25298",
+          "1791055451890857393",
+          "1791129096575874273"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 415,
+      "baseline_LF_count": 415
+    },
+    {
+      "name": "source/admission.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/admission.py",
+        "bytes": 14621,
+        "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229163",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14621",
+          "1791114574028375049",
+          "1791130708176202735"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/admission.py",
+        "bytes": 14621,
+        "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010596",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14621",
+          "1791114574028375049",
+          "1791129096575904866"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 239,
+      "baseline_LF_count": 239
+    },
+    {
+      "name": "source/alljob_cohort.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/alljob_cohort.py",
+        "bytes": 24686,
+        "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229185",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24686",
+          "1791124977250132808",
+          "1791130708176867759"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/alljob_cohort.py",
+        "bytes": 24686,
+        "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010618",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24686",
+          "1791124977250132808",
+          "1791129096576602558"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 520,
+      "baseline_LF_count": 520
+    },
+    {
+      "name": "source/capacity.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/capacity.py",
+        "bytes": 20946,
+        "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229164",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "20946",
+          "1791055451892045339",
+          "1791130708176226799"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/capacity.py",
+        "bytes": 20946,
+        "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010597",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "20946",
+          "1791055451892045339",
+          "1791129096575930054"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 333,
+      "baseline_LF_count": 333
+    },
+    {
+      "name": "source/class_semantics.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/class_semantics.py",
+        "bytes": 19516,
+        "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229165",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19516",
+          "1791055451892857503",
+          "1791130708176251901"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/class_semantics.py",
+        "bytes": 19516,
+        "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010598",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19516",
+          "1791055451892857503",
+          "1791129096575957592"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 333,
+      "baseline_LF_count": 333
+    },
+    {
+      "name": "source/common.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/common.py",
+        "bytes": 37411,
+        "sha256": "eedafb8804eae10c6919183f75c06333f99ce2e1b586a6314670b96b3ade00f8",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229166",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37411",
+          "1791057473167531372",
+          "1791130708176276209"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/common.py",
+        "bytes": 37411,
+        "sha256": "eedafb8804eae10c6919183f75c06333f99ce2e1b586a6314670b96b3ade00f8",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010599",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37411",
+          "1791057473167531372",
+          "1791129096575982959"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 835,
+      "baseline_LF_count": 835
+    },
+    {
+      "name": "source/consumer_bridge.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/consumer_bridge.py",
+        "bytes": 21315,
+        "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229167",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21315",
+          "1791123343504470278",
+          "1791130708176313455"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/consumer_bridge.py",
+        "bytes": 21315,
+        "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010600",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21315",
+          "1791123343504470278",
+          "1791129096576012305"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 322,
+      "baseline_LF_count": 322
+    },
+    {
+      "name": "source/custody.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/custody.py",
+        "bytes": 29181,
+        "sha256": "2dce6e09e39b8faf6063619e77a7bd9a0e756ec6111dc38409438eb046c87e09",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229168",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29181",
+          "1791127056250321796",
+          "1791130708176338270"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/custody.py",
+        "bytes": 29181,
+        "sha256": "2dce6e09e39b8faf6063619e77a7bd9a0e756ec6111dc38409438eb046c87e09",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010601",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29181",
+          "1791127056250321796",
+          "1791129096576039636"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 579,
+      "baseline_LF_count": 579
+    },
+    {
+      "name": "source/existing_root_caller.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/existing_root_caller.py",
+        "bytes": 37637,
+        "sha256": "2dc5040eeacf820c031b5b0ebb291fd733dd6798de919ec2d6762d9d22bfe6c4",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229182",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37637",
+          "1791127056250321796",
+          "1791130708176781929"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/existing_root_caller.py",
+        "bytes": 37637,
+        "sha256": "2dc5040eeacf820c031b5b0ebb291fd733dd6798de919ec2d6762d9d22bfe6c4",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010615",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37637",
+          "1791127056250321796",
+          "1791129096576512664"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 615,
+      "baseline_LF_count": 615
+    },
+    {
+      "name": "source/extraction.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/extraction.py",
+        "bytes": 27923,
+        "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229169",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27923",
+          "1791123343502470163",
+          "1791130708176369926"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/extraction.py",
+        "bytes": 27923,
+        "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010602",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27923",
+          "1791123343502470163",
+          "1791129096576071202"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 535,
+      "baseline_LF_count": 535
+    },
+    {
+      "name": "source/fact_bridge.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/fact_bridge.py",
+        "bytes": 14689,
+        "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229170",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14689",
+          "1791055451949860648",
+          "1791130708176397925"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/fact_bridge.py",
+        "bytes": 14689,
+        "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010603",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14689",
+          "1791055451949860648",
+          "1791129096576096496"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 209,
+      "baseline_LF_count": 209
+    },
+    {
+      "name": "source/independent_selector.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/independent_selector.py",
+        "bytes": 7718,
+        "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229171",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7718",
+          "1791055451949860648",
+          "1791130708176419063"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/independent_selector.py",
+        "bytes": 7718,
+        "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010604",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7718",
+          "1791055451949860648",
+          "1791129096576120655"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 112,
+      "baseline_LF_count": 112
+    },
+    {
+      "name": "source/launcher.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/launcher.py",
+        "bytes": 11188,
+        "sha256": "1816bf4a533c7110790bc93c7ca15c26801f459b6e2c2dc9f4c002663203d25b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229172",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11188",
+          "1791055451950860704",
+          "1791130708176437496"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/launcher.py",
+        "bytes": 11188,
+        "sha256": "1816bf4a533c7110790bc93c7ca15c26801f459b6e2c2dc9f4c002663203d25b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010605",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11188",
+          "1791055451950860704",
+          "1791129096576140050"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 203,
+      "baseline_LF_count": 203
+    },
+    {
+      "name": "source/lifetime.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/lifetime.py",
+        "bytes": 48667,
+        "sha256": "46eb70c1337e20fabc9e668a1464b4998edae53309598afadf6b1f5cd65fb6f0",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229173",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "48667",
+          "1791057473248535975",
+          "1791130708176500722"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/lifetime.py",
+        "bytes": 48667,
+        "sha256": "46eb70c1337e20fabc9e668a1464b4998edae53309598afadf6b1f5cd65fb6f0",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010606",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "48667",
+          "1791057473248535975",
+          "1791129096576162924"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 846,
+      "baseline_LF_count": 846
+    },
+    {
+      "name": "source/master_pool.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/master_pool.py",
+        "bytes": 2315,
+        "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229186",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2315",
+          "1791057473532552110",
+          "1791130708176892956"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/master_pool.py",
+        "bytes": 2315,
+        "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010619",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2315",
+          "1791057473532552110",
+          "1791129096576630966"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 39,
+      "baseline_LF_count": 39
+    },
+    {
+      "name": "source/native.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/native.py",
+        "bytes": 44470,
+        "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229174",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "44470",
+          "1791114574027374993",
+          "1791130708176533402"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/native.py",
+        "bytes": 44470,
+        "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010607",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "44470",
+          "1791114574027374993",
+          "1791129096576196521"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 672,
+      "baseline_LF_count": 672
+    },
+    {
+      "name": "source/normalization.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/normalization.py",
+        "bytes": 12779,
+        "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229175",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12779",
+          "1791055451952426787",
+          "1791130708176562535"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/normalization.py",
+        "bytes": 12779,
+        "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010608",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12779",
+          "1791055451952426787",
+          "1791129096576271525"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 184,
+      "baseline_LF_count": 184
+    },
+    {
+      "name": "source/observer.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/observer.py",
+        "bytes": 137240,
+        "sha256": "74039092c9c929e5530330af42dcd0bc46b9ea66d3a4f14d34de7134f453310c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229176",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "137240",
+          "1791129096620295982",
+          "1791130708176583541"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/observer.py",
+        "bytes": 137240,
+        "sha256": "74039092c9c929e5530330af42dcd0bc46b9ea66d3a4f14d34de7134f453310c",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010609",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "137240",
+          "1791129096620295982",
+          "1791129096620295982"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 2173,
+      "baseline_LF_count": 2173
+    },
+    {
+      "name": "source/operations.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/operations.py",
+        "bytes": 24309,
+        "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229177",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24309",
+          "1791055451953860869",
+          "1791130708176636498"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/operations.py",
+        "bytes": 24309,
+        "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010610",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24309",
+          "1791055451953860869",
+          "1791129096576365496"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 419,
+      "baseline_LF_count": 419
+    },
+    {
+      "name": "source/owned_prefix_bank.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/owned_prefix_bank.py",
+        "bytes": 42474,
+        "sha256": "d9ad072368a3cbf310f915a22cacf7d935d778ee57c54fbd4c930df64efdf75b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229183",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42474",
+          "1791127056231320706",
+          "1791130708176812210"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/owned_prefix_bank.py",
+        "bytes": 42474,
+        "sha256": "d9ad072368a3cbf310f915a22cacf7d935d778ee57c54fbd4c930df64efdf75b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010616",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42474",
+          "1791127056231320706",
+          "1791129096576543979"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 827,
+      "baseline_LF_count": 827
+    },
+    {
+      "name": "source/retention.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/retention.py",
+        "bytes": 8465,
+        "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229178",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8465",
+          "1791055452013864180",
+          "1791130708176662148"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/retention.py",
+        "bytes": 8465,
+        "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010611",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8465",
+          "1791055452013864180",
+          "1791129096576391365"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 103,
+      "baseline_LF_count": 103
+    },
+    {
+      "name": "source/roles.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/roles.py",
+        "bytes": 5018,
+        "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229179",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5018",
+          "1791055452014864235",
+          "1791130708176682131"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/roles.py",
+        "bytes": 5018,
+        "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010612",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5018",
+          "1791055452014864235",
+          "1791129096576413100"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 98,
+      "baseline_LF_count": 98
+    },
+    {
+      "name": "source/root_tool_adapter.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/root_tool_adapter.py",
+        "bytes": 151551,
+        "sha256": "f62785816d2aead153aa67c1709b50fcfdd8ced465acf042274f238920acf3be",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229180",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "151551",
+          "1791128255478688703",
+          "1791130708176700202"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/root_tool_adapter.py",
+        "bytes": 151551,
+        "sha256": "f62785816d2aead153aa67c1709b50fcfdd8ced465acf042274f238920acf3be",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010613",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "151551",
+          "1791128255478688703",
+          "1791129096576432284"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 2116,
+      "baseline_LF_count": 2116
+    },
+    {
+      "name": "source/selected_owned_values.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/selected_owned_values.py",
+        "bytes": 21602,
+        "sha256": "f85b67fc47e6e9725508c35fa4df8e7ba49410d96a53892e7dea12e6ba674144",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229184",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21602",
+          "1791127056231320706",
+          "1791130708176842557"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/selected_owned_values.py",
+        "bytes": 21602,
+        "sha256": "f85b67fc47e6e9725508c35fa4df8e7ba49410d96a53892e7dea12e6ba674144",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010617",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21602",
+          "1791127056231320706",
+          "1791129096576576425"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 412,
+      "baseline_LF_count": 412
+    },
+    {
+      "name": "source/snapshot_producer.py",
+      "candidate": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/source/snapshot_producer.py",
+        "bytes": 4130,
+        "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4229181",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4130",
+          "1791055452015864290",
+          "1791130708176764246"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/source/snapshot_producer.py",
+        "bytes": 4130,
+        "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+        "identity9_decimal_strings": [
+          "2050",
+          "5010614",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4130",
+          "1791055452015864290",
+          "1791129096576493805"
+        ],
+        "stable9": true
+      },
+      "candidate_LF_count": 52,
+      "baseline_LF_count": 52
+    }
+  ],
+  "changed": [
+    {
+      "name": "native/publisher_root_entry.c",
+      "hunks": [
+        {
+          "tag": "replace",
+          "old_LF_start": 5560,
+          "old_LF_end": 5560,
+          "new_LF_start": 5560,
+          "new_LF_end": 5560,
+          "old_text": "        PyObject *ledger=p->refs[1],*ops=own_plain_field(ledger,\"updates\");\n",
+          "new_text": "        PyObject *ledger=p->refs[1];\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 5563,
+          "old_LF_end": 5562,
+          "new_LF_start": 5563,
+          "new_LF_end": 5566,
+          "old_text": "",
+          "new_text": "        /* Shape BEFORE the first dictionary walk. This fixed debit pays the\n         * constructor/status fields only, never an arbitrary update history. */\n        if(!ledger||!PyDict_CheckExact(ledger)||PyDict_Size(ledger)!=14)return -1;\n        PyObject *ops=own_plain_field(ledger,\"updates\");\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 5564,
+          "old_LF_end": 5565,
+          "new_LF_start": 5568,
+          "new_LF_end": 5568,
+          "old_text": "        if(!ledger||!PyDict_CheckExact(ledger)||PyDict_Size(ledger)!=14||\n           !ascii(own_plain_field(ledger,\"schema\"),\"friday.astra256.own-hash-input-ledger.v2\")||\n",
+          "new_text": "        if(!ascii(own_plain_field(ledger,\"schema\"),\"friday.astra256.own-hash-input-ledger.v2\")||\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 5580,
+          "old_LF_end": 5579,
+          "new_LF_start": 5583,
+          "new_LF_end": 5591,
+          "old_text": "",
+          "new_text": "        /* A257: pay every actual row BEFORE entering the loop. Exact seven\n         * fields bound each row's scans, not the number of update rows. Keep\n         * the original pool/caps; refusal retains the same owners. This is an\n         * explicit conservative debit, NOT measured whole implicit ABI fit. */\n        uint64_t updates=(uint64_t)PyList_GET_SIZE(ops);\n        const uint64_t row_reads=24576;\n        if(updates>UINT64_MAX/row_reads)\n            return FridayPublisherMasterFault(&root_storage.pool,\"own_hash_full_update_scan_overflow\");\n        if(FridayPublisherMasterBefore(&root_storage.pool,updates*row_reads,0,0,0)<0)return -1;\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 5581,
+          "old_LF_end": 5581,
+          "new_LF_start": 5593,
+          "new_LF_end": 5593,
+          "old_text": "        for(Py_ssize_t j=0;j<PyList_GET_SIZE(ops);j++) {\n",
+          "new_text": "        for(Py_ssize_t j=0;j<(Py_ssize_t)updates;j++) {\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 5584,
+          "old_LF_end": 5583,
+          "new_LF_start": 5596,
+          "new_LF_end": 5596,
+          "old_text": "",
+          "new_text": "            if(!op||!PyDict_CheckExact(op)||PyDict_Size(op)!=7)return -1;\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 5588,
+          "old_LF_end": 5589,
+          "new_LF_start": 5601,
+          "new_LF_end": 5601,
+          "old_text": "            if(!op||!PyDict_CheckExact(op)||PyDict_Size(op)!=7||\n               own_plain_field(op,\"attempted\")!=Py_True||!full||!PyBytes_CheckExact(full)||\n",
+          "new_text": "            if(own_plain_field(op,\"attempted\")!=Py_True||!full||!PyBytes_CheckExact(full)||\n"
+        }
+      ],
+      "forward_exact": true,
+      "inverse_exact": true
+    }
+  ],
+  "unchanged": [
+    "consumer/source/authority.py",
+    "consumer/source/bill.py",
+    "consumer/source/body_scope.py",
+    "consumer/source/canonical.py",
+    "consumer/source/capability.py",
+    "consumer/source/contract.py",
+    "consumer/source/declared_controls.py",
+    "consumer/source/document_vector.py",
+    "consumer/source/document_windows.py",
+    "consumer/source/effects.py",
+    "consumer/source/formats.py",
+    "consumer/source/ingress.py",
+    "consumer/source/material_literals.py",
+    "consumer/source/performing_contracts.py",
+    "consumer/source/pins.py",
+    "consumer/source/producer_consumer.py",
+    "consumer/source/receipt_chain.py",
+    "consumer/source/recipe_planner.py",
+    "consumer/source/resource_meter.py",
+    "consumer/source/runtime_consumer.py",
+    "consumer/source/schema_validate.py",
+    "consumer/source/semantics.py",
+    "consumer/source/whole_join.py",
+    "native/publisher_original_caller.c",
+    "native/publisher_original_caller.h",
+    "native/publisher_owned_custody.c",
+    "native/publisher_owned_custody.h",
+    "native/publisher_root_command.c",
+    "native/publisher_root_command.h",
+    "native/publisher_root_entry.h",
+    "source/actor_bootstrap.py",
+    "source/actor_context.py",
+    "source/admission.py",
+    "source/alljob_cohort.py",
+    "source/capacity.py",
+    "source/class_semantics.py",
+    "source/common.py",
+    "source/consumer_bridge.py",
+    "source/custody.py",
+    "source/existing_root_caller.py",
+    "source/extraction.py",
+    "source/fact_bridge.py",
+    "source/independent_selector.py",
+    "source/launcher.py",
+    "source/lifetime.py",
+    "source/master_pool.py",
+    "source/native.py",
+    "source/normalization.py",
+    "source/observer.py",
+    "source/operations.py",
+    "source/owned_prefix_bank.py",
+    "source/retention.py",
+    "source/roles.py",
+    "source/root_tool_adapter.py",
+    "source/selected_owned_values.py",
+    "source/snapshot_producer.py"
+  ],
+  "references": [
+    {
+      "pin": {
+        "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/manifest.json",
+        "bytes": 1014,
+        "sha256": "7ad22e0920ff5f8e51d070dd4034596b581e5af3691ceb5e53c4fb8ca38778e0",
+        "identity9_decimal_strings": [
+          "2050",
+          "3714968",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1014",
+          "1791129887041410391",
+          "1791129887041410391"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "GO": false,
+        "Root_admission": false,
+        "SourceReady": false,
+        "decision": "SCOPED_ACCEPT_A256_HASH_RETURN_METADATA_BOTH_ENDS_WHOLE_ADMISSION_OPEN",
+        "execution": "NOT_RUN",
+        "file_count": 5,
+        "files": [
+          {
+            "bytes": 467,
+            "name": "README.txt",
+            "sha256": "64f1c946e2d70dbc278af4c55c2ecc72a39067624af44f0e34f70fbb522dcc8e"
+          },
+          {
+            "bytes": 2254,
+            "name": "obligations.json",
+            "sha256": "2924db2d8425929ff2d55954df6539a8a328ab1ef72500af540001609d69ad1e"
+          },
+          {
+            "bytes": 1682,
+            "name": "pins.json",
+            "sha256": "4c33a31e9bb330de446f5736dd6c762f3de946e4c0bc2e56fa2230ecdf340a14"
+          },
+          {
+            "bytes": 8094,
+            "name": "review.json",
+            "sha256": "f911e732d9fbb17a0b650e4b753060a6cc1bbf141ff1dfcbd43be9363ada0b44"
+          },
+          {
+            "bytes": 415,
+            "name": "timing.json",
+            "sha256": "064f3379aec8b7cd4e6b897b3067ac3f8318cc53268ccac7e053f1c8ab742918"
+          }
+        ],
+        "fit": "UNCONFIRMED",
+        "schema": "friday.lab946.manifest.v1"
+      }
+    },
+    {
+      "pin": {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB946-RESULT-RECEIVED-20261004.json",
+        "bytes": 5310,
+        "sha256": "73c3c5edae1994de8f9ce753153bc8448896e83a2c7656f1e20af055708abcd6",
+        "identity9_decimal_strings": [
+          "2050",
+          "8536535",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5310",
+          "1791130578070696265",
+          "1791130578090697357"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "schema": "friday.astra.lab-result-received.v1",
+        "assignment": "ASTRA-E4-A256-PUBLISHER-HASH-ACTUAL-RETURN-METADATA-ERROR-NONAUTHOR-LAB-946",
+        "generation": 1,
+        "received_msk": "2026-10-04T19:16:18.034275+03:00",
+        "job": "job_d931092ecc7546c18b5277a0bb06cee9",
+        "result_message": "msg_aa83ff2a42be4978b40b72376e09477d",
+        "manifest": {
+          "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/manifest.json",
+          "bytes": 1014,
+          "sha256": "7ad22e0920ff5f8e51d070dd4034596b581e5af3691ceb5e53c4fb8ca38778e0",
+          "identity9_decimal_strings": [
+            "2050",
+            "3714968",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1014",
+            "1791129887041410391",
+            "1791129887041410391"
+          ],
+          "stable9": true
+        },
+        "pins": [
+          {
+            "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/manifest.json",
+            "bytes": 1014,
+            "sha256": "7ad22e0920ff5f8e51d070dd4034596b581e5af3691ceb5e53c4fb8ca38778e0",
+            "identity9_decimal_strings": [
+              "2050",
+              "3714968",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1014",
+              "1791129887041410391",
+              "1791129887041410391"
+            ],
+            "stable9": true
+          },
+          {
+            "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/README.txt",
+            "bytes": 467,
+            "sha256": "64f1c946e2d70dbc278af4c55c2ecc72a39067624af44f0e34f70fbb522dcc8e",
+            "identity9_decimal_strings": [
+              "2050",
+              "3714963",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "467",
+              "1791129887040410334",
+              "1791129887040410334"
+            ],
+            "stable9": true
+          },
+          {
+            "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/obligations.json",
+            "bytes": 2254,
+            "sha256": "2924db2d8425929ff2d55954df6539a8a328ab1ef72500af540001609d69ad1e",
+            "identity9_decimal_strings": [
+              "2050",
+              "3714966",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "2254",
+              "1791129887040410334",
+              "1791129887040410334"
+            ],
+            "stable9": true
+          },
+          {
+            "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/pins.json",
+            "bytes": 1682,
+            "sha256": "4c33a31e9bb330de446f5736dd6c762f3de946e4c0bc2e56fa2230ecdf340a14",
+            "identity9_decimal_strings": [
+              "2050",
+              "3714964",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "1682",
+              "1791129887040410334",
+              "1791129887040410334"
+            ],
+            "stable9": true
+          },
+          {
+            "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/review.json",
+            "bytes": 8094,
+            "sha256": "f911e732d9fbb17a0b650e4b753060a6cc1bbf141ff1dfcbd43be9363ada0b44",
+            "identity9_decimal_strings": [
+              "2050",
+              "3714965",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "8094",
+              "1791129887040410334",
+              "1791129887040410334"
+            ],
+            "stable9": true
+          },
+          {
+            "path": "/var/tmp/friday-lab946-publisher-hash-outcome-independent-review/timing.json",
+            "bytes": 415,
+            "sha256": "064f3379aec8b7cd4e6b897b3067ac3f8318cc53268ccac7e053f1c8ab742918",
+            "identity9_decimal_strings": [
+              "2050",
+              "3714967",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "415",
+              "1791129887040410334",
+              "1791129887040410334"
+            ],
+            "stable9": true
+          }
+        ],
+        "input": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB946-INPUT-20261004.json",
+          "bytes": 34569,
+          "sha256": "236bfa1b2d9be64ae9c1adb4543e457f1a6a293fb5684325a77555490285e9b0",
+          "identity9_decimal_strings": [
+            "2050",
+            "8536529",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "34569",
+            "1791129509792708880",
+            "1791129509816167558"
+          ],
+          "stable9": true
+        },
+        "target": {
+          "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/manifest.json",
+          "bytes": 32881,
+          "sha256": "c4ea289c4df851e3364d6d3cc802c60ee6fa0162c12e25449ee01c70fda11e86",
+          "identity9_decimal_strings": [
+            "2050",
+            "5010660",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "32881",
+            "1791129359526042982",
+            "1791129359546343017"
+          ],
+          "stable9": true
+        },
+        "decision": "SCOPED_ACCEPT_A256_HASH_RETURN_METADATA_BOTH_ENDS_WHOLE_ADMISSION_OPEN",
+        "accepted_scope": [
+          "H-SCHEMA",
+          "H-RETURN",
+          "H-UPDATE",
+          "H-COPY",
+          "H-BOTH",
+          "H-OWN",
+          "H-PUBLISH refusal only"
+        ],
+        "H_COST": "OPEN: new fixed debit ordering credited, update-row cumulative/full workload fit not established. Do not read NO_CONCRETE_UNDERDEBIT as cost acceptance.",
+        "SourceReady": false,
+        "GO": false,
+        "Source_execution": 0,
+        "author_self_acceptance": false,
+        "timing": {
+          "children": 0,
+          "elapsed_ns": 299412413000,
+          "network": 0,
+          "read_bytes": 4807180,
+          "schema": "friday.lab946.timing.v1",
+          "seal_duration_ns": 10082476,
+          "seal_ended_msk": "2026-10-04T19:04:47.042110+03:00",
+          "seal_started_msk": "2026-10-04T19:04:47.032040+03:00",
+          "source_execution": 0,
+          "work_ended_msk": "2026-10-04T19:04:47.042110+03:00",
+          "work_started_msk": "2026-10-04T18:59:47.629697+03:00"
+        }
+      }
+    },
+    {
+      "pin": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/INTEGRATION.json",
+        "bytes": 7629,
+        "sha256": "307067ea00ab01c95bbed23f5430b9d726adacd9576663001adc045f2c2da62b",
+        "identity9_decimal_strings": [
+          "2050",
+          "3980639",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7629",
+          "1791130808415360186",
+          "1791130808435277592"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "schema": "friday.astra.a257.hash-history-prospective-scan-integration.v1",
+        "baseline": {
+          "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/manifest.json",
+          "bytes": 32881,
+          "sha256": "c4ea289c4df851e3364d6d3cc802c60ee6fa0162c12e25449ee01c70fda11e86",
+          "identity9_decimal_strings": [
+            "2050",
+            "5010660",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "32881",
+            "1791129359526042982",
+            "1791129359546343017"
+          ],
+          "stable9": true
+        },
+        "changed": [
+          "native/publisher_root_entry.c"
+        ],
+        "unchanged": [
+          "consumer/source/authority.py",
+          "consumer/source/bill.py",
+          "consumer/source/body_scope.py",
+          "consumer/source/canonical.py",
+          "consumer/source/capability.py",
+          "consumer/source/contract.py",
+          "consumer/source/declared_controls.py",
+          "consumer/source/document_vector.py",
+          "consumer/source/document_windows.py",
+          "consumer/source/effects.py",
+          "consumer/source/formats.py",
+          "consumer/source/ingress.py",
+          "consumer/source/material_literals.py",
+          "consumer/source/performing_contracts.py",
+          "consumer/source/pins.py",
+          "consumer/source/producer_consumer.py",
+          "consumer/source/receipt_chain.py",
+          "consumer/source/recipe_planner.py",
+          "consumer/source/resource_meter.py",
+          "consumer/source/runtime_consumer.py",
+          "consumer/source/schema_validate.py",
+          "consumer/source/semantics.py",
+          "consumer/source/whole_join.py",
+          "native/publisher_original_caller.c",
+          "native/publisher_original_caller.h",
+          "native/publisher_owned_custody.c",
+          "native/publisher_owned_custody.h",
+          "native/publisher_root_command.c",
+          "native/publisher_root_command.h",
+          "native/publisher_root_entry.h",
+          "source/actor_bootstrap.py",
+          "source/actor_context.py",
+          "source/admission.py",
+          "source/alljob_cohort.py",
+          "source/capacity.py",
+          "source/class_semantics.py",
+          "source/common.py",
+          "source/consumer_bridge.py",
+          "source/custody.py",
+          "source/existing_root_caller.py",
+          "source/extraction.py",
+          "source/fact_bridge.py",
+          "source/independent_selector.py",
+          "source/launcher.py",
+          "source/lifetime.py",
+          "source/master_pool.py",
+          "source/native.py",
+          "source/normalization.py",
+          "source/observer.py",
+          "source/operations.py",
+          "source/owned_prefix_bank.py",
+          "source/retention.py",
+          "source/roles.py",
+          "source/root_tool_adapter.py",
+          "source/selected_owned_values.py",
+          "source/snapshot_producer.py"
+        ],
+        "root_cause": "H-COST retained OPEN by LAB946: actual native hash consumer charged fixed constructor metadata debit for an arbitrary full update history; ledger and row lookups also preceded exact shape validation.",
+        "implemented": [
+          "Actual command_own_record_consumer now pays fixed ledger read before first dictionary walk and validates exact14-field shape first.",
+          "Actual updates=PyList_GET_SIZE(ops) is multiplied by per-row24576 only after overflow guard, and original same Root MasterBefore pays the whole history before entering loop. No lower row cap/new budget/refund.",
+          "Each exact7-field operation shape is checked before its field scans. Original counters, aliases, original-error/metadata-error, complete/copy semantics and owner retirement are unchanged.",
+          "All56 other files including actual Source producer, typed reader, native headers/layout, child paths and last-owner endpoints remain exact A256. LAB945 is not imported."
+        ],
+        "validation": {
+          "fullSHA9": true,
+          "literal_forward_inverse_hunks": 2,
+          "checks": {
+            "only_actual_native_hash_reader_changed": true,
+            "all56_other_source_identical": true,
+            "unchanged_native_layout": true,
+            "ledger_debit_before_lookup": true,
+            "ledger_shape_before_lookup": true,
+            "actual_full_row_count": true,
+            "multiply_overflow_before_debit": true,
+            "full_history_prepaid_before_iteration": true,
+            "seven_field_shape_before_row_walk": true,
+            "original_false_completion_and_counters": true,
+            "same_v2_producer_and_typed_reader": true,
+            "no_new_pool_cap_grant": true
+          },
+          "Source_execution": 0
+        },
+        "cost": {
+          "fixed_constructor_metadata_reads": 24576,
+          "per_actual_update_row_reads": 24576,
+          "overflow_guard": "updates <= UINT64_MAX/24576",
+          "additional_allocation": 0,
+          "implicit_ABI": "NOT_RUN_UNKNOWN_NOT_ZERO",
+          "full_required_workload_fit": "UNCONFIRMED"
+        },
+        "scoped_independent_evidence": {
+          "LAB946": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB946-RESULT-RECEIVED-20261004.json",
+          "target": {
+            "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/manifest.json",
+            "bytes": 32881,
+            "sha256": "c4ea289c4df851e3364d6d3cc802c60ee6fa0162c12e25449ee01c70fda11e86",
+            "identity9_decimal_strings": [
+              "2050",
+              "5010660",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "32881",
+              "1791129359526042982",
+              "1791129359546343017"
+            ],
+            "stable9": true
+          },
+          "seven_scoped_relations": "accepted on exact A256 only",
+          "H_COST": "not accepted; A257 correction needs changed-path rejoin"
+        },
+        "remaining": [
+          "C1-R1A remains OPEN_CODE: A255 joins SOL107 partial child journal seed/error/close owners only. Actual child Context/Token/compiled bindings/full transport and BOTH typed/native finite ends still require same-task SOL107 continuation; no completed scope or SourceReady.",
+          "C1-R1B/C remains OPEN: first-field/partial mmap and unknown-close/native Source metadata joins; full hash error-prefix/support lifetime and actual class-factory provenance. A256 adds connected native actual hash return/status vs Source metadata-error separation and both receivers, but it is authored/static only, not independently accepted or runtime-qualified.",
+          "LAB945 was independently reviewed/rejected in A257. Its unsafe error release, missing pre-strong-capture guard and native role mismatch are corrected at scoped static level; Source carrier/cost/frame role-phase mismatch and completed error endpoint remain open. LAB947 implements connected actual carrier/cost/roles from exact A256+945; Astra owns finite native error end and integration. No blind carry-forward of old findings or self-acceptance.",
+          "Publisher C2 full required widths/jobs remain OPEN. LAB946 accepted seven scoped A256 hash relations, not full fit: update history scan had fixed debit. A257 pays actual full update count prospectively with overflow and shape-before-scan checks in actual native receiver. One changed file/two literal hunks, not independently accepted or runtime-measured. LAB941 fake sizing/disabled routes excluded.",
+          "Actual native ColdPerform -> RootPerform -> CallOriginal -> CommandReceive -> cold_complete -> FinalReceive is present on success and error. Existing outside installed-image invocation and external final-evidence consumption/bindings remain UNESTABLISHED integration/qualification; absence of a second generic main is not itself a new CODE requirement. No runtime or standalone completion claimed.",
+          "Non-author connected source acceptance, then selected actual Source/Root/image/compiler ABI/provider/grants/resources/finite clocks and collect-all diagnostics; all agreed exact-release/live160/A+B/B09/R10/all30/F0-F11/build-install/restore-rollback/target/independent acceptance remain required. r5 immutable RED/no reuse; r6 absent."
+        ],
+        "independent_acceptance": false,
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false,
+        "Source_execution": 0,
+        "Root_execution": 0
+      }
+    },
+    {
+      "pin": {
+        "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/LITERAL-DELTA.json",
+        "bytes": 6266,
+        "sha256": "a4e30a26f3e037ac624eb14a4b47460cd5c175c6bf885fc95bc46fbf4aea8a1b",
+        "identity9_decimal_strings": [
+          "2050",
+          "3980640",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6266",
+          "1791130808415360186",
+          "1791130808435277592"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "schema": "friday.astra.a257.literal-sequential.v1",
+        "baseline": {
+          "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/manifest.json",
+          "bytes": 32881,
+          "sha256": "c4ea289c4df851e3364d6d3cc802c60ee6fa0162c12e25449ee01c70fda11e86",
+          "identity9_decimal_strings": [
+            "2050",
+            "5010660",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "32881",
+            "1791129359526042982",
+            "1791129359546343017"
+          ],
+          "stable9": true
+        },
+        "hunks": [
+          {
+            "file": "native/publisher_root_entry.c",
+            "old": "           r->nodes[id-1].original!=(value?value:Py_None)||\n           r->edge_roles[v->edge_at+j]!=(value&&!support))return -1;\n    }\n    if(p->kind==OWN_HASH) {\n        PyObject *ledger=p->refs[1],*ops=own_plain_field(ledger,\"updates\");\n        uint64_t mode=(p->flags>>8)&3;\n        if(FridayPublisherMasterBefore(&root_storage.pool,24576,0,0,0)<0)return -1;\n        PyObject *metadata=own_plain_field(ledger,\"metadata_error\");\n        if(!ledger||!PyDict_CheckExact(ledger)||PyDict_Size(ledger)!=14||\n           !ascii(own_plain_field(ledger,\"schema\"),\"friday.astra256.own-hash-input-ledger.v2\")||\n           !ops||!PyList_CheckExact(ops)||!metadata||\n           (metadata!=Py_None&&!PyExceptionInstance_Check(metadata))||\n           own_plain_field(ledger,\"original_error\")!=Py_None||\n           own_hash_status_key(ledger,\"runtime_h\")!=p->refs[9]||\n",
+            "new": "           r->nodes[id-1].original!=(value?value:Py_None)||\n           r->edge_roles[v->edge_at+j]!=(value&&!support))return -1;\n    }\n    if(p->kind==OWN_HASH) {\n        PyObject *ledger=p->refs[1];\n        uint64_t mode=(p->flags>>8)&3;\n        if(FridayPublisherMasterBefore(&root_storage.pool,24576,0,0,0)<0)return -1;\n        /* Shape BEFORE the first dictionary walk. This fixed debit pays the\n         * constructor/status fields only, never an arbitrary update history. */\n        if(!ledger||!PyDict_CheckExact(ledger)||PyDict_Size(ledger)!=14)return -1;\n        PyObject *ops=own_plain_field(ledger,\"updates\");\n        PyObject *metadata=own_plain_field(ledger,\"metadata_error\");\n        if(!ascii(own_plain_field(ledger,\"schema\"),\"friday.astra256.own-hash-input-ledger.v2\")||\n           !ops||!PyList_CheckExact(ops)||!metadata||\n           (metadata!=Py_None&&!PyExceptionInstance_Check(metadata))||\n           own_plain_field(ledger,\"original_error\")!=Py_None||\n           own_hash_status_key(ledger,\"runtime_h\")!=p->refs[9]||\n",
+            "id": "A257-H001"
+          },
+          {
+            "file": "native/publisher_root_entry.c",
+            "old": "           own_plain_field(ledger,\"actual_attempted\")!=Py_True||\n           (own_plain_field(ledger,\"state_complete\")!=Py_True&&\n            own_plain_field(ledger,\"state_complete\")!=Py_False)||\n           !ascii(own_plain_field(ledger,\"mode\"),mode==1?\"sha256\":mode==2?\"new\":mode==3?\"copy\":\"\"))return -1;\n        uint64_t attempted=1,confirmed=1;int complete=own_plain_field(ledger,\"state_complete\")==Py_True;\n        for(Py_ssize_t j=0;j<PyList_GET_SIZE(ops);j++) {\n            PyObject *op=PyList_GET_ITEM(ops,j);\n            if((j&1023)==0&&!command_clock(r))return -1;\n            PyObject *full=own_plain_field(op,\"full_bytes\");\n            PyObject *actual=own_plain_field(op,\"actual_attempted\"),*returned=own_plain_field(op,\"confirmed\");\n            PyObject *error=own_plain_field(op,\"original_error\");\n            PyObject *metadata_error=own_plain_field(op,\"metadata_error\");\n            if(!op||!PyDict_CheckExact(op)||PyDict_Size(op)!=7||\n               own_plain_field(op,\"attempted\")!=Py_True||!full||!PyBytes_CheckExact(full)||\n               (actual!=Py_True&&actual!=Py_False)||(returned!=Py_True&&returned!=Py_False)||\n               !error||(error!=Py_None&&!PyExceptionInstance_Check(error))||\n               !metadata_error||(metadata_error!=Py_None&&!PyExceptionInstance_Check(metadata_error))||\n               (metadata_error!=Py_None&&returned!=Py_True))return -1;\n",
+            "new": "           own_plain_field(ledger,\"actual_attempted\")!=Py_True||\n           (own_plain_field(ledger,\"state_complete\")!=Py_True&&\n            own_plain_field(ledger,\"state_complete\")!=Py_False)||\n           !ascii(own_plain_field(ledger,\"mode\"),mode==1?\"sha256\":mode==2?\"new\":mode==3?\"copy\":\"\"))return -1;\n        /* A257: pay every actual row BEFORE entering the loop. Exact seven\n         * fields bound each row's scans, not the number of update rows. Keep\n         * the original pool/caps; refusal retains the same owners. This is an\n         * explicit conservative debit, NOT measured whole implicit ABI fit. */\n        uint64_t updates=(uint64_t)PyList_GET_SIZE(ops);\n        const uint64_t row_reads=24576;\n        if(updates>UINT64_MAX/row_reads)\n            return FridayPublisherMasterFault(&root_storage.pool,\"own_hash_full_update_scan_overflow\");\n        if(FridayPublisherMasterBefore(&root_storage.pool,updates*row_reads,0,0,0)<0)return -1;\n        uint64_t attempted=1,confirmed=1;int complete=own_plain_field(ledger,\"state_complete\")==Py_True;\n        for(Py_ssize_t j=0;j<(Py_ssize_t)updates;j++) {\n            PyObject *op=PyList_GET_ITEM(ops,j);\n            if((j&1023)==0&&!command_clock(r))return -1;\n            if(!op||!PyDict_CheckExact(op)||PyDict_Size(op)!=7)return -1;\n            PyObject *full=own_plain_field(op,\"full_bytes\");\n            PyObject *actual=own_plain_field(op,\"actual_attempted\"),*returned=own_plain_field(op,\"confirmed\");\n            PyObject *error=own_plain_field(op,\"original_error\");\n            PyObject *metadata_error=own_plain_field(op,\"metadata_error\");\n            if(own_plain_field(op,\"attempted\")!=Py_True||!full||!PyBytes_CheckExact(full)||\n               (actual!=Py_True&&actual!=Py_False)||(returned!=Py_True&&returned!=Py_False)||\n               !error||(error!=Py_None&&!PyExceptionInstance_Check(error))||\n               !metadata_error||(metadata_error!=Py_None&&!PyExceptionInstance_Check(metadata_error))||\n               (metadata_error!=Py_None&&returned!=Py_True))return -1;\n",
+            "id": "A257-H002"
+          }
+        ],
+        "exact_forward_inverse": true
+      }
+    }
+  ],
+  "counted_host_read_bytes": 3682720,
+  "source_execution": 0
+}

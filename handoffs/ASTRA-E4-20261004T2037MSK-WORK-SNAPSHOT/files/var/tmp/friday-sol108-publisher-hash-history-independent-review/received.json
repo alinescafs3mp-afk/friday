@@ -1,0 +1,16 @@
+{
+  "schema": "friday.sol108.received.v1",
+  "event": "ASTRA-SOL108-T1",
+  "assignment": "ASTRA-E4-A257-PUBLISHER-HASH-FULL-HISTORY-SCAN-NONAUTHOR-SOL108",
+  "generation": 1,
+  "accepted_msk": "2026-10-04T19:25:04+03:00",
+  "task": {"path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL108-TASK.txt", "sha256": "6f8307b063e9ad8033594c37c901f840ebce15f61bbf3c0b843c669fff37c722"},
+  "input": {"path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL108-INPUT-20261004.json", "sha256": "3b8a67649940ac46e5a56d72b0f3a724855cf40e966af2bb0068962a76a2ebbf"},
+  "lifecycle": "ACTIVE",
+  "native_queue_at_acceptance": {"count": 0, "consume": "NOT_NEEDED_ITEM_ALREADY_DISPATCHED"},
+  "pre_task_compact": "Astra confirms completed exactly once; not repeated",
+  "scope": "Read-only independent A257 arithmetic/debit/shape review; no SOL107 continuation or draft read",
+  "children": 0,
+  "source_execution": 0,
+  "ABSTRACT_HASH_ONLY": {"required": true, "waiver": false}
+}

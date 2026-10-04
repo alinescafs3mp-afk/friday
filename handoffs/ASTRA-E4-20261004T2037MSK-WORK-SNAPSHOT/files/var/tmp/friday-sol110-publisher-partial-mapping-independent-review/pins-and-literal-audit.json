@@ -1,0 +1,3575 @@
+{
+  "schema": "friday.sol110.host-literal-audit.v1",
+  "verified_msk": "2026-10-04T20:16:46.615713+03:00",
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL110-INPUT-20261004.json",
+    "bytes": 32907,
+    "sha256": "e6bda26c1f864e45abf8a25ad7fd060a9181df2a1263f805c12c86e21ee3e939",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536554",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32907",
+      "1791133936943751975",
+      "1791133936969753336"
+    ],
+    "stable9": true
+  },
+  "candidate_manifest": {
+    "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/manifest.json",
+    "bytes": 17218,
+    "sha256": "9eba2d683ad67d0a481b6175f2b398d70dbd60da30a6747a1718fffaa6698314",
+    "identity9_decimal_strings": [
+      "2050",
+      "5135430",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "17218",
+      "1791132990308324798",
+      "1791132990308324798"
+    ],
+    "stable9": true
+  },
+  "baseline_manifest": {
+    "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/manifest.json",
+    "bytes": 32692,
+    "sha256": "82773d86edb14c70f82a7f5f3b31c9fb217b4097435596c93be786d697751374",
+    "identity9_decimal_strings": [
+      "2050",
+      "5010675",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32692",
+      "1791132364835513228",
+      "1791132364854513635"
+    ],
+    "stable9": true
+  },
+  "source_pins": [
+    {
+      "name": "consumer/source/authority.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/authority.py",
+        "bytes": 16580,
+        "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135364",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16580",
+          "1791132990305653913",
+          "1791132990305653913"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/authority.py",
+        "bytes": 16580,
+        "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135332",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16580",
+          "1791131666030679894",
+          "1791132277616494420"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 384,
+      "old_LF_count": 384
+    },
+    {
+      "name": "consumer/source/bill.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/bill.py",
+        "bytes": 24098,
+        "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135365",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24098",
+          "1791132990305780652",
+          "1791132990305780652"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/bill.py",
+        "bytes": 24098,
+        "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135333",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24098",
+          "1791131666030730890",
+          "1791132277616516591"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 643,
+      "old_LF_count": 643
+    },
+    {
+      "name": "consumer/source/body_scope.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/body_scope.py",
+        "bytes": 7655,
+        "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135366",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7655",
+          "1791132990305809053",
+          "1791132990305809053"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/body_scope.py",
+        "bytes": 7655,
+        "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135334",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7655",
+          "1791131666030756986",
+          "1791132277616537745"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 188,
+      "old_LF_count": 188
+    },
+    {
+      "name": "consumer/source/canonical.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/canonical.py",
+        "bytes": 3825,
+        "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135367",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3825",
+          "1791132990305827993",
+          "1791132990305827993"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/canonical.py",
+        "bytes": 3825,
+        "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135335",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3825",
+          "1791131666030776161",
+          "1791132277616555617"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 110,
+      "old_LF_count": 110
+    },
+    {
+      "name": "consumer/source/capability.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/capability.py",
+        "bytes": 11981,
+        "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135368",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11981",
+          "1791132990305844173",
+          "1791132990305844173"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/capability.py",
+        "bytes": 11981,
+        "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135336",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11981",
+          "1791131666030793140",
+          "1791132277616573460"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 277,
+      "old_LF_count": 277
+    },
+    {
+      "name": "consumer/source/contract.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/contract.py",
+        "bytes": 2099,
+        "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135369",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2099",
+          "1791132990305869663",
+          "1791132990305869663"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/contract.py",
+        "bytes": 2099,
+        "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135337",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2099",
+          "1791131666030820593",
+          "1791132277616594075"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 82,
+      "old_LF_count": 82
+    },
+    {
+      "name": "consumer/source/declared_controls.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/declared_controls.py",
+        "bytes": 39603,
+        "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135370",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "39603",
+          "1791132990305895719",
+          "1791132990305895719"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/declared_controls.py",
+        "bytes": 39603,
+        "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135338",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "39603",
+          "1791131666030838240",
+          "1791132277616611151"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 683,
+      "old_LF_count": 683
+    },
+    {
+      "name": "consumer/source/document_vector.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/document_vector.py",
+        "bytes": 17709,
+        "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135371",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17709",
+          "1791132990305926515",
+          "1791132990305926515"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/document_vector.py",
+        "bytes": 17709,
+        "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135339",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17709",
+          "1791131666030871370",
+          "1791132277616639062"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 269,
+      "old_LF_count": 269
+    },
+    {
+      "name": "consumer/source/document_windows.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/document_windows.py",
+        "bytes": 7707,
+        "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135372",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7707",
+          "1791132990305947308",
+          "1791132990305947308"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/document_windows.py",
+        "bytes": 7707,
+        "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135340",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7707",
+          "1791131666030895819",
+          "1791132277616659980"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 127,
+      "old_LF_count": 127
+    },
+    {
+      "name": "consumer/source/effects.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/effects.py",
+        "bytes": 690,
+        "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135373",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "690",
+          "1791132990305964490",
+          "1791132990305964490"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/effects.py",
+        "bytes": 690,
+        "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135341",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "690",
+          "1791131666030914706",
+          "1791132277616678272"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 22,
+      "old_LF_count": 22
+    },
+    {
+      "name": "consumer/source/formats.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/formats.py",
+        "bytes": 13628,
+        "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135374",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13628",
+          "1791132990305984002",
+          "1791132990305984002"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/formats.py",
+        "bytes": 13628,
+        "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135342",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13628",
+          "1791131666030933959",
+          "1791132277616693271"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 346,
+      "old_LF_count": 346
+    },
+    {
+      "name": "consumer/source/ingress.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/ingress.py",
+        "bytes": 3025,
+        "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135375",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3025",
+          "1791132990306015894",
+          "1791132990306015894"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/ingress.py",
+        "bytes": 3025,
+        "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135343",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3025",
+          "1791131666030954365",
+          "1791132277616715187"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 75,
+      "old_LF_count": 75
+    },
+    {
+      "name": "consumer/source/material_literals.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/material_literals.py",
+        "bytes": 5689,
+        "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135376",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5689",
+          "1791132990306038400",
+          "1791132990306038400"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/material_literals.py",
+        "bytes": 5689,
+        "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135344",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5689",
+          "1791131666030969780",
+          "1791132277616732849"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 90,
+      "old_LF_count": 90
+    },
+    {
+      "name": "consumer/source/performing_contracts.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/performing_contracts.py",
+        "bytes": 18209,
+        "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135377",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18209",
+          "1791132990306063182",
+          "1791132990306063182"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/performing_contracts.py",
+        "bytes": 18209,
+        "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135345",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18209",
+          "1791131666030990587",
+          "1791132277616753366"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 300,
+      "old_LF_count": 300
+    },
+    {
+      "name": "consumer/source/pins.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/pins.py",
+        "bytes": 9147,
+        "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135378",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9147",
+          "1791132990306086154",
+          "1791132990306086154"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/pins.py",
+        "bytes": 9147,
+        "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135346",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9147",
+          "1791131666031016272",
+          "1791132277616775790"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 165,
+      "old_LF_count": 165
+    },
+    {
+      "name": "consumer/source/producer_consumer.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/producer_consumer.py",
+        "bytes": 3243,
+        "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135379",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3243",
+          "1791132990306102890",
+          "1791132990306102890"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/producer_consumer.py",
+        "bytes": 3243,
+        "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135347",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3243",
+          "1791131666031037045",
+          "1791132277616795435"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 91,
+      "old_LF_count": 91
+    },
+    {
+      "name": "consumer/source/receipt_chain.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/receipt_chain.py",
+        "bytes": 16263,
+        "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135380",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16263",
+          "1791132990306120222",
+          "1791132990306120222"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/receipt_chain.py",
+        "bytes": 16263,
+        "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135348",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16263",
+          "1791131666031054376",
+          "1791132277616812864"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 392,
+      "old_LF_count": 392
+    },
+    {
+      "name": "consumer/source/recipe_planner.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/recipe_planner.py",
+        "bytes": 102799,
+        "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135381",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "102799",
+          "1791132990306166959",
+          "1791132990306166959"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/recipe_planner.py",
+        "bytes": 102799,
+        "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135349",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "102799",
+          "1791131666031077066",
+          "1791132277616833599"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 2192,
+      "old_LF_count": 2192
+    },
+    {
+      "name": "consumer/source/resource_meter.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/resource_meter.py",
+        "bytes": 29321,
+        "sha256": "eb49bcb0be0f1df0ec185ee285b069596c00b5e28b6fbce6a0c91533bcd7a976",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135382",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29321",
+          "1791132990306208438",
+          "1791132990306208438"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/resource_meter.py",
+        "bytes": 29321,
+        "sha256": "eb49bcb0be0f1df0ec185ee285b069596c00b5e28b6fbce6a0c91533bcd7a976",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135350",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29321",
+          "1791131666031118583",
+          "1791132277616875654"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 581,
+      "old_LF_count": 581
+    },
+    {
+      "name": "consumer/source/runtime_consumer.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/runtime_consumer.py",
+        "bytes": 13297,
+        "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135383",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13297",
+          "1791132990306232983",
+          "1791132990306232983"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/runtime_consumer.py",
+        "bytes": 13297,
+        "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135351",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13297",
+          "1791131666031144543",
+          "1791132277616900417"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 207,
+      "old_LF_count": 207
+    },
+    {
+      "name": "consumer/source/schema_validate.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/schema_validate.py",
+        "bytes": 6776,
+        "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135384",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6776",
+          "1791132990306251892",
+          "1791132990306251892"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/schema_validate.py",
+        "bytes": 6776,
+        "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135352",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6776",
+          "1791131666031164083",
+          "1791132277616920690"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 173,
+      "old_LF_count": 173
+    },
+    {
+      "name": "consumer/source/semantics.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/semantics.py",
+        "bytes": 2578,
+        "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135385",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2578",
+          "1791132990306269516",
+          "1791132990306269516"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/semantics.py",
+        "bytes": 2578,
+        "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135353",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2578",
+          "1791131666031181999",
+          "1791132277616937231"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 54,
+      "old_LF_count": 54
+    },
+    {
+      "name": "consumer/source/whole_join.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/consumer/source/whole_join.py",
+        "bytes": 18213,
+        "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135386",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18213",
+          "1791132990306288023",
+          "1791132990306288023"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/consumer/source/whole_join.py",
+        "bytes": 18213,
+        "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135354",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18213",
+          "1791131666031197877",
+          "1791132277616953886"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 435,
+      "old_LF_count": 435
+    },
+    {
+      "name": "native/publisher_original_caller.c",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/native/publisher_original_caller.c",
+        "bytes": 13800,
+        "sha256": "d228b6a5c0f33d81f884f6cb992f6f23d6638501cd69af1d4d2705b0b586d180",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135388",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13800",
+          "1791132990306288023",
+          "1791132990306288023"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/native/publisher_original_caller.c",
+        "bytes": 13800,
+        "sha256": "d228b6a5c0f33d81f884f6cb992f6f23d6638501cd69af1d4d2705b0b586d180",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135322",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13800",
+          "1791131666031229113",
+          "1791132277616137191"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 238,
+      "old_LF_count": 238
+    },
+    {
+      "name": "native/publisher_original_caller.h",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/native/publisher_original_caller.h",
+        "bytes": 6493,
+        "sha256": "27bf9815fb118e12c7c32943875c30c4d6cf640c53e74cb5d1ac073fbeb4b05e",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135389",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6493",
+          "1791132990306347964",
+          "1791132990306347964"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/native/publisher_original_caller.h",
+        "bytes": 6493,
+        "sha256": "27bf9815fb118e12c7c32943875c30c4d6cf640c53e74cb5d1ac073fbeb4b05e",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135323",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6493",
+          "1791131666031249830",
+          "1791132277616162450"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 113,
+      "old_LF_count": 113
+    },
+    {
+      "name": "native/publisher_owned_custody.c",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/native/publisher_owned_custody.c",
+        "bytes": 63843,
+        "sha256": "6cb9dc7b228fae434c4a9178d225f4e159a9e916ba65e1dd6aba587c5ed1ef08",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135390",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "63843",
+          "1791132990306380781",
+          "1791132990306380781"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/native/publisher_owned_custody.c",
+        "bytes": 63843,
+        "sha256": "6cb9dc7b228fae434c4a9178d225f4e159a9e916ba65e1dd6aba587c5ed1ef08",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135324",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "63843",
+          "1791131666031274424",
+          "1791132277616181609"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 1077,
+      "old_LF_count": 1077
+    },
+    {
+      "name": "native/publisher_owned_custody.h",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/native/publisher_owned_custody.h",
+        "bytes": 5728,
+        "sha256": "6e08b447f7dfefb119f3d894f7a6b9a8a0b4dd85e5e3ea7abb9b296101b8f7ed",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135391",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5728",
+          "1791132990306410222",
+          "1791132990306410222"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/native/publisher_owned_custody.h",
+        "bytes": 5728,
+        "sha256": "6e08b447f7dfefb119f3d894f7a6b9a8a0b4dd85e5e3ea7abb9b296101b8f7ed",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135325",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5728",
+          "1791131666031302580",
+          "1791132277616214659"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 100,
+      "old_LF_count": 100
+    },
+    {
+      "name": "native/publisher_root_command.c",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/native/publisher_root_command.c",
+        "bytes": 27772,
+        "sha256": "51fd8c4a662b802bc8f5910e4b34cc94804faeb89b480bfcac6c4072f2c2dc1b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135392",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27772",
+          "1791132990306434199",
+          "1791132990306434199"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/native/publisher_root_command.c",
+        "bytes": 27772,
+        "sha256": "51fd8c4a662b802bc8f5910e4b34cc94804faeb89b480bfcac6c4072f2c2dc1b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135326",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27772",
+          "1791131666031345589",
+          "1791132277616232827"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 523,
+      "old_LF_count": 523
+    },
+    {
+      "name": "native/publisher_root_command.h",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/native/publisher_root_command.h",
+        "bytes": 4777,
+        "sha256": "7af5c2b27f9b748f2253ac4f8235912bf5105857e1d001fc6af09b0651dcb9bd",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135393",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4777",
+          "1791132990306454681",
+          "1791132990306454681"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/native/publisher_root_command.h",
+        "bytes": 4777,
+        "sha256": "7af5c2b27f9b748f2253ac4f8235912bf5105857e1d001fc6af09b0651dcb9bd",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135327",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4777",
+          "1791131666031366629",
+          "1791132277616260715"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 90,
+      "old_LF_count": 90
+    },
+    {
+      "name": "native/publisher_root_entry.c",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/native/publisher_root_entry.c",
+        "bytes": 460953,
+        "sha256": "29515cc28af51596ba0e1697488b331778dfa05259fb3c666fee2f8b99e235eb",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135394",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "460953",
+          "1791132990306620746",
+          "1791132990306620746"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/native/publisher_root_entry.c",
+        "bytes": 459370,
+        "sha256": "3c22683c6d65ade4df576ba546421a1ef9df864e8db94a2e4781e410e87944c6",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135328",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "459370",
+          "1791132286908023879",
+          "1791132286908023879"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 7991,
+      "old_LF_count": 7964
+    },
+    {
+      "name": "native/publisher_root_entry.h",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/native/publisher_root_entry.h",
+        "bytes": 18657,
+        "sha256": "b4feeab968c8240113195d2333fe9682be03eb4c2c084e7e07f1c38fc59344de",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135395",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18657",
+          "1791132990306721317",
+          "1791132990306721317"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/native/publisher_root_entry.h",
+        "bytes": 18657,
+        "sha256": "b4feeab968c8240113195d2333fe9682be03eb4c2c084e7e07f1c38fc59344de",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135329",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18657",
+          "1791131666031528875",
+          "1791132277616418898"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 326,
+      "old_LF_count": 326
+    },
+    {
+      "name": "source/actor_bootstrap.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/actor_bootstrap.py",
+        "bytes": 61339,
+        "sha256": "f47505b651e88b60d19b6a2fcef555d1709f4607433043e79229cf9c9af751df",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135397",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "61339",
+          "1791132990306721317",
+          "1791132990306721317"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/actor_bootstrap.py",
+        "bytes": 61339,
+        "sha256": "f47505b651e88b60d19b6a2fcef555d1709f4607433043e79229cf9c9af751df",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135295",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "61339",
+          "1791131666031564182",
+          "1791132277615366063"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 1097,
+      "old_LF_count": 1097
+    },
+    {
+      "name": "source/actor_context.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/actor_context.py",
+        "bytes": 25298,
+        "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135398",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25298",
+          "1791132990306795792",
+          "1791132990306795792"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/actor_context.py",
+        "bytes": 25298,
+        "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135296",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25298",
+          "1791131666031597476",
+          "1791132277615413030"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 415,
+      "old_LF_count": 415
+    },
+    {
+      "name": "source/admission.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/admission.py",
+        "bytes": 14621,
+        "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135399",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14621",
+          "1791132990306819093",
+          "1791132990306819093"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/admission.py",
+        "bytes": 14621,
+        "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135297",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14621",
+          "1791131666031620483",
+          "1791132277615441117"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 239,
+      "old_LF_count": 239
+    },
+    {
+      "name": "source/alljob_cohort.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/alljob_cohort.py",
+        "bytes": 24686,
+        "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135400",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24686",
+          "1791132990306844641",
+          "1791132990306844641"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/alljob_cohort.py",
+        "bytes": 24686,
+        "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135298",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24686",
+          "1791131666031639790",
+          "1791132277615463820"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 520,
+      "old_LF_count": 520
+    },
+    {
+      "name": "source/capacity.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/capacity.py",
+        "bytes": 20946,
+        "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135401",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "20946",
+          "1791132990306868712",
+          "1791132990306868712"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/capacity.py",
+        "bytes": 20946,
+        "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135299",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "20946",
+          "1791131666031661876",
+          "1791132277615488758"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 333,
+      "old_LF_count": 333
+    },
+    {
+      "name": "source/class_semantics.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/class_semantics.py",
+        "bytes": 19516,
+        "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135402",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19516",
+          "1791132990306893996",
+          "1791132990306893996"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/class_semantics.py",
+        "bytes": 19516,
+        "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135300",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19516",
+          "1791131666031680681",
+          "1791132277615510874"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 333,
+      "old_LF_count": 333
+    },
+    {
+      "name": "source/common.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/common.py",
+        "bytes": 37411,
+        "sha256": "eedafb8804eae10c6919183f75c06333f99ce2e1b586a6314670b96b3ade00f8",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135403",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37411",
+          "1791132990306920022",
+          "1791132990306920022"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/common.py",
+        "bytes": 37411,
+        "sha256": "eedafb8804eae10c6919183f75c06333f99ce2e1b586a6314670b96b3ade00f8",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135301",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37411",
+          "1791131666031702840",
+          "1791132277615532488"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 835,
+      "old_LF_count": 835
+    },
+    {
+      "name": "source/consumer_bridge.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/consumer_bridge.py",
+        "bytes": 21315,
+        "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135404",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21315",
+          "1791132990306945287",
+          "1791132990306945287"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/consumer_bridge.py",
+        "bytes": 21315,
+        "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135302",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21315",
+          "1791131666031725691",
+          "1791132277615559801"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 322,
+      "old_LF_count": 322
+    },
+    {
+      "name": "source/custody.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/custody.py",
+        "bytes": 29181,
+        "sha256": "2dce6e09e39b8faf6063619e77a7bd9a0e756ec6111dc38409438eb046c87e09",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135405",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29181",
+          "1791132990306975991",
+          "1791132990306975991"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/custody.py",
+        "bytes": 29181,
+        "sha256": "2dce6e09e39b8faf6063619e77a7bd9a0e756ec6111dc38409438eb046c87e09",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135303",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29181",
+          "1791131666031748122",
+          "1791132277615583105"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 579,
+      "old_LF_count": 579
+    },
+    {
+      "name": "source/existing_root_caller.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/existing_root_caller.py",
+        "bytes": 37637,
+        "sha256": "2dc5040eeacf820c031b5b0ebb291fd733dd6798de919ec2d6762d9d22bfe6c4",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135406",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37637",
+          "1791132990307009195",
+          "1791132990307009195"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/existing_root_caller.py",
+        "bytes": 37637,
+        "sha256": "2dc5040eeacf820c031b5b0ebb291fd733dd6798de919ec2d6762d9d22bfe6c4",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135304",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37637",
+          "1791131666031772326",
+          "1791132277615607911"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 615,
+      "old_LF_count": 615
+    },
+    {
+      "name": "source/extraction.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/extraction.py",
+        "bytes": 27923,
+        "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135407",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27923",
+          "1791132990307040532",
+          "1791132990307040532"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/extraction.py",
+        "bytes": 27923,
+        "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135305",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27923",
+          "1791131666031795402",
+          "1791132277615633624"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 535,
+      "old_LF_count": 535
+    },
+    {
+      "name": "source/fact_bridge.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/fact_bridge.py",
+        "bytes": 14689,
+        "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135408",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14689",
+          "1791132990307062717",
+          "1791132990307062717"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/fact_bridge.py",
+        "bytes": 14689,
+        "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135306",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14689",
+          "1791131666031814860",
+          "1791132277615658320"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 209,
+      "old_LF_count": 209
+    },
+    {
+      "name": "source/independent_selector.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/independent_selector.py",
+        "bytes": 7718,
+        "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135409",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7718",
+          "1791132990307084120",
+          "1791132990307084120"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/independent_selector.py",
+        "bytes": 7718,
+        "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135307",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7718",
+          "1791131666031831974",
+          "1791132277615681004"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 112,
+      "old_LF_count": 112
+    },
+    {
+      "name": "source/launcher.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/launcher.py",
+        "bytes": 11634,
+        "sha256": "3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135410",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11634",
+          "1791132990307119608",
+          "1791132990307119608"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/launcher.py",
+        "bytes": 11634,
+        "sha256": "3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135308",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11634",
+          "1791131666031847357",
+          "1791132277615698490"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 210,
+      "old_LF_count": 210
+    },
+    {
+      "name": "source/lifetime.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/lifetime.py",
+        "bytes": 49101,
+        "sha256": "4cbdbc7840fefc6c971043d3913c8833ca17e259cdfa95aaddb1e19b4ce1e8d6",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135411",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "49101",
+          "1791132990307167015",
+          "1791132990307167015"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/lifetime.py",
+        "bytes": 49101,
+        "sha256": "4cbdbc7840fefc6c971043d3913c8833ca17e259cdfa95aaddb1e19b4ce1e8d6",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135309",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "49101",
+          "1791131666031865561",
+          "1791132277615719014"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 853,
+      "old_LF_count": 853
+    },
+    {
+      "name": "source/master_pool.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/master_pool.py",
+        "bytes": 2315,
+        "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135412",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2315",
+          "1791132990307195493",
+          "1791132990307195493"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/master_pool.py",
+        "bytes": 2315,
+        "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135310",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2315",
+          "1791131666031890498",
+          "1791132277615748969"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 39,
+      "old_LF_count": 39
+    },
+    {
+      "name": "source/native.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/native.py",
+        "bytes": 44470,
+        "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135413",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "44470",
+          "1791132990307220967",
+          "1791132990307220967"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/native.py",
+        "bytes": 44470,
+        "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135311",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "44470",
+          "1791131666031905049",
+          "1791132277615766694"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 672,
+      "old_LF_count": 672
+    },
+    {
+      "name": "source/normalization.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/normalization.py",
+        "bytes": 12779,
+        "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135414",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12779",
+          "1791132990307246851",
+          "1791132990307246851"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/normalization.py",
+        "bytes": 12779,
+        "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135312",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "12779",
+          "1791131666031928270",
+          "1791132277615796248"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 184,
+      "old_LF_count": 184
+    },
+    {
+      "name": "source/observer.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/observer.py",
+        "bytes": 139337,
+        "sha256": "b7c71b05a189aa9409312a1d7c025b6da21071d27408bec39d027a561b62e0e8",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135415",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "139337",
+          "1791132990307300357",
+          "1791132990307300357"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/observer.py",
+        "bytes": 138862,
+        "sha256": "8ce39e6c8237264ddcb02e2debf34589e9187e039eabb6402c53b57aede1cce1",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135313",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "138862",
+          "1791131666031947817",
+          "1791132277615819532"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 2207,
+      "old_LF_count": 2201
+    },
+    {
+      "name": "source/operations.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/operations.py",
+        "bytes": 24309,
+        "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135416",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24309",
+          "1791132990307355901",
+          "1791132990307355901"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/operations.py",
+        "bytes": 24309,
+        "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135314",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24309",
+          "1791131666031997304",
+          "1791132277615869664"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 419,
+      "old_LF_count": 419
+    },
+    {
+      "name": "source/owned_prefix_bank.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/owned_prefix_bank.py",
+        "bytes": 42474,
+        "sha256": "d9ad072368a3cbf310f915a22cacf7d935d778ee57c54fbd4c930df64efdf75b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135417",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42474",
+          "1791132990307387319",
+          "1791132990307387319"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/owned_prefix_bank.py",
+        "bytes": 42474,
+        "sha256": "d9ad072368a3cbf310f915a22cacf7d935d778ee57c54fbd4c930df64efdf75b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135315",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "42474",
+          "1791131666032015987",
+          "1791132277615893591"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 827,
+      "old_LF_count": 827
+    },
+    {
+      "name": "source/retention.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/retention.py",
+        "bytes": 8465,
+        "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135418",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8465",
+          "1791132990307412091",
+          "1791132990307412091"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/retention.py",
+        "bytes": 8465,
+        "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135316",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8465",
+          "1791131666032038389",
+          "1791132277615920183"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 103,
+      "old_LF_count": 103
+    },
+    {
+      "name": "source/roles.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/roles.py",
+        "bytes": 5018,
+        "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135419",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5018",
+          "1791132990307430908",
+          "1791132990307430908"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/roles.py",
+        "bytes": 5018,
+        "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135317",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5018",
+          "1791131666032112478",
+          "1791132277615959459"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 98,
+      "old_LF_count": 98
+    },
+    {
+      "name": "source/root_tool_adapter.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/root_tool_adapter.py",
+        "bytes": 151551,
+        "sha256": "f62785816d2aead153aa67c1709b50fcfdd8ced465acf042274f238920acf3be",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135420",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "151551",
+          "1791132990307487294",
+          "1791132990307487294"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/root_tool_adapter.py",
+        "bytes": 151551,
+        "sha256": "f62785816d2aead153aa67c1709b50fcfdd8ced465acf042274f238920acf3be",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135318",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "151551",
+          "1791131666032138134",
+          "1791132277615997229"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 2116,
+      "old_LF_count": 2116
+    },
+    {
+      "name": "source/selected_owned_values.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/selected_owned_values.py",
+        "bytes": 44070,
+        "sha256": "2c5b53f58c83bdcfc306c980010b9f3130380595a4f3c4f526702da895bd8502",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135421",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "44070",
+          "1791132990307541905",
+          "1791132990307541905"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/selected_owned_values.py",
+        "bytes": 39170,
+        "sha256": "c36070e14c77f54b273be92e2bd0800683985bb05bd3927cdaefcb351488f3ac",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135319",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "39170",
+          "1791131666032191597",
+          "1791132277616057317"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 851,
+      "old_LF_count": 769
+    },
+    {
+      "name": "source/snapshot_producer.py",
+      "candidate": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/source/snapshot_producer.py",
+        "bytes": 4130,
+        "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135422",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4130",
+          "1791132990307564749",
+          "1791132990307564749"
+        ],
+        "stable9": true
+      },
+      "baseline": {
+        "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/source/snapshot_producer.py",
+        "bytes": 4130,
+        "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135320",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4130",
+          "1791131666032217426",
+          "1791132277616084452"
+        ],
+        "stable9": true
+      },
+      "new_LF_count": 52,
+      "old_LF_count": 52
+    }
+  ],
+  "changes": [
+    {
+      "name": "native/publisher_root_entry.c",
+      "hunks": [
+        {
+          "tag": "replace",
+          "old_LF_start": 3811,
+          "old_LF_end": 3811,
+          "new_LF_start": 3811,
+          "new_LF_end": 3811,
+          "old_text": "static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p) {\n",
+          "new_text": "static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p,int cohort) {\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 3886,
+          "old_LF_end": 3886,
+          "new_LF_start": 3886,
+          "new_LF_end": 3886,
+          "old_text": "        \"closed\",Py_False,\"full_bytes\",cut->refs[2],\"cohort_before_effect\",Py_False);\n",
+          "new_text": "        \"closed\",Py_False,\"full_bytes\",cut->refs[2],\"cohort_before_effect\",cohort?Py_True:Py_False);\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 3903,
+          "old_LF_end": 3902,
+          "new_LF_start": 3903,
+          "new_LF_end": 3914,
+          "old_text": "",
+          "new_text": "        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers)||\n           !ascii(own_plain_field(cut,\"schema\"),\"friday.sol106.actual-mmap-constructor.v1\")||\n           own_plain_field(cut,\"row\")!=row||own_plain_field(cut,\"credit\")!=credit||\n           own_plain_field(cut,\"returned_mapping\")!=Py_None||\n           own_plain_field(cut,\"returned\")!=Py_False||\n           own_plain_field(cut,\"attempted\")!=Py_False||\n           own_plain_field(cut,\"state_complete\")!=Py_False||\n           own_plain_field(cut,\"original_error\")!=Py_None||\n           own_plain_field(cut,\"metadata_error\")!=Py_None||\n           own_plain_field(cut,\"prebirth_error\")!=Py_None||\n           !own_plain_field(cut,\"birth\"))\n            return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_actual_birth_inputs\"),NULL;\n"
+        },
+        {
+          "tag": "delete",
+          "old_LF_start": 3904,
+          "old_LF_end": 3905,
+          "new_LF_start": 3916,
+          "new_LF_end": 3915,
+          "old_text": "        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers))\n            return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_actual_birth_inputs\"),NULL;\n",
+          "new_text": ""
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 3948,
+          "old_LF_end": 3947,
+          "new_LF_start": 3958,
+          "new_LF_end": 3962,
+          "old_text": "",
+          "new_text": "        if(!p->refs[7]||PyDict_SetItemString(p->refs[7],\"mapping\",p->refs[6])<0||\n           PyDict_SetItemString(cut,\"returned_mapping\",p->refs[6])<0||\n           PyDict_SetItemString(cut,\"returned\",Py_True)<0) {\n            p->confirmed=1;return own_error(p),NULL;\n        }\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 3954,
+          "old_LF_end": 3953,
+          "new_LF_start": 3969,
+          "new_LF_end": 3972,
+          "old_text": "",
+          "new_text": "    if(!strcmp(action,\"retained\")) {\n        if(!p->refs[6])Py_RETURN_NONE;\n        return Py_NewRef(p->refs[6]);\n    }\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 3955,
+          "old_LF_end": 3955,
+          "new_LF_start": 3974,
+          "new_LF_end": 3975,
+          "old_text": "    if(!strcmp(action,\"cut\"))return own_mapping_current_cut(p);\n",
+          "new_text": "    if(!strcmp(action,\"cut\")||!strcmp(action,\"cohort-cut\"))\n        return own_mapping_current_cut(p,!strcmp(action,\"cohort-cut\"));\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 4032,
+          "old_LF_end": 4031,
+          "new_LF_start": 4052,
+          "new_LF_end": 4052,
+          "old_text": "",
+          "new_text": "        if(p->attempts>=3||(p->flags&4))return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_close_outcome_unknown\"),NULL;\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 4038,
+          "old_LF_end": 4038,
+          "new_LF_start": 4059,
+          "new_LF_end": 4059,
+          "old_text": "        if(!closed)return own_error(p),NULL;\n",
+          "new_text": "        if(!closed){p->flags|=4;return own_error(p),NULL;}\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 4040,
+          "old_LF_end": 4040,
+          "new_LF_start": 4061,
+          "new_LF_end": 4061,
+          "old_text": "        if(!confirmed)return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_actual_closed\"),NULL;\n",
+          "new_text": "        if(!confirmed){p->flags|=4;return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_close_unconfirmed\"),NULL;}\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 5158,
+          "old_LF_end": 5157,
+          "new_LF_start": 5179,
+          "new_LF_end": 5179,
+          "old_text": "",
+          "new_text": "    if(p->attempts>=3&&(p->flags&4)&&p->confirmed!=3)return 3;\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 5174,
+          "old_LF_end": 5173,
+          "new_LF_start": 5196,
+          "new_LF_end": 5200,
+          "old_text": "",
+          "new_text": "        if(expected&&(bytes!=sizeof(phase)||r->nodes[r->active_node-1].edges!=15))return -1;\n        return 0;\n    }\n    if(phase==3) {\n        /* Unknown close stays off CURRENT16 and RETIRED15. No buffer, tell, or fstat. */\n"
+        }
+      ],
+      "forward_exact": true,
+      "inverse_exact": true
+    },
+    {
+      "name": "source/observer.py",
+      "hunks": [
+        {
+          "tag": "insert",
+          "old_LF_start": 196,
+          "old_LF_end": 195,
+          "new_LF_start": 196,
+          "new_LF_end": 199,
+          "old_text": "",
+          "new_text": "        elif selected_mapping is not None and selected_mapping.close_attempted and not selected_mapping.closed_confirmed:\n            unsupported.append({'identity':str(key),'module':'mmap','class':'mmap',\n                'reason':'mapping_close_outcome_unknown'})\n            row=['unsupported','mapping_close_outcome_unknown']\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 870,
+          "old_LF_end": 869,
+          "new_LF_start": 874,
+          "new_LF_end": 875,
+          "old_text": "",
+          "new_text": "        elif kind=='unsupported' and body=='mapping_close_outcome_unknown':\n            raise Refused('mapping_close_outcome_unknown','terminal')\n"
+        }
+      ],
+      "forward_exact": true,
+      "inverse_exact": true
+    },
+    {
+      "name": "source/selected_owned_values.py",
+      "hunks": [
+        {
+          "tag": "replace",
+          "old_LF_start": 143,
+          "old_LF_end": 143,
+          "new_LF_start": 143,
+          "new_LF_end": 144,
+          "old_text": "        # this constructor. Initialize its custody before fallible validation.\n",
+          "new_text": "        # this constructor. The creation record is that preowned slot.\n        # A failed check writes the error there and does not allocate a map.\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 148,
+          "old_LF_end": 147,
+          "new_LF_start": 149,
+          "new_LF_end": 149,
+          "old_text": "",
+          "new_text": "        self.metadata_error=None;self.state_complete=False\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 149,
+          "old_LF_end": 172,
+          "new_LF_start": 151,
+          "new_LF_end": 186,
+          "old_text": "            'fd':prepared.fd,'width':width,'access':mmap.ACCESS_WRITE,\n            'attempted':False,'returned':False,'original_error':None}\n        prepared._owned()\n        row=prepared.store.fdjournal._row(prepared.fd)\n        if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:\n            raise Refused('selected_mapping_actual_prepared_row','terminal')\n        self.fd=prepared.fd;self.row=row;self.credit=prepared.hold\n        self.owner_pid=os.getpid();self.width=width;self.role=role\n        self.binding=prepared.binding()\n        self.birth=identity9(os.fstat(self.fd))\n        self.cuts=[];self.child_reads=0;self.child_allocation=0\n        self.borrowed=False\n        # Debit before mmap allocation. Mapping is not a newly granted role.\n        if self.binding['allocation']<width+131072:\n            raise Refused('selected_mapping_original_RAM_before_birth','terminal')\n        charge_selected_allocation(self.credit,width+131072)\n        self._own_registry=_own_native()\n        if self._own_registry is not None:\n            self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)\n        # Record the BIRTH identity before mmap, not an allocating registration\n        # after return. A returned map is reachable even if metadata later fails.\n        key=(os.getpid(),id(self))\n        if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')\n        _MAP_BIRTHS[key]=self\n",
+          "new_text": "            'fd':None,'width':width,'access':mmap.ACCESS_WRITE,\n            'attempted':False,'returned':False,'returned_mapping':None,\n            'original_error':None,'metadata_error':None,'prebirth_error':None,\n            'row':None,'credit':None,'birth':None,'state_complete':False}\n        try:\n            prepared._owned()\n            row=prepared.store.fdjournal._row(prepared.fd)\n            if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:\n                raise Refused('selected_mapping_actual_prepared_row','terminal')\n            self.fd=prepared.fd;self.row=row;self.credit=prepared.hold\n            self.owner_pid=os.getpid();self.width=width;self.role=role\n            self.binding=prepared.binding()\n            self.creation['fd']=self.fd\n            self.creation['row']=row\n            self.creation['credit']=self.credit\n            if self.binding['allocation']<width+131072:\n                raise Refused('selected_mapping_original_RAM_before_birth','terminal')\n            charge_selected_allocation(self.credit,width+131072)\n            if row.get('status') not in ('ACQUIRED','HELD') or row.get('attempted_close') not in (None,'NOT_ATTEMPTED'):\n                raise Refused('selected_mapping_keeper_still_owned','terminal')\n            self.birth=identity9(os.fstat(self.fd))\n            self.creation['birth']=self.birth\n            self.cuts=[];self.child_reads=0;self.child_allocation=0\n            self.borrowed=False\n            self._own_registry=_own_native()\n            if self._own_registry is not None:\n                self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)\n            key=(os.getpid(),id(self))\n            if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')\n            _MAP_BIRTHS[key]=self\n        except BaseException as error:\n            self.creation['prebirth_error']=error\n            self.creation['state_complete']=False\n            self.state_complete=False\n            self.creation_error=error\n            raise\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 174,
+          "old_LF_end": 174,
+          "new_LF_start": 188,
+          "new_LF_end": 188,
+          "old_text": "        if self.created or self.mapping is not None or os.getpid()!=self.owner_pid:\n",
+          "new_text": "        if self.created or self.mapping is not None or self.creation.get('returned') is True or os.getpid()!=self.owner_pid:\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 176,
+          "old_LF_end": 176,
+          "new_LF_start": 190,
+          "new_LF_end": 191,
+          "old_text": "        self.created=True\n",
+          "new_text": "        if self.creation.get('prebirth_error') is not None:\n            raise Refused('selected_mapping_prebirth_incomplete','terminal')\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 180,
+          "old_LF_end": 180,
+          "new_LF_start": 195,
+          "new_LF_end": 198,
+          "old_text": "                self.mapping=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)\n",
+          "new_text": "                result=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)\n                self.mapping=result\n                self.creation['returned_mapping']=result\n                self.creation['returned']=True\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 182,
+          "old_LF_end": 184,
+          "new_LF_start": 200,
+          "new_LF_end": 202,
+          "old_text": "                # SAME constructor, now the actual native recipient retains\n                # the returned object before any Source metadata operation.\n                self.mapping=self._own_registry.own_mapping('create',self,None,\n",
+          "new_text": "                # Native retains the constructor return in its row and in this\n                # preowned record before Source metadata below can fail.\n                result=self._own_registry.own_mapping('create',self,None,\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 186,
+          "old_LF_end": 186,
+          "new_LF_start": 204,
+          "new_LF_end": 217,
+          "old_text": "            self.creation['returned']=True\n",
+          "new_text": "                if result is None:\n                    result=self._own_registry.own_mapping('retained',self,None,\n                        self.creation,self.cuts,self.row,self.credit)\n                if self.mapping is None and result is not None:\n                    self.mapping=result\n                    self.creation['returned_mapping']=result\n                    self.creation['returned']=True\n                if (result is None or self.mapping is not result\n                        or self.creation.get('returned_mapping') is not result\n                        or self.creation.get('returned') is not True):\n                    raise Refused('selected_mapping_returned_alias','terminal')\n            self.created=True\n            self.state_complete=True\n            self.creation['state_complete']=True\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 188,
+          "old_LF_end": 188,
+          "new_LF_start": 219,
+          "new_LF_end": 240,
+          "old_text": "            self.creation_error=error;self.creation['original_error']=error\n",
+          "new_text": "            if self.mapping is None and self._own_registry is not None:\n                held=None\n                try:\n                    held=self._own_registry.own_mapping('retained',self,None,\n                        self.creation,self.cuts,self.row,self.credit)\n                except BaseException:\n                    held=None\n                if held is not None:\n                    self.mapping=held\n                    self.creation['returned_mapping']=held\n                    self.creation['returned']=True\n            if self.mapping is not None and self.creation.get('returned_mapping') is None:\n                self.creation['returned_mapping']=self.mapping\n                self.creation['returned']=True\n            self.state_complete=False\n            self.creation['state_complete']=False\n            if self.creation.get('returned') is True or self.mapping is not None:\n                self.metadata_error=error\n                self.creation['metadata_error']=error\n            else:\n                self.creation_error=error\n                self.creation['original_error']=error\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 191,
+          "old_LF_end": 190,
+          "new_LF_start": 243,
+          "new_LF_end": 247,
+          "old_text": "",
+          "new_text": "    def _require_owned_body_fd(self):\n        row=self.row\n        if (type(row) is not dict or row.get('status') not in ('ACQUIRED','HELD')\n                or row.get('attempted_close') not in (None,'NOT_ATTEMPTED')):\n            raise Refused('selected_mapping_keeper_still_owned','terminal')\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 205,
+          "old_LF_end": 205,
+          "new_LF_start": 262,
+          "new_LF_end": 264,
+          "old_text": "        if mapping is None or mapping.closed or self.close_attempted:\n",
+          "new_text": "        if mapping is None or self.close_attempted or mapping.closed:\n            if self.close_attempted and not self.closed_confirmed:\n                raise Refused('selected_mapping_close_outcome_unknown','terminal')\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 222,
+          "old_LF_end": 221,
+          "new_LF_start": 281,
+          "new_LF_end": 281,
+          "old_text": "",
+          "new_text": "        self._require_owned_body_fd()\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 244,
+          "old_LF_end": 245,
+          "new_LF_start": 304,
+          "new_LF_end": 307,
+          "old_text": "        if (self.mapping is not None and self.mapping.closed\n                and self.close_attempted and self.closed_confirmed and self.close_error is None):\n",
+          "new_text": "        if self.close_attempted and not (self.closed_confirmed and self.close_error is None and self.close_returned):\n            raise Refused('selected_mapping_close_outcome_unknown','terminal')\n        if (self.mapping is not None and self.closed_confirmed and self.close_attempted\n                and self.close_error is None and self.close_returned and self.mapping.closed):\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 256,
+          "old_LF_end": 256,
+          "new_LF_start": 318,
+          "new_LF_end": 318,
+          "old_text": "        if not any(item is cut for item in self.cuts) or self.mapping is None or self.mapping.closed:\n",
+          "new_text": "        if not any(item is cut for item in self.cuts) or self.mapping is None or self.close_attempted:\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 261,
+          "old_LF_end": 260,
+          "new_LF_start": 323,
+          "new_LF_end": 323,
+          "old_text": "",
+          "new_text": "            self._require_owned_body_fd()\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 272,
+          "old_LF_end": 271,
+          "new_LF_start": 335,
+          "new_LF_end": 335,
+          "old_text": "",
+          "new_text": "        self._require_owned_body_fd()\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 280,
+          "old_LF_end": 279,
+          "new_LF_start": 344,
+          "new_LF_end": 345,
+          "old_text": "",
+          "new_text": "            if self.close_attempted and not self.closed_confirmed:\n                raise Refused('selected_mapping_close_outcome_unknown','terminal')\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 287,
+          "old_LF_end": 286,
+          "new_LF_start": 353,
+          "new_LF_end": 353,
+          "old_text": "",
+          "new_text": "        self._require_owned_body_fd()\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 305,
+          "old_LF_end": 304,
+          "new_LF_start": 372,
+          "new_LF_end": 373,
+          "old_text": "",
+          "new_text": "        if self.close_returned or self.close_error is not None or self.closed_confirmed:\n            raise Refused('selected_mapping_close_outcome_unknown','terminal')\n"
+        },
+        {
+          "tag": "replace",
+          "old_LF_start": 311,
+          "old_LF_end": 311,
+          "new_LF_start": 380,
+          "new_LF_end": 380,
+          "old_text": "        if self.close_attempted:return self.closed_confirmed\n",
+          "new_text": "        if self.close_attempted:return self.closed_confirmed and self.close_error is None\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 351,
+          "old_LF_end": 350,
+          "new_LF_start": 420,
+          "new_LF_end": 421,
+          "old_text": "",
+          "new_text": "        if self.close_attempted:\n            raise Refused('selected_mapping_close_outcome_unknown','terminal')\n"
+        },
+        {
+          "tag": "insert",
+          "old_LF_start": 352,
+          "old_LF_end": 351,
+          "new_LF_start": 423,
+          "new_LF_end": 434,
+          "old_text": "",
+          "new_text": "        if self._own_registry is not None and os.getpid()==self.owner_pid:\n            cut=self._own_registry.own_mapping('cohort-cut',self,mapping,None,None,self.row,self.credit)\n            if cut.get('cohort_before_effect') is not True or type(cut.get('full_bytes')) is not bytes:\n                raise Refused('selected_mapping_cohort_keeper_cut','terminal')\n            self.before_effect_raw=cut['full_bytes']\n            self.before_effect_cut=cut\n            if not hasattr(carrier,'selected_mapping_cuts'):carrier.selected_mapping_cuts=[]\n            carrier.selected_mapping_cuts.append((self,cut))\n            if not hasattr(carrier,'cohort_before_effect'):carrier.cohort_before_effect=[]\n            carrier.cohort_before_effect.append(cut)\n            return cut\n        self._require_owned_body_fd()\n"
+        },
+        {
+          "tag": "delete",
+          "old_LF_start": 375,
+          "old_LF_end": 375,
+          "new_LF_start": 458,
+          "new_LF_end": 457,
+          "old_text": "\n",
+          "new_text": ""
+        }
+      ],
+      "forward_exact": true,
+      "inverse_exact": true
+    }
+  ],
+  "unchanged": [
+    "consumer/source/authority.py",
+    "consumer/source/bill.py",
+    "consumer/source/body_scope.py",
+    "consumer/source/canonical.py",
+    "consumer/source/capability.py",
+    "consumer/source/contract.py",
+    "consumer/source/declared_controls.py",
+    "consumer/source/document_vector.py",
+    "consumer/source/document_windows.py",
+    "consumer/source/effects.py",
+    "consumer/source/formats.py",
+    "consumer/source/ingress.py",
+    "consumer/source/material_literals.py",
+    "consumer/source/performing_contracts.py",
+    "consumer/source/pins.py",
+    "consumer/source/producer_consumer.py",
+    "consumer/source/receipt_chain.py",
+    "consumer/source/recipe_planner.py",
+    "consumer/source/resource_meter.py",
+    "consumer/source/runtime_consumer.py",
+    "consumer/source/schema_validate.py",
+    "consumer/source/semantics.py",
+    "consumer/source/whole_join.py",
+    "native/publisher_original_caller.c",
+    "native/publisher_original_caller.h",
+    "native/publisher_owned_custody.c",
+    "native/publisher_owned_custody.h",
+    "native/publisher_root_command.c",
+    "native/publisher_root_command.h",
+    "native/publisher_root_entry.h",
+    "source/actor_bootstrap.py",
+    "source/actor_context.py",
+    "source/admission.py",
+    "source/alljob_cohort.py",
+    "source/capacity.py",
+    "source/class_semantics.py",
+    "source/common.py",
+    "source/consumer_bridge.py",
+    "source/custody.py",
+    "source/existing_root_caller.py",
+    "source/extraction.py",
+    "source/fact_bridge.py",
+    "source/independent_selector.py",
+    "source/launcher.py",
+    "source/lifetime.py",
+    "source/master_pool.py",
+    "source/native.py",
+    "source/normalization.py",
+    "source/operations.py",
+    "source/owned_prefix_bank.py",
+    "source/retention.py",
+    "source/roles.py",
+    "source/root_tool_adapter.py",
+    "source/snapshot_producer.py"
+  ],
+  "candidate_source_bytes": 1858091,
+  "baseline_source_bytes": 1851133,
+  "extra_artifacts": [
+    {
+      "name": "INERT-OBLIGATIONS.json",
+      "pin": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/INERT-OBLIGATIONS.json",
+        "bytes": 1560,
+        "sha256": "13888ade7160575a1f45ecfb7068daaee2594edf8c62a6700c6b08be060020ae",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135423",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1560",
+          "1791132990307564749",
+          "1791132990307564749"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "GO": false,
+        "Root_admission": false,
+        "SourceReady": false,
+        "closed_in_source": [
+          "Constructor return is retained before Source created/state metadata. Original constructor failure and later metadata failure stay distinct.",
+          "The returned mapping alias is the same object in the native row, the preowned creation record, and Source.",
+          "Prebirth failure writes the existing creation record and does not allocate a mapping after that failure.",
+          "Before-close capture uses the still-owned keeper. A closed or attempted body descriptor is not stat-ed.",
+          "Confirmed close keeps the retained historical bytes. Unknown close is not CURRENT and not RETIRED, and it is not retried or reread.",
+          "CURRENT stays 16 edges. RETIRED stays 15 edges. Unknown close reuses the 15-edge record with phase 3 and no buffer."
+        ],
+        "decision": "REJOINED_A258_PARTIAL_MAPPING_RETURN_KEEPER_UNKNOWN_CLOSE_WHOLE_ADMISSION_OPEN",
+        "execution": "NOT_RUN",
+        "fit": "UNCONFIRMED",
+        "schema": "friday.lab948.inert-obligations.v1",
+        "self_acceptance": false,
+        "still_open": [
+          "C1-R1A child Context, Token, compiled bindings, and both child ends stay with the stopped Sol107 work.",
+          "C1-R1C class-factory provenance stays open.",
+          "Native whole error-end graph and finalizer stay with Astra.",
+          "C2 full required widths, ABI, workload fit, and gates stay open.",
+          "Whole admission stays open. LAB-937 native residuals stay open.",
+          "A258 carrier, hash, and secondary corrections are preserved and not accepted by this author."
+        ]
+      }
+    },
+    {
+      "name": "INERT-READ-CHECK.json",
+      "pin": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/INERT-READ-CHECK.json",
+        "bytes": 390,
+        "sha256": "2410fb7e87d1e6cac9fa4a28256bd989ce9c671ea5da75a15aa73bba205a580b",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135424",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "390",
+          "1791132990307564749",
+          "1791132990307564749"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "checks": [
+          "A258 Source57 pins matched before editing the fresh copy",
+          "forward and inverse literal hunks replay",
+          "hash ledger v2 remains and v1 is absent",
+          "secondary error end, group22 move comment, and own_before capture order remain",
+          "CURRENT16 and RETIRED15 edge counts remain"
+        ],
+        "schema": "friday.lab948.inert-read-check.v1",
+        "source_execution": 0
+      }
+    },
+    {
+      "name": "INTEGRATION.json",
+      "pin": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/INTEGRATION.json",
+        "bytes": 924,
+        "sha256": "5e25a7c46ab955e2d6cca71a264e07717a40bc42ba54b677950cf3a5197c5317",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135425",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "924",
+          "1791132990307564749",
+          "1791132990307564749"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "GO": false,
+        "Root_admission": false,
+        "SourceReady": false,
+        "a258_preserved": true,
+        "active_sol107_output_read": false,
+        "changed": [
+          "native/publisher_root_entry.c",
+          "source/observer.py",
+          "source/selected_owned_values.py"
+        ],
+        "child_acceptance_claimed": false,
+        "classification": {
+          "code": [
+            "mapping constructor alias before metadata",
+            "prebirth record before map allocation",
+            "keeper-owned before-close capture",
+            "unknown close phase distinct from current and retired"
+          ],
+          "evidence": "literal forward and inverse replay against A258",
+          "qualification": "NOT_RUN"
+        },
+        "compiler_abi": "NOT_RUN",
+        "decision": "REJOINED_A258_PARTIAL_MAPPING_RETURN_KEEPER_UNKNOWN_CLOSE_WHOLE_ADMISSION_OPEN",
+        "execution": "NOT_RUN",
+        "fit": "UNCONFIRMED",
+        "native_cost": "UNKNOWN_NOT_ZERO",
+        "schema": "friday.lab948.integration.v1",
+        "self_acceptance": false
+      }
+    },
+    {
+      "name": "LITERAL-DELTA",
+      "pin": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/LITERAL-DELTA",
+        "bytes": 28224,
+        "sha256": "d79181531b54ab292a0149e6b039d7bcd0fb76b0a2cb9d33fb8eb6003e625128",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135426",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "28224",
+          "1791132990307564749",
+          "1791132990307564749"
+        ],
+        "stable9": true
+      },
+      "value": "FORWARD_A258\nFILE native/publisher_root_entry.c\n@@ -3811,1 +3811,1 @@\n-static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p) {\n+static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p,int cohort) {\n@@ -3886,1 +3886,1 @@\n-        \"closed\",Py_False,\"full_bytes\",cut->refs[2],\"cohort_before_effect\",Py_False);\n+        \"closed\",Py_False,\"full_bytes\",cut->refs[2],\"cohort_before_effect\",cohort?Py_True:Py_False);\n@@ -3903,0 +3903,12 @@\n+        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers)||\n+           !ascii(own_plain_field(cut,\"schema\"),\"friday.sol106.actual-mmap-constructor.v1\")||\n+           own_plain_field(cut,\"row\")!=row||own_plain_field(cut,\"credit\")!=credit||\n+           own_plain_field(cut,\"returned_mapping\")!=Py_None||\n+           own_plain_field(cut,\"returned\")!=Py_False||\n+           own_plain_field(cut,\"attempted\")!=Py_False||\n+           own_plain_field(cut,\"state_complete\")!=Py_False||\n+           own_plain_field(cut,\"original_error\")!=Py_None||\n+           own_plain_field(cut,\"metadata_error\")!=Py_None||\n+           own_plain_field(cut,\"prebirth_error\")!=Py_None||\n+           !own_plain_field(cut,\"birth\"))\n+            return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_actual_birth_inputs\"),NULL;\n@@ -3904,2 +3916,0 @@\n-        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers))\n-            return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_actual_birth_inputs\"),NULL;\n@@ -3948,0 +3958,5 @@\n+        if(!p->refs[7]||PyDict_SetItemString(p->refs[7],\"mapping\",p->refs[6])<0||\n+           PyDict_SetItemString(cut,\"returned_mapping\",p->refs[6])<0||\n+           PyDict_SetItemString(cut,\"returned\",Py_True)<0) {\n+            p->confirmed=1;return own_error(p),NULL;\n+        }\n@@ -3954,0 +3969,4 @@\n+    if(!strcmp(action,\"retained\")) {\n+        if(!p->refs[6])Py_RETURN_NONE;\n+        return Py_NewRef(p->refs[6]);\n+    }\n@@ -3955,1 +3974,2 @@\n-    if(!strcmp(action,\"cut\"))return own_mapping_current_cut(p);\n+    if(!strcmp(action,\"cut\")||!strcmp(action,\"cohort-cut\"))\n+        return own_mapping_current_cut(p,!strcmp(action,\"cohort-cut\"));\n@@ -4032,0 +4052,1 @@\n+        if(p->attempts>=3||(p->flags&4))return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_close_outcome_unknown\"),NULL;\n@@ -4038,1 +4059,1 @@\n-        if(!closed)return own_error(p),NULL;\n+        if(!closed){p->flags|=4;return own_error(p),NULL;}\n@@ -4040,1 +4061,1 @@\n-        if(!confirmed)return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_actual_closed\"),NULL;\n+        if(!confirmed){p->flags|=4;return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_close_unconfirmed\"),NULL;}\n@@ -5158,0 +5179,1 @@\n+    if(p->attempts>=3&&(p->flags&4)&&p->confirmed!=3)return 3;\n@@ -5174,0 +5196,5 @@\n+        if(expected&&(bytes!=sizeof(phase)||r->nodes[r->active_node-1].edges!=15))return -1;\n+        return 0;\n+    }\n+    if(phase==3) {\n+        /* Unknown close stays off CURRENT16 and RETIRED15. No buffer, tell, or fstat. */\nINVERSE native/publisher_root_entry.c\n@@ -3811,1 +3811,1 @@\n-static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p,int cohort) {\n+static PyObject *own_mapping_current_cut(FridayPublisherOwnValue *p) {\n@@ -3886,1 +3886,1 @@\n-        \"closed\",Py_False,\"full_bytes\",cut->refs[2],\"cohort_before_effect\",cohort?Py_True:Py_False);\n+        \"closed\",Py_False,\"full_bytes\",cut->refs[2],\"cohort_before_effect\",Py_False);\n@@ -3903,11 +3903,2 @@\n-        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers)||\n-           !ascii(own_plain_field(cut,\"schema\"),\"friday.sol106.actual-mmap-constructor.v1\")||\n-           own_plain_field(cut,\"row\")!=row||own_plain_field(cut,\"credit\")!=credit||\n-           own_plain_field(cut,\"returned_mapping\")!=Py_None||\n-           own_plain_field(cut,\"returned\")!=Py_False||\n-           own_plain_field(cut,\"attempted\")!=Py_False||\n-           own_plain_field(cut,\"state_complete\")!=Py_False||\n-           own_plain_field(cut,\"original_error\")!=Py_None||\n-           own_plain_field(cut,\"metadata_error\")!=Py_None||\n-           own_plain_field(cut,\"prebirth_error\")!=Py_None||\n-           !own_plain_field(cut,\"birth\"))\n+        p=own_birth(OWN_MAPPING);if(!p)return NULL;\n+        if(!PyDict_CheckExact(cut)||!PyList_CheckExact(ledgers))\n@@ -3915,1 +3906,0 @@\n-        p=own_birth(OWN_MAPPING);if(!p)return NULL;\n@@ -3958,5 +3948,0 @@\n-        if(!p->refs[7]||PyDict_SetItemString(p->refs[7],\"mapping\",p->refs[6])<0||\n-           PyDict_SetItemString(cut,\"returned_mapping\",p->refs[6])<0||\n-           PyDict_SetItemString(cut,\"returned\",Py_True)<0) {\n-            p->confirmed=1;return own_error(p),NULL;\n-        }\n@@ -3969,4 +3954,0 @@\n-    if(!strcmp(action,\"retained\")) {\n-        if(!p->refs[6])Py_RETURN_NONE;\n-        return Py_NewRef(p->refs[6]);\n-    }\n@@ -3974,2 +3955,1 @@\n-    if(!strcmp(action,\"cut\")||!strcmp(action,\"cohort-cut\"))\n-        return own_mapping_current_cut(p,!strcmp(action,\"cohort-cut\"));\n+    if(!strcmp(action,\"cut\"))return own_mapping_current_cut(p);\n@@ -4052,1 +4032,0 @@\n-        if(p->attempts>=3||(p->flags&4))return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_close_outcome_unknown\"),NULL;\n@@ -4059,1 +4038,1 @@\n-        if(!closed){p->flags|=4;return own_error(p),NULL;}\n+        if(!closed)return own_error(p),NULL;\n@@ -4061,1 +4040,1 @@\n-        if(!confirmed){p->flags|=4;return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_close_unconfirmed\"),NULL;}\n+        if(!confirmed)return FridayPublisherMasterFault(&root_storage.pool,\"own_mapping_actual_closed\"),NULL;\n@@ -5179,1 +5158,0 @@\n-    if(p->attempts>=3&&(p->flags&4)&&p->confirmed!=3)return 3;\n@@ -5196,5 +5174,0 @@\n-        if(expected&&(bytes!=sizeof(phase)||r->nodes[r->active_node-1].edges!=15))return -1;\n-        return 0;\n-    }\n-    if(phase==3) {\n-        /* Unknown close stays off CURRENT16 and RETIRED15. No buffer, tell, or fstat. */\nFILE source/observer.py\n@@ -196,0 +196,4 @@\n+        elif selected_mapping is not None and selected_mapping.close_attempted and not selected_mapping.closed_confirmed:\n+            unsupported.append({'identity':str(key),'module':'mmap','class':'mmap',\n+                'reason':'mapping_close_outcome_unknown'})\n+            row=['unsupported','mapping_close_outcome_unknown']\n@@ -870,0 +874,2 @@\n+        elif kind=='unsupported' and body=='mapping_close_outcome_unknown':\n+            raise Refused('mapping_close_outcome_unknown','terminal')\nINVERSE source/observer.py\n@@ -196,4 +196,0 @@\n-        elif selected_mapping is not None and selected_mapping.close_attempted and not selected_mapping.closed_confirmed:\n-            unsupported.append({'identity':str(key),'module':'mmap','class':'mmap',\n-                'reason':'mapping_close_outcome_unknown'})\n-            row=['unsupported','mapping_close_outcome_unknown']\n@@ -874,2 +870,0 @@\n-        elif kind=='unsupported' and body=='mapping_close_outcome_unknown':\n-            raise Refused('mapping_close_outcome_unknown','terminal')\nFILE source/selected_owned_values.py\n@@ -143,1 +143,2 @@\n-        # this constructor. Initialize its custody before fallible validation.\n+        # this constructor. The creation record is that preowned slot.\n+        # A failed check writes the error there and does not allocate a map.\n@@ -148,0 +149,1 @@\n+        self.metadata_error=None;self.state_complete=False\n@@ -149,24 +151,36 @@\n-            'fd':prepared.fd,'width':width,'access':mmap.ACCESS_WRITE,\n-            'attempted':False,'returned':False,'original_error':None}\n-        prepared._owned()\n-        row=prepared.store.fdjournal._row(prepared.fd)\n-        if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:\n-            raise Refused('selected_mapping_actual_prepared_row','terminal')\n-        self.fd=prepared.fd;self.row=row;self.credit=prepared.hold\n-        self.owner_pid=os.getpid();self.width=width;self.role=role\n-        self.binding=prepared.binding()\n-        self.birth=identity9(os.fstat(self.fd))\n-        self.cuts=[];self.child_reads=0;self.child_allocation=0\n-        self.borrowed=False\n-        # Debit before mmap allocation. Mapping is not a newly granted role.\n-        if self.binding['allocation']<width+131072:\n-            raise Refused('selected_mapping_original_RAM_before_birth','terminal')\n-        charge_selected_allocation(self.credit,width+131072)\n-        self._own_registry=_own_native()\n-        if self._own_registry is not None:\n-            self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)\n-        # Record the BIRTH identity before mmap, not an allocating registration\n-        # after return. A returned map is reachable even if metadata later fails.\n-        key=(os.getpid(),id(self))\n-        if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')\n-        _MAP_BIRTHS[key]=self\n+            'fd':None,'width':width,'access':mmap.ACCESS_WRITE,\n+            'attempted':False,'returned':False,'returned_mapping':None,\n+            'original_error':None,'metadata_error':None,'prebirth_error':None,\n+            'row':None,'credit':None,'birth':None,'state_complete':False}\n+        try:\n+            prepared._owned()\n+            row=prepared.store.fdjournal._row(prepared.fd)\n+            if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:\n+                raise Refused('selected_mapping_actual_prepared_row','terminal')\n+            self.fd=prepared.fd;self.row=row;self.credit=prepared.hold\n+            self.owner_pid=os.getpid();self.width=width;self.role=role\n+            self.binding=prepared.binding()\n+            self.creation['fd']=self.fd\n+            self.creation['row']=row\n+            self.creation['credit']=self.credit\n+            if self.binding['allocation']<width+131072:\n+                raise Refused('selected_mapping_original_RAM_before_birth','terminal')\n+            charge_selected_allocation(self.credit,width+131072)\n+            if row.get('status') not in ('ACQUIRED','HELD') or row.get('attempted_close') not in (None,'NOT_ATTEMPTED'):\n+                raise Refused('selected_mapping_keeper_still_owned','terminal')\n+            self.birth=identity9(os.fstat(self.fd))\n+            self.creation['birth']=self.birth\n+            self.cuts=[];self.child_reads=0;self.child_allocation=0\n+            self.borrowed=False\n+            self._own_registry=_own_native()\n+            if self._own_registry is not None:\n+                self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)\n+            key=(os.getpid(),id(self))\n+            if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')\n+            _MAP_BIRTHS[key]=self\n+        except BaseException as error:\n+            self.creation['prebirth_error']=error\n+            self.creation['state_complete']=False\n+            self.state_complete=False\n+            self.creation_error=error\n+            raise\n@@ -174,1 +188,1 @@\n-        if self.created or self.mapping is not None or os.getpid()!=self.owner_pid:\n+        if self.created or self.mapping is not None or self.creation.get('returned') is True or os.getpid()!=self.owner_pid:\n@@ -176,1 +190,2 @@\n-        self.created=True\n+        if self.creation.get('prebirth_error') is not None:\n+            raise Refused('selected_mapping_prebirth_incomplete','terminal')\n@@ -180,1 +195,4 @@\n-                self.mapping=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)\n+                result=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)\n+                self.mapping=result\n+                self.creation['returned_mapping']=result\n+                self.creation['returned']=True\n@@ -182,3 +200,3 @@\n-                # SAME constructor, now the actual native recipient retains\n-                # the returned object before any Source metadata operation.\n-                self.mapping=self._own_registry.own_mapping('create',self,None,\n+                # Native retains the constructor return in its row and in this\n+                # preowned record before Source metadata below can fail.\n+                result=self._own_registry.own_mapping('create',self,None,\n@@ -186,1 +204,14 @@\n-            self.creation['returned']=True\n+                if result is None:\n+                    result=self._own_registry.own_mapping('retained',self,None,\n+                        self.creation,self.cuts,self.row,self.credit)\n+                if self.mapping is None and result is not None:\n+                    self.mapping=result\n+                    self.creation['returned_mapping']=result\n+                    self.creation['returned']=True\n+                if (result is None or self.mapping is not result\n+                        or self.creation.get('returned_mapping') is not result\n+                        or self.creation.get('returned') is not True):\n+                    raise Refused('selected_mapping_returned_alias','terminal')\n+            self.created=True\n+            self.state_complete=True\n+            self.creation['state_complete']=True\n@@ -188,1 +219,22 @@\n-            self.creation_error=error;self.creation['original_error']=error\n+            if self.mapping is None and self._own_registry is not None:\n+                held=None\n+                try:\n+                    held=self._own_registry.own_mapping('retained',self,None,\n+                        self.creation,self.cuts,self.row,self.credit)\n+                except BaseException:\n+                    held=None\n+                if held is not None:\n+                    self.mapping=held\n+                    self.creation['returned_mapping']=held\n+                    self.creation['returned']=True\n+            if self.mapping is not None and self.creation.get('returned_mapping') is None:\n+                self.creation['returned_mapping']=self.mapping\n+                self.creation['returned']=True\n+            self.state_complete=False\n+            self.creation['state_complete']=False\n+            if self.creation.get('returned') is True or self.mapping is not None:\n+                self.metadata_error=error\n+                self.creation['metadata_error']=error\n+            else:\n+                self.creation_error=error\n+                self.creation['original_error']=error\n@@ -191,0 +243,5 @@\n+    def _require_owned_body_fd(self):\n+        row=self.row\n+        if (type(row) is not dict or row.get('status') not in ('ACQUIRED','HELD')\n+                or row.get('attempted_close') not in (None,'NOT_ATTEMPTED')):\n+            raise Refused('selected_mapping_keeper_still_owned','terminal')\n@@ -205,1 +262,3 @@\n-        if mapping is None or mapping.closed or self.close_attempted:\n+        if mapping is None or self.close_attempted or mapping.closed:\n+            if self.close_attempted and not self.closed_confirmed:\n+                raise Refused('selected_mapping_close_outcome_unknown','terminal')\n@@ -222,0 +281,1 @@\n+        self._require_owned_body_fd()\n@@ -244,2 +304,4 @@\n-        if (self.mapping is not None and self.mapping.closed\n-                and self.close_attempted and self.closed_confirmed and self.close_error is None):\n+        if self.close_attempted and not (self.closed_confirmed and self.close_error is None and self.close_returned):\n+            raise Refused('selected_mapping_close_outcome_unknown','terminal')\n+        if (self.mapping is not None and self.closed_confirmed and self.close_attempted\n+                and self.close_error is None and self.close_returned and self.mapping.closed):\n@@ -256,1 +318,1 @@\n-        if not any(item is cut for item in self.cuts) or self.mapping is None or self.mapping.closed:\n+        if not any(item is cut for item in self.cuts) or self.mapping is None or self.close_attempted:\n@@ -261,0 +323,1 @@\n+            self._require_owned_body_fd()\n@@ -272,0 +335,1 @@\n+        self._require_owned_body_fd()\n@@ -280,0 +344,2 @@\n+            if self.close_attempted and not self.closed_confirmed:\n+                raise Refused('selected_mapping_close_outcome_unknown','terminal')\n@@ -287,0 +353,1 @@\n+        self._require_owned_body_fd()\n@@ -305,0 +372,2 @@\n+        if self.close_returned or self.close_error is not None or self.closed_confirmed:\n+            raise Refused('selected_mapping_close_outcome_unknown','terminal')\n@@ -311,1 +380,1 @@\n-        if self.close_attempted:return self.closed_confirmed\n+        if self.close_attempted:return self.closed_confirmed and self.close_error is None\n@@ -351,0 +420,2 @@\n+        if self.close_attempted:\n+            raise Refused('selected_mapping_close_outcome_unknown','terminal')\n@@ -352,0 +423,12 @@\n+        if self._own_registry is not None and os.getpid()==self.owner_pid:\n+            cut=self._own_registry.own_mapping('cohort-cut',self,mapping,None,None,self.row,self.credit)\n+            if cut.get('cohort_before_effect') is not True or type(cut.get('full_bytes')) is not bytes:\n+                raise Refused('selected_mapping_cohort_keeper_cut','terminal')\n+            self.before_effect_raw=cut['full_bytes']\n+            self.before_effect_cut=cut\n+            if not hasattr(carrier,'selected_mapping_cuts'):carrier.selected_mapping_cuts=[]\n+            carrier.selected_mapping_cuts.append((self,cut))\n+            if not hasattr(carrier,'cohort_before_effect'):carrier.cohort_before_effect=[]\n+            carrier.cohort_before_effect.append(cut)\n+            return cut\n+        self._require_owned_body_fd()\n@@ -375,1 +458,0 @@\n-\nINVERSE source/selected_owned_values.py\n@@ -143,2 +143,1 @@\n-        # this constructor. The creation record is that preowned slot.\n-        # A failed check writes the error there and does not allocate a map.\n+        # this constructor. Initialize its custody before fallible validation.\n@@ -149,1 +148,0 @@\n-        self.metadata_error=None;self.state_complete=False\n@@ -151,36 +149,24 @@\n-            'fd':None,'width':width,'access':mmap.ACCESS_WRITE,\n-            'attempted':False,'returned':False,'returned_mapping':None,\n-            'original_error':None,'metadata_error':None,'prebirth_error':None,\n-            'row':None,'credit':None,'birth':None,'state_complete':False}\n-        try:\n-            prepared._owned()\n-            row=prepared.store.fdjournal._row(prepared.fd)\n-            if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:\n-                raise Refused('selected_mapping_actual_prepared_row','terminal')\n-            self.fd=prepared.fd;self.row=row;self.credit=prepared.hold\n-            self.owner_pid=os.getpid();self.width=width;self.role=role\n-            self.binding=prepared.binding()\n-            self.creation['fd']=self.fd\n-            self.creation['row']=row\n-            self.creation['credit']=self.credit\n-            if self.binding['allocation']<width+131072:\n-                raise Refused('selected_mapping_original_RAM_before_birth','terminal')\n-            charge_selected_allocation(self.credit,width+131072)\n-            if row.get('status') not in ('ACQUIRED','HELD') or row.get('attempted_close') not in (None,'NOT_ATTEMPTED'):\n-                raise Refused('selected_mapping_keeper_still_owned','terminal')\n-            self.birth=identity9(os.fstat(self.fd))\n-            self.creation['birth']=self.birth\n-            self.cuts=[];self.child_reads=0;self.child_allocation=0\n-            self.borrowed=False\n-            self._own_registry=_own_native()\n-            if self._own_registry is not None:\n-                self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)\n-            key=(os.getpid(),id(self))\n-            if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')\n-            _MAP_BIRTHS[key]=self\n-        except BaseException as error:\n-            self.creation['prebirth_error']=error\n-            self.creation['state_complete']=False\n-            self.state_complete=False\n-            self.creation_error=error\n-            raise\n+            'fd':prepared.fd,'width':width,'access':mmap.ACCESS_WRITE,\n+            'attempted':False,'returned':False,'original_error':None}\n+        prepared._owned()\n+        row=prepared.store.fdjournal._row(prepared.fd)\n+        if row is None or row['status'] not in ('ACQUIRED','HELD') or not 1<=width<=DOCUMENT_MAX:\n+            raise Refused('selected_mapping_actual_prepared_row','terminal')\n+        self.fd=prepared.fd;self.row=row;self.credit=prepared.hold\n+        self.owner_pid=os.getpid();self.width=width;self.role=role\n+        self.binding=prepared.binding()\n+        self.birth=identity9(os.fstat(self.fd))\n+        self.cuts=[];self.child_reads=0;self.child_allocation=0\n+        self.borrowed=False\n+        # Debit before mmap allocation. Mapping is not a newly granted role.\n+        if self.binding['allocation']<width+131072:\n+            raise Refused('selected_mapping_original_RAM_before_birth','terminal')\n+        charge_selected_allocation(self.credit,width+131072)\n+        self._own_registry=_own_native()\n+        if self._own_registry is not None:\n+            self._own_registry.own_mapping('birth',self,None,self.creation,self.cuts,self.row,self.credit)\n+        # Record the BIRTH identity before mmap, not an allocating registration\n+        # after return. A returned map is reachable even if metadata later fails.\n+        key=(os.getpid(),id(self))\n+        if key in _MAP_BIRTHS:raise Refused('selected_mapping_birth_identity_reuse','terminal')\n+        _MAP_BIRTHS[key]=self\n@@ -188,1 +174,1 @@\n-        if self.created or self.mapping is not None or self.creation.get('returned') is True or os.getpid()!=self.owner_pid:\n+        if self.created or self.mapping is not None or os.getpid()!=self.owner_pid:\n@@ -190,2 +176,1 @@\n-        if self.creation.get('prebirth_error') is not None:\n-            raise Refused('selected_mapping_prebirth_incomplete','terminal')\n+        self.created=True\n@@ -195,4 +180,1 @@\n-                result=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)\n-                self.mapping=result\n-                self.creation['returned_mapping']=result\n-                self.creation['returned']=True\n+                self.mapping=mmap.mmap(self.fd,self.width,access=mmap.ACCESS_WRITE)\n@@ -200,3 +182,3 @@\n-                # Native retains the constructor return in its row and in this\n-                # preowned record before Source metadata below can fail.\n-                result=self._own_registry.own_mapping('create',self,None,\n+                # SAME constructor, now the actual native recipient retains\n+                # the returned object before any Source metadata operation.\n+                self.mapping=self._own_registry.own_mapping('create',self,None,\n@@ -204,14 +186,1 @@\n-                if result is None:\n-                    result=self._own_registry.own_mapping('retained',self,None,\n-                        self.creation,self.cuts,self.row,self.credit)\n-                if self.mapping is None and result is not None:\n-                    self.mapping=result\n-                    self.creation['returned_mapping']=result\n-                    self.creation['returned']=True\n-                if (result is None or self.mapping is not result\n-                        or self.creation.get('returned_mapping') is not result\n-                        or self.creation.get('returned') is not True):\n-                    raise Refused('selected_mapping_returned_alias','terminal')\n-            self.created=True\n-            self.state_complete=True\n-            self.creation['state_complete']=True\n+            self.creation['returned']=True\n@@ -219,22 +188,1 @@\n-            if self.mapping is None and self._own_registry is not None:\n-                held=None\n-                try:\n-                    held=self._own_registry.own_mapping('retained',self,None,\n-                        self.creation,self.cuts,self.row,self.credit)\n-                except BaseException:\n-                    held=None\n-                if held is not None:\n-                    self.mapping=held\n-                    self.creation['returned_mapping']=held\n-                    self.creation['returned']=True\n-            if self.mapping is not None and self.creation.get('returned_mapping') is None:\n-                self.creation['returned_mapping']=self.mapping\n-                self.creation['returned']=True\n-            self.state_complete=False\n-            self.creation['state_complete']=False\n-            if self.creation.get('returned') is True or self.mapping is not None:\n-                self.metadata_error=error\n-                self.creation['metadata_error']=error\n-            else:\n-                self.creation_error=error\n-                self.creation['original_error']=error\n+            self.creation_error=error;self.creation['original_error']=error\n@@ -243,5 +191,0 @@\n-    def _require_owned_body_fd(self):\n-        row=self.row\n-        if (type(row) is not dict or row.get('status') not in ('ACQUIRED','HELD')\n-                or row.get('attempted_close') not in (None,'NOT_ATTEMPTED')):\n-            raise Refused('selected_mapping_keeper_still_owned','terminal')\n@@ -262,3 +205,1 @@\n-        if mapping is None or self.close_attempted or mapping.closed:\n-            if self.close_attempted and not self.closed_confirmed:\n-                raise Refused('selected_mapping_close_outcome_unknown','terminal')\n+        if mapping is None or mapping.closed or self.close_attempted:\n@@ -281,1 +222,0 @@\n-        self._require_owned_body_fd()\n@@ -304,4 +244,2 @@\n-        if self.close_attempted and not (self.closed_confirmed and self.close_error is None and self.close_returned):\n-            raise Refused('selected_mapping_close_outcome_unknown','terminal')\n-        if (self.mapping is not None and self.closed_confirmed and self.close_attempted\n-                and self.close_error is None and self.close_returned and self.mapping.closed):\n+        if (self.mapping is not None and self.mapping.closed\n+                and self.close_attempted and self.closed_confirmed and self.close_error is None):\n@@ -318,1 +256,1 @@\n-        if not any(item is cut for item in self.cuts) or self.mapping is None or self.close_attempted:\n+        if not any(item is cut for item in self.cuts) or self.mapping is None or self.mapping.closed:\n@@ -323,1 +261,0 @@\n-            self._require_owned_body_fd()\n@@ -335,1 +272,0 @@\n-        self._require_owned_body_fd()\n@@ -344,2 +280,0 @@\n-            if self.close_attempted and not self.closed_confirmed:\n-                raise Refused('selected_mapping_close_outcome_unknown','terminal')\n@@ -353,1 +287,0 @@\n-        self._require_owned_body_fd()\n@@ -372,2 +305,0 @@\n-        if self.close_returned or self.close_error is not None or self.closed_confirmed:\n-            raise Refused('selected_mapping_close_outcome_unknown','terminal')\n@@ -380,1 +311,1 @@\n-        if self.close_attempted:return self.closed_confirmed and self.close_error is None\n+        if self.close_attempted:return self.closed_confirmed\n@@ -420,2 +351,0 @@\n-        if self.close_attempted:\n-            raise Refused('selected_mapping_close_outcome_unknown','terminal')\n@@ -423,12 +352,0 @@\n-        if self._own_registry is not None and os.getpid()==self.owner_pid:\n-            cut=self._own_registry.own_mapping('cohort-cut',self,mapping,None,None,self.row,self.credit)\n-            if cut.get('cohort_before_effect') is not True or type(cut.get('full_bytes')) is not bytes:\n-                raise Refused('selected_mapping_cohort_keeper_cut','terminal')\n-            self.before_effect_raw=cut['full_bytes']\n-            self.before_effect_cut=cut\n-            if not hasattr(carrier,'selected_mapping_cuts'):carrier.selected_mapping_cuts=[]\n-            carrier.selected_mapping_cuts.append((self,cut))\n-            if not hasattr(carrier,'cohort_before_effect'):carrier.cohort_before_effect=[]\n-            carrier.cohort_before_effect.append(cut)\n-            return cut\n-        self._require_owned_body_fd()\n@@ -458,0 +375,1 @@\n+\n"
+    },
+    {
+      "name": "README.txt",
+      "pin": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/README.txt",
+        "bytes": 198,
+        "sha256": "aa3e161e1f5d43e2dfbe80c41c8671ecd5f2be9f8340c55431f90d5f6b54efa2",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135428",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "198",
+          "1791132990307564749",
+          "1791132990307564749"
+        ],
+        "stable9": true
+      },
+      "value": "LAB-948 inert partial-mapping source.\nFresh copy of exact A258 Source57 with the mapping return, keeper, and unknown-close join.\nExecution NOT_RUN. GO false. Non-author acceptance remains required.\n"
+    },
+    {
+      "name": "SOURCE-PINS.json",
+      "pin": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/SOURCE-PINS.json",
+        "bytes": 524,
+        "sha256": "a688cbb1d4291b92bc9179aeb6090935bcf5c28b9f2e0cc8f8d2d97ee18925d4",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135427",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "524",
+          "1791132990307564749",
+          "1791132990307564749"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "baseline": "A258",
+        "changed": [
+          "native/publisher_root_entry.c",
+          "source/observer.py",
+          "source/selected_owned_values.py"
+        ],
+        "identity9": [
+          "2050",
+          "5010675",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "32692",
+          "1791132364835513228",
+          "1791132364854513635"
+        ],
+        "manifest_sha256": "82773d86edb14c70f82a7f5f3b31c9fb217b4097435596c93be786d697751374",
+        "manifest_size": 32692,
+        "mtime_equals_ctime": false,
+        "schema": "friday.lab948.source-pins.v1",
+        "source_file_count": 57
+      }
+    },
+    {
+      "name": "timing.json",
+      "pin": {
+        "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/timing.json",
+        "bytes": 463,
+        "sha256": "b40672b9a7d0ed8e8c0e0c9e7067c9cf118358e3819dc1623055ef270ede38d4",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135429",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "463",
+          "1791132990307564749",
+          "1791132990307564749"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "children": 0,
+        "elapsed_ns": 511280988000,
+        "heavy_runs": 0,
+        "network": 0,
+        "read_bytes": 1937426,
+        "schema": "friday.lab948.timing.v1",
+        "seal_duration_ns": 177000,
+        "seal_ended_msk": "2026-10-04T19:56:30.307903+03:00",
+        "seal_started_msk": "2026-10-04T19:56:30.307726+03:00",
+        "source_execution": 0,
+        "timezone": "Europe/Moscow",
+        "work_ended_msk": "2026-10-04T19:56:30.307903+03:00",
+        "work_started_msk": "2026-10-04T19:47:59.026915+03:00"
+      }
+    }
+  ],
+  "references": [
+    {
+      "pin": {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB948-RESULT-RECEIVED-20261004.json",
+        "bytes": 34527,
+        "sha256": "16889b628160e599c658a728a0b703abe7bc7f4a40b3aa826ba6015aea107424",
+        "identity9_decimal_strings": [
+          "2050",
+          "8536553",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "34527",
+          "1791133861610808151",
+          "1791133861630809198"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "schema": "friday.astra.lab948.received.v1",
+        "assignment": "ASTRA-E4-A258-PUBLISHER-PARTIAL-MAPPING-BOTH-READERS-ENDS-LAB-948",
+        "job": "job_da0386a47fa04deb9cfca6d8bf6eb5e1",
+        "event": "msg_2de0883c10dc4429a277f9df45927948",
+        "received_msk": "2026-10-04T20:10:07.494133+03:00",
+        "manifest": {
+          "path": "/var/tmp/friday-lab948-publisher-partial-mapping-connected-inert-source/manifest.json",
+          "bytes": 17218,
+          "sha256": "9eba2d683ad67d0a481b6175f2b398d70dbd60da30a6747a1718fffaa6698314",
+          "identity9_decimal_strings": [
+            "2050",
+            "5135430",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "17218",
+            "1791132990308324798",
+            "1791132990308324798"
+          ],
+          "stable9": true
+        },
+        "envelope_pin": {
+          "path": "/home/jericho/jericho/.git/friday-lab/v2/messages/msg_2de0883c10dc4429a277f9df45927948.json",
+          "bytes": 412,
+          "sha256": "fe1467e5043bfcdf8553f9571a6c5be081d8481b9776400c1986e2fe3f0c105e",
+          "identity9_decimal_strings": [
+            "2050",
+            "7801571",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "412",
+            "1791133034735841085",
+            "1791133034736841142"
+          ],
+          "stable9": true
+        },
+        "input": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB948-INPUT-20261004.json",
+          "bytes": 35106,
+          "sha256": "0a2ba56f388eafd630a08e4736b18da46bd155e01f58a7bf8617bceb82bb8997",
+          "identity9_decimal_strings": [
+            "2050",
+            "8536547",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "35106",
+            "1791132468622777693",
+            "1791132468651779336"
+          ],
+          "stable9": true
+        },
+        "decision": "AUTHENTICATED_AUTHOR_PACKAGE_PENDING_NONAUTHOR_REVIEW_NOT_INTEGRATED",
+        "author_result": {
+          "GO": false,
+          "Root_admission": false,
+          "SourceReady": false,
+          "a258_preserved": true,
+          "active_sol107_output_read": false,
+          "changed": [
+            "native/publisher_root_entry.c",
+            "source/observer.py",
+            "source/selected_owned_values.py"
+          ],
+          "child_acceptance_claimed": false,
+          "classification": {
+            "code": [
+              "mapping constructor alias before metadata",
+              "prebirth record before map allocation",
+              "keeper-owned before-close capture",
+              "unknown close phase distinct from current and retired"
+            ],
+            "evidence": "literal forward and inverse replay against A258",
+            "qualification": "NOT_RUN"
+          },
+          "compiler_abi": "NOT_RUN",
+          "decision": "REJOINED_A258_PARTIAL_MAPPING_RETURN_KEEPER_UNKNOWN_CLOSE_WHOLE_ADMISSION_OPEN",
+          "execution": "NOT_RUN",
+          "fit": "UNCONFIRMED",
+          "native_cost": "UNKNOWN_NOT_ZERO",
+          "schema": "friday.lab948.integration.v1",
+          "self_acceptance": false
+        },
+        "timing": {
+          "children": 0,
+          "elapsed_ns": 511280988000,
+          "heavy_runs": 0,
+          "network": 0,
+          "read_bytes": 1937426,
+          "schema": "friday.lab948.timing.v1",
+          "seal_duration_ns": 177000,
+          "seal_ended_msk": "2026-10-04T19:56:30.307903+03:00",
+          "seal_started_msk": "2026-10-04T19:56:30.307726+03:00",
+          "source_execution": 0,
+          "timezone": "Europe/Moscow",
+          "work_ended_msk": "2026-10-04T19:56:30.307903+03:00",
+          "work_started_msk": "2026-10-04T19:47:59.026915+03:00"
+        },
+        "Source_execution": 0,
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false,
+        "write_scope_clarification": {
+          "actual_output": "fresh948, correct exact INPUT/OUTPUT; sealed947 unchanged at A259 start",
+          "old_generic_typo": "fresh947 in effects",
+          "ANSWER_delivery": false,
+          "no_job_state_bypass": true
+        }
+      }
+    },
+    {
+      "pin": {
+        "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/manifest.json",
+        "bytes": 8201,
+        "sha256": "3c4a0e154d58551e6aa2b69c1687951eebd5170ca40d166df3fb5f7dc17e683a",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135433",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8201",
+          "1791133139874795918",
+          "1791133139893796994"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "schema": "friday.sol109.independent-review.manifest.v1",
+        "root": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review",
+        "assignment": "ASTRA-E4-A258-PUBLISHER-CARRIER-BUDGET-ROLE-PHASE-NONAUTHOR-SOL109",
+        "generation": 1,
+        "file_count": 7,
+        "artifact_bytes": 252838,
+        "input": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL109-INPUT-20261004.json",
+          "bytes": 34520,
+          "sha256": "193c71e422e3719d44c421378c1af57a433f73329afe1467319bc28113938f54",
+          "identity9_decimal_strings": [
+            "2050",
+            "8536546",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "34520",
+            "1791132405381380269",
+            "1791132405400380676"
+          ],
+          "stable9": true
+        },
+        "candidate": {
+          "path": "/var/tmp/friday-astra-a258-publisher-carrier-join.Z8jLrF/manifest.json",
+          "bytes": 32692,
+          "sha256": "82773d86edb14c70f82a7f5f3b31c9fb217b4097435596c93be786d697751374",
+          "identity9_decimal_strings": [
+            "2050",
+            "5010675",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "32692",
+            "1791132364835513228",
+            "1791132364854513635"
+          ],
+          "stable9": true
+        },
+        "baseline": {
+          "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/manifest.json",
+          "bytes": 29378,
+          "sha256": "73f4db4fc8427e718dd5c2bc6991a7bf59d1f4dbfb775a61877923a761cdf39d",
+          "identity9_decimal_strings": [
+            "2050",
+            "3980643",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "29378",
+            "1791130808528481691",
+            "1791130808551283927"
+          ],
+          "stable9": true
+        },
+        "decision": "REJECT_CONNECTED_BUDGET_CLOSURE_PRESERVE_SCOPED_CREDITS",
+        "review_work_complete": true,
+        "acceptance_done_when": false,
+        "scoped_credits": [
+          "carrier dispatch4-map/0-map and cumulative existing envelope subtraction",
+          "one-arg own_prepare plus optional reads and actual before_scan",
+          "owned DATA/foreign+builtins SUPPORT and historical frame phase",
+          "native capture guard/group22 MOVE and safe error retention",
+          "exact A257 hash two-hunk connected rejoin"
+        ],
+        "rejection": {
+          "grouped_root": "existing C2-R1D prospective explicit scan coverage",
+          "findings": [
+            "Source retained-list consumer header/traceback/error/Source passes not prospectively debited",
+            "actual Source-facing native namespace/support probe/reuse scans lack full-count prospective allowance"
+          ],
+          "smallest_correction": "Charge actual full consumer pass and actual namespace/support probes before their walks from same original carrier/Root; preserve cases/limits/aliases/end rules.",
+          "new_grouped_roots": 0
+        },
+        "residuals": {
+          "ordinary_native_error_end": "OPEN; retention is not completed transfer",
+          "Source_ABI": "NOT_RUN",
+          "physical_whole_cost": "UNKNOWN_NOT_ZERO",
+          "required_full_workload_fit": "UNCONFIRMED",
+          "SourceReady": false,
+          "Root_admission": false,
+          "GO": false
+        },
+        "proof": {
+          "candidate57_SHA9": true,
+          "baseline57_SHA9_at_intake": true,
+          "lab57_SHA9_at_intake": true,
+          "final_candidate57_SHA9": true,
+          "final_baseline57_identity9_unchanged": true,
+          "final_lab57_identity9_unchanged": true,
+          "final_Source_inventory_exact": true,
+          "declared36_forward_inverse_exact": true,
+          "minimal_non_equal_opcodes": 59,
+          "hash_two_hunk_forward_inverse_exact": true,
+          "lab_other56_exact": true,
+          "final_pin_checks": 77
+        },
+        "timing": {
+          "accepted_msk": "2026-10-04T19:49:06.737364+03:00",
+          "review_integrity_verified_msk": "2026-10-04T19:58:21.292341+03:00",
+          "artifacts_sealed_msk": "2026-10-04T19:58:59.837775+03:00",
+          "completed_msk": "RECORDED_IN_RESULT_AFTER_FINAL_MANIFEST_VERIFICATION",
+          "elapsed_seconds": "RECORDED_IN_RESULT"
+        },
+        "resources": {
+          "budget": {
+            "wall_seconds": 2400,
+            "seal_reserve_seconds": 300,
+            "read_bytes": 268435456,
+            "RAM_bytes": 8589934592,
+            "output_bytes": 33554432,
+            "local_concurrency": 4,
+            "children": 0,
+            "heavy_runs": 0
+          },
+          "instrumented_host_read_bytes_lower_bound": 22501513,
+          "host_total_read_bytes": null,
+          "host_total_read_class": "UNKNOWN_NOT_ZERO: shell reads/helper loading/tool transport/final manifest/result reads additional; no exact total or zero assertion.",
+          "audit_host_peak_rss_bytes": 611573760,
+          "whole_turn_peak_RSS": null,
+          "artifact_output_bytes_before_manifest": 252838,
+          "Source_execution": 0,
+          "Source_edits": 0,
+          "network": 0,
+          "children": 0,
+          "heavy_runs": 0
+        },
+        "boundaries": {
+          "Source_parser": false,
+          "Source_import_or_execution": false,
+          "compiler": false,
+          "tests": false,
+          "Root_live": false,
+          "foreign_host_script_execution": false,
+          "stopped_SOL107_draft_read": false,
+          "stopped_SOL107_resume": false,
+          "guard_bypass": false,
+          "restricted_controls": "ABSTRACT_HASH_ONLY",
+          "required": true,
+          "waiver": false
+        }
+      }
+    },
+    {
+      "pin": {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL109-RESULT-RECEIVED-20261004.json",
+        "bytes": 11049,
+        "sha256": "6beadca48b50202dcd166d4b4eeb4a52b46d5b5c514da34c6bae26f4f61e3ff5",
+        "identity9_decimal_strings": [
+          "2050",
+          "8536552",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11049",
+          "1791133861610808151",
+          "1791133861630809198"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "schema": "friday.astra.sol109.received.v1",
+        "assignment": "ASTRA-E4-A258-PUBLISHER-CARRIER-BUDGET-ROLE-PHASE-NONAUTHOR-SOL109",
+        "generation": 1,
+        "event": "SOL-SOL109-R1",
+        "queue_item": "01a107db-3685-74f1-8e8a-9def4dab4ce1",
+        "received_msk": "2026-10-04T20:10:07.433464+03:00",
+        "result": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL109-RESULT.json",
+          "bytes": 1601,
+          "sha256": "364fc09a378fbd15894c022b4936dbf3a055fc554fd26e2ba1bbd63fb4acc54e",
+          "identity9_decimal_strings": [
+            "2050",
+            "8536551",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "1601",
+            "1791133168491416693",
+            "1791133168509417713"
+          ],
+          "stable9": true
+        },
+        "manifest": {
+          "path": "/var/tmp/friday-sol109-publisher-carrier-budget-phase-independent-review/manifest.json",
+          "bytes": 8201,
+          "sha256": "3c4a0e154d58551e6aa2b69c1687951eebd5170ca40d166df3fb5f7dc17e683a",
+          "identity9_decimal_strings": [
+            "2050",
+            "5135433",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "8201",
+            "1791133139874795918",
+            "1791133139893796994"
+          ],
+          "stable9": true
+        },
+        "input": {
+          "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL109-INPUT-20261004.json",
+          "bytes": 34520,
+          "sha256": "193c71e422e3719d44c421378c1af57a433f73329afe1467319bc28113938f54",
+          "identity9_decimal_strings": [
+            "2050",
+            "8536546",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "34520",
+            "1791132405381380269",
+            "1791132405400380676"
+          ],
+          "stable9": true
+        },
+        "decision": "REJECT_CONNECTED_BUDGET_CLOSURE_PRESERVE_SCOPED_CREDITS",
+        "review_work_complete": true,
+        "acceptance_done_when": false,
+        "code_residuals": [
+          {
+            "id": "C2-R1D-CONSUMER-PASS",
+            "state": "REJECT_CODE",
+            "class": "existing C2-R1D explicit Source scan coverage",
+            "severity": "blocking for scoped budget acceptance",
+            "paths": [
+              "source/observer.py:174",
+              "source/observer.py:1856",
+              "source/selected_owned_values.py:423",
+              "source/selected_owned_values.py:686",
+              "source/selected_owned_values.py:699",
+              "source/selected_owned_values.py:743",
+              "source/selected_owned_values.py:750",
+              "source/selected_owned_values.py:765"
+            ],
+            "invariant": "Every actual repeated consumer traversal and alias/field read is prospectively charged to the original caller envelope before that pass, including refusal prefixes and retained historical rows.",
+            "actual_path": "full_value_arena and Meter.retain_error_arena call consume_secondary_own_cut after preown. records is the persistent entire _SECONDARY_CUTS list, not just rows registered or reached by this prewalk. consume validates/traverses rows and reads kind/original/edges/scalars before any per-pass debit. Only frame/code/buffer branches invoke _secondary_before. Traceback, error and Source rows perform their field/alias comparisons without a consumer debit. Earlier registration/prewalk is a different traversal and does not explicitly reserve this entire retained-list pass; repeated direct consumer calls also have no count-bound shared allowance. Zero buffer width likewise cannot account for row/metadata validation by a width-only debit.",
+            "evidence": "Literal lines 686-703 contain no count-linked pre-pass debit, 743-767 contain no debit. No enclosing consumer count/credit is passed by either actual new caller. Native command_read_reserved is a native command credit, not authorization for untracked repeated Source carrier passes.",
+            "smallest_correction": "Add an overflow-safe original-carrier debit for the full actual retained row/header/alias pass before entering the consumer loop (or before each row's first read with a whole-prefix bound), including traceback/error/Source and zero-body cases. Keep separate already-correct variable buffer/code debits and exact aliases; do not clear old records, narrow kinds/widths, reset/refund counters or change caps. Validate all actual callers/retained-row passes after an independently permitted qualification; execution here remains NOT_RUN."
+          },
+          {
+            "id": "C2-R1D-NAMESPACE-PROBES",
+            "state": "REJECT_CODE",
+            "class": "same existing C2-R1D explicit lookup coverage, not a new root",
+            "severity": "blocking for scoped budget acceptance",
+            "paths": [
+              "source/selected_owned_values.py:605",
+              "source/observer.py:311",
+              "native/publisher_root_entry.c:3564",
+              "native/publisher_root_entry.c:3580",
+              "native/publisher_root_entry.c:3650",
+              "native/publisher_root_entry.c:3662",
+              "native/publisher_root_entry.c:3680",
+              "native/publisher_root_entry.c:3690"
+            ],
+            "invariant": "Actual newly connected namespace/support probes must debit their real scan cardinality before the walk, not merely guard a later strong capture.",
+            "actual_path": "Owned frame prewalk/arena invokes own_binding, which immediately calls own_module_for_namespace and walks own_values.count before own_before(131072). Foreign frame arena invokes new mode3 own_support_relation, which calls own_module_for_namespace again before own_before(512), followed by another support-row reuse scan. These paths contain no count-linked read debit. The Source frame's fixed 5*64 allowance is not a demonstrated maximum over the variable native registry/repeated probes; the helper only adds allocation, not registry reads.",
+            "evidence": "The same secondary_globals_role(5924) and secondary_class_owned(6035) correctly charge own_values.count before their walks; the Source-facing ownership/support query routes above do not. Original fixed native command read reservation (4476) is present, so this is not a claim that native readers receive zero credit; no explicit repeated Source-query allocation from that command allowance is established.",
+            "smallest_correction": "Cover the actual Source-facing ownership/support query and reuse scans prospectively with the same original Root and overflow-safe full registry count (or a proved original pre-reserved per-query allowance), preserving original role proof, own_before before capture, and exact normal/error refusal. Do not invent a native pool, broaden provenance based on names, or call unknown costs zero."
+          }
+        ],
+        "scoped_credits": [
+          {
+            "id": "C2-R1D-CARRIER-ROUTES",
+            "state": "SCOPED_SOURCE_CREDIT"
+          },
+          {
+            "id": "C2-R1D-NATIVE-ENTRY-READS",
+            "state": "SCOPED_SOURCE_CREDIT"
+          },
+          {
+            "id": "C2-R1D-CHANNEL-CUMULATIVE",
+            "state": "SCOPED_SOURCE_CREDIT"
+          },
+          {
+            "id": "C2-R1D-MATERIALIZATION",
+            "state": "SCOPED_NOMINAL_ORDER_CREDIT_PHYSICAL_QUALIFICATION_OPEN"
+          },
+          {
+            "id": "C1-R1D-DATA-SUPPORT-PHASE",
+            "state": "SCOPED_CONNECTED_SOURCE_CREDIT"
+          },
+          {
+            "id": "C1-R1D-GROUP22-CUSTODY",
+            "state": "SCOPED_SAFE_RETENTION_CREDIT_ERROR_COMPLETION_OPEN"
+          },
+          {
+            "id": "H-COST-A257-REJOIN",
+            "state": "SCOPED_SOURCE_CREDIT_REJOINED_NOT_WHOLE_INHERITANCE"
+          },
+          {
+            "id": "BOUNDARIES",
+            "state": "PRESERVED"
+          }
+        ],
+        "whole_acceptance": false,
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false,
+        "Source_execution": 0
+      }
+    },
+    {
+      "pin": {
+        "path": "/var/tmp/friday-sol106-publisher-child-current-mapping-binding-inert-source/RESIDUALS.json",
+        "bytes": 6493,
+        "sha256": "f354ac35d13acd134b154feba257c6be8f59c28e1e0e43a59b06a5d0b9541a53",
+        "identity9_decimal_strings": [
+          "2050",
+          "4635307",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6493",
+          "1791125198700828528",
+          "1791125232440420025"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "schema": "friday.sol106.finite-code-versus-qualification-residuals.v1",
+        "assignment": "ASTRA-E4-A250-PUBLISHER-CHILD-CURRENT-MAPPING-BINDING-CONNECTED-SOL106",
+        "generation": 1,
+        "decision": "PARTIAL_AUTHOR_RESULT",
+        "C1": [
+          {
+            "id": "C1-R1A-ACTUAL-CHILD",
+            "status": "OPEN_CODE",
+            "locations": [
+              "source/actor_bootstrap.py",
+              "source/consumer_bridge.py:HeldConsumerLoader",
+              "source/selected_owned_values.py:_own_native/own_context_body",
+              "source/observer.py:StockChildJournal"
+            ],
+            "gap": "Actual standalone/fork child has no complete portable Context/Token actual_context/used/default/current and exact binding supply under the original before-effect envelope. Root-owned consumer loader remains required; StockChildJournal remains unsupported. Parent PID/context/native Root grant is not a child issuer.",
+            "next": "Implement original child bootstrap/factory/body transport and BOTH real typed/native receivers, preserving ordinary/error cases and preowned resource envelope; no new Root grant."
+          },
+          {
+            "id": "C1-R1B-PARTIAL-MAPPING",
+            "status": "PARTIALLY_AUTHORED_OPEN_CODE",
+            "locations": [
+              "source/selected_owned_values.py:OwnedMappingBirth",
+              "native/publisher_root_entry.c:FridayPublisherRootOwnMapping/own_mapping_current_cut/command_mapping_tail"
+            ],
+            "gap": "Root native retains real constructor return before Source metadata and distinguishes CURRENT/RETIRED. This does not close all first-field/prebirth failures, Source mapping=None versus native retained-return joins, keeper already retired before mapping close, or close-attempt outcome unknown. Those paths retain/refuse rather than prove full required body/finite end.",
+            "next": "Join each actual partial/error carrier to existing consumer; preserve unknown-close originals without reading/reopening a possibly closed mapping. Qualify before-last-close ordering with the existing keeper, not recycled original FD."
+          },
+          {
+            "id": "C1-R1B-HASH-ERROR-JOIN",
+            "status": "PARTIALLY_AUTHORED_OPEN_CODE",
+            "locations": [
+              "consumer/source/resource_meter.py:_Hash",
+              "source/observer.py:full_value_arena/typed hash ledger",
+              "native/publisher_root_entry.c:FridayPublisherRootOwnHashNew/Update/command_own_record_consumer"
+            ],
+            "gap": "Full constructor/update/copy inputs and sticky original-error prefix are authored. Actual return followed by metadata failure can still disagree with Source runtime_h/constructed/confirmed and native counts; untracked stock hash/child portable full own body and actual support retirement remain open.",
+            "next": "Finish native/Source partial-return/error-prefix relation and exact support end; a demand for foreign private heap requires a precise existing contract decision, never digest/name/pointer or native_state_complete=True substitution."
+          },
+          {
+            "id": "C1-R1C-ACTUAL-CLASS-FACTORY",
+            "status": "OPEN_CODE",
+            "locations": [
+              "native/publisher_root_entry.c:own_types/own_module_for_namespace",
+              "source/observer.py:v9 binding/function/type classification",
+              "source/consumer_bridge.py:HeldConsumerLoader"
+            ],
+            "gap": "Actual module/dict/code/pin/raw alias and full-byte relation checks are authored, but class discovery still has inherited namespace/__module__ selection rather than complete real class-factory containment; child transport, unforced annotation/support and full ordinary/error carriers are not closed.",
+            "next": "Bind actual class/code birth to the retained compiled Source relation before deregistration; neither caller-supplied __module__ nor a filename/hash alone issues provenance. Pair all typed/native consumers."
+          },
+          {
+            "id": "C1-R1C-HELD-PHASE",
+            "status": "OPEN_CODE_REJOIN",
+            "locations": [
+              "source/existing_root_caller.py:NativeMemoryBody",
+              "source/custody.py:PreparedFullBody",
+              "source/owned_prefix_bank.py:PrefixBodyMailbox",
+              "native/publisher_root_entry.c:FridayPublisherRootOwnHeldBodyCheck/command_take_owners"
+            ],
+            "gap": "New full-held-body helper operates on live RootHeldFile slots BEFORE their ownership MOVE. After MOVE native OWN_BINDING/graph retains actual relation; do not call helper against emptied h.pin/h.raw or require ended sys.modules registration.",
+            "next": "Astra rejoin must enforce before-MOVE typed validation versus after-MOVE retained native relation and clear every borrowed alias before last DECREF."
+          },
+          {
+            "id": "C1-A250-R1D-REJOIN",
+            "status": "OPEN_CODE_OTHER_OWNER",
+            "locations": [
+              "command_take_owners",
+              "command_mapping_phase",
+              "command_mapping_tail",
+              "command_own_value",
+              "command_own_record_consumer",
+              "command_graph_consumer",
+              "FridayPublisherRootCommandReceive"
+            ],
+            "gap": "This derivative is based only on exact SOL10557. Sealed A250 context is not overlaid; Grok942 R1D active output was not read. New mmap body/edges, actual MAP_CUT owners, six Root stock owners and hash fields require exact shared-interface/layout integration.",
+            "next": "Astra owns A250 both final receivers/whole caller; rejoin with independently sealed Grok R1D. The three R1D function bodies are byte-exact, not evidence that their shared surrounding interfaces are already integrated."
+          }
+        ],
+        "C2": [
+          {
+            "id": "C2-SELECTED-ABI",
+            "status": "NOT_RUN",
+            "required": "Exact selected CPython Context/Token/function/code/type/hash/mmap APIs, real stock methods/identity, buffer leases and RootStorage/receipt ABI."
+          },
+          {
+            "id": "C2-WHOLE-COST-AND-FIT",
+            "status": "NOT_RUN_UNKNOWN_NOT_ZERO",
+            "required": "Actual sizeof/alignment, strong owners, implicit imports/stock/kernel/provider allocations, physical copies/read multiplicity/scan steps and entire original workload within unchanged caps."
+          },
+          {
+            "id": "C2-FULL-CONTROLS-AND-ENDS",
+            "status": "NOT_RUN",
+            "required": "Independent source review and every original positive/failure28/preentry7/69/15/current134/schema20 control/gate on final rejoined exact bytes, meaningful negatives and both actual final receivers."
+          }
+        ],
+        "C1_not_relabelled_C2": true,
+        "Scope_DONE_WHEN": false,
+        "R1_complete": false,
+        "implementation_complete": false,
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false
+      }
+    },
+    {
+      "pin": {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A236-PUBLISHER-SAME-ROOT-ENTRY-IMPLEMENTATION-DECISION-20261003.json",
+        "bytes": 2839,
+        "sha256": "ca702a189feb990ce58ab81ed5c7f9fe5636c2ebd827b4ef82d2303a42dda71b",
+        "identity9_decimal_strings": [
+          "2050",
+          "8534935",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2839",
+          "1791054638938460955",
+          "1791054638999464383"
+        ],
+        "stable9": true
+      },
+      "value": {
+        "schema": "friday.astra.a236.publisher.same-root-owner-implementation-decision.v1",
+        "recorded_utc": "2026-10-03T19:10:38.912Z",
+        "authority": "Current owner reply in this existing Astra Lead Architect epoch4 session; no takeover/model/guard change.",
+        "owner_reply": "Я честно не знаю ответ на твой вопрос. Реши сама пожалуйста эту проблему и последующие, я наделяю тебя всеми полномочиями для этого",
+        "decision": "IMPLEMENT_MISSING_ENTRY_AND_SUPPLIERS_AS_NEW_SOURCE_IN_THE_SAME_EXISTING_PUBLISHER_ROOT_ROLE",
+        "reason": "Current source52 contains CallOriginal->OwnedInvoke but no actual outer call site/creator of Bindings, no current_enrollment_matches body or original whole master pool. Missing private historical source cannot be reconstructed. Owner cannot identify an existing implementation and directs Lead to resolve autonomously. Author a new explicitly labeled same-role implementation from canonical contract, not claim recovered historical code.",
+        "scope": [
+          "Actual Root native performing entry and its real call to CallOriginal/OwnedInvoke, preowned storage and final success/failure consumer",
+          "Concrete protected enrollment/signed-admission/current root PID/start/exe/source/consumer/caps/clock matcher; no true/default stub, synthetic fact/table or issuer/key",
+          "One actual original whole master pool shared by Source and native phases, surviving Source observer detachment; no second grant/reset, retained spent IO/history/RAM",
+          "Both finite endpoints/custody; actual complete body/alias correspondence before owner loss, confirmed retirement or lawful transfer within existing topology; no infinite observer chain"
+        ],
+        "retained_contract": "All canonical release acceptance/functions/cases/control inventories/caps/resource/exclusive-slot/production boundaries and external web defer remain. New same-role source is NOT independent acceptance, Source/Root/image/compilerABI/runtime admission or permission to execute.",
+        "not_authorized_here": [
+          "Source parser/import/compiler/preprocess/eval/execution/tests/live/native/Root/GPG/install",
+          "new service, dispatcher, project register, root model/TUI/role/grant/issuer, private/foreign heap theorem",
+          "changes to models/reasoning/tier/provider/settings/guards/writer locks or stock provider identity",
+          "rewriting frozen baselines/results; private artifacts reconstructed from prose"
+        ],
+        "supersedes": "A233/A236 missing existing Root path is no longer a user-information dependency. A230 same-role new implementation allowance is made concrete; actual protected grants and installed enrollment remain later external admission prerequisites.",
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false
+      }
+    }
+  ],
+  "counted_host_read_bytes": 5745524,
+  "helper_peak_rss_bytes": 611573760,
+  "Source_execution": 0,
+  "Source_parsing": 0
+}

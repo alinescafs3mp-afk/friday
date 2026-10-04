@@ -1,0 +1,22 @@
+{
+  "Source_execution": 0,
+  "analysis": "implementation-result.json",
+  "costs": "costs.json",
+  "directory_mode": "0700",
+  "file_mode": "0600",
+  "join": "SOURCE-JOIN.json",
+  "pins": "pins.json",
+  "result": "implementation-result.json",
+  "root": "/var/tmp/friday-lab927-node-nonalias-prospective-format-connected-inert-source",
+  "schema": "friday.lab927.exact-pathset.v1",
+  "source6": [
+    "caller.py",
+    "expectations.json",
+    "launch-contract.json",
+    "ordinary-surplus.txt",
+    "supervisor.py",
+    "verifier.py"
+  ],
+  "symlinks": false,
+  "validation": "validation-plan.json"
+}

@@ -1,0 +1,1257 @@
+{
+  "schema": "friday.astra.lab950.received.v1",
+  "assignment": "ASTRA-E4-A259-PUBLISHER-MAPPING-RETURN-UNCERTAIN-END-CONNECTED-LAB-950",
+  "job": "job_94de37bf1664496895df4e8306386db1",
+  "event": "msg_36d76e40ffb541cdbbc076c5decdd595",
+  "received_msk": "2026-10-04T20:47:14.924332+03:00",
+  "manifest": {
+    "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/manifest.json",
+    "bytes": 18680,
+    "sha256": "9f1c3b80a78ca571e8812ea11ba92eaa33b611ccf7adf354db72d598868daaf8",
+    "identity9_decimal_strings": [
+      "2050",
+      "3558828",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "18680",
+      "1791135764327324776",
+      "1791135764327324776"
+    ],
+    "stable9": true
+  },
+  "pins": [
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/manifest.json",
+      "bytes": 18680,
+      "sha256": "9f1c3b80a78ca571e8812ea11ba92eaa33b611ccf7adf354db72d598868daaf8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558828",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18680",
+        "1791135764327324776",
+        "1791135764327324776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/INERT-OBLIGATIONS.json",
+      "bytes": 1357,
+      "sha256": "543a35b3a2eed945ed21524e4a381ebb251038c8ff2e269a0f42d6368ce71e1b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558821",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1357",
+        "1791135764327324776",
+        "1791135764327324776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/INERT-READ-CHECK.json",
+      "bytes": 510,
+      "sha256": "6026abc0fbdfa776967162243e1a84f5ceb2dd09ef63bf3b4d05fabc4530c000",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558822",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "510",
+        "1791135764327324776",
+        "1791135764327324776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/INTEGRATION.json",
+      "bytes": 941,
+      "sha256": "348f2f3ffab27a26f84b0fac56297ca54651d29b90a1fb96a500de330a55e53c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558823",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "941",
+        "1791135764327324776",
+        "1791135764327324776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/LITERAL-DELTA",
+      "bytes": 18076,
+      "sha256": "893fa6701583eff5f14f7618c1d1505eba35212ddb4417b4c69c66839e00cac9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558824",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18076",
+        "1791135764327324776",
+        "1791135764327324776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/README.txt",
+      "bytes": 243,
+      "sha256": "edbf73c1f947164a938ad09e171218e619c57d62cbafaff7610feb69b0dd0885",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558825",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "243",
+        "1791135764327324776",
+        "1791135764327324776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/SOURCE-PINS.json",
+      "bytes": 1284,
+      "sha256": "6cac67526a44ca136ad740c3b11f5c6f08f1beae81989d5da8143f841716da83",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558826",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1284",
+        "1791135764327324776",
+        "1791135764327324776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/authority.py",
+      "bytes": 16580,
+      "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558789",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16580",
+        "1791135764325752655",
+        "1791135764325752655"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/bill.py",
+      "bytes": 24098,
+      "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558790",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24098",
+        "1791135764325838630",
+        "1791135764325838630"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/body_scope.py",
+      "bytes": 7655,
+      "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558791",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7655",
+        "1791135764325865212",
+        "1791135764325865212"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/canonical.py",
+      "bytes": 3825,
+      "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558792",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3825",
+        "1791135764325883522",
+        "1791135764325883522"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/capability.py",
+      "bytes": 11981,
+      "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558793",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11981",
+        "1791135764325898703",
+        "1791135764325898703"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/contract.py",
+      "bytes": 2099,
+      "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558794",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2099",
+        "1791135764325927598",
+        "1791135764325927598"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558795",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "39603",
+        "1791135764325941605",
+        "1791135764325941605"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/document_vector.py",
+      "bytes": 17709,
+      "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558796",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17709",
+        "1791135764325970952",
+        "1791135764325970952"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/document_windows.py",
+      "bytes": 7707,
+      "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558797",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7707",
+        "1791135764325990853",
+        "1791135764325990853"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/effects.py",
+      "bytes": 690,
+      "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558798",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "690",
+        "1791135764326006491",
+        "1791135764326006491"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/formats.py",
+      "bytes": 13628,
+      "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558799",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13628",
+        "1791135764326064522",
+        "1791135764326064522"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/ingress.py",
+      "bytes": 3025,
+      "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558800",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3025",
+        "1791135764326089099",
+        "1791135764326089099"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/material_literals.py",
+      "bytes": 5689,
+      "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558801",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5689",
+        "1791135764326116718",
+        "1791135764326116718"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/performing_contracts.py",
+      "bytes": 18209,
+      "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558802",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18209",
+        "1791135764326136159",
+        "1791135764326136159"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/pins.py",
+      "bytes": 9147,
+      "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558803",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9147",
+        "1791135764326155263",
+        "1791135764326155263"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/producer_consumer.py",
+      "bytes": 3243,
+      "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558804",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3243",
+        "1791135764326171024",
+        "1791135764326171024"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/receipt_chain.py",
+      "bytes": 16263,
+      "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558805",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16263",
+        "1791135764326191263",
+        "1791135764326191263"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/recipe_planner.py",
+      "bytes": 102799,
+      "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558806",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "102799",
+        "1791135764326209461",
+        "1791135764326209461"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/resource_meter.py",
+      "bytes": 29321,
+      "sha256": "eb49bcb0be0f1df0ec185ee285b069596c00b5e28b6fbce6a0c91533bcd7a976",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558807",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "29321",
+        "1791135764326243611",
+        "1791135764326243611"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/runtime_consumer.py",
+      "bytes": 13297,
+      "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558808",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13297",
+        "1791135764326271505",
+        "1791135764326271505"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/schema_validate.py",
+      "bytes": 6776,
+      "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558809",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6776",
+        "1791135764326289722",
+        "1791135764326289722"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/semantics.py",
+      "bytes": 2578,
+      "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558810",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2578",
+        "1791135764326303103",
+        "1791135764326303103"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/consumer/source/whole_join.py",
+      "bytes": 18213,
+      "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558811",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18213",
+        "1791135764326383101",
+        "1791135764326383101"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/native/publisher_original_caller.c",
+      "bytes": 13800,
+      "sha256": "d228b6a5c0f33d81f884f6cb992f6f23d6638501cd69af1d4d2705b0b586d180",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558813",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13800",
+        "1791135764326383101",
+        "1791135764326383101"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/native/publisher_original_caller.h",
+      "bytes": 6493,
+      "sha256": "27bf9815fb118e12c7c32943875c30c4d6cf640c53e74cb5d1ac073fbeb4b05e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558814",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6493",
+        "1791135764326455084",
+        "1791135764326455084"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/native/publisher_owned_custody.c",
+      "bytes": 63843,
+      "sha256": "6cb9dc7b228fae434c4a9178d225f4e159a9e916ba65e1dd6aba587c5ed1ef08",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558815",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "63843",
+        "1791135764326469767",
+        "1791135764326469767"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/native/publisher_owned_custody.h",
+      "bytes": 5728,
+      "sha256": "6e08b447f7dfefb119f3d894f7a6b9a8a0b4dd85e5e3ea7abb9b296101b8f7ed",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558816",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5728",
+        "1791135764326495957",
+        "1791135764326495957"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/native/publisher_root_command.c",
+      "bytes": 27772,
+      "sha256": "51fd8c4a662b802bc8f5910e4b34cc94804faeb89b480bfcac6c4072f2c2dc1b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558817",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27772",
+        "1791135764326511883",
+        "1791135764326511883"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/native/publisher_root_command.h",
+      "bytes": 4777,
+      "sha256": "7af5c2b27f9b748f2253ac4f8235912bf5105857e1d001fc6af09b0651dcb9bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558818",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4777",
+        "1791135764326533389",
+        "1791135764326533389"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/native/publisher_root_entry.c",
+      "bytes": 465108,
+      "sha256": "93792e859f7b6f5c073615ec5448e61adda29a1e4fe9b2d514fc5d0e506dd49a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558819",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "465108",
+        "1791135764326547846",
+        "1791135764326547846"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/native/publisher_root_entry.h",
+      "bytes": 18657,
+      "sha256": "b4feeab968c8240113195d2333fe9682be03eb4c2c084e7e07f1c38fc59344de",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558820",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18657",
+        "1791135764326678082",
+        "1791135764326678082"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/actor_bootstrap.py",
+      "bytes": 61339,
+      "sha256": "f47505b651e88b60d19b6a2fcef555d1709f4607433043e79229cf9c9af751df",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714979",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "61339",
+        "1791135764326678082",
+        "1791135764326678082"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/actor_context.py",
+      "bytes": 25298,
+      "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714980",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25298",
+        "1791135764326749105",
+        "1791135764326749105"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/admission.py",
+      "bytes": 14621,
+      "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714981",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14621",
+        "1791135764326768896",
+        "1791135764326768896"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/alljob_cohort.py",
+      "bytes": 24686,
+      "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714982",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24686",
+        "1791135764326805088",
+        "1791135764326805088"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/capacity.py",
+      "bytes": 20946,
+      "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714983",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20946",
+        "1791135764326826846",
+        "1791135764326826846"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/class_semantics.py",
+      "bytes": 19516,
+      "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714984",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19516",
+        "1791135764326850620",
+        "1791135764326850620"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/common.py",
+      "bytes": 37411,
+      "sha256": "eedafb8804eae10c6919183f75c06333f99ce2e1b586a6314670b96b3ade00f8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714985",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "37411",
+        "1791135764326867271",
+        "1791135764326867271"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/consumer_bridge.py",
+      "bytes": 21315,
+      "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714986",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21315",
+        "1791135764326887832",
+        "1791135764326887832"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/custody.py",
+      "bytes": 29181,
+      "sha256": "2dce6e09e39b8faf6063619e77a7bd9a0e756ec6111dc38409438eb046c87e09",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714987",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "29181",
+        "1791135764326904763",
+        "1791135764326904763"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/existing_root_caller.py",
+      "bytes": 37637,
+      "sha256": "2dc5040eeacf820c031b5b0ebb291fd733dd6798de919ec2d6762d9d22bfe6c4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714988",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "37637",
+        "1791135764326928885",
+        "1791135764326928885"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/extraction.py",
+      "bytes": 27923,
+      "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714989",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27923",
+        "1791135764326967389",
+        "1791135764326967389"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/fact_bridge.py",
+      "bytes": 14689,
+      "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714990",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14689",
+        "1791135764326995384",
+        "1791135764326995384"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/independent_selector.py",
+      "bytes": 7718,
+      "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714991",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7718",
+        "1791135764327013544",
+        "1791135764327013544"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/launcher.py",
+      "bytes": 11634,
+      "sha256": "3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714992",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11634",
+        "1791135764327027427",
+        "1791135764327027427"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/lifetime.py",
+      "bytes": 49101,
+      "sha256": "4cbdbc7840fefc6c971043d3913c8833ca17e259cdfa95aaddb1e19b4ce1e8d6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714993",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49101",
+        "1791135764327044620",
+        "1791135764327044620"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/master_pool.py",
+      "bytes": 2315,
+      "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714994",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2315",
+        "1791135764327068402",
+        "1791135764327068402"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/native.py",
+      "bytes": 44470,
+      "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714995",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44470",
+        "1791135764327080991",
+        "1791135764327080991"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/normalization.py",
+      "bytes": 12779,
+      "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714996",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12779",
+        "1791135764327105576",
+        "1791135764327105576"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/observer.py",
+      "bytes": 141622,
+      "sha256": "8ad4bcb8b2e079c52c8c6e0269e2cb06c13efe88a62d990866ed32078a628db1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714997",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "141622",
+        "1791135764327121426",
+        "1791135764327121426"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/operations.py",
+      "bytes": 24309,
+      "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714998",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24309",
+        "1791135764327177730",
+        "1791135764327177730"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/owned_prefix_bank.py",
+      "bytes": 42474,
+      "sha256": "d9ad072368a3cbf310f915a22cacf7d935d778ee57c54fbd4c930df64efdf75b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3714999",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "42474",
+        "1791135764327199308",
+        "1791135764327199308"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/retention.py",
+      "bytes": 8465,
+      "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715000",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8465",
+        "1791135764327221220",
+        "1791135764327221220"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/roles.py",
+      "bytes": 5018,
+      "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715001",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5018",
+        "1791135764327235380",
+        "1791135764327235380"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/root_tool_adapter.py",
+      "bytes": 151551,
+      "sha256": "f62785816d2aead153aa67c1709b50fcfdd8ced465acf042274f238920acf3be",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715002",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "151551",
+        "1791135764327248963",
+        "1791135764327248963"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/selected_owned_values.py",
+      "bytes": 44639,
+      "sha256": "d10ed2224e99a2facb87819f2eb352d118ee1d2a3468b89e45042795c434d60d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715003",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44639",
+        "1791135764327291175",
+        "1791135764327291175"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/source/snapshot_producer.py",
+      "bytes": 4130,
+      "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715004",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4130",
+        "1791135764327324776",
+        "1791135764327324776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab950-publisher-mapping-outcome-end-inert-source/timing.json",
+      "bytes": 462,
+      "sha256": "84b1529a82fbddad088becb16304795439957232d552e719c474760ed593af91",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558827",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "462",
+        "1791135764327324776",
+        "1791135764327324776"
+      ],
+      "stable9": true
+    }
+  ],
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB950-INPUT-20261004.json",
+    "bytes": 35354,
+    "sha256": "e7bbc01c3790906ebb353106987d91d39c746eedfcd8cc199fc6e75c5438b94d",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536561",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "35354",
+      "1791135047189533639",
+      "1791135047212534886"
+    ],
+    "stable9": true
+  },
+  "envelope_pin": {
+    "path": "/home/jericho/jericho/.git/friday-lab/v2/messages/msg_36d76e40ffb541cdbbc076c5decdd595.json",
+    "bytes": 412,
+    "sha256": "36913533282787cacdc1c70819a24b3513843d8fc96e7a9eec975e61b62c2a5c",
+    "identity9_decimal_strings": [
+      "2050",
+      "7801613",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "412",
+      "1791135777134230073",
+      "1791135777135230130"
+    ],
+    "stable9": true
+  },
+  "author_claims": {
+    "INERT-OBLIGATIONS.json": {
+      "GO": false,
+      "Root_admission": false,
+      "SourceReady": false,
+      "closed_in_source": [
+        "A failed retained recovery does not relabel a returned constructor as a factory failure.",
+        "The first error stays, and a confirmed return keeps the native, creation, and Source aliases.",
+        "Unresolved publication is an explicit STOP. The constructor is not run again and the clock check stays.",
+        "Phase 3 is not full mapping DATA and cannot pass ordinary retirement.",
+        "CURRENT phase 1 keeps 16 edges and the live buffer. RETIRED phase 2 keeps 15 edges and the historical bytes.",
+        "Prebirth, normal return, keeper order, confirmed historical close, and unknown-close retention credits stay."
+      ],
+      "decision": "REJOINED_LAB948_MAPPING_RETURN_RECOVERY_UNKNOWN_END_WHOLE_ADMISSION_OPEN",
+      "execution": "NOT_RUN",
+      "fit": "UNCONFIRMED",
+      "schema": "friday.lab950.inert-obligations.v1",
+      "self_acceptance": false,
+      "still_open": [
+        "First-field and creation-slot failure limits stay explicit.",
+        "SOL109 C2-R1D consumer-pass and namespace-probe rejections stay open. LAB949 was not overlaid.",
+        "Astra's native whole error-end graph stays open.",
+        "C2 full required widths, compiler ABI, workload fit, and gates stay open.",
+        "Sol107 child output was not read. Whole admission and LAB-937 native residuals stay open."
+      ]
+    },
+    "INERT-READ-CHECK.json": {
+      "checks": [
+        "LAB948 Source57 pins and fullSHA9 matched before editing the fresh copy",
+        "forward and inverse literal hunks replay",
+        "hash ledger v2 remains and v1 is absent",
+        "group22 retention, secondary error end, and own_before capture order remain",
+        "CURRENT16 and RETIRED15 edge counts remain",
+        "phase 3 clears data_read and blocks retirement",
+        "LAB949 consumer and namespace edits are absent"
+      ],
+      "schema": "friday.lab950.inert-read-check.v1",
+      "source_execution": 0
+    },
+    "INTEGRATION.json": {
+      "GO": false,
+      "Root_admission": false,
+      "SourceReady": false,
+      "active_sol111_output_read": false,
+      "changed": [
+        "native/publisher_root_entry.c",
+        "source/observer.py",
+        "source/selected_owned_values.py"
+      ],
+      "child_acceptance_claimed": false,
+      "classification": {
+        "code": [
+          "returned alias published before instance metadata",
+          "unconfirmed recovery stays STOP",
+          "phase 3 excluded from full DATA and retirement"
+        ],
+        "evidence": "literal forward and inverse replay against LAB948",
+        "qualification": "NOT_RUN"
+      },
+      "compiler_abi": "NOT_RUN",
+      "decision": "REJOINED_LAB948_MAPPING_RETURN_RECOVERY_UNKNOWN_END_WHOLE_ADMISSION_OPEN",
+      "execution": "NOT_RUN",
+      "fit": "UNCONFIRMED",
+      "lab948_preserved": true,
+      "lab949_overlaid": false,
+      "native_cost": "UNKNOWN_NOT_ZERO",
+      "schema": "friday.lab950.integration.v1",
+      "self_acceptance": false,
+      "stopped_sol107_output_read": false
+    },
+    "timing.json": {
+      "children": 0,
+      "elapsed_ns": 661252264000,
+      "heavy_runs": 0,
+      "network": 0,
+      "read_bytes": 1921269,
+      "schema": "friday.lab950.timing.v1",
+      "seal_duration_ns": 94757,
+      "seal_ended_msk": "2026-10-04T20:42:44.327432+03:00",
+      "seal_started_msk": "2026-10-04T20:42:44.327345+03:00",
+      "source_execution": 0,
+      "timezone": "Europe/Moscow",
+      "work_ended_msk": "2026-10-04T20:42:44.327432+03:00",
+      "work_started_msk": "2026-10-04T20:31:43.075168+03:00"
+    }
+  },
+  "decision": "AUTHENTICATED_INERT_AUTHOR_CORRECTION_NOT_INTEGRATED_REQUIRES_NONAUTHOR",
+  "independent_acceptance": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false,
+  "Source_execution": 0
+}

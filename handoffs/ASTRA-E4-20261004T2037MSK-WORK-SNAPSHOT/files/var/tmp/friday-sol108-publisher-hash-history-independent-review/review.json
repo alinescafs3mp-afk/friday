@@ -1,0 +1,205 @@
+{
+  "schema": "friday.sol108.independent-safe-hash-accounting-review.v1",
+  "assignment": "ASTRA-E4-A257-PUBLISHER-HASH-FULL-HISTORY-SCAN-NONAUTHOR-SOL108",
+  "generation": 1,
+  "decision": "SCOPED_ACCEPT_A257_HASH_HISTORY_COUNT_DEBIT_SHAPE_REJOIN",
+  "reviewer": "Sol, non-author of A257 two-hunk change",
+  "scope": "Only A257 changed native hash-history scan arithmetic, prospective explicit read debit and shape guards, joined to exact A256 producer/typed reader/owner relation. Not independent acceptance of all previous Sol-authored code.",
+  "candidate_manifest": {
+    "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/manifest.json",
+    "bytes": 29378,
+    "sha256": "73f4db4fc8427e718dd5c2bc6991a7bf59d1f4dbfb775a61877923a761cdf39d",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980643",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "29378",
+      "1791130808528481691",
+      "1791130808551283927"
+    ],
+    "stable9": true
+  },
+  "baseline_manifest": {
+    "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/manifest.json",
+    "bytes": 32881,
+    "sha256": "c4ea289c4df851e3364d6d3cc802c60ee6fa0162c12e25449ee01c70fda11e86",
+    "identity9_decimal_strings": [
+      "2050",
+      "5010660",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "32881",
+      "1791129359526042982",
+      "1791129359546343017"
+    ],
+    "stable9": true
+  },
+  "changed_file": {
+    "name": "native/publisher_root_entry.c",
+    "candidate": {
+      "path": "/var/tmp/friday-astra-a257-publisher-hash-scan.NITA2z/native/publisher_root_entry.c",
+      "bytes": 413280,
+      "sha256": "2f7a8fa32dee8a91330a2975e8826bb487b59690a03e81496c0a3276082cfc7a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229218",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "413280",
+        "1791130708211803917",
+        "1791130708211803917"
+      ],
+      "stable9": true
+    },
+    "baseline": {
+      "path": "/var/tmp/friday-astra-a256-publisher-hash-outcome.Zl4NIT/native/publisher_root_entry.c",
+      "bytes": 412436,
+      "sha256": "15ac8b60f733ea4869308133f907c66dbab6a8dba2a1988d79025cc506b6e11a",
+      "identity9_decimal_strings": [
+        "2050",
+        "5010626",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "412436",
+        "1791129207558656060",
+        "1791129207558656060"
+      ],
+      "stable9": true
+    },
+    "candidate_LF_count": 7134,
+    "baseline_LF_count": 7122
+  },
+  "delta": {
+    "changed": 1,
+    "unchanged": 56,
+    "added": 0,
+    "removed": 0,
+    "source_bytes": 1783650,
+    "baseline_source_bytes": 1782806,
+    "byte_delta": 844,
+    "LF_delta": 12,
+    "authored_hunks": 2,
+    "host_minimal_non_equal_opcodes": 7,
+    "forward_exact": true,
+    "inverse_exact": true,
+    "evidence": "/var/tmp/friday-sol108-publisher-hash-history-independent-review/pins-and-literal-audit.json",
+    "supplied_hunk_replay": "/var/tmp/friday-sol108-publisher-hash-history-independent-review/literal-lab-evidence.json"
+  },
+  "findings": [
+    {
+      "id": "H108-ACTUAL",
+      "decision": "ACCEPT",
+      "class": "SOURCE_CODE",
+      "path": "native/publisher_root_entry.c:5532-5618;5650-5667;5758-5759",
+      "invariant": "The changed branch is the actual own-record consumer reached from command_graph_consumer before required_values_complete.",
+      "evidence": "It looks up the same original OWN_HASH row, validates actual seven-scalar body and fifteen original/support edges, and uses p->refs[1], not a generated or sampled history. command_values only sets required_values_complete after this real consumer returns."
+    },
+    {
+      "id": "H108-COUNT",
+      "decision": "ACCEPT",
+      "class": "SOURCE_CODE",
+      "path": "native/publisher_root_entry.c:5566-5593",
+      "invariant": "Full actual update-list cardinality, not constructor field count, drives the prospective charge.",
+      "evidence": "After exact ledger14 and exact PyList validation, updates is the nonnegative Py_ssize_t list size represented as uint64_t. The same captured value controls the loop. No provider/user callback occurs in the added checks. Zero updates yields zero additional row reads and no row iteration; constructor fixed charge remains. On the intended ssize_t<=64-bit domain the return cast represents the original size exactly; actual compiler ABI is not established."
+    },
+    {
+      "id": "H108-OVERFLOW",
+      "decision": "ACCEPT",
+      "class": "SOURCE_CODE",
+      "path": "native/publisher_root_entry.c:5587-5591",
+      "invariant": "Nonzero row_reads=24576 and division guard precede the multiplication.",
+      "evidence": "updates greater than UINT64_MAX/24576 refuses through the same MasterFault before multiplying or entering the loop. A permitted product fits uint64_t. Since this limit is below UINT64_MAX, attempted/confirmed start at one and cannot overflow from at most updates increments. The guard is representability, not a lower workload-width cap."
+    },
+    {
+      "id": "H108-PREPAY",
+      "decision": "ACCEPT",
+      "class": "SOURCE_CODE",
+      "path": "native/publisher_root_entry.c:5562;5589-5596;485-521",
+      "invariant": "Ledger metadata and every prospective history row are debited before their respective walks.",
+      "evidence": "Fixed MasterBefore(24576) precedes the first ledger dictionary walk. Full MasterBefore(updates*24576) precedes row retrieval, row validation and field scans. MasterBefore first checks original pool identity, cumulative pending/spent/observed reads, clocks and existing caps, then adds spent_read. Failure returns before the row loop. No new pool, refund, cap expansion, sampling, truncation or added allocation appears in either hunk. Early refusal conservatively retains unused prepaid row credit; no refund claim."
+    },
+    {
+      "id": "H108-SHAPE",
+      "decision": "ACCEPT",
+      "class": "SOURCE_CODE",
+      "path": "native/publisher_root_entry.c:5563-5568;5593-5605;3477-3488;3980-3992",
+      "invariant": "Constructor14 and operation7 cardinality checks precede added plain-field scans.",
+      "evidence": "Ledger null/exact-dict/size14 precedes updates lookup. Per-row null/exact-dict/size7 precedes all six required row-field lookups. own_plain_field first compares exact Unicode length with the fixed literal name and only then inspects that fixed number of codepoints. own_hash_status_key checks existing bounded status-key domain. The 24576 per-row amount is a declared conservative explicit allowance for this actual preowned seven-field producer domain, not a measurement of CPython internal table layout, sparse storage, provider or whole physical cost."
+    },
+    {
+      "id": "H108-PRODUCER-SCHEMA",
+      "decision": "ACCEPT_REJOIN",
+      "class": "SOURCE_RELATION",
+      "path": "consumer/source/resource_meter.py:519-574; native/publisher_root_entry.c:4005-4106; source/observer.py:849-929",
+      "invariant": "The unchanged actual producer and both readers continue to use v2 constructor14/update7.",
+      "evidence": "The producer appends the full same input/row before actual update, keeps the previous completion bit, and makes it false before append/provider. Native actual/confirmed counters and retained original status-key aliases precede returned publication. Typed reader requires exact field-name sets; native reader requires cardinality, required fields, actual key/value aliases and counters in the full original graph. This is composite agreement on this exact unchanged producer, not a new assertion that the native check is a standalone arbitrary-dictionary validator."
+    },
+    {
+      "id": "H108-ERROR-COMPLETION",
+      "decision": "ACCEPT_REJOIN",
+      "class": "SOURCE_RELATION",
+      "path": "native/publisher_root_entry.c:5601-5618; source/observer.py:856-868;909-924; consumer/source/resource_meter.py:544-574",
+      "invariant": "Original provider errors, later metadata errors and actual attempted/confirmed facts cannot become false completion.",
+      "evidence": "Both readers refuse confirmed update plus original_error and metadata_error before confirmation. Completion requires actual attempted/confirmed rows and no metadata errors. Native additionally compares full reconstructed attempted/confirmed totals with actual row counters and sticky uncertainty flags. Post-return Source metadata failure leaves state_complete false. Failed confirmed-slot publication leaves native confirmed counter ahead of the ledger and therefore refuses before retirement; it is not recovered as completion. Constructor returned-slot facts and original-vs-metadata distinction are unchanged, and no old runtime acceptance is transferred."
+    },
+    {
+      "id": "H108-COPY",
+      "decision": "ACCEPT_REJOIN",
+      "class": "SOURCE_RELATION",
+      "path": "consumer/source/resource_meter.py:528;546;574-576; native/publisher_root_entry.c:4034-4055; source/observer.py:874-903",
+      "invariant": "The full actual history debit does not replace or shorten the original copy-prefix relation.",
+      "evidence": "Unchanged actual producer/native capture 1+parent update count before the real copy, retaining original parent aliases. Typed completed-copy validation checks precisely that retained prefix, so later parent rows do not rewrite it. The A257 loop validates each selected hash's own full current update ledger; it neither changes the captured parent ordinal nor erases incomplete original prefixes."
+    },
+    {
+      "id": "H108-RETENTION",
+      "decision": "ACCEPT_REJOIN",
+      "class": "SOURCE_RELATION",
+      "path": "native/publisher_root_entry.c:360-373;4691-4710;6224-6271;6288-6300;6415-6454;6599-6610",
+      "invariant": "New debit/shape/overflow failure preserves the same original owner/borrower relation and cannot reach successful retirement.",
+      "evidence": "Group21 moves all twelve actual slots and error cells while restoring borrowed views; status-key slots9/10/11 remain required owners. If command_values fails during the changed branch, the command seals with originals retained, and required_values_complete has not been set. The success-only retirement requires complete read/error/FD/owner conditions before borrower clearing, then actual strong-owner retirement. Final reader rechecks ended row links after borrowed views are null. MasterFault refuses without replacing an already pending original error. Error sealing may perform its existing finite secondary payload read from prior credit; refusal does not mean all remaining work is zero."
+    },
+    {
+      "id": "H108-POSITIVE-DOMAIN",
+      "decision": "ACCEPT_SOURCE_DOMAIN_NOT_FIT",
+      "class": "SOURCE_CODE_AND_QUALIFICATION_BOUNDARY",
+      "path": "native/publisher_root_entry.c:29-36;5587-5593; source/observer.py:849-929",
+      "invariant": "Original workloads, routes and caps are preserved; positive full-width fit is not claimed.",
+      "evidence": "No lower maximum history length or pool reset was introduced. Ordinary empty/nonempty histories with original valid shape, aliases, completion facts and enough unchanged master credit follow the same scan. Explicit hash-consumer credit is 24576*(1+N) reads for N actual rows, in addition to all other original costs. Large valid cases can now refuse correctly when aggregate credit is unavailable. Whether every required unchanged workload fits is UNCONFIRMED; that open qualification is not a reason to authorize narrower cases or raise caps."
+    }
+  ],
+  "evidence_boundaries": {
+    "LAB946": "Manifest plus all five artifact SHA9 verified; exact A256 seven scoped relations used only as bounded evidence. H-COST/full fit was OPEN. A257 changed branch independently rejoined rather than silently carrying acceptance.",
+    "fixed_row_bound": "Explicit source accounting allowance only. Implicit ABI/provider/internal object-table work UNKNOWN_NOT_ZERO.",
+    "compiler_ABI": "NOT_RUN",
+    "whole_required_workload_fit": "UNCONFIRMED",
+    "Source_execution": 0,
+    "Root_execution": 0,
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false,
+    "ABSTRACT_HASH_ONLY": {
+      "required": true,
+      "waiver": false
+    },
+    "SOL107": "No stopped draft implementation read, copied, resumed or completed; no guard workaround.",
+    "children": 0,
+    "heavy_runs": 0,
+    "network": 0,
+    "source_edits": 0
+  },
+  "corrections": {
+    "scoped_source_code": "NONE_REQUIRED",
+    "qualification": "Retain ABI and full required-workload fit as open; qualify only under a separately authorized actual execution gate."
+  },
+  "Scope_DONE_WHEN": true,
+  "source_snapshot_acceptance": "Only the identified A257 accounting delta and stated existing relation; not release/whole SourceReady"
+}
