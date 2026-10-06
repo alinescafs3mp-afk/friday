@@ -1,0 +1,67 @@
+{
+  "schema": "friday.sol166.source-comparison.v1",
+  "counts": {
+    "Source61": {
+      "changed": 1,
+      "unchanged": 60
+    },
+    "current88": {
+      "changed": 1,
+      "unchanged": 87
+    }
+  },
+  "delta": {
+    "relative": "parent/publisher_root_command.py",
+    "before": {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent/publisher_root_command.py",
+      "bytes": 69491,
+      "sha256": "be9c93d67aa39fb3bfc78ae8d88eb2f37d068331624069c2ad958b810a76c27d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230482",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "69491",
+        "1791269663741501926",
+        "1791269663741501926"
+      ],
+      "stable9": true
+    },
+    "after": {
+      "path": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/parent/publisher_root_command.py",
+      "bytes": 69495,
+      "sha256": "d839fb085d84daaa9c73d4149d318256152188d0cf26501857d4313bfadb000c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230625",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "69495",
+        "1791270648521128965",
+        "1791270648521128965"
+      ],
+      "stable9": true
+    }
+  },
+  "entire_parent_inverse_exact": true,
+  "entire_other87_exact": true,
+  "metadata_change": false,
+  "physical": [
+    {
+      "role": "snapshot",
+      "physical_count": 94,
+      "membership": "EXACT"
+    },
+    {
+      "role": "base",
+      "physical_count": 108,
+      "membership": "EXACT"
+    }
+  ],
+  "current_unique_paths": 88,
+  "Source_execution": false
+}

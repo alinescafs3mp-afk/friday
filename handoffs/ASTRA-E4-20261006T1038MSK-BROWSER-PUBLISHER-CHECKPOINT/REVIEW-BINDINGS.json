@@ -1,0 +1,158 @@
+[
+  {
+    "review": {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/REVIEW.json",
+      "bytes": 11302,
+      "sha256": "704917d6b2c7bd586d09b350db126ff7d0cc96e1a2f63e3b81751eb706a84749",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230676",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11302",
+        "1791270753089141858",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    "package": {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json",
+      "bytes": 10781,
+      "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230566",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10781",
+        "1791270177829870695",
+        "1791270177847283442"
+      ],
+      "stable9": true
+    },
+    "decision": "SCOPED_STATIC_ACCEPT_EXACT_A308_CONNECTED_PRIVATE_SUCCESS_GRAPH_RETIREMENT_DELTA_ONLY",
+    "scope": "Astra A308 delta in three decoders + actual A079 success retirement, rejoined current209/aux3. Not whole Browser acceptance.",
+    "test_execution": "NOT_RUN"
+  },
+  {
+    "review": {
+      "path": "/var/tmp/friday-sol166-a308-publisher-initial71-receiver-review/REVIEW.json",
+      "bytes": 10682,
+      "sha256": "d14c6f1b0c13e813fc90464ff09cabb3d72a0267c3b2e9ee05cfc3db288f88f0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4372375",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10682",
+        "1791271429315023070",
+        "1791271483962164893"
+      ],
+      "stable9": true
+    },
+    "package": {
+      "path": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/manifest.json",
+      "bytes": 75190,
+      "sha256": "2a5e9b96b3d8048992712531746a8009e5a01265874f93d96befef846686c6c4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230689",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75190",
+        "1791270876923262608",
+        "1791270876945263873"
+      ],
+      "stable9": true
+    },
+    "decision": "SCOPED_STATIC_ACCEPT_EXACT_A308_ACTUAL_INITIAL71_RECEIVER_ENTRY_DELTA_ONLY",
+    "scope": "Exact one-line Astra71 receiver entry delta and actual connected error/retirement consumers. NOT self-acceptance of Sol164 baseline.",
+    "test_execution": "NOT_RUN"
+  },
+  {
+    "review": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A308-SOL164-CONNECTED-REVIEW-20261006.json",
+      "bytes": 5586,
+      "sha256": "626d1e08b29874efbf4d396ec6a272f1ba80e872a8b76a598420e8f24f74e61b",
+      "identity9_decimal_strings": [
+        "2050",
+        "8536864",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5586",
+        "1791270839735124208",
+        "1791270839758125531"
+      ],
+      "stable9": true
+    },
+    "package": {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/manifest.json",
+      "bytes": 82497,
+      "sha256": "83a4a43d7d5acce85bab0ef3064e6941e73227ab201c2b6f9c84d8a6f0e4a18e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230561",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "82497",
+        "1791269861184855339",
+        "1791269861185855397"
+      ],
+      "stable9": true
+    },
+    "decision": "REJECT_CONNECTED_AS_SUBMITTED",
+    "scope": "Astra nonauthor review of Sol164 original connected package: valid numeric birth/wire scoped relations; actual71 entry mismatch. Original rejected bytes/result immutable.",
+    "test_execution": "NOT_RUN"
+  },
+  {
+    "review": {
+      "path": "/var/tmp/friday-sol163-a306-browser-three-reader-history-once-review/REVIEW.json",
+      "bytes": 8673,
+      "sha256": "8625f8704328e266d417af04350f548da55b7c45e7e469143a4083bd9414b2ac",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229671",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8673",
+        "1791268506712302995",
+        "1791268545881529237"
+      ],
+      "stable9": true
+    },
+    "package": {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/manifest.json",
+      "bytes": 10524,
+      "sha256": "e9aaacce5b79a820244889712e00319f29be6dcc42c26795d6331c01ea216f7a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849832",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10524",
+        "1791267970351818526",
+        "1791267970368819487"
+      ],
+      "stable9": true
+    },
+    "decision": "SCOPED_STATIC_ACCEPT_EXACT_A306_HISTORY_ONCE_DELTA_ONLY",
+    "scope": "Superseded comparison baseline, not acceptance of all A308 bytes; current context independently rejoined by Sol165.",
+    "test_execution": "NOT_RUN"
+  }
+]

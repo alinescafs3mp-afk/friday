@@ -1,0 +1,1055 @@
+{
+  "schema": "friday.sol136.full-text.hash-only.controls.v1",
+  "ABSTRACT_HASH_ONLY": {
+    "required": true,
+    "waiver": false
+  },
+  "status": "NOT_RUN",
+  "inherited92": 92,
+  "new26": 26,
+  "unique_cases": 118,
+  "cases": [
+    {
+      "id": "A280-ZERO-BIRTH",
+      "text": "Fresh cold constructor, zero rows and native totals, next_token1. All actual first slots/observation/case-copy readers must see zero pending totals without any original row-bank traversal. Failed cold-start remains unconfirmed, not a reset/retry.",
+      "bytes": 246,
+      "sha256": "e8038f369d2d28a0e241ea07bdb3caad2c40618c085f331fe7c00e10f746cb9c",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-APPEND-KINDS",
+      "text": "Each actual reserve/preowner/native-reserve appends exactly one original ordinal token; normal Source credits increment source_rows, native-reserve does not. Original pending units and count advance together before token publication. No row reused or pool issued.",
+      "bytes": 263,
+      "sha256": "c3163d88ca5b5e341e4d89651df0cd8fc62005b9a67c47866355c4a3fbaf7a48",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-BAD-IDENTITY",
+      "text": "Foreign pool, zero/out-of-range or wrong ordinal token, drifted count/next-token/index row count, invalid row flags and duplicate/mismatched destination are rejected before row/totals commit; original history and first cause retained.",
+      "bytes": 234,
+      "sha256": "5b5230ae3addddde1a55b4a8e43ac43243d7bd52426bb5a2cba6e122643b9134",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-COMMIT-CONVERSION",
+      "text": "Actual Source commit moves requested original read/output/hash amount from pending to cumulative spent, one time. Underflow or any cumulative overflow leaves both original rows and cumulative counters unchanged before failure; no partial scalar debit is accepted.",
+      "bytes": 263,
+      "sha256": "5e50bee3671b79ad08e4dcbccbe3588e9cb2506a920fc3f14ed1bc90a963a330",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-OUTPUT-TRANSFER",
+      "text": "Actual two-row same-pool output transfer validates both originals and all arithmetic before either store. Aggregate pending output unchanged; destination refusal/overflow/alias cannot leave a source-only debit or manufacture credit.",
+      "bytes": 232,
+      "sha256": "f8c136e3bf6fa3ebdffcd92bbffc63b01522d311b37000b5e3c12fa9815caa34",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-RELEASE-RETENTION",
+      "text": "Actual release while prepared keeper or bootstrap native endpoint still live must preserve the complete active row and totals. Confirmed release removes pending unused units, moves all original allocation to retained allocation, marks original transferred without clearing its historical fields.",
+      "bytes": 295,
+      "sha256": "a20d78f7bb7030e78d2f7d8112bd32764137f836ddcf13eedee8fa4993ace032",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-GROW-RETAIN",
+      "text": "Grow uses actual original aggregate RAM admission then updates the same row/totals. Retain decreases pending allocation only by moving the exact difference to retained allocation; total retained+pending never refunds memory.",
+      "bytes": 224,
+      "sha256": "c8db1c4633a16ecdb4c00ec61caabe21640874a85df7d9918cdf30d5a426d8ca",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-SLOT-END",
+      "text": "Actual retire_slots refuses while existing physical ownership remains live; once allowed, only the same row pending slots becomes zero. No source/native live-slot counters are silently replaced or reset.",
+      "bytes": 203,
+      "sha256": "1860a0bc3e6ea6f8394567fe0507168621e069268e894f6c26dad349d826cea0",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-SOURCE-DETACH",
+      "text": "Source detach succeeds only when maintained source_rows is zero under matching original count/ordinal relation. Native-only active rows do not masquerade as Source; final original-row recomputation must agree with that classification.",
+      "bytes": 234,
+      "sha256": "f888e290f2d3abff01b5bb49563568787cb20c07848636fd5c5cb036388d7c87",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-BOOT-SLOT-MOVE",
+      "text": "Existing Root bootstrap scalar reservation moves exactly two pending slots into the existing preowned FD record before acquisition. Failure leaves the original pending credit owned and reports the actual retained prefix, no new FD/grant or child-context/supplier change.",
+      "bytes": 270,
+      "sha256": "e1cc38ecba582cd2105a83e2bbaf9bf52b80e5cd04b0a589980c70ff287900ee",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-BOOT-SLOT-RETURN",
+      "text": "Only unused existing per-FD reserved slots move back to the same live original row. Missing/inactive row or checked overflow preserves the old per-FD and pool relation and records refusal; do not claim that an observed close disappeared or retry it.",
+      "bytes": 249,
+      "sha256": "b1f2c78b0e38629a1c859ab9a838723b145e224ffaad3afac712acee9b533ccd",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-BOOT-SETTLEMENT",
+      "text": "Actual Root bootstrap known read/write totals move from original row to cumulative spent, atomically with pending-index update. Unknown child IO/full endpoint end retains original reservation. Confirmed previous end moves allocation to retained storage; no zero-as-unknown or new observer.",
+      "bytes": 289,
+      "sha256": "6ef31882a4aacd14fe947b694d497b51c6c1895a821c8776b83d108df8bf015a",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-BIRTH-RETURN-FAILURE",
+      "text": "If the actual Python token-result factory fails after native append, the original unreturned row remains in Root's physical bank and totals. Preserve existing first-error/outside caller handling and do not claim complete C1 failure-end from ledger consistency alone.",
+      "bytes": 266,
+      "sha256": "a20edcb3244e34b466ab13b45d979d3c8b2a5fdafa7e6355edb1f8f00cfcd176",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-UTILITY-RECOMPUTE",
+      "text": "At actual final utility consumer, original constructor-reserved credit precedes a complete current original row scan with finite clock checks. Recompute all five units, active/source counts and token/flag shape; mismatch rejects resource-bounds acceptance even if maintained index looks plausible.",
+      "bytes": 297,
+      "sha256": "2073f157d34923be1b89d93dc773e28031c9e857f394f409bf74017299703734",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-FINAL-PRESETTLEMENT",
+      "text": "Actual final caller must receive the complete immutable utility pool snapshot, compare it to current original pool, prepay scan from constructor-owned final credit and independently rejoin every original row to maintained totals BEFORE settlement. No late MasterBefore or endpoint reopen.",
+      "bytes": 288,
+      "sha256": "d91b0b8cb9306a178d8e158d98d40f35ae44bc31af6e9f1caf28a8e120dd1523",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-FINAL-SETTLEMENT",
+      "text": "Every active original row becomes transferred through the same row/totals commit and its allocation becomes retained RAM. All historical tokens/widths/spent units remain. Final pending totals/source/active counts must all be zero, and later full native reread must observe the actual settled state.",
+      "bytes": 298,
+      "sha256": "f49f91146f18b54e5c685b26ae905b5ecd13905a390eabf2682597e68b8b11ec",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-FINAL-PARTIAL-CLOCK",
+      "text": "If existing final clock/refusal interrupts settlement, already processed rows/totals/cumulative retained RAM remain a consistent actual prefix; untouched rows remain active. No terminal_completion, repeated settlement or immutable exposed status rewrite is inferred.",
+      "bytes": 266,
+      "sha256": "cc65f6e00f165b91c30177eb7ded13134c05d85d12790e7bfb6d48a4c80f855d",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-SNAPSHOT-BODIES",
+      "text": "Actual MasterState/PreparedState complete original rows/files still appear under unchanged schemas and aliases. Prospective row/body read allowances precede parent-side snapshot factories; result is not a digest/count-only substitute. Existing stock API/factory implicit cost qualification stays required.",
+      "bytes": 305,
+      "sha256": "133c48918564580191d62606c6f6e1e33fdbba5d3190ec9c91cc4259e8993602",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-SHADOW-BOUNDARY",
+      "text": "Existing inherited read-only snapshot behavior is preserved: no parent debit or parent grant is issued by a fork shadow. Source-facing native change still requires the original existing owner/context. This obligation does not authorize stopped child supplier/context/journal work.",
+      "bytes": 280,
+      "sha256": "b607c0d8bb1ef564a07c96554cb50dbaa3297c7b4198dd551c03bd8809afe276",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-FINAL-PRIVATE-INDEX",
+      "text": "The private original Root totals body is included in actual native owner body, and all original rows remain alongside it. sizeof RootStorage pays storage and original two final scan reserves pay work; no new public pool/role, portable ABI claim or old receipt reuse.",
+      "bytes": 266,
+      "sha256": "791f764163776d098fcc1f9e2f83d8ef31f2efa7624d0622b3c1e4757401931c",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-OLD-SCOPED-RELATIONS",
+      "text": "Rejoin unchanged original-cell ACTIVE/FAILED guards, PreparedFullBody real protocol, document/local-v2 original binding, bounded set path and actual cold/original/Root ordinary/failure callers with changed MasterBefore/pending semantics. Exact file equality alone is not reacceptance of their changed caller context.",
+      "bytes": 316,
+      "sha256": "da5094bad5d99bd4bf6e8cd51cec6454ed25d9a1a64ca5011e68c1dfd56d391f",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-WHOLE-RESOURCE-FIT",
+      "text": "Preserve read40960000000, output33554432, RAM8589934592, live slots128/workers4, original input2m/body80m and all original required cases. Additional constructor reserves consume same original caps; no new credits or inferred full fit. Remaining prepared/held scans, stock ABI/API/implicit/full workload costs remain qualified separately.",
+      "bytes": 338,
+      "sha256": "c25dd73c933ba25bdfbc9c9f8393fedba34f29c9e9a8a2814a3389b07b0636d1",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "A280-REAL-ADMISSION",
+      "text": "All meaningful original positive/negative controls and mandatory later diagnostics/gates remain required on the admitted exact candidate. This inert text hash is NOT a test, collection result, Source admission, compiler/native ABI proof or release GO.",
+      "bytes": 251,
+      "sha256": "24d475ad7cd4e55c785a76d6a0966509e4edbd1fac8f73d0ad3e50d88344b4d8",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "actual_Prepared_both_receivers",
+      "text": "Actual final-body PreparedFullBody supplies all three native error readers at FinalArena then NativeCompletionReceipt, with same carrier/arena; no helper-only route.",
+      "bytes": 165,
+      "sha256": "03f4c19e808ef70cfdd0b63854feaff75aaf8b33fa4915b493ec1cccdc0659a5",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "original_metadata_and_full_body",
+      "text": "Actual original arena exactly one group; old5/new6/all10 record/TYPE/document node aliases; None distinct empty/full bytes; original physical spans and full bytes.",
+      "bytes": 163,
+      "sha256": "d75939cdbf4be1a47dfcaf00b7dc42717e9bcb6f62e152fb8098c717bdfb90fb",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "live_historical_phases",
+      "text": "Prepared holder/FD/store/credit valid before transfer; reject ended/removed carrier. Retained historical mmap state after confirmed close; no live read of closed mapping.",
+      "bytes": 170,
+      "sha256": "32310b64f653a80940dd8bfa198e8befb6084b7f262a0a642a1e4a528ab5fa61",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "both_completion_paths",
+      "text": "New reader failure cannot set receipt confirmed or native close/transfer status; full existing failure retention. Held unconfirmed STOP not accepted ordinary/failure end.",
+      "bytes": 170,
+      "sha256": "20ea12e73526fb35d211ac57c7f3061f70068cfdb09e4455b2e14fe1ffcb9bd2",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "additive_budget",
+      "text": "Original error_guard8858380288+set8463590400 reserve before all old terms; Prepared4096/8192 peractualpublic call plus unchangedshareds; no hidden fit/implicitzero.",
+      "bytes": 164,
+      "sha256": "639fde9611aeb569716b17f7505bdb515bc3dfc650366aa253699412d0ac6b02",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "native_Source_union",
+      "text": "Actual native schema278 bothproducers/readers, cell Finish fourarg ABI and original guard chain retained; tuple exposure remains immutable. Other Source doc/wire methods exact.",
+      "bytes": 176,
+      "sha256": "e5600a7f575774adfd709f19f1a6ede6264065725959350a28f69a9000153266",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "set_interval",
+      "text": "Explicit linear set cause stays credited; no claim GCpause excludes synchronouscallbacks or free-threaded changes; actual selected supported runtime relation stillqualification.",
+      "bytes": 177,
+      "sha256": "62bd565fcec5bd5a36e5bb75574912fd787c3ae8accb583663a1d9dd59e9e3d0",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "mailbox_gap",
+      "text": "Generic decoded mailbox still lacks proved permitted full original binding/required-route exclusion; no private/stopped child supplier reconstruction.",
+      "bytes": 150,
+      "sha256": "8c25ac90fcb28a0b5964efd89dbf7635685522fced5914abf099304c77a7e545",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "runtime_no_credit",
+      "text": "All required positive/negative cases and mandatory gates remain NOT_RUN; source-only credits not SourceReady/GO.",
+      "bytes": 112,
+      "sha256": "06c9c876aadbe89ced0e3caad9745c6ee41bf2b105152a8805501003bf57ef10",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-01-NORMAL-TRUE",
+      "text": "Exact same-original reserve/preowner returns a real token, mirror/counters/Reservation completes, every real endpoint and known grant ends. Detach with zero original source_rows returns exact True; existing Source clears/namespaces/registrations are then reached. Both independent native full-row readers and actual final ends still required.",
+      "bytes": 342,
+      "sha256": "13b8eb3d3f5da01306ace1046278653cc16ad10695abdde0d331f7cb1f54cbb7",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-02-RESERVE-TOKEN-FAIL",
+      "text": "Required ordinary native PyLong result allocation failure after reserve commits one original row. Preserve exact first MemoryError/TB, active row/token/width/index/units, no mirror and no synthetic zero token. Valid nonzero source_rows withholds Source detach without setting a new pool refusal. Whole native error/Source/ref/runtime/utility consumers must actually complete before final original-row settlement.",
+      "bytes": 412,
+      "sha256": "7392e69559ce476063d6d6a057a93fddd58f6699c54590e5a1cfbef69936c267",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-03-PREOWNER-TOKEN-FAIL",
+      "text": "Required ordinary PyLong failure after preowner issuance: actual preowned PreObserverHash token0/partial attrs, original pool preowner_started/preowner_token and active row remain. No fake completed FDState/journals/observer, no reconstructed token or repeated preowner. Actual native handback/error graph and both outside ends determine completion.",
+      "bytes": 349,
+      "sha256": "e57b14e67e3a0d44b9aaab45957c193ab3c3e5a7ca105e5e8404a8853cbd8c64",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-04-PREMIRROR-ARITHMETIC",
+      "text": "Fail actual next_token arithmetic/max after native token return but before pending mirror insertion. Returned token/local frame and original row remain real. Known-grant Source settlement must not poison native full reader for the unseen row; no rollback, fabricated no-effect state or partial counters normalized to zero.",
+      "bytes": 322,
+      "sha256": "2c634f52e7261d21be62a145247f5322830bf0a115dd837890a7e6d9b5e65541",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-05-MIRROR-DICT-FAIL",
+      "text": "Fail actual pending mirror value/dict insertion after native issuance. Preserve every reached real local/partial value/error/cause/TB and original active row. Absent mirror uses withheld native detach; a successfully inserted mirror without an actual grant already returns Source False before detach. Neither branch creates a synthetic Reservation or refunds credit.",
+      "bytes": 366,
+      "sha256": "838bb57b16e94fa62e5927b416f86d56e889c4a89c4d6b726488f87506ce8181",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-06-COUNTER-PREFIX",
+      "text": "Fail a real live_alloc/live_slots/peak allocation after mirror insertion. Actual partial counters and mirror are retained as graph data, not forced into a complete relation. Missing grant forbids Source clearing; same native original row survives until all actual end and full-row checks permit settlement. No Source retry.",
+      "bytes": 323,
+      "sha256": "a6ff8aff000d44520631ec6b45703bf189ef2a023522fb2617276dea833b31a6",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-07-RESERVATION-NEW",
+      "text": "Fail Reservation instance allocation after complete native row/mirror/counters. No returned Reservation is invented. Preserve actual pending mirror and first error; Source grant-completeness refusal remains non-success, while native full owner/error receiver sees the actual graph and original row.",
+      "bytes": 298,
+      "sha256": "2f6e1b6ef96564031c42888fb7de4f84b8508d9d3787e93d2bb36d8aa3205e16",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-08-RESERVATION-INIT",
+      "text": "Fail a required ordinary Reservation __init__ prefix after instance birth. Preserve the actual self/meter/token/partial dict and reachable traceback/frame aliases; a missing attribute is not synthesized. Full typed native graph must represent exact errors and partial Source state before any real ref loss and later full final credit transfer.",
+      "bytes": 343,
+      "sha256": "1c8bdc3d05959d90b8581ebd2e163e2dc3f888e5acf058d3240cd9fd5c211974",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-09-PREOWNER-AFTER-TOKEN",
+      "text": "Fail FDState or subsequent journals/RootObserver construction after actual preowner token return. The same native-retained PreObserverHash/partial observer and returned token survive. Preserve original bank/preowner flags plus first and subsequent errors. No preowner reset, invented empty descriptor end or Source constructor replay.",
+      "bytes": 334,
+      "sha256": "6b0481181d7c1e93676faaf7dd3d477ef3915d9b26d4f0799e413f0c4cb0c2c1",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-10-FALSE-FORBIDS-CLEAR",
+      "text": "Native valid source_rows>0 produces detach False. Verify BOTH retire_prefix and retire_delivery return ownership_retired False/CREDIT_HISTORY_OR_ALIAS_COMPLETION_UNCONFIRMED; observer/adapter namespaces, completion detach and owner-registration removal are NOT executed. Prior confirmed releases remain historical, not rolled back; complete actual captured roots stay available to the native caller.",
+      "bytes": 399,
+      "sha256": "e167fefd2b5412acba187d6cc80f767d02cbe13ed99c21b0bd24b732dc80acf6",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-11-STRUCTURAL-REFUSALS",
+      "text": "Foreign original owner, invalid count/next_token/index shape or repeated successful detach still retain their hard original refusal and cannot report True. Withheld False does not clear an already present refusal, unknown observation, other original error or previously transferred immutable body. No new owner/cap is admitted.",
+      "bytes": 327,
+      "sha256": "5a9cf558922d05123bacd8ea18e66e058e4c51bad15df1e5902a461133c3810f",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-12-NATIVE-ONLY",
+      "text": "A valid active native-reserve row has source_owned0 and does not falsely block a genuine zero-source_rows Source detach. It still remains an active original row in both full independent recomputations and actual final settlement; no native slot/endpoint end is inferred from source_rows0.",
+      "bytes": 288,
+      "sha256": "c92130a533b42bfff2778675d95f064528a151c0a5bb747f02d9c78b2a083e88",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-13-FIRST-LATER-ERRORS",
+      "text": "Required ordinary token/mirror/Reservation failure followed by an allowed Source capture/cleanup/packet failure retains the exact first error and later errors/causal context/TBs/partial owners in actual native strong inventories, not merely repr/count/hash. A failed full graph/error consumer or full handback keeps ownership unconfirmed; terminal rc0/sealed/STOP or persistent exhaustion is never acceptance.",
+      "bytes": 409,
+      "sha256": "b52785c75ff3fb2c092e9065879945541a60bc5a7954317ed3200b9fb44381e2",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-14-UTILITY-ROW-JOIN",
+      "text": "Before final settlement, the actual utility endpoint consumes all original rows, independently recomputes five units plus source/active/row counts, preserves orphan row fields/full fault/history bytes and checks unchanged caps including pending credit. Corrupt shape/index/snapshot, live endpoint or unknown observation cannot become full utility end.",
+      "bytes": 351,
+      "sha256": "e76b0445ac21ce61933eefe8d7c571697bd1a8fbd4c2fed0a53f6fc39441183b",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-15-ACTUAL-FINAL-BOTH-OUTCOMES",
+      "text": "Both actual normal/error RootPerform outcomes converge once through CommandReceive, owned runtime completion, utility and RootFinalReceive. A lawful Source withheld detach is not an eligibility substitute or circular dependency. Required full graph, Source ref/registration loss, config/runtime/utility end, complete bodies and clocks must actually hold; no direct credit-only shortcut.",
+      "bytes": 386,
+      "sha256": "129d724c8c8759290183e72d8915fd07923f99a9ca2a2b6673ab593cbd985c94",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-16-ORIGINAL-HISTORY-COST",
+      "text": "Actual final receiver compares full pre-settlement utility snapshot, independently rejoins all rows/index before mutation, transfers every active row using pool_apply, moves exact allocation to retained RAM, preserves token/width/history/spent/clock/caps, then rereads full actual settled native body. No second grant, pool reset, RAM/cumulative refund, synthetic token or old receipt rewrite.",
+      "bytes": 393,
+      "sha256": "08e79a5a8d290a4ed87821377d7375df56c1a4c2bba117fe0b280706626197ba",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-17-PARTIAL-FINAL-STOP",
+      "text": "Clock, read-credit, body, end or row/index failure during actual final completion preserves exact already processed prefix and all remaining owned credit; no repeated settlement, optimistic source_owner_end/command_owner_end or final ownership move. A successful Source False return alone is not confirmed outside end.",
+      "bytes": 318,
+      "sha256": "e37c69c0fe6f102b4ab0107348cfc6778c4126ee18e0ea7fb186e4379e2420e4",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL133-18-EXACT-CANDIDATE",
+      "text": "Later independent acceptance binds this exact full57 candidate/two LF changes and unchanged original69+mandatory20 definitions, inherited32 and all new controls to actual admitted image/ABI/enrollment/full resources. No old candidate execution or failed SOL132 qualification credit; unchanged caps/model/role/set interval. Until authorized execution every case and full gate stays NOT_RUN, SourceReady/Root/GO false.",
+      "bytes": 416,
+      "sha256": "284283616e3cceafe5d28285a0d97cab269993cbc1623e4fca9a4d12537e10a5",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-TABLE-SPARSE",
+      "text": "Hold the same exact live cardinality but a larger original set table containing dummy/unused slots. Each actual factory must debit mask+1 entries before it scans them, rather than infer width from len(set).",
+      "bytes": 206,
+      "sha256": "cd7030e53518c3fccc5923274606d2d9b5df5544b6208ef6e6d5512f06bf04e9",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-FROZEN-HISTORY",
+      "text": "Exact frozenset historical capture takes the same new prospective debit before its one PySequence_Tuple call, preserving original member/tuple ownership and original immutable-domain controls.",
+      "bytes": 192,
+      "sha256": "9244255b9e84906cdc59da65b0d157b77846edc3cf6c512116eae1fa360955eb",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-EMPTY-TO-SMALL",
+      "text": "Cover actual cardinalities0,1,7 under the selected implementation's eight-pointer stack and final tuple path; no list is needed but conservative headers remain and empty-tuple reuse creates no refund.",
+      "bytes": 200,
+      "sha256": "f248afa4cadab943dca23f045e706b06dbe44b7f9df67163f371c6665541ae52",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-LIST-BOUNDARY",
+      "text": "Cover actual cardinalities8,16,17 and each list growth boundary. At8 the actual list16 exists. Sum all requested list arrays through success or failed resize, including old/new coexistence; no final-output-size substitution.",
+      "bytes": 224,
+      "sha256": "f7ea8ee741ee1a7453248e73baeadd05ce9d6112a7aa5542eb8f2b368be0182f",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-CAPACITY-PROOF",
+      "text": "For append-only growth from16 and m=c+1, verify c_next=((m+(m>>3)+6)&~3) is >=9c/8; last c<=max(16,n+floor(n/8)+6), so sum c_i<=9*last_upper. Bind actual no-length-hint PySequence_Tuple body and selected normal-GIL branch.",
+      "bytes": 222,
+      "sha256": "200351602b8bfe619dab2c90621ba01f19a13b08e56e713f7a8276c9b4067910",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-ALL-PHASES",
+      "text": "Historical capture plus all existing current observation phases1,2,3 use actual originals and exact required tuple/member witnesses. Both source call sites remain; no new materializing call, domain gate or skipped phase.",
+      "bytes": 220,
+      "sha256": "7715ec17385d4348e9b894a5907a3228d7a58ae5f19ad11566da98aaa01875ea",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-NATIVE-OVERFLOW",
+      "text": "Reject invalid actual used/fill/mask/table relations and every table/array/multiplication/sum/receipt-counter overflow before materialization. Original MasterFault/first-error semantics and owner retention remain.",
+      "bytes": 213,
+      "sha256": "3e61a532a4e34ee901e193312b3a63202f82042190fc2f48e9e9bd658bb16026",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-POOL-REFUSAL",
+      "text": "When the SAME original READ_CAP/RAM_CAP cannot cover the request, refuse before any iterator/list/tuple. Preserve previous cumulative charges and original errors; no local pool/refund/reset or new grant.",
+      "bytes": 203,
+      "sha256": "416e9c5cf4c443bce56397582d659c4424e801496088f00f8857a628acb28a3a",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-FACTORY-FAILURES",
+      "text": "Iterator/list/resize/final tuple failure retains the first actual pending error and exact already-owned graph/factory prefix. No retry in secondary traversal, no refund merely because the Python factory returned NULL.",
+      "bytes": 217,
+      "sha256": "4c2d4a83dbb36964c2d285d77c2d305756cf29285b2b1c4e877efaed7b100e11",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-COUNTER-PUBLICATION",
+      "text": "Check the getter cumulative counter addition before original pool debit; publish the scalar only after that debit succeeds. Both actual final readers receive the real original pool/full native body, not an unbound declared allowance.",
+      "bytes": 233,
+      "sha256": "0092bdb11300f75a2e323890e75704c3bbbf22b6e5a577fdd752fd5fbbbd5aac",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-CONSUMER-JOIN",
+      "text": "Rejoin unchanged command graph/body readers, whole native and utility/final consumers, and original pool/index accounting with the increased actual charges. No consumer assumes getter bytes are exactly attempts*131072.",
+      "bytes": 218,
+      "sha256": "aac5007c4872f693909dc247f0c14d5d62e8addfc0685f4e993f87ef138d7fe0",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-REQUIRED-WORKLOAD",
+      "text": "After admission, establish actual required workload/selected ABI/allocator/resource fit in the unchanged caps including these new charges PLUS all existing reservations; authored request formula alone is not whole C2 fit or GO.",
+      "bytes": 227,
+      "sha256": "417c8fc36f47ab6efd9e4809a43a867a48cab9fa96b7358aa92989823c73f915",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "R1-SET-INTERVAL-PRECONDITION",
+      "text": "Before execution independently establish the actual selected TYPE/callback/actor and nonmutation relation across factory and consumers/last relevant loss. Existing unresolved SOL122-R1 is not waived by a cost helper, GC pause or normal-GIL family.",
+      "bytes": 247,
+      "sha256": "ba22eee35a00343fd5df2f5212261035f53f537fb9d35000461a76c033a81f75",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "C2-SET-STOCK-DRIFT",
+      "text": "If actual image/headers/allocator/stock-body selection differs, do not use this conditional derivation as current ABI/physical qualification. No selector/provider/model change is authorized by this source patch.",
+      "bytes": 211,
+      "sha256": "44cb621ae4112733f8a6a810618acc6540708115b50ffb647bea96b0d55908b5",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL134-C1-UNMIRRORED-CURRENT-REQUEST",
+      "text": "Under separately admitted current image/ABI/stable interval and sufficient remaining original capacity, leave a real native issued source row with no returned token or Source mirror. Reach real Source detach False and both actual historical/current tuple consumers. Pending original row remains included beside all previous and new set request charges; no detach MasterFault, no early row settlement and no synthetic Source end.",
+      "bytes": 428,
+      "sha256": "5c2a9fc1206ded94985dae9b9f5b6d714348a1204703974c44d5d07c9ef81e77",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL134-C1-REAL-CAPACITY-REFUSAL",
+      "text": "Repeat the exact pending-row/new set-request join when actual aggregate RAM or READ capacity cannot cover all pending plus old plus new requests. Refuse before tuple effect, retain original rows/owners/errors and all successful preceding debits. Do not call this legitimate capacity stop a detach regression or declare end/GO.",
+      "bytes": 326,
+      "sha256": "da797377a09468c786ec144cb35815cd635ab003ab645eb484e496b52301448a",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL134-DUAL-EMPTY-SMALL-EIGHT",
+      "text": "On both real producers and each admitted existing phase, cover exact empty/set/frozenset and cardinalities1,7,8,16,17. At8 account actual list16 despite no ninth member; below8 stack/tuple route, empty reuse no refund; sparse mask+1 remains independently charged.",
+      "bytes": 263,
+      "sha256": "95b6d3ef47f9d863b9b53fd5ce4d8c4da130a201fa17c364362821ad4edb95fe",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL134-GROW-FAILURE-ORIGINAL-ERROR",
+      "text": "At real iterator birth, list16 birth, every reached normal-GIL realloc and tuple birth failure retain original errors/owners and accumulated requests, including attempted final realloc and old/new/tuple overlap. No historical factory replay or fabricated partial tuple; selected stock temporary cleanup must be independently admitted.",
+      "bytes": 334,
+      "sha256": "5cd023ae8c11aa1489b3d3225fb628969beaa303e8e4bd617a5c9215ba7c6333",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL134-REQUEST-COUNTER-PREFIX",
+      "text": "Check prospective request arithmetic/receipt overflow and original pool refusal at both call sites. New counter publishes only after successful same-pool debit; later nominal/clock refusal preserves that charged prefix without attempt flag or effect success. Original nominal/scans/owner/edge/body charges remain independently present.",
+      "bytes": 335,
+      "sha256": "5bed05210a0decc2b2a77f8a6c2423a2cb5ae917bd8a9945ca707cfad328404b",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL134-BOTH-REAL-FINAL-RECEIVERS",
+      "text": "For real normal and error cold calls, authenticate complete actual tuple/member/error graph, utility pool snapshot and whole native/cold/post-settlement bodies containing old+new cumulative charges. Final active-row settlement follows actual Source/config/runtime/utility/FD/clock ends, never tuple count, debit scalar, Source success bool, rc or historical digest alone.",
+      "bytes": 371,
+      "sha256": "0cc27cff00dc8871d56063aaaaedad2df16f34bfa08f1f19a63a5de83653e7c0",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL134-INCOMPLETE-PHASE-NO-END",
+      "text": "A missing historical result, incomplete existing phase1/2/3, pending later error, actual alias/registration/reference/FD uncertainty or final partial clock/body keeps original owner. No new whitelist, fallback count-only witness, exposed tuple mutation, replay or synthetic end may bridge it.",
+      "bytes": 292,
+      "sha256": "3f36bd57c4a2f1a08a5efe754da1af249d3f2990df08d6fc936b9bb47734d5c5",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL134-EXACT-CURRENT-ADMISSION-WHOLE-FIT",
+      "text": "Before execution bind this exact57-file coherent union to selected admitted stock/image/header/compiler ABI and finite TYPE/callback/actor/set interval, then establish full required workload costs including pending rows, cumulative geometric requested buffers, old+new allocator footprint and all implicit work/ends under unchanged caps. Run original69, mandatory20, inherited32, C1 eighteen, C2 fourteen and these joins through complete authorized independent gates. Inert scoped review is not whole SourceReady/Root/GO.",
+      "bytes": 521,
+      "sha256": "7f8d3cbfd4d7762f3f0f3b050935d8d74cdf46421cb715bfdc5a3ad04bd1bd7f",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-FD-ORDINARY-PATH",
+      "text": "Through actual held consumer resource_meter.bounded_file, ingress schema load and document_windows page path, bind the new held observer/resource_meter bytes. fd_scope must return the actual Root manager, not another contextlib wrapper. Check unchanged flags, maximum/read/type/pin limits, bytes/digest and both real receivers; normal close/release/owner retirement must be confirmed before scope success.",
+      "bytes": 405,
+      "sha256": "72fd552833ed74a2ba4a1f3eda110aa22924a45b371e78c7a49ec06033cb49ef",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-FD-RESERVE-PREFIX",
+      "text": "Fail original native reserve, Source mirror/counter or Reservation creation at each actual prefix before file open. No FD acquisition or false hold/Source end is allowed. Retain original error, full traceback/locals and actual native pending rows; C1 valid pending detach stays False without invented structural poison.",
+      "bytes": 319,
+      "sha256": "2ddd37c3bbc4d156a2761629b809c910789d01a9c717960825a452ecfc14f614",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-FD-MANAGER-BOOK-PREFIX",
+      "text": "Fail manager field construction, local-owner publication and each OwnedFDs constructor/grant/attachment prefix. No factory runs before preowned actual row/credit. Full bound partial manager/book/hold/error aliases remain with actual owner; no synthetic absent-FD success, release or hidden constructor retry.",
+      "bytes": 308,
+      "sha256": "d992e4cbf247bdcad15203c6aedb4eebf83c2a8ce1a0a8b5ef27350594443037",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-FD-OPEN-ENTRY-ERROR",
+      "text": "Fail actual open_absolute acquisition before any returned file scope, including parent acquire/project/open/parent-close uncertainty. The original __enter__ error and actual manager/journal/fd/hold remain full DATA through error->traceback->frame locals. No foreign generator manager, removed traceback, cleared error or arbitrary foreign-heap whitelist may create completeness.",
+      "bytes": 378,
+      "sha256": "f5abfc61ba116218cadcb5ffc3ad6926f849a25b316734afb5860ad02a0d1ab7",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-FD-ORDINARY-BODY-ERROR",
+      "text": "After successful entry, raise each required read/size/identity/type/pin/hash/body error. __exit__ must not suppress or replace the SAME original unless cleanup itself throws, and must not manually rewrite traceback/local DATA. Required original body/local buffers and all actual manager/journal aliases must reach both exact native consumers under unchanged limits.",
+      "bytes": 365,
+      "sha256": "e47719f8e193b36092402735e4bdccbd24261b45f7d1c9cfe423299be0b3ab9d",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-FD-CLEANUP-CHAIN",
+      "text": "Fail actual book close/publication, hold.release and local-owner retirement once each. A thrown cleanup original preserves active primary as context, complete traceback and partial state. No repeat close/release/open and no count/status/projection substitute for complete original errors and ownership ends.",
+      "bytes": 307,
+      "sha256": "d23aca7ae4327b837d109ddc9d7649fbf83004ba2b8bc0aa21697e0a286b1355",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-FD-UNKNOWN-NO-END",
+      "text": "Return an UNKNOWN Root or standalone close. Keep actual descriptor journal, unchanged generation/credit and occupied state; no EBADF or reused integer proves end. Normal Root scope must explicitly refuse, while an existing body original remains primary. Actual final native/cold readers must retain incomplete ownership instead of manufacturing SourceReady.",
+      "bytes": 357,
+      "sha256": "53d56ecec2f03546d46f3a7b469c4421816d45af2a17ab005944233d6f0c1728",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-FD-FALSE-RELEASE",
+      "text": "Known FD rows close but actual hold.release returns False or retirement is unconfirmed. The Root manager and ORIGINAL reservation remain owned, cleanup_confirmed stays False and no Source pending clear follows. Check legitimate partial pool indexes and accepted A282 C1 withheld-detach semantics against actual full final rows, not only Source token mirrors.",
+      "bytes": 358,
+      "sha256": "d1d72a9b5c93ac5a68918c4c7f0ba999d55f9f93aaa431befd2a33b25df1a095",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-STANDALONE-OPEN-FAIL",
+      "text": "With absent external owner, require current WholeMeter, unchanged unknown/history65536/active128 caps, same call/domain and actual row/attempt BEFORE os.open. Failed open stores NO_RETURN, exact original error and manager prefix; it does not close a nonexistent descriptor or create a new domain/service.",
+      "bytes": 304,
+      "sha256": "deaac6190ede98db7bde506fcd77eeed1d7c76f20404ef6e8ef5b488f31d5d10",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-STANDALONE-FSTAT-CLOSE",
+      "text": "Fail fstat after actual standalone open; then make close either succeed or throw. One attempted close, CLOSED active decrement only on success, UNKNOWN/domain fault on failure. Retain actual close exception in attempt.error and original fstat as its active context; bare raised fstat remains SAME primary. Whole call roots and outer actual recipient must agree on those aliases.",
+      "bytes": 378,
+      "sha256": "1230be93200bd145a71dcd87656a267c2a9331762281803015f38a6086868665",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-STANDALONE-PUBLICATION-PREFIX",
+      "text": "Fail after open return during row/status/active publication or during identity construction. Preexisting manager.fd must retain actual descriptor and error frame. No stale PREOWNED/partial row may be treated as successful completion; no factory replay or hidden cleanup proof may cure the unresolved prefix.",
+      "bytes": 307,
+      "sha256": "79fd047fc587974fb4d8529a8728504f937739a18614ac2c94f6ebeca8d789d9",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-FD-ONE-SHOT",
+      "text": "Attempt explicit enter/exit reentry after successful, failed and UNKNOWN prefixes. The actual scope must not reacquire or re-close/release a completed/attempted operation. A one-shot state is not permission to drop original uncertain rows/errors or to accept an unconfirmed prior cleanup.",
+      "bytes": 288,
+      "sha256": "862b8ea6cf77a99e6e0bbdb20ba4c85ddf9b2532a7bd42423ae1ca559c1994c7",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-CURSOR-LAZY-BOUNDARIES",
+      "text": "Construct without traversing/validating. For count0, one root, chunk512, chunks512 and count262144, pay only reached chunks/roots with O(1) cursor state; yield exact order/multiplicity and validate total only at exhaustion. Preserve explicit caller list materialization and all its original caps; no eager flatten, length hint or global history cache.",
+      "bytes": 351,
+      "sha256": "b999ae6d7653ea4a60889d5d162113ba0bdca8fa12c45cd51cb23355df132ffd",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-CURSOR-EXACT-NEGATIVES",
+      "text": "Reject count bool/nonint/negative/262145, chunks foreign/nonlist/513, empty/nonlist/513-member reached part and root bool/nonint at their original lazy boundary. Preserve already yielded prefix. Count short/long mismatches fail at terminal exhaustion. An iterator's own error ends without replay; no deleted original error or new weakened scenario.",
+      "bytes": 348,
+      "sha256": "8a2658c4ee2ae1603c52ab7121f02e8f3d746bf250edb801c4336b7e67336204",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-CURSOR-CALLER-ERROR",
+      "text": "Have full_value_arena validation fail node index, body root not dict, key type or duplicate key immediately after cursor next. Retained local roots must be exact bound cursor with actual body/chunks/part/counters, not a suspended foreign generator. Repeated body roots must not be deduplicated by the cursor; actual consumers still enforce their original role/alias conditions.",
+      "bytes": 377,
+      "sha256": "a392ca965f4a63c6ee57632c971cef07a346b0d0d8f28d3ed6a464303092f724",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-CLASS-HELD-BINDING",
+      "text": "For all three new classes and each partial instance, verify actual enrolled module, complete held raw/code pin, local confirmed class factory birth and actual dictionary relation. Missing/foreign/name-only or forged binding must remain unsupported. Old fixed class memoization cannot create authority, and no global type whitelist or stock-frame private heap traversal is allowed.",
+      "bytes": 380,
+      "sha256": "deed0c36bf2eeeb5cac9424ecb2a5e65fecaf3a9fa1d0efe8e6f374330fa6415",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-PRIMARY-SECONDARY-ALIAS",
+      "text": "Consume required context/cursor/error/frame locals through Source-object dictionary/binding and native primary actual class/dict fields, plus actual preowned secondary source cut(type,state). Both readers must check original pointer aliases and complete required DATA/bytes/edges. Runtime-support relabel, missing cuts, cold code cache or unrelated traceback must refuse, not erase DATA.",
+      "bytes": 387,
+      "sha256": "2470d7493a7811a530557a41fb0a7f6912387ae6949273b8d417b08fe9467e8c",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-BOTH-ACTUAL-ENDS",
+      "text": "Run required normal and all entry/body/cleanup refusal outcomes through actual RootPerform->CommandReceive->cold_complete->prebound FinalReceive once. Full original graph/native/cold data, Source/class registrations, own/secondary/FD/region refs and runtime/config/utility ends must join before original complete row/index credit settlement and post-settlement reread/MOVE. No local helper/exit status/optional callback acceptance.",
+      "bytes": 431,
+      "sha256": "13efcd8c7740b0920243cd29fd2f501d6ff9bd46e7e2b51d19c3c767b311e1ae",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-RAW-ROOT-CLOSE-CUSTODY-OPEN",
+      "text": "At actual unchanged OwnedFDs._close_row capture a thrown os.close exception and distinguish raw original object/traceback/locals from common.error_fact projection. This author package does NOT add producer-side raw custody. A projection, UNKNOWN status or manager binding alone MUST NOT pass full error acceptance; require an authorized producer correction and independent full native/cold error-alias join before closing this exact remaining obligation.",
+      "bytes": 454,
+      "sha256": "d195f7085a6a9c9523d5ef02f748fe9da2935131acd7c7facda38ece8062f54a",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL135-ORIGINAL-CAPS-FULL-FIT",
+      "text": "Preserve original69/mandatory20, inherited32+C1 eighteen+C2 fourteen+Sol134 eight, old exposed packets/mmap/history/FD fields and all original limits. Keep A282 requested set/table/buffer terms and native same-pool pending/spent/retained/observation costs. Include new class births/cursors/manager/current error reachability and all implicit allocator/GC/refcount/callback/body/end costs in whole required workload under unchanged caps and finite selected image/TYPE/actor/nonmutation interval. All controls are currently NOT_RUN; independent whole gates, SourceReady/Root/GO remain false.",
+      "bytes": 589,
+      "sha256": "c2d8e0d5a4a1ba73079f564a529a2330414eddb39700f078787493d20d429ac9",
+      "status": "NOT_RUN",
+      "origin": "inherited_SOL135_92"
+    },
+    {
+      "id": "SOL136-ORIGINAL-BEFORE-PROJECTION",
+      "text": "Actual Root os.close error: the exact caught exception and its original traceback must occupy prospectively owned fields BEFORE error_fact/str/getattr/fault append/notification. Full ordinary/native/cold data readers see those same original objects; a class/message/errno copy is not the original.",
+      "bytes": 297,
+      "sha256": "b5edd95ec5ea67c421afae2a146c2359decee24a0fc68dfb57fde956f43b8f8a",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-CLOSE-FACT-FAILURE",
+      "text": "With original close error, a failing error_fact projection must preserve BOTH actual original close and projection errors/tracebacks in the same row cell. No second projection is attempted to retain the secondary; UNKNOWN/occupied credit is not completed.",
+      "bytes": 255,
+      "sha256": "1713b588dc3b01f9f8f3037edb297ba3289b17ffb35053a2d37414b5248da757",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-CLOSE-APPEND-FAILURE",
+      "text": "Failure appending wire fault or notifying after close projection retains the actual new exception while original close stays strong. Row/attempt/current and initial TB aliases remain visible; no replacement terminal fact certifies the failure path.",
+      "bytes": 248,
+      "sha256": "e5da2133885fc4d77b3b2af89bd45b1756385c58b13c8566a15da62f73c3e835",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-PRECLOSE-HISTORY-FAILURE",
+      "text": "History append/status failure occurs after close claim but before syscall: original active row/credit and actual metadata error survive, no syscall receipt is guessed, later close_one/close cannot replay the claimed generation or close a reused integer.",
+      "bytes": 253,
+      "sha256": "737d38b411c4035fb2f4fbb749b8a43e615b15117d53d26b0c18847d6f5c5bfa",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-CONFIRMED-CLOSE",
+      "text": "One successful actual os.close sets close_returned before fallible CLOSED metadata/pop. Only confirmed original grant removal permits release; unchanged wire status/attempt/history and actual closed book/raw cells remain strongly owned through full native transfer.",
+      "bytes": 265,
+      "sha256": "b99946599ffde54338260955218d029ab8cb7b115f0ba0a714334d7d94f1b7f5",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-POSTSUCCESS-METADATA",
+      "text": "Successful actual close followed by status/pop/publication failure preserves original return marker and actual metadata exception. Claimed close cannot replay, original pending fd_rows/credit or incomplete receipt prevents false Source end. Numeric EBADF probes cannot repair publication.",
+      "bytes": 288,
+      "sha256": "94babfefb8517a4a56848dd7c0c922a0407a8da14b792185229423fe601b8520",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-UNKNOWN-NO-RETRY",
+      "text": "Actual syscall close error retains original exception/TB and UNKNOWN row/grant. Original FDState.unknown prohibits further acquisition under that unknown domain; no retry, EBADF inference, refund, CLOSED rewrite or local manager retirement.",
+      "bytes": 240,
+      "sha256": "0d20bb77841e1d406c932aa26d43bda1129596309f90ad19cd80bbb828cc7fe0",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-PAIR-FACTORY-ERROR",
+      "text": "A pair/acquire factory error is stored on each actual prospective row before cancellation. No-return rows retain complete actual history and aliases; original exception is shared, not copied, and one row cannot silently lose its factory prefix.",
+      "bytes": 244,
+      "sha256": "763d958f2e9ecdf5e5bf6b9fcb6e991b64719a49f5cf18ac64af2524114fa9d2",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-PREPARE-PREFIX",
+      "text": "No credit, growth failure, cell/map allocation failure or incomplete publication must not call a descriptor factory. A before-generation uncertain prefix keeps prepare_pending and its actual Source/native roots; same book cannot overwrite its generation cell or certify an absent FD/end.",
+      "bytes": 287,
+      "sha256": "abe007319af5fbbbb2e073fae6f79a86c07434106d2983928d6b0f39b338011e",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-CANCEL-PUBLICATION",
+      "text": "After actual generation advance, complete cancellation alone yields known NO_RETURN and may clear pending. Failed cancellation/retained_journal/secondary enrollment stores its actual secondary error while the original publication exception remains in every cell. No original row/state history is erased.",
+      "bytes": 303,
+      "sha256": "e48ccb17e8af48f01f7b3dc0f58606cf5ebd97bfd30fb90feaa02c88b4e6af8d",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-ACQUISITION-PROJECTION",
+      "text": "Original fstat/get_inheritable/identity failure is captured before any fallible projection. Projection failure remains actual and chained; finally performs one original cleanup. Its separate original close or cleanup error/TB is retained raw, not summarized/discarded.",
+      "bytes": 268,
+      "sha256": "8998fe01d4c2afdec6b855e6a92c238f5adb5a5050196e7e0ba2b75549dfcef3",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-ACQUISITION-PUBLICATION",
+      "text": "Ordinary post-projection _changed failure retains the actual error with its original HELD row/credit, before propagation to incoming native originals. There is no successful FD/owner lifecycle receipt inferred from a locally correct metadata projection.",
+      "bytes": 253,
+      "sha256": "fb511a05cae9d4bbc1ca0dc970e0a84bcc10132d470fab7b276947a1fd752ca4",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-PREPARED-NATIVE",
+      "text": "Prepared-output acquisition/close uses unchanged real native birth/OFD/keeper/close bank. Thrown native metadata original is retained in Source cell; native prepared outcome query failure retains its own real secondary. No Source close_returned flag supersedes native actual close/end or UNKNOWN.",
+      "bytes": 296,
+      "sha256": "07a0969d1c67eb7ad00012b08c083636d36cdc3a499d8a144950f70382748ec2",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-TRANSFER-ALIAS",
+      "text": "Destination precharges original cell index storage on SAME grant, then inserts SAME cell/row/attempt before destination row publication. Partial transfer preserves original owner's row and both actual map aliases. No new row/generation/error reconstructed or overwritten.",
+      "bytes": 271,
+      "sha256": "9085f020504ae94d4daa6fc1bf95b261442a217440df1d3cf7b704f2e95095d3",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-WIRE-DATA-SHAPE",
+      "text": "History codec/rows/meta/faults and common.error_fact output stay original JSON DATA. Raw exceptions/TB reside only on actual Source error_cells; all exposed status/attempt/tuple/field/identity9/no-return absences remain exact and full wire primary body joins still agree.",
+      "bytes": 271,
+      "sha256": "1056bf9abb0418a592b86671d5dbc42d382768a5ed42423b6072ac29d653b4b6",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-ROOT-AFTER-RETIRE",
+      "text": "After confirmed manager/book removal from local_owners, complete_owner_graph MUST retain the actual FDState root with original attached book/cell/error/traceback/row/attempt aliases. A wire-only FDState.graph or error-count receipt cannot replace full Source native/cold DATA.",
+      "bytes": 276,
+      "sha256": "906b506a8cd4377fee1eb6d7eef8bda7c1a86b8c9755bd3786bf19cea4435057",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-RELEASE-FALSE",
+      "text": "RootOwnedFile and owned_sample must retain actual manager/book/credit when hold.release is False. Empty book.fds alone cannot retire the owner; original Source/native pending row remains valid and full error roots stay visible.",
+      "bytes": 227,
+      "sha256": "187406bcb5caf75244a476f88837dc17338012b91e121260d1f5aacc856fe0c0",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-READ-CREDIT-END",
+      "text": "Added zero-slot read reservation uses same original Root pool, commits actual declared pass and requires release True. Partial reserve/append/commit/release failure retains actual prefix/credit; FDState and history completion refuse unclosed custody holds. No synthetic cleanup retry or new allowance.",
+      "bytes": 301,
+      "sha256": "acdb319967accfeab903737aec5480f1f7d96764e74b57fe93d73be961a97221",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-SAMPLING-NO-RECURSION",
+      "text": "Existing Root grow/check/sample uses preowner FD acquisitions. Added PreObserverHash storage growth must not recursively call RootObserver.check/grow/sample; same original native token and attached allocation/live/peak mirror stay consistent before factory and after partial native/Source mirror failure.",
+      "bytes": 304,
+      "sha256": "e3f3bd99c7b9982ce8e5b06ff5a49dd04286691de1bcf903c92015001d9c8bbf",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-PREOWNER-NATIVE-BUDGET",
+      "text": "Before/after Root attachment, sampling error storage is charged via SAME native master grow and existing read_debit. PID/closed/token/mirror errors precede acquisition. Native retained+pending aggregate, cumulative read/hash, caps and whole deadline cannot reset or issue a second pool.",
+      "bytes": 286,
+      "sha256": "20e5e7c32413724c4537d6a1bfa1755e71255df7be163eb7f2748ae5685021b1",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-FULL-RAW-CUTS",
+      "text": "Actual full encoder/secondary cuts/native Source and dictionary consumers must read cell's original fields plus error cause/context/TB/frame/code/locals and exact alias pointers. Missing binding/foreign/unsupported data stays unresolved; generic Source label, count or projected error is insufficient.",
+      "bytes": 301,
+      "sha256": "ad3b30a09969418a37135d4c7a2d135e3ffa1c9ae747e9223b8450ebd1878424",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-BOTH-ACTUAL-ENDS",
+      "text": "Normal and every early/error Root outcome must reach the unchanged actual CommandReceive/cold_complete/prebound FinalReceive with original roots. Missing terminal is incomplete. Full body/error/native bank/index reread and Source/config/runtime/FD/region/utility ends remain mandatory before original transfer.",
+      "bytes": 310,
+      "sha256": "30b8183e0e5e973e3a72b943e1a18c9eedc75a946d33e57ef1d8ab15a0927a8b",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-RETIRE-WITH-REAL-RECEIPT",
+      "text": "No original cell/map/history clears before actual completed full-data receipt and exact FD/slot/credit end. Pending preparation or unclosed custody read hold must stop retirement BEFORE deleting row IDs. Confirmed error transfer is not author self-acceptance or native outside end.",
+      "bytes": 281,
+      "sha256": "9dd5a9dd09688a6057dc6f784eb9c59563f2dad506f3cca312e8389c52068843",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-INHERITED-MANAGER-CURSOR",
+      "text": "SOL135 exact prior RootOwnedFile/no-contextlib ordinary body errors, standalone consumer FD scope and lazy bounded Source cursor must remain unchanged on this coherent candidate. Inherited controls remain full text SHA NOT_RUN; old CLOSE_CUSTODY_OPEN is a pinned baseline, not an unchanged new-candidate result.",
+      "bytes": 311,
+      "sha256": "26b3e19094262ed4b99052a2378e314f5aef6f9829da7c6d8852ebe48f3ee2ff",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-FULL-ORIGINAL-CONTROLS",
+      "text": "Original69 plus mandatory20 four complete raw-LF definitions/caps/thresholds/scenarios remain byte-equal. All inherited92 plus new meaningful cases remain NOT_RUN under ABSTRACT_HASH_ONLY; no collection or test simulation is acceptance, and no old run attaches to new bytes.",
+      "bytes": 274,
+      "sha256": "696603ae7886648fbbeab7e638ad62eeeec6c7414a79e2fbb680ed4c3bb41f1c",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    },
+    {
+      "id": "SOL136-WHOLE-PHYSICAL-FIT",
+      "text": "8192 cell allocation/1024 metadata read per birth/transfer are pre-effect declarations only. Actual allocator/map growth/GC/refcount/projection/full TB and graph/body/native/cold costs plus original API/ABI workload and finite nonmutation interval need independent same-pool whole qualification. Unknown is not zero or a waived cap.",
+      "bytes": 332,
+      "sha256": "14a4f2d3bfa30d0002d47da0c0d8eb183ced71549a2b6fac91c341b25b4f0849",
+      "status": "NOT_RUN",
+      "origin": "new_SOL136_26"
+    }
+  ],
+  "original69_mandatory20": [
+    {
+      "relative_path": "consumer/source/declared_controls.py",
+      "pin": {
+        "path": "/var/tmp/friday-sol136-a284-publisher-root-close-errors-connected-inert-source/consumer/source/declared_controls.py",
+        "bytes": 39603,
+        "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135521",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "39603",
+          "1791231617394756886",
+          "1791231617394756886"
+        ],
+        "stable9": true
+      },
+      "full_raw_text_sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "status": "NOT_RUN",
+      "runtime_collection": "NOT_RUN"
+    },
+    {
+      "relative_path": "source/consumer_bridge.py",
+      "pin": {
+        "path": "/var/tmp/friday-sol136-a284-publisher-root-close-errors-connected-inert-source/source/consumer_bridge.py",
+        "bytes": 21315,
+        "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+        "identity9_decimal_strings": [
+          "2050",
+          "5404622",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21315",
+          "1791231617397340733",
+          "1791231617397340733"
+        ],
+        "stable9": true
+      },
+      "full_raw_text_sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+      "status": "NOT_RUN",
+      "runtime_collection": "NOT_RUN"
+    },
+    {
+      "relative_path": "source/admission.py",
+      "pin": {
+        "path": "/var/tmp/friday-sol136-a284-publisher-root-close-errors-connected-inert-source/source/admission.py",
+        "bytes": 14621,
+        "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+        "identity9_decimal_strings": [
+          "2050",
+          "5404617",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14621",
+          "1791231617397070736",
+          "1791231617397070736"
+        ],
+        "stable9": true
+      },
+      "full_raw_text_sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+      "status": "NOT_RUN",
+      "runtime_collection": "NOT_RUN"
+    },
+    {
+      "relative_path": "consumer/source/pins.py",
+      "pin": {
+        "path": "/var/tmp/friday-sol136-a284-publisher-root-close-errors-connected-inert-source/consumer/source/pins.py",
+        "bytes": 9147,
+        "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+        "identity9_decimal_strings": [
+          "2050",
+          "5135529",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9147",
+          "1791231617395067089",
+          "1791231617395067089"
+        ],
+        "stable9": true
+      },
+      "full_raw_text_sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+      "status": "NOT_RUN",
+      "runtime_collection": "NOT_RUN"
+    }
+  ],
+  "historical_control_scope": "Unmodified pinned baseline full text; no previous result carried onto changed bytes. SOL135 raw-close-custody OPEN case is historical, explicitly superseded only by new authored delta obligations.",
+  "Source_parse": false,
+  "runtime_collection": false,
+  "test_execution": false
+}

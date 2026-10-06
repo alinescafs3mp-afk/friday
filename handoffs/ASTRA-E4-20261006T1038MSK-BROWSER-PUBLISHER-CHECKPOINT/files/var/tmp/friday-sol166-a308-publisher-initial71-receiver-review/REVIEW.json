@@ -1,0 +1,90 @@
+{
+  "schema": "friday.sol166.connected-nonauthor-review.v1",
+  "assignment": "ASTRA-E4-A308-PUBLISHER-ACTUAL-INITIAL71-RECEIVER-CONNECTED-NONAUTHOR-SOL166",
+  "generation": 1,
+  "reviewer": "Sol independent of exact Astra A308 delta",
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A308_ACTUAL_INITIAL71_RECEIVER_ENTRY_DELTA_ONLY",
+  "scope": "ONE Astra-authored literal insertion of 71 in actual PublisherBank.receive entry. Complete current61/current88 pinned changed-context join, not independent acceptance of Sol's own unchanged Sol164 implementation, not execution or resource/admission authority.",
+  "snapshot": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/manifest.json",
+  "snapshot_sha256": "2a5e9b96b3d8048992712531746a8009e5a01265874f93d96befef846686c6c4",
+  "base": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/manifest.json",
+  "base_sha256": "83a4a43d7d5acce85bab0ef3064e6941e73227ab201c2b6f9c84d8a6f0e4a18e",
+  "lead_review": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A308-SOL164-CONNECTED-REVIEW-20261006.json",
+  "lead_review_sha256": "626d1e08b29874efbf4d396ec6a272f1ba80e872a8b76a598420e8f24f74e61b",
+  "lead_finding": {"id": "A308-PUBLISHER-F1", "status": "CLOSED_FOR_EXACT_A308_STATIC_ENTRY_RELATION_ONLY", "old_Sol164_result": "IMMUTABLE_REJECTED_AS_SUBMITTED; not retroactively repaired or accepted", "runtime_status": "NOT_RUN"},
+  "verification": {
+    "snapshot_physical_files": 94,
+    "base_physical_files": 108,
+    "both_physical_memberships": "EXACT",
+    "current_unique_paths": 88,
+    "Source61": {"changed": 1, "unchanged": 60},
+    "current88": {"changed": 1, "unchanged": 87},
+    "changed_path": "candidate/parent/publisher_root_command.py",
+    "entire_changed_file_inverse_exact": true,
+    "metadata_changed": false,
+    "host_raw_literal_observations": 31,
+    "safe_raw_spans": 14,
+    "Source_tests": 0,
+    "pins_and_evidence": "INPUT-PINS.json / SOURCE-COMPARISON.json / RAW-RELATION-EVIDENCE.json / RAW-SPANS.json / FINAL-INPUT-RECHECK.json"
+  },
+  "relations": [
+    {
+      "id": "R1",
+      "relation": "Only exact new declared returncode71 is added, no predicate deletion",
+      "evidence": "Entire parent reverses to Sol164 with one exact literal replacement. All other87 current files, including 60 other Source and27 historical metadata/stock files, are byte-exact. Actual process/PID/proof identity, returned same code, cleanup_clear, leader_reaped, no forced leader/descendants remain required; unknown codes still reject before _retain_raw_bank. receive_attempted is set once before this gate, no retry credit.",
+      "limit": "Copied historical metadata/recipes still do not bind a new compiled image. Fresh CURRENT-SOURCE-JOIN is the current88 byte map; no ABI/runtime/source-admission acceptance."
+    },
+    {
+      "id": "R2",
+      "relation": "Real declared native producer and parent launcher join, not direct-helper injection",
+      "evidence": "Existing executable main checks argc10 and forwards fd/case/7 birth identities to FridayPublisherRootBankCommand; _Exit uses SAME result. The same command obtains ColdPerform return, latches original final restriction, requires returned Commit and full bank_publish before choosing BANK_INITIAL_WORK_DATA3 ->71. bank_publish copies/compares every declared body chunk, marks full extent, then copies/compares header last. Parent run_preowned_root registers SAME outside case and retained bank before effects, starts declared image with same fd/case/7 identities/inherited fd, uses original remaining interval, waits, then passes SAME scope.proof and actual returncode to receive and finisher.",
+      "limit": "This is static declared entry/caller relation, not proof of selected image compilation/provider wiring, live invocation, native heap/body completeness or protected wait policy performance. ColdPerform/Commit protected internal qualification reused only as Astra's permitted scoped conditional context, not reviewed or executed here."
+    },
+    {
+      "id": "R3",
+      "relation": "cleanup_clear is not zero-only clean_exit",
+      "evidence": "Original frozen CleanupProof DATA predicate cleanup_clear is kernel_echild + subreaper_restored + no failure_codes, without returncode0. clean_exit separately requires0. Actual receiver uses cleanup_clear PLUS real reap/matching71/no-force, not clean_exit. Thus a proof satisfying unchanged original requirements is not rejected solely for71 after this delta.",
+      "limit": "Actual kernel/process/no-writer facts remain mandatory NOT_RUN. Protected wait/close/lifetime policy bodies were not inspected or qualified. No fabricated cleanup success or assumption that a live/uncertain scope meets these predicates."
+    },
+    {
+      "id": "R4",
+      "relation": "71 still enters original full DATA/min/header/bind/phase/alias relation",
+      "evidence": "Original fd birth identity, operation clock and F_SEAL_WRITE+F_SEAL_SEAL checks precede physical intake. _retain_raw_bank is once-only and uses same reservation/identity/restrictive min before full allocation, reads all layout.total bytes, hashes full bytes, checks same fd and header and unchanged credit. For71, B65 must be the retained restrictive min and RP31 zero; no failed scalar or clock can fall back to larger D0. Final seals/deferred fault/input header/reserved bytes/native bind/eight full phase strings/alias relations/cold DATA/full copy/resource fields remain unchanged. Only outcome3 paired with71 and exact phase5 returned sec/nsec/raw observed sample, W0<T<=retained restriction, original bank+F+U+C sums/adopted/unacquired flags and exact first-fault bytes reaches InitialWorkData. All raw data remain raw DATA, not runtime/utility/resource observation or full historical pointee proof."
+    },
+    {
+      "id": "R5",
+      "relation": "All success/mismatch counterpaths remain strict",
+      "evidence": "71/outcome1 cannot meet code0 and71/outcome2 cannot meet code70.0/70/outcome3 cannot meet code71. Unknown outcome, absent/malformed initial raw fields, wrong debit components, clock domains, min, aliases, code/proof mismatch, bad seals/identity or partial intake remain failure. Non71 initial cells66..79 stay zero-required. Existing0/70/78/79 paths and predicates are byte-exact. Retiring fully retained invalid raw DATA into BankReceiveFailureResult is not successful semantic/native acceptance. Exit71 alone never grants intake/custody/END."
+    },
+    {
+      "id": "R6",
+      "relation": "Same first InitialWorkFailure survives actual all-outcome finalization",
+      "evidence": "Complete valid outcome3 constructs frozen InitialWorkData with header/full raw digest/original words/proof/restrictive min/SAME outside case and false SourceReady/Root_admission/GO/work_success, resource NOT_ATTEMPTED. It stores and raises SAME InitialWorkFailure before normal BankCompletion path. Actual run caller catches this declared type together with existing received failure types, records first error BEFORE finish_received, retains secondary finish error, then bare-reraises SAME first error. _remember_fault retains first/secondary/retirement and collection-error slots without traceback clearing. Bank was already appended to caller-owned retained_evidence; final immutable DATA is not a replacement for that held error/owner."
+    },
+    {
+      "id": "R7",
+      "relation": "Once-close + retained historical DATA -> distinct new immutable final error record",
+      "evidence": "Initial branch of finish_received requires full body/size/header equal to InitialWorkData, selects INITIAL_WORK_ERROR_FULL_DATA_ONLY_ROOT_PROCESS_ENDED/code71 and calls _close_retained_raw, not semantic-success close_consumed. Original full raw/digest/proof/reap/no-force/fd identity/clock prerequisites and close_attempted guard remain. Close is once and flags fd=-1/closed only after returned os.close. After close finisher never fstats/preads a closed fd: it uses historical identity/header, freezes complete retained mutable body, checks original final clock, constructs NEW frozen BankFinalResult and stores it; no old tuple mutation. Actual run still raises original initial error. Copy failure keeps original mutable body; post-copy clock failure keeps immutable final_body; unconfirmed close/clock/copy failure holds first+secondary actual remaining data/error states with no result/retry. It does not restore or claim state already released by a preceding successful step."
+    },
+    {
+      "id": "R8",
+      "relation": "Scope, resource and control boundaries preserved",
+      "evidence": "One finite comparison adds UNKNOWN_NOT_ZERO selected cost, not measured fit or new credit. Original read/RAM/output/layout/prepaid debits/4200s original interval/600s tail and retained-min predicates unchanged by full inverse. All69/mandatory20/full140/v2/inherited/M37/I14/J20/K01-K33 plus P01-P06 required, no waiver and NOT_RUN. No Source parser/compiler/preprocess/import/AST/eval/exec/tests/helpers/live/network/install or Source/input/repo/settings/Git edits. Stopped107#2/Scanner075/SOL139/equivalents excluded; protected stock/set/type/callback/worker/lifetime bodies opaque/unqualified."
+    }
+  ],
+  "introduced_contradictions": [],
+  "remaining_required": [
+    "Selected actual image/compiler/ABI/nine sizeof layout/provider/whole byte admission; no old image or positive control carried to new bytes.",
+    "Original applicable-cutoff authority, current generation and prelaunch/full-span reconciliation not closed by allowing71.",
+    "Actual body/value/history/alias/original-error/last-owner custody and protected internal qualification remain separate required gates.",
+    "Whole physical/implicit allocator/RAM/read/CPU/IO/time/output fit remains OPEN; sampled/declarative bound is not a finite-operation performance certificate.",
+    "All original and inherited positive/negative controls including actual71 receiver reachability and final first-error preservation, selected actual cleanup/kernel writer facts and failure-injection observations remain REQUIRED_NOT_RUN."
+  ],
+  "host_only_failures": [
+    "Verification first pass assumed A308 join key files; actual A308 key current88 with name/before/after. Corrected OWN host schema handling after exact metadata inspection; successful pass verified full pins/inventory/inverse. No Source edit or execution.",
+    "Relation first pass host literal mistakenly searched self._remember_fault inside actual run, whose receiver is bank._remember_fault. Corrected OWN host assertion and repeated host raw observations only. No Source failure claimed."
+  ],
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

@@ -1,0 +1,75 @@
+{
+  "assignment": "ASTRA-E4-A284-PUBLISHER-ACTUAL-ROOT-CLOSE-ERROR-CUSTODY-SOL136",
+  "generation": 1,
+  "event": "ASTRA-SOL136-T1",
+  "accepted_msk": "2026-10-05T23:20:17.391343+03:00",
+  "deadline_unix": 1791233885.9580586,
+  "task_sha256": "8567e0580decd00f368bf790a144f5bc24b7c803b151c9c99cfd099de771deb3",
+  "input_sha256": "33b4b1b38738149cf73d5c5802f83c70e896205a12e192489fc2a46b6dd5f94d",
+  "receipt": {
+    "event_id": "ASTRA-SOL136-T1",
+    "sha256": "8567e0580decd00f368bf790a144f5bc24b7c803b151c9c99cfd099de771deb3",
+    "recipient_thread": "01a0d516-a446-7131-a123-faeea4bb8e8c",
+    "recipient_generation": "d5afa5e1-60d7-457b-931b-fd12001a35a4",
+    "sender_generation": "acba5992-6a22-4e73-b141-30f35bb631a7",
+    "assignment_id": "ASTRA-E4-A284-PUBLISHER-ACTUAL-ROOT-CLOSE-ERROR-CUSTODY-SOL136",
+    "assignment_generation": "1",
+    "assignment_action": "active",
+    "state": "ENQUEUED",
+    "notification_bytes": 389,
+    "contract_bytes": 1876,
+    "large_reason": null,
+    "peer_receipt": "unconfirmed",
+    "dispatch": "native_idle_boundary",
+    "submission_id": "01a10db7-6800-77f1-89ab-56375ebbd37f",
+    "elapsed_ms": 292
+  },
+  "compact": {
+    "GO": false,
+    "after": {
+      "latest_turn": {
+        "id": "01a10db5-8545-7c21-aaae-1b9f3f922fdc",
+        "status": "completed"
+      },
+      "queue_count": 0,
+      "queue_has_more": false,
+      "thread_status": {
+        "type": "idle"
+      }
+    },
+    "assignment": "ASTRA-E4-A284-PUBLISHER-ACTUAL-ROOT-CLOSE-ERROR-CUSTODY-SOL136",
+    "at": "2026-10-05T20:17:38.971021+00:00",
+    "before": {
+      "latest_turn": {
+        "id": "01a10d90-af94-7d80-add2-985082f504e7",
+        "status": "completed"
+      },
+      "queue_count": 0,
+      "queue_has_more": false,
+      "thread_status": {
+        "type": "idle"
+      }
+    },
+    "compact_response": {},
+    "compact_turn": "01a10db5-8545-7c21-aaae-1b9f3f922fdc",
+    "completion": {
+      "completed_at": 1791231458,
+      "duration_ms": 96394,
+      "error": null,
+      "id": "01a10db5-8545-7c21-aaae-1b9f3f922fdc",
+      "item_id": "01a10db5-856e-7c23-bc1a-f0b63abd7ab6",
+      "item_type": "contextCompaction",
+      "started_at": 1791231362,
+      "status": "completed"
+    },
+    "completion_verified_by": "thread/turns/list itemsView=full contextCompaction",
+    "generation": 1,
+    "next_task_enqueued": false,
+    "same_tui": true,
+    "schema": "friday.astra.sol-pre-task-compact.v1",
+    "thread_compacted_notification_required": false,
+    "thread_id": "01a0d516-a446-7131-a123-faeea4bb8e8c"
+  },
+  "execution_authority": "ABSTRACT_HASH_ONLY",
+  "children": 0
+}

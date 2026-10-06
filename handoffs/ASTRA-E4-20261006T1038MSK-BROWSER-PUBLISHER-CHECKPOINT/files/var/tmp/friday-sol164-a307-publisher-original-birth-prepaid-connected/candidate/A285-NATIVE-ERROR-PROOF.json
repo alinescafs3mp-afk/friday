@@ -1,0 +1,243 @@
+{
+  "schema": "friday.astra.a285.connected-native-refusal-author-proof.v1",
+  "recorded_msk": "2026-10-05T23:33:53.000+03:00",
+  "state": "AUTHOR_CHANGE_PREPARED_FOR_CONNECTED_INTEGRATION_NOT_INDEPENDENTLY_ACCEPTED",
+  "root": "/var/tmp/friday-astra-a284-publisher-preowned-error-connected.KcXy0c",
+  "base": {
+    "path": "/var/tmp/friday-astra-a282-publisher-connected-request-detach.zgEJ7O/manifest.json",
+    "bytes": 35347,
+    "sha256": "0748d139e668558ae391c0ba3f5f22cafa79bf33dde2b6ce0ae5978ba288be7a",
+    "identity9_decimal_strings": [
+      "2050",
+      "7084436",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "35347",
+      "1791227171550615466",
+      "1791227171569616546"
+    ],
+    "stable9": true
+  },
+  "Source": 57,
+  "changed_source": [
+    {
+      "relative_path": "native/publisher_original_caller.c",
+      "base": {
+        "path": "/var/tmp/friday-astra-a282-publisher-connected-request-detach.zgEJ7O/native/publisher_original_caller.c",
+        "bytes": 14605,
+        "sha256": "1b52975dbd7a69468f49ea2ec3d87ce057785c4065fdaaa87674b289d51f67b9",
+        "identity9_decimal_strings": [
+          "2050",
+          "7084386",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14605",
+          "1791145805533337237",
+          "1791226986608455397"
+        ],
+        "stable9": true
+      },
+      "draft": {
+        "path": "/var/tmp/friday-astra-a284-publisher-preowned-error-connected.KcXy0c/native/publisher_original_caller.c",
+        "bytes": 15007,
+        "sha256": "18fd8caeadb26b1daec81753b76dcb011b55ce66f7b385d622293d2bb0b7415e",
+        "identity9_decimal_strings": [
+          "2050",
+          "7084549",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "15007",
+          "1791229746876014117",
+          "1791229746876014117"
+        ],
+        "stable9": true
+      },
+      "raw_LF_diff": "--- A282/native/publisher_original_caller.c\n+++ A284-draft/native/publisher_original_caller.c\n@@ -61,10 +61,17 @@\n        reads>UINT64_MAX-c->reads||output>UINT64_MAX-c->output||\n        hash>UINT64_MAX-c->hash||allocation>UINT64_MAX-c->allocation) {\n         /* Pure structural failure precedes a provider debit: no new Python\n-         * exception allocated here. Python-callable bridges use the exact\n-         * original Root preowned refusal if no original error is pending. */\n-        if(c==&caller_storage&&!PyErr_Occurred()&&c->original.preowned_refusal_type&&c->original.preowned_refusal_value)\n-            PyErr_SetObject(c->original.preowned_refusal_type,c->original.preowned_refusal_value);\n+         * exception allocated here. Keep pending/handled originals before\n+         * selecting the exact Root preowned refusal on an empty boundary. */\n+        if(c==&caller_storage&&!PyErr_Occurred()&&c->original.preowned_refusal_type&&c->original.preowned_refusal_value) {\n+            /* A currently handled original is still real error DATA even\n+             * with no raised indicator. Re-raise its owned reference, or\n+             * select the same preowned Root refusal only if it is absent.\n+             * No implicit causal-chain rewrite or overwritten old error. */\n+            PyObject *original=PyErr_GetHandledException();\n+            if(!original)original=Py_NewRef(c->original.preowned_refusal_value);\n+            PyErr_SetRaisedException(original);\n+        }\n         return -1;\n     }\n     /* Not a new grant/substitute ledger: original whole-pool provider is called\n"
+    },
+    {
+      "relative_path": "native/publisher_root_entry.c",
+      "base": {
+        "path": "/var/tmp/friday-astra-a282-publisher-connected-request-detach.zgEJ7O/native/publisher_root_entry.c",
+        "bytes": 640459,
+        "sha256": "d2ca58bc82fa4f2d15a579b1d6934f87f8d172d644e2785bdef1eeb00b93dded",
+        "identity9_decimal_strings": [
+          "2050",
+          "7084392",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "640459",
+          "1791226986648104361",
+          "1791226986648104361"
+        ],
+        "stable9": true
+      },
+      "draft": {
+        "path": "/var/tmp/friday-astra-a284-publisher-preowned-error-connected.KcXy0c/native/publisher_root_entry.c",
+        "bytes": 641159,
+        "sha256": "cde12291f8ee49ce8b01c46dee1e7553e7614625cd0f0aaebfb515472f88a1dd",
+        "identity9_decimal_strings": [
+          "2050",
+          "7084555",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "641159",
+          "1791229746875014060",
+          "1791229746875014060"
+        ],
+        "stable9": true
+      },
+      "raw_LF_diff": "--- A282/native/publisher_root_entry.c\n+++ A284-draft/native/publisher_root_entry.c\n@@ -442,12 +442,23 @@\n      * Python reference after the caller's actual final end. */\n     if(p==&root_storage.pool&&final_caller_binding.transferred)return -1;\n     if(p&&!p->refused){p->refused=1;p->fault=why;}\n-    /* Exact preowned refusal is installed only when there is no original\n-     * error. No allocation/normalization or overwritten provider exception. */\n+    /* Keep pending and handled originals; only their absence selects the\n+     * exact preowned refusal. No new/normalized provider exception. */\n     /* The actual cold command uses this pool before any interpreter exists.\n      * Do not ask for a Python error indicator without an initialized runtime. */\n-    if(Py_IsInitialized()&&p&&p->refusal_type&&p->refusal_value&&!PyErr_Occurred())\n-        PyErr_SetObject(p->refusal_type,p->refusal_value);\n+    if(Py_IsInitialized()&&p&&p->refusal_type&&p->refusal_value&&!PyErr_Occurred()) {\n+        /* An empty raised indicator does not mean no original: an active\n+         * handler still owns its actual exception. Preserve that instance\n+         * as the raised error; use the preowned refusal only without one.\n+         * PyErr_SetObject would instead traverse/rewrite causal chains.\n+         * The public getter returns an owned ref; the setter steals it with\n+         * the already-checked old indicator NULL. No context/TB rewrite,\n+         * normalization or new exception here. Later Python propagation\n+         * may add real traceback frames, which remain required error DATA. */\n+        PyObject *original=PyErr_GetHandledException();\n+        if(!original)original=Py_NewRef(p->refusal_value);\n+        PyErr_SetRaisedException(original);\n+    }\n     return -1;\n }\n static int root_pool_start(FridayPublisherRootStorage *s,uint64_t command_storage) {\n"
+    }
+  ],
+  "other_Source55": "Unchanged at A284 preservation; exact current candidate census required when joining SOL136. No Source mutation in A285.",
+  "preservation": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A284-PREOWNED-ERROR-DRAFT-PRESERVED-20261005.json",
+    "bytes": 41262,
+    "sha256": "cd20d5df587c04fb64d0efbb7e9f9dc23418f6b70fae456279fc22795d30ef67",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536731",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "41262",
+      "1791231510715607053",
+      "1791231510732604424"
+    ],
+    "stable9": true
+  },
+  "obligations": {
+    "path": "/var/tmp/friday-astra-a284-publisher-preowned-error-connected.KcXy0c/A285-NATIVE-ERROR-OBLIGATIONS.json",
+    "bytes": 9004,
+    "sha256": "70a8c38bbc7834449afa4c6cf14f53c412a811df467b63be25c3c94d13bb9f01",
+    "identity9_decimal_strings": [
+      "2050",
+      "7084644",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "9004",
+      "1791232380048177652",
+      "1791232380065179166"
+    ],
+    "stable9": true
+  },
+  "existing_invariant": "Preserve actual original failure values and aliases before any projection/normalization, with phase-correct ownership and full actual producer/receiver error bodies. Ordinary refusal must not rewrite required already-owned causal history to make it representable; same Root roles, original caps and both real endpoints remain.",
+  "previous_actual_failure_relation": {
+    "sites": [
+      "publisher_root_entry.c FridayPublisherMasterFault",
+      "publisher_original_caller.c original_debit structural refusal"
+    ],
+    "old": "PyErr_SetObject(preowned_type,preowned_value) was described as no allocation/normalization. Even a compatible preowned exception enters selected errors.c implicit causal-chain handling when another exception is being handled.",
+    "stock_body": {
+      "path": "/var/tmp/friday-astra-a284-publisher-preowned-error-connected.KcXy0c/stock-data/Python/errors.c",
+      "bytes": 57848,
+      "sha256": "5ef37b5d6fdcd7a6c55002eba9fe31ed70a5a7a76fa606a468ba3c4894384af0",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084603",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57848",
+        "1791218365831603846",
+        "1791229592838142802"
+      ],
+      "stable9": true
+    },
+    "raw_evidence": "errors.c152-197 has normalization/type machinery;199-235 obtains active handled exception and can unlink/set contexts, touching original chains.25-30 SetRaisedException only swaps the current raised field and decrefs old; guard proves old NULL on changed selected path.115-126/591-605 GetHandledException walks actual exception-stack chain and returns owned original or NULL.514-535 Fetch transfers actual instance and obtains exact actual type/traceback; not a new normalized error.",
+    "patch_join": {
+      "pin": {
+        "path": "/var/tmp/friday-astra-a284-publisher-preowned-error-connected.KcXy0c/STOCK-REQUEST-INPUTS.json",
+        "bytes": 56022,
+        "sha256": "b05a8eb2cea6a15f71b3914a10be7976b5d2c424c6960ab40a6c49e0b7f7281e",
+        "identity9_decimal_strings": [
+          "2050",
+          "7084591",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "56022",
+          "1791224492914250833",
+          "1791229468084767665"
+        ],
+        "stable9": true
+      },
+      "active_patches": 45,
+      "Python_errors_c_targets": [],
+      "scope": "Exact existing authenticated active-target census has no errors.c patch. This is conditional selected source evidence, not installed image/compiler ABI admission."
+    }
+  },
+  "new_actual_relation": [
+    {
+      "phase": "already raised",
+      "action": "Neither setter calls getter/setter when PyErr_Occurred is non-NULL. Preserve the existing original indicator; no fetch/discard, normalization or overwrite."
+    },
+    {
+      "phase": "empty raised, active handled",
+      "action": "Public getter takes owned reference to actual handled exception. Setter steals that reference into empty raised slot. No context/traceback/args/dict mutation by these APIs; later real propagation remains required DATA."
+    },
+    {
+      "phase": "neither raised nor handled",
+      "action": "Py_NewRef of exact existing Root preowned refusal; SetRaisedException steals it. No new exception factory. Original stock instance/class already retained by Root storage and bound as borrowed aliases to actual caller."
+    },
+    {
+      "phase": "before Root interpreter / preowned instance",
+      "action": "Existing Py_IsInitialized and type/value guards retain native refusal only. No new Python access introduced before existing Root phase."
+    },
+    {
+      "phase": "after final Root transfer",
+      "action": "Existing final_caller_binding.transferred guard returns before mutable pool/ref access. No exposed tuple/status/native body edit."
+    },
+    {
+      "phase": "original_debit",
+      "action": "All structural checks, preexisting actual caller runtime preconditions, original provider call, same pool/caps, prospective ordering and successful counters unchanged. No fallback provider, allowance/refund/reset."
+    }
+  ],
+  "connected_paths": {
+    "construction_bindings": "Draft Root5485-5487 constructs exact preowned RuntimeError;5527-5529 supplies original pool/before and BORROWED refusal refs. Actual caller188 copies same Bindings,210 installs original_debit and215 debits original whole provider before native invoke218.",
+    "actual_error_capture": "Root5600-5608 initial_failure and original caller220-235/252-255 retain actual triple in already-owned fields; no reconstruction from facts. Command error5641-5650 preserves full first cell, retains pending second and stops.",
+    "actual_owner_move": "command_take_owners5691-5693 moves strong Root refusal once;5745 and5747 move actual initial/original-call type/value/traceback; borrowed Bindings are not independent owners. Fields are cleared only at existing registered retirement; no tuple mutation.",
+    "actual_error_body": "Root6118-6137 accepts actual builtin or captured Source exception type, carries full args/dict/notes/cause/context/traceback edges and suppress flag; following branches retain selected builtin extensions. Unsupported required types stay incomplete; original handled instance is never relabeled support.",
+    "source_error_path": "Unchanged A282 observer.retain_error_arena retains actual error then preowns refreshed full graph; full_value_arena and native secondary cuts preserve type/state and errors/frame locals. Later re-raise may change real traceback and must be rejoined, not assumed immutable.",
+    "actual_final_end": "Existing cold command493-520 calls actual RootPerform, CommandReceive, cold_complete and prebound FinalReceive once on both normal and failure outcomes. Native full graph/error/end/cap gates unchanged. This author change does not establish those whole predicates."
+  },
+  "explicit_not_proven": [
+    "Independent non-author review of exact changed two-native-file package after compatible integration with SOL136 raw Root error custody.",
+    "Whole producer/wire/arena/original-body/Source end and both outside final ends; other C1/R2 and stopped work unchanged.",
+    "Real caller/profile/image/compiler/native ABI/TYPE/callback/nonmutation qualification. Getter exception-stack lookup costs are nonzero and potentially depth-dependent; no constant-cost claim or new allowance.",
+    "Whole workload physical/implicit allocation, refcount, cleanup and actual resource fit under original caps. No source changes to counters make these measured.",
+    "All required actual positive/negative execution, diagnostics and mandatory release stages remain NOT_RUN."
+  ],
+  "integration_rule": "Keep this A284 Source draft separate while Sol136 runs from immutable SOL135. Next join only exact whole files after authenticating Sol result: if its native files differ, reconcile actual LF changes/dependencies rather than overwriting. Astra independently reviews Sol-authored producer, Sol can review Astra-authored setter and connected joins without self-accepting own producer. Do not enqueue a knowingly incompatible local-only whole-source review.",
+  "new_grouped_roots": 0,
+  "scope": "Existing original-error/callback/finite custody causes; no new theoretical invariants, process, service or topology.",
+  "source_writes_this_turn": 0,
+  "new_metadata_only": [
+    "A285-NATIVE-ERROR-OBLIGATIONS.json",
+    "A285-NATIVE-ERROR-PROOF.json"
+  ],
+  "unchanged_historical_metadata": "BASE-MANIFEST-A282, ASTRA-C1-REVIEW, INTEGRATION, LITERAL-DELTA and SOL133/134 records are exact historical evidence for their own referenced inputs, NOT current draft acceptance. No current manifest sealed yet.",
+  "Source_parser": 0,
+  "Source_execution": 0,
+  "compiler": 0,
+  "tests": "NOT_RUN",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}
+

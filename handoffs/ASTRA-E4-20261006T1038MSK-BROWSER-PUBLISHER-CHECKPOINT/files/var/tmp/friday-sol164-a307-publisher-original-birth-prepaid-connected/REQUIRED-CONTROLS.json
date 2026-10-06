@@ -1,0 +1,232 @@
+{
+  "schema": "friday.sol164.a307.required-controls.v1",
+  "required": true,
+  "waiver": false,
+  "status": "REQUIRED_NOT_RUN",
+  "inherited": [
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/REQUIRED-CHECKS.json",
+      "bytes": 1256,
+      "sha256": "8ba4a3a67a40a9c8aaf7ddf5d285cd4bea85b7fd9b9896287bb677f791b3a853",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558909",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1256",
+        "1791265968398356852",
+        "1791265968416357858"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/REQUIRED-CONTROLS.json",
+      "bytes": 3768,
+      "sha256": "604dad1f135061d961a8c62fbfb22d74681c8ad4ee207899d038c73673cacb91",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849817",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3768",
+        "1791266323085161552",
+        "1791266323101162446"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/REQUIRED-CONTROLS.json",
+      "bytes": 8188,
+      "sha256": "239f81748a041362b93ad3d3cf3f7b2874c9455e9fd4cfde0bdd20df90215d82",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086800",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8188",
+        "1791265081982371990",
+        "1791265155946617459"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol162-a305-publisher-initial-work-full-connected/REQUIRED-CONTROLS.json",
+      "bytes": 5029,
+      "sha256": "24f1e93a779163e1c7d8f18ca26a7f67783e83ded8d2a3ec09e8e6a891cad1f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980771",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5029",
+        "1791267592124452138",
+        "1791267652846882384"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/INHERITED-CONTROL-PINS.json",
+      "bytes": 2196,
+      "sha256": "e8dff250fd7743372965db8ec7ae096f779a04360d4cc36e4d634bbe7c1fcc34",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086803",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2196",
+        "1791265155956618022",
+        "1791265155957618079"
+      ],
+      "stable9": true
+    }
+  ],
+  "cases": [
+    [
+      "K01",
+      "Healthy original reservation v7/2 exact native/parent nine sizeof facts; normal Source positive plus all ordinary error outcomes and previous positive cases."
+    ],
+    [
+      "K02",
+      "Old v6 bank/v1 reservation/missing qualified fields/default sizes rejected; no tolerant fallback; original positive scenario rejoined under exact v7, not waived."
+    ],
+    [
+      "K03",
+      "Every F/U/C term and sum/alignment/u64 original interval overflow checked before memfd/launch and native adoption; same caps, no second pool/grant/debit/refund."
+    ],
+    [
+      "K04",
+      "Swap individually declared F/U/C/sizeof facts with same sum, wrong owner/PID/generation/start/deadline/layout/image: exact selected qualification and early header validation refuse."
+    ],
+    [
+      "K05",
+      "Track original birth adoption before FIRST constructor clock and every F/U/C receipt before refusal; original counters never replenished/reset."
+    ],
+    [
+      "K06",
+      "Initial S<=T<W0 and T==W0 keep original positive constructor relation; later original strict admission boundary remains required."
+    ],
+    [
+      "K07",
+      "Initial W0<T<D0 and T==D0 preserve FIRST sec/nsec/rc/immediate errno/observed, terminalWORK5, exact first error identity/body; no initialized/next token/Source/config/runtime/utility/case work."
+    ],
+    [
+      "K08",
+      "Every actual work API/Before/Owns/case/config/reserve/admission/perform caller refuses before new primitive/debit/acquisition after initial terminal work refusal."
+    ],
+    [
+      "K09",
+      "Initial genuine primitive unavailable/ENTERED/unreturned/bad sec/nsec/zero/backward/overflow/T>D0 keeps uncertainty; no WORK classification or D0 fallback."
+    ],
+    [
+      "K10",
+      "First failed/unknown cold/final/Commit/publication clock is never retried; expiration after valid initialT==D0 blocks completion without grace."
+    ],
+    [
+      "K11",
+      "Initial numeric helper invalid owner/layout/reservation/counters/prior tokens/references/source state/nonzero unused clock fields/false END/readiness cannot authorize early DATA."
+    ],
+    [
+      "K12",
+      "Actual ColdPool failure routes through cold_complete early branch -> FinalReceive -> Commit -> wire; no uncalled eligible helper accepted."
+    ],
+    [
+      "K13",
+      "No utility endpoints/acquisition/observation/stock factory/config/runtime/finalizer/Source work in early branch; unattempted support not called ended or observed."
+    ],
+    [
+      "K14",
+      "Full required private RootStorage/Cold prefix and binding/final bank bytes read/copy/compare/retention; no missing actual required bodies/errors/alias rows replaced with scalar/digest flags."
+    ],
+    [
+      "K15",
+      "Exact first error pointer and full phase/fault alias text bodies stay original; original outside case object retained before effects; selected actual argv codec/body/identity/error custody independently verified, not waived."
+    ],
+    [
+      "K16",
+      "Early b.read_credit and original p.spent_read cover actual final/cold numeric guards/scan/copy plus all implicit costs on selected image; physical/read/CPU/RAM/IO/workload fit UNKNOWN_NOT_ZERO until real qualification."
+    ],
+    [
+      "K17",
+      "Early DATA does NOT use normal utility snapshot/resource-observation/credit-settlement/success END predicates; no live row/ref silently erased."
+    ],
+    [
+      "K18",
+      "New header words66..79 and output-only B65/RP31 are initially zero; every stale/nonzero preimage byte rejected at actual bind."
+    ],
+    [
+      "K19",
+      "First clock phases valid5/raw range/rcerrno0/original min/data-only flags and bank/F/U/C components coherently produced and fully validated by actual parent."
+    ],
+    [
+      "K20",
+      "Return71/outcome3 only matched same raw restrictive B65 and RP31 semantics, complete real full-bank retention/phase bodies/birth receipt sum; normal0/70 rejects nonzero initial-data cells."
+    ],
+    [
+      "K21",
+      "Any71 with wrong outcome, false full-read flag/body/first fault/raw/component/absence/END mismatch stays unconfirmed, no BankCompletion."
+    ],
+    [
+      "K22",
+      "Parent initial complete data is distinct immutable InitialWorkData + first InitialWorkFailure; original same exception re-raised after actual finisher, no success fallback."
+    ],
+    [
+      "K23",
+      "Actual cleanup proof/no forced leader-descendant/actual reap/descriptor identity/no remaining writer/full read/seals verified before new parent result; protected policy itself remains independently required."
+    ],
+    [
+      "K24",
+      "Once-close and immutable whole retained body copy; uncertain close never retried, original buffer/evidence retained on failure, final cutoff checked after real end."
+    ],
+    [
+      "K25",
+      "Failed close/clock/copy/semantic receive produces separate retained secondary without replacing first actual initial work failure or manufacturing immutable completion."
+    ],
+    [
+      "K26",
+      "Actual Sol159 launch intent/partial-start/prelaunch clock error-shaped/suppression/all-outcome behavior remains exact; new InitialWorkFailure-shaped prelaunch errors are not native receive outcomes."
+    ],
+    [
+      "K27",
+      "Native old79 no surviving clock-failure-copy retry, original error/compare operands and both transports remain actual; return79 is never complete custody."
+    ],
+    [
+      "K28",
+      "All later A303 kind6/kind7 and original initial/malformed/no-attempt/min37 controls retain exact meaning on current bytes; no Source grant from numeric bound."
+    ],
+    [
+      "K29",
+      "Selected native ABI/padding/sizeof graph/every field/128-bit support/caller qualification and layout version must match exact code; old recipe/pins/historical metadata are not evidence."
+    ],
+    [
+      "K30",
+      "Earlier authority/current image/signature/generation/applicable-min/full-span/prelaunch witness separately required before any enrolled live effects."
+    ],
+    [
+      "K31",
+      "Exact original original69/mandatory20/full140/v2/inherited/M37/I14/J20 and whole final mandatory gate + independent final review remain; no weaker scenarios/limits/oracles."
+    ],
+    [
+      "K32",
+      "All failed/unreturned/primitive/cap/ownership/last-user/non-receiving/partial outcomes retain actual bodies/alias/error data or honest owner HELD; local sealed/end/status alone not transfer."
+    ],
+    [
+      "K33",
+      "Exact physical current88/full61 six changed55/82 same, final SHA/id9/memberships; fresh metadata join, no old reports treated as new acceptance."
+    ]
+  ],
+  "Source_tests": 0,
+  "old_positive_acceptance_carried_to_new_bytes": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

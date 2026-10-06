@@ -1,0 +1,14 @@
+{
+  "schema":"friday.sol165.boundaries.v1",
+  "Source_parser_compiler_preprocess_import_AST_eval_exec_tests_helpers_live_network_install": "NOT_RUN",
+  "source_input_writes":0,
+  "repo_git_push_changes":0,
+  "local":1,"children":0,"heavy":0,
+  "new_model_TUI_issuer_grant_service_pool_cap":0,
+  "protected_qualification":"UNCHANGED_OPAQUE_NOT_REVIEWED_OR_REPAIRED; byte preservation only",
+  "read_scope_incident":"One bounded A0791032-1219 location read unintentionally emitted unchanged sol151_writer_end body. No policy diagnosis/qualification/effect or reuse; not repeated. Strict hash-only read claim unavailable for that disclosure.",
+  "stopped_scopes":"SOL107#2/ScannerSOL075/SOL139 and equivalents excluded; no retry/salvage/review/partial acceptance/rephrase/reroute",
+  "host_only_failed_check":"ONE: raw decoder extraction to next def included the following A079 SOL151_A079_CUSTODY constant, causing false nonidentical-body assertion. Corrected own administrative extraction to exact shared root-return boundary; no Source test/error or Source modification.",
+  "scope":"Independent exact Astra A308 delta only; no Sol whole own-baseline acceptance, mandatory controls REQUIRED_NOT_RUN",
+  "SourceReady":false,"Root_admission":false,"GO":false
+}

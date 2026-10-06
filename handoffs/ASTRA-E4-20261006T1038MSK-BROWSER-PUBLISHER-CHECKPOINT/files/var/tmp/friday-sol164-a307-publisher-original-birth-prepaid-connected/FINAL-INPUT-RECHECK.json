@@ -1,0 +1,9 @@
+{
+  "schema": "friday.sol164.final-input-recheck.v1",
+  "full_SHA_stable9_pins": 313,
+  "all_true": true,
+  "base_and_snapshot_physical_memberships_exact": true,
+  "current_source_bytes_changed_after_verification": false,
+  "streamed_bytes_seal": 22406582,
+  "Source_execution": 0
+}

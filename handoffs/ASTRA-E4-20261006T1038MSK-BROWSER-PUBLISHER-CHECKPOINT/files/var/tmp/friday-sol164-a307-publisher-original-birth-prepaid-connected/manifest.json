@@ -1,0 +1,2887 @@
+{
+  "schema": "friday.sol164.a307.original-birth.connected.inert-manifest.v1",
+  "package": "A307_ORIGINAL_BIRTH_PREPAID_EARLY_WORK_FAILURE_DATA",
+  "root": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected",
+  "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_INDEPENDENT_REVIEW",
+  "base": {
+    "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/manifest.json",
+    "bytes": 71440,
+    "sha256": "7b73d830d31e69ab52e997a4f9d33baa33d5e15ba74e32c6d779dc0f3834a175"
+  },
+  "files": [
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/ADDITIONAL-INPUT-PINS.json",
+      "bytes": 143459,
+      "sha256": "d32ea2a11b9738c60c2f5532aae681e9661b49b976e5402c63c17553c6e01849",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230549",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "143459",
+        "1791269759137987435",
+        "1791269759137987435"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/ALL-OUTCOME-JOIN.json",
+      "bytes": 2722,
+      "sha256": "6e6ed48d8f8103949aa6bffaaffc29f87f35d256efd7ee45aa76335b65352fc9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230555",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2722",
+        "1791269861143852982",
+        "1791269861143852982"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/AUTHOR-RELATIONS.json",
+      "bytes": 2445,
+      "sha256": "9aa43c84ecacf73982323a3503f3c38a47888d0ff7644c66d1cb43e27069ce20",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230531",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2445",
+        "1791269759116986227",
+        "1791269759116986227"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/BASE-INDEX.json",
+      "bytes": 103360,
+      "sha256": "5e92a22b8c6ca67993c47ee8e1e35c4be946d7dc8bded4ea023ba039cff08c1b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229682",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "103360",
+        "1791268921942903237",
+        "1791268921942903237"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/BOUNDARIES.json",
+      "bytes": 1475,
+      "sha256": "a7ee066b62d4f22a18e550cc5b2071a15c1e22ea510161ed56d72fa8b7102e6b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230558",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1475",
+        "1791269861159853902",
+        "1791269861159853902"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/CURRENT-SOURCE-JOIN.json",
+      "bytes": 129276,
+      "sha256": "38ade717a783c0a33794aec54f8ee221e60a30adcc96d4b09eaca8d56fbdd738",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230553",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129276",
+        "1791269861132852349",
+        "1791269861132852349"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/FINAL-INPUT-RECHECK.json",
+      "bytes": 283,
+      "sha256": "7b1b651163d29436345a53f7902fdd79c464356ccd3580c1003ac1abdb8062a9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230559",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "283",
+        "1791269861172854650",
+        "1791269861172854650"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/HOST-LITERAL-CHECKS.json",
+      "bytes": 24586,
+      "sha256": "f68e5696129d3e431c42dd92f63672a5bc3be30778dc7805e50dea48c1b362a6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230550",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24586",
+        "1791269759144987837",
+        "1791269759144987837"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/IMPLEMENTATION.json",
+      "bytes": 6938,
+      "sha256": "59dd0bca6e77d7ccb08052bd42c6bfadc0f2105eb3c98409a3388ab476229fc5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230554",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6938",
+        "1791269861138852695",
+        "1791269861138852695"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/INHERITED-CONTROL-PINS.json",
+      "bytes": 2696,
+      "sha256": "4a1d7ecc8bfceb3ca1baa510456ad1f01f3021ebbe04f0ae32876e069f727570",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230556",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2696",
+        "1791269861148853270",
+        "1791269861149853327"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/INPUT-PINS.json",
+      "bytes": 121053,
+      "sha256": "57dfd901ab6bda119eef23f6b783f1c767f906e69ee1e4df5937a5a275215a32",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229681",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "121053",
+        "1791268921935902839",
+        "1791268921935902839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/REQUIRED-CONTROLS.json",
+      "bytes": 9268,
+      "sha256": "3285dca43e1cb0c1023ce695be21fb82ed16766ec306b32e7329280f7735bb5c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230557",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9268",
+        "1791269861153853557",
+        "1791269861154853614"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/SOURCE-DELTA.patch",
+      "bytes": 43194,
+      "sha256": "8d3758f32ce4045df797b730dd98d6d3d88b25d34b07e3419cd7924d24a29d5b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230530",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "43194",
+        "1791269759110985882",
+        "1791269759110985882"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/TIMING-RESOURCE.json",
+      "bytes": 1058,
+      "sha256": "4170d08d10f7e6fab4de29beaee6c54b9a5e175b0315de33783659087b700970",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230560",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1058",
+        "1791269861177854938",
+        "1791269861177854938"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/A285-INTEGRATION.json",
+      "bytes": 9933,
+      "sha256": "97d6d8dc08489c152b02f5f5fd7023d55331b07d19d22779f1dc294fd8a30aef",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229685",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9933",
+        "1791269224822263103",
+        "1791269224823263160"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/A285-NATIVE-ERROR-OBLIGATIONS.json",
+      "bytes": 9004,
+      "sha256": "70a8c38bbc7834449afa4c6cf14f53c412a811df467b63be25c3c94d13bb9f01",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229686",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9004",
+        "1791269224827263390",
+        "1791269224828263448"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/A285-NATIVE-ERROR-PROOF.json",
+      "bytes": 15534,
+      "sha256": "df5df291c22c461fd06ce1020f46c429497d91f9e636a3ee59c18f0c2720b91b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229687",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15534",
+        "1791269224832263678",
+        "1791269224833263735"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/ASTRA-SOL135-SCOPED-REVIEW.json",
+      "bytes": 44998,
+      "sha256": "299c216b6ac30a79d880eaad10c5626b103faa650ebc59d6c8ae9fdde758214d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229688",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44998",
+        "1791269224837263965",
+        "1791269224838264023"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/BASE-MANIFEST-A285.json",
+      "bytes": 40537,
+      "sha256": "bf36b5cd603775fdc8903a6fe8788e16301b42b425e579aa3531fae79b7a969b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229689",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "40537",
+        "1791269224843264311",
+        "1791269224843264311"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/BASE-MANIFEST-SOL136.json",
+      "bytes": 66708,
+      "sha256": "ce20854ab94e9474c8a475c3acfd8ea9eb3c79e6b470802f4a1abb796d1290c4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229690",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "66708",
+        "1791269224848264598",
+        "1791269224848264598"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/CONTROL-HASHES.json",
+      "bytes": 66361,
+      "sha256": "87edc4f376ed71c1c37427fc4fa9c9bf865797a6a3835461d3585fe4582f836c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229691",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "66361",
+        "1791269224853264886",
+        "1791269224853264886"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/FINAL-INPUT-RECHECK.json",
+      "bytes": 45532,
+      "sha256": "f4591d7a2d59ab6fcace9aa271c8e42777e6c17cba71c77f6bfc6a27671a3234",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229692",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "45532",
+        "1791269224858265173",
+        "1791269224858265173"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/INPUT-PINS.json",
+      "bytes": 47598,
+      "sha256": "d03bed86c6bd5a7afe6855a7070871b85e7b95200bda3ebc03ca0766c6aa833a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229693",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47598",
+        "1791269224863265461",
+        "1791269224863265461"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/LITERAL-DELTA.json",
+      "bytes": 27114,
+      "sha256": "69493c13dcec6b6c43ab7be6979cc3f20306a81d258bd7d8a59b792d1216dd4f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229694",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27114",
+        "1791269224868265748",
+        "1791269224869265806"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/NEW-OBLIGATIONS.json",
+      "bytes": 8707,
+      "sha256": "478513a39b52ff52ad57b6b532094cda75fe47ffd2b86f6f6d1274754de343a4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229695",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8707",
+        "1791269224873266036",
+        "1791269224874266093"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/PROOF.json",
+      "bytes": 13914,
+      "sha256": "38b470d244214e2bf9613c45fc0554f954bfa0b029f75c49e7f6595f469811fb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229696",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13914",
+        "1791269224878266323",
+        "1791269224879266381"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/READER-RESOURCE.json",
+      "bytes": 122,
+      "sha256": "09d9387967692744ccf10dd9f2e65e5354e8e013a54766765e33fa504b5de761",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229697",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "122",
+        "1791269224883266611",
+        "1791269224883266611"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/RESOURCE.json",
+      "bytes": 945,
+      "sha256": "c01793ba1d19df91fd13790bac4fd24c57b83f89cef74e209188bea66aff3629",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229698",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "945",
+        "1791269224888266898",
+        "1791269224888266898"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/authority.py",
+      "bytes": 16580,
+      "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230447",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16580",
+        "1791269224892267128",
+        "1791269224893267186"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/bill.py",
+      "bytes": 24098,
+      "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230448",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24098",
+        "1791269224897267416",
+        "1791269224898267473"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/body_scope.py",
+      "bytes": 7655,
+      "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230449",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7655",
+        "1791269224902267703",
+        "1791269224903267761"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/canonical.py",
+      "bytes": 3825,
+      "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230450",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3825",
+        "1791269224907267991",
+        "1791269224907267991"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/capability.py",
+      "bytes": 11981,
+      "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230451",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11981",
+        "1791269224912268278",
+        "1791269224912268278"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/contract.py",
+      "bytes": 2099,
+      "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230452",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2099",
+        "1791269224917268566",
+        "1791269224917268566"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230453",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "39603",
+        "1791269224921268796",
+        "1791269224922268854"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/document_vector.py",
+      "bytes": 17709,
+      "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230454",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17709",
+        "1791269224926269083",
+        "1791269224927269141"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/document_windows.py",
+      "bytes": 7707,
+      "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230455",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7707",
+        "1791269224931269371",
+        "1791269224931269371"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/effects.py",
+      "bytes": 690,
+      "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230456",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "690",
+        "1791269224935269601",
+        "1791269224936269659"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/formats.py",
+      "bytes": 13628,
+      "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230457",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13628",
+        "1791269224940269888",
+        "1791269224940269888"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/ingress.py",
+      "bytes": 3025,
+      "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230458",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3025",
+        "1791269224944270119",
+        "1791269224944270119"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/material_literals.py",
+      "bytes": 5689,
+      "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230459",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5689",
+        "1791269224949270406",
+        "1791269224949270406"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/performing_contracts.py",
+      "bytes": 18209,
+      "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230460",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18209",
+        "1791269224953270637",
+        "1791269224954270694"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/pins.py",
+      "bytes": 9147,
+      "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230461",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9147",
+        "1791269224958270924",
+        "1791269224958270924"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/producer_consumer.py",
+      "bytes": 3243,
+      "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230462",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3243",
+        "1791269224962271154",
+        "1791269224963271212"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/receipt_chain.py",
+      "bytes": 16263,
+      "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230463",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16263",
+        "1791269224966271384",
+        "1791269224967271441"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/recipe_planner.py",
+      "bytes": 102799,
+      "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230464",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "102799",
+        "1791269224972271729",
+        "1791269224973271787"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/resource_meter.py",
+      "bytes": 30206,
+      "sha256": "50b7c70a35f6a1f960555071bca3aef9defe57c4ff7f506fe6a586b51eace3ce",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230465",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30206",
+        "1791269224978272074",
+        "1791269224978272074"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/runtime_consumer.py",
+      "bytes": 13297,
+      "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230466",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13297",
+        "1791269224982272304",
+        "1791269224983272362"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/schema_validate.py",
+      "bytes": 6776,
+      "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230467",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6776",
+        "1791269224987272592",
+        "1791269224990272764"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/semantics.py",
+      "bytes": 2578,
+      "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230468",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2578",
+        "1791269224994272994",
+        "1791269224994272994"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/whole_join.py",
+      "bytes": 18213,
+      "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230469",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18213",
+        "1791269224999273281",
+        "1791269224999273281"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_original_caller.c",
+      "bytes": 15007,
+      "sha256": "18fd8caeadb26b1daec81753b76dcb011b55ce66f7b385d622293d2bb0b7415e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230471",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15007",
+        "1791269225004273569",
+        "1791269225004273569"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_original_caller.h",
+      "bytes": 6596,
+      "sha256": "94ef97754d8789c3fdd0810c1379147c73d191c3f01d66ff127dea8c20096c10",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230472",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6596",
+        "1791269225008273799",
+        "1791269225008273799"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_owned_custody.c",
+      "bytes": 70396,
+      "sha256": "974ab116b0672c17a8adbbd9a349394238d284e0719428a0f5db99ec11808b2f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230473",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "70396",
+        "1791269225013274086",
+        "1791269225013274086"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_owned_custody.h",
+      "bytes": 6522,
+      "sha256": "e1905df1072950b8b92ca7b6bf0fc42e0dc6fc7d35cf9c24f1ebd5e075a75bb0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230474",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6522",
+        "1791269225017274317",
+        "1791269225018274374"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_bank.c",
+      "bytes": 24475,
+      "sha256": "e59df04e38d9391242320539bd7a2674c914da82a8c32856e3b05b35e1268616",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230475",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24475",
+        "1791269225022274604",
+        "1791269225022274604"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_bank.h",
+      "bytes": 9088,
+      "sha256": "2f699a1c080f9e2bbe37e84d5ba7d624c46ffad5bbd6b517485e76f88b005262",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230476",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9088",
+        "1791269438062524874",
+        "1791269438062524874"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_command.c",
+      "bytes": 28548,
+      "sha256": "d0e83b29ff9aef566f6caf129a922cfc97d124a0b1c97baeeaebf4d77b7234dc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230477",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "28548",
+        "1791269225031857353",
+        "1791269225032320889"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_command.h",
+      "bytes": 5786,
+      "sha256": "a275274f6c985210a4327c6d5c007f9519e7276c6c3b3a9eb5a79ff2e0db196c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230478",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5786",
+        "1791269225035275352",
+        "1791269225036275410"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_entry.c",
+      "bytes": 672846,
+      "sha256": "78df0548a2f1d26766f26d49041ce541dd9e07638f99c04f762d174fe931d370",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230479",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "672846",
+        "1791269759035981569",
+        "1791269759035981569"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_entry.h",
+      "bytes": 24978,
+      "sha256": "6d9319d66619f5cc614ca37d8804abd9988d76e13ea18b174b78cf085877ded0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230480",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24978",
+        "1791269225054276444",
+        "1791269225054276444"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent/publisher_root_command.py",
+      "bytes": 69491,
+      "sha256": "be9c93d67aa39fb3bfc78ae8d88eb2f37d068331624069c2ad958b810a76c27d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230482",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "69491",
+        "1791269663741501926",
+        "1791269663741501926"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent/quality_gate_process.py",
+      "bytes": 13293,
+      "sha256": "1ed9b256b24efa7b7b449c464d62e22378280a8a4929d3a19056ba56c112a22a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230483",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13293",
+        "1791269225065603420",
+        "1791269225066277134"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent-evidence/ORIGINAL-CONTROL-DEFINITIONS.json",
+      "bytes": 95869,
+      "sha256": "1d3be7fc93ab0b1dd140603fd1d26a709020a00c5150c9938ad495a4c3b6f88d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230485",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "95869",
+        "1791269225071277422",
+        "1791269225072281845"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent-evidence/SOL135-CONTROL-HASHES.json",
+      "bytes": 49628,
+      "sha256": "2b12d945c2de8e879340839da627295bd3ac74951053d12d2c1ca45f2131ab32",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230486",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49628",
+        "1791269225077458762",
+        "1791269225077458762"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent-evidence/SOL135-PROOF.json",
+      "bytes": 15889,
+      "sha256": "8e8182a41f2281367d7b891c62ad7aabb50bd522da5b045b64cab5b54dc3530c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230487",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15889",
+        "1791269225082278054",
+        "1791269225083192128"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent-evidence/SOL135-manifest.json",
+      "bytes": 44876,
+      "sha256": "7ff6788fd62b8222b1d18b6ee8beba86840624b5a5e488acd74bcb20e35fec0a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230488",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44876",
+        "1791269225088278399",
+        "1791269225088278399"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/read_data.py",
+      "bytes": 6206,
+      "sha256": "3d17cc78397c789b1fd1cfd7e1871f12518d4a3c7d57a631510a5df244c04011",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230489",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6206",
+        "1791269225093278687",
+        "1791269225093278687"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/received.json",
+      "bytes": 2616,
+      "sha256": "625c09dae98687c774a28d0a639273e762a932ced11f6837d9ab4b643e00eb68",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230490",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2616",
+        "1791269225098278974",
+        "1791269225098278974"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/seal_data.py",
+      "bytes": 13489,
+      "sha256": "22bfcc883d481c1a63b35d7f298643c55941c6461122ca5ab0b8535c8895699b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230491",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13489",
+        "1791269225103279262",
+        "1791269225104279320"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/actor_bootstrap.py",
+      "bytes": 61339,
+      "sha256": "f47505b651e88b60d19b6a2fcef555d1709f4607433043e79229cf9c9af751df",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230493",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "61339",
+        "1791269225109279607",
+        "1791269225109279607"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/actor_context.py",
+      "bytes": 25298,
+      "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230494",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25298",
+        "1791269225114279895",
+        "1791269225114279895"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/admission.py",
+      "bytes": 14621,
+      "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230495",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14621",
+        "1791269225119280182",
+        "1791269225119280182"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/alljob_cohort.py",
+      "bytes": 24686,
+      "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230496",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24686",
+        "1791269225124280470",
+        "1791269225124280470"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/capacity.py",
+      "bytes": 20946,
+      "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230497",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20946",
+        "1791269225129280758",
+        "1791269225129280758"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/class_semantics.py",
+      "bytes": 19516,
+      "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230498",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19516",
+        "1791269225133280987",
+        "1791269225134281045"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/common.py",
+      "bytes": 38326,
+      "sha256": "d02a5488dd6cba3d1255aa4cbf13ecec9437e386f04e17a07c324c4bd56a3f51",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230499",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "38326",
+        "1791269225139281333",
+        "1791269225139281333"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/consumer_bridge.py",
+      "bytes": 21315,
+      "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230500",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21315",
+        "1791269225144281620",
+        "1791269225144281620"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/custody.py",
+      "bytes": 31225,
+      "sha256": "a9b19529d1410188e916f11c6ae38f7834a1c8818afd42dd2b541f6d236ad4af",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230501",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31225",
+        "1791269225149281907",
+        "1791269225150281965"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/existing_root_caller.py",
+      "bytes": 47382,
+      "sha256": "6e8c932a4b214eb8696ed7a8c2efd18a84ccba8587e2b29376fe546eefa7991c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230502",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47382",
+        "1791269225154282195",
+        "1791269225155282252"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/extraction.py",
+      "bytes": 27923,
+      "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230503",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27923",
+        "1791269225160282540",
+        "1791269225160282540"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/fact_bridge.py",
+      "bytes": 14689,
+      "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230504",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14689",
+        "1791269225165282827",
+        "1791269225165282827"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/independent_selector.py",
+      "bytes": 7718,
+      "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230505",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7718",
+        "1791269225170283115",
+        "1791269225170283115"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/launcher.py",
+      "bytes": 11634,
+      "sha256": "3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230506",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11634",
+        "1791269225175283402",
+        "1791269225176283460"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/lifetime.py",
+      "bytes": 53987,
+      "sha256": "84affe919b12dca8871134991fda68ec5d7bccf66553e15cb2dfc5406f7ec482",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230507",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "53987",
+        "1791269225183283863",
+        "1791269225184283920"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/master_pool.py",
+      "bytes": 2315,
+      "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230508",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2315",
+        "1791269225189284207",
+        "1791269225190284265"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/native.py",
+      "bytes": 44470,
+      "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230509",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44470",
+        "1791269225195284552",
+        "1791269225195284552"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/normalization.py",
+      "bytes": 12779,
+      "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230510",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12779",
+        "1791269225199284782",
+        "1791269225200284840"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/observer.py",
+      "bytes": 155367,
+      "sha256": "f47369f03041a26d77cfc9ea17fefd1b562e820b3e2e5f1be9b47f1300593e34",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230511",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "155367",
+        "1791269225206285185",
+        "1791269225206285185"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/operations.py",
+      "bytes": 24309,
+      "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230512",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24309",
+        "1791269225211285473",
+        "1791269225211285473"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/owned_prefix_bank.py",
+      "bytes": 44237,
+      "sha256": "89a1b8f0c86f426510ee45f0829e7d64dcb2a715d9b8eacc9ef2eb93b347a829",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230513",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44237",
+        "1791269225216285760",
+        "1791269225216285760"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/retention.py",
+      "bytes": 8465,
+      "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230514",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8465",
+        "1791269225220285990",
+        "1791269225221286048"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/roles.py",
+      "bytes": 5018,
+      "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230515",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5018",
+        "1791269225225286278",
+        "1791269225225286278"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/root_tool_adapter.py",
+      "bytes": 152270,
+      "sha256": "63fcdb47a76b4e31bd5215431f8c14565d603b58f91510e7d190d01045aee4fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230516",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "152270",
+        "1791269225230286565",
+        "1791269225231286623"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/selected_owned_values.py",
+      "bytes": 60827,
+      "sha256": "c7f2c5929bba7ab3cdceafc6e8d0bb9693bf5bb5785583bef92f727428ae6b31",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230517",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "60827",
+        "1791269225235286853",
+        "1791269225236286910"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/snapshot_producer.py",
+      "bytes": 4130,
+      "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230518",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4130",
+        "1791269225240287140",
+        "1791269225241287198"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/stock-data/Include/cpython/listobject.h",
+      "bytes": 1801,
+      "sha256": "01db083043a33e64b99e8d8ac7da1862042a0e56e2899b5856662e2080faffe9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230522",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1801",
+        "1791269225246287485",
+        "1791269225246287485"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/stock-data/Include/cpython/setobject.h",
+      "bytes": 2046,
+      "sha256": "de9eeb690b95abe93a56100de500aabfb0c26f47ec5aef1c405aac7e969f5ed4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230523",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2046",
+        "1791269225251287773",
+        "1791269225251287773"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/stock-data/Objects/abstract.c",
+      "bytes": 81268,
+      "sha256": "5eeff9306d90cfd1cc817c7db4dda29b06932d0ef09ce664323e66bcf829b2a3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230525",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "81268",
+        "1791269225257288118",
+        "1791269225257288118"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/stock-data/Objects/listobject.c",
+      "bytes": 128723,
+      "sha256": "ae99faca56ecd038b314e847255fc548b6b7e6dd8060d2f5aaed94792d50298c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230526",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "128723",
+        "1791269225263288463",
+        "1791269225264288520"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/stock-data/Objects/setobject.c",
+      "bytes": 82002,
+      "sha256": "d2130bf7c89f301349025e26379041d4e6878b422be11d7eaa4e60c26b10f72d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230527",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "82002",
+        "1791269225269288808",
+        "1791269225270288866"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/stock-data/Python/errors.c",
+      "bytes": 57848,
+      "sha256": "5ef37b5d6fdcd7a6c55002eba9fe31ed70a5a7a76fa606a468ba3c4894384af0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230529",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57848",
+        "1791269225275289153",
+        "1791269225276289210"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/host_author.py",
+      "bytes": 31094,
+      "sha256": "32e560a1e6ae881bdea67577fad99ff7b53e38d8547e576573bc069372558c86",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229683",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31094",
+        "1791269759032981396",
+        "1791269861113851257"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/host_check.py",
+      "bytes": 11135,
+      "sha256": "6ae3785d019a389d29bc299dba17c67866c3b4db63e42e9b46e1577a6e7ceb08",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230548",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11135",
+        "1791269707234548438",
+        "1791269861113851257"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/host_prepare.py",
+      "bytes": 6193,
+      "sha256": "7411f4d76a4e963e987acff3bff5eb73189fd11b050d309d090f8480f50513ae",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229680",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6193",
+        "1791268921884899939",
+        "1791268921916901758"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/host_seal.py",
+      "bytes": 25049,
+      "sha256": "1c7e33814c2c3b35c10301e818608eea6e639ed26ac3817098325db68c6ed405",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230552",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25049",
+        "1791269861078849244",
+        "1791269861113851257"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/received.json",
+      "bytes": 767,
+      "sha256": "3f40a66d62096923f7d2c090ffdd35835f48f2a5fe2118c4460194fe8edbe9e3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229679",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "767",
+        "1791268895888422394",
+        "1791268921916901758"
+      ],
+      "stable9": true
+    }
+  ],
+  "source61": [
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/authority.py",
+      "bytes": 16580,
+      "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230447",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16580",
+        "1791269224892267128",
+        "1791269224893267186"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/bill.py",
+      "bytes": 24098,
+      "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230448",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24098",
+        "1791269224897267416",
+        "1791269224898267473"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/body_scope.py",
+      "bytes": 7655,
+      "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230449",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7655",
+        "1791269224902267703",
+        "1791269224903267761"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/canonical.py",
+      "bytes": 3825,
+      "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230450",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3825",
+        "1791269224907267991",
+        "1791269224907267991"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/capability.py",
+      "bytes": 11981,
+      "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230451",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11981",
+        "1791269224912268278",
+        "1791269224912268278"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/contract.py",
+      "bytes": 2099,
+      "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230452",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2099",
+        "1791269224917268566",
+        "1791269224917268566"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230453",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "39603",
+        "1791269224921268796",
+        "1791269224922268854"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/document_vector.py",
+      "bytes": 17709,
+      "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230454",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17709",
+        "1791269224926269083",
+        "1791269224927269141"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/document_windows.py",
+      "bytes": 7707,
+      "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230455",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7707",
+        "1791269224931269371",
+        "1791269224931269371"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/effects.py",
+      "bytes": 690,
+      "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230456",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "690",
+        "1791269224935269601",
+        "1791269224936269659"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/formats.py",
+      "bytes": 13628,
+      "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230457",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13628",
+        "1791269224940269888",
+        "1791269224940269888"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/ingress.py",
+      "bytes": 3025,
+      "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230458",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3025",
+        "1791269224944270119",
+        "1791269224944270119"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/material_literals.py",
+      "bytes": 5689,
+      "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230459",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5689",
+        "1791269224949270406",
+        "1791269224949270406"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/performing_contracts.py",
+      "bytes": 18209,
+      "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230460",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18209",
+        "1791269224953270637",
+        "1791269224954270694"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/pins.py",
+      "bytes": 9147,
+      "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230461",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9147",
+        "1791269224958270924",
+        "1791269224958270924"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/producer_consumer.py",
+      "bytes": 3243,
+      "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230462",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3243",
+        "1791269224962271154",
+        "1791269224963271212"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/receipt_chain.py",
+      "bytes": 16263,
+      "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230463",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16263",
+        "1791269224966271384",
+        "1791269224967271441"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/recipe_planner.py",
+      "bytes": 102799,
+      "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230464",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "102799",
+        "1791269224972271729",
+        "1791269224973271787"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/resource_meter.py",
+      "bytes": 30206,
+      "sha256": "50b7c70a35f6a1f960555071bca3aef9defe57c4ff7f506fe6a586b51eace3ce",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230465",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30206",
+        "1791269224978272074",
+        "1791269224978272074"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/runtime_consumer.py",
+      "bytes": 13297,
+      "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230466",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13297",
+        "1791269224982272304",
+        "1791269224983272362"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/schema_validate.py",
+      "bytes": 6776,
+      "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230467",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6776",
+        "1791269224987272592",
+        "1791269224990272764"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/semantics.py",
+      "bytes": 2578,
+      "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230468",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2578",
+        "1791269224994272994",
+        "1791269224994272994"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/whole_join.py",
+      "bytes": 18213,
+      "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230469",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18213",
+        "1791269224999273281",
+        "1791269224999273281"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_original_caller.c",
+      "bytes": 15007,
+      "sha256": "18fd8caeadb26b1daec81753b76dcb011b55ce66f7b385d622293d2bb0b7415e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230471",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15007",
+        "1791269225004273569",
+        "1791269225004273569"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_original_caller.h",
+      "bytes": 6596,
+      "sha256": "94ef97754d8789c3fdd0810c1379147c73d191c3f01d66ff127dea8c20096c10",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230472",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6596",
+        "1791269225008273799",
+        "1791269225008273799"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_owned_custody.c",
+      "bytes": 70396,
+      "sha256": "974ab116b0672c17a8adbbd9a349394238d284e0719428a0f5db99ec11808b2f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230473",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "70396",
+        "1791269225013274086",
+        "1791269225013274086"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_owned_custody.h",
+      "bytes": 6522,
+      "sha256": "e1905df1072950b8b92ca7b6bf0fc42e0dc6fc7d35cf9c24f1ebd5e075a75bb0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230474",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6522",
+        "1791269225017274317",
+        "1791269225018274374"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_bank.c",
+      "bytes": 24475,
+      "sha256": "e59df04e38d9391242320539bd7a2674c914da82a8c32856e3b05b35e1268616",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230475",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24475",
+        "1791269225022274604",
+        "1791269225022274604"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_bank.h",
+      "bytes": 9088,
+      "sha256": "2f699a1c080f9e2bbe37e84d5ba7d624c46ffad5bbd6b517485e76f88b005262",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230476",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9088",
+        "1791269438062524874",
+        "1791269438062524874"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_command.c",
+      "bytes": 28548,
+      "sha256": "d0e83b29ff9aef566f6caf129a922cfc97d124a0b1c97baeeaebf4d77b7234dc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230477",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "28548",
+        "1791269225031857353",
+        "1791269225032320889"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_command.h",
+      "bytes": 5786,
+      "sha256": "a275274f6c985210a4327c6d5c007f9519e7276c6c3b3a9eb5a79ff2e0db196c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230478",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5786",
+        "1791269225035275352",
+        "1791269225036275410"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_entry.c",
+      "bytes": 672846,
+      "sha256": "78df0548a2f1d26766f26d49041ce541dd9e07638f99c04f762d174fe931d370",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230479",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "672846",
+        "1791269759035981569",
+        "1791269759035981569"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_entry.h",
+      "bytes": 24978,
+      "sha256": "6d9319d66619f5cc614ca37d8804abd9988d76e13ea18b174b78cf085877ded0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230480",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24978",
+        "1791269225054276444",
+        "1791269225054276444"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent/publisher_root_command.py",
+      "bytes": 69491,
+      "sha256": "be9c93d67aa39fb3bfc78ae8d88eb2f37d068331624069c2ad958b810a76c27d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230482",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "69491",
+        "1791269663741501926",
+        "1791269663741501926"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent/quality_gate_process.py",
+      "bytes": 13293,
+      "sha256": "1ed9b256b24efa7b7b449c464d62e22378280a8a4929d3a19056ba56c112a22a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230483",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13293",
+        "1791269225065603420",
+        "1791269225066277134"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/actor_bootstrap.py",
+      "bytes": 61339,
+      "sha256": "f47505b651e88b60d19b6a2fcef555d1709f4607433043e79229cf9c9af751df",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230493",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "61339",
+        "1791269225109279607",
+        "1791269225109279607"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/actor_context.py",
+      "bytes": 25298,
+      "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230494",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25298",
+        "1791269225114279895",
+        "1791269225114279895"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/admission.py",
+      "bytes": 14621,
+      "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230495",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14621",
+        "1791269225119280182",
+        "1791269225119280182"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/alljob_cohort.py",
+      "bytes": 24686,
+      "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230496",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24686",
+        "1791269225124280470",
+        "1791269225124280470"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/capacity.py",
+      "bytes": 20946,
+      "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230497",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20946",
+        "1791269225129280758",
+        "1791269225129280758"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/class_semantics.py",
+      "bytes": 19516,
+      "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230498",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19516",
+        "1791269225133280987",
+        "1791269225134281045"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/common.py",
+      "bytes": 38326,
+      "sha256": "d02a5488dd6cba3d1255aa4cbf13ecec9437e386f04e17a07c324c4bd56a3f51",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230499",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "38326",
+        "1791269225139281333",
+        "1791269225139281333"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/consumer_bridge.py",
+      "bytes": 21315,
+      "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230500",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21315",
+        "1791269225144281620",
+        "1791269225144281620"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/custody.py",
+      "bytes": 31225,
+      "sha256": "a9b19529d1410188e916f11c6ae38f7834a1c8818afd42dd2b541f6d236ad4af",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230501",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31225",
+        "1791269225149281907",
+        "1791269225150281965"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/existing_root_caller.py",
+      "bytes": 47382,
+      "sha256": "6e8c932a4b214eb8696ed7a8c2efd18a84ccba8587e2b29376fe546eefa7991c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230502",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47382",
+        "1791269225154282195",
+        "1791269225155282252"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/extraction.py",
+      "bytes": 27923,
+      "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230503",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27923",
+        "1791269225160282540",
+        "1791269225160282540"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/fact_bridge.py",
+      "bytes": 14689,
+      "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230504",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14689",
+        "1791269225165282827",
+        "1791269225165282827"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/independent_selector.py",
+      "bytes": 7718,
+      "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230505",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7718",
+        "1791269225170283115",
+        "1791269225170283115"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/launcher.py",
+      "bytes": 11634,
+      "sha256": "3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230506",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11634",
+        "1791269225175283402",
+        "1791269225176283460"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/lifetime.py",
+      "bytes": 53987,
+      "sha256": "84affe919b12dca8871134991fda68ec5d7bccf66553e15cb2dfc5406f7ec482",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230507",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "53987",
+        "1791269225183283863",
+        "1791269225184283920"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/master_pool.py",
+      "bytes": 2315,
+      "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230508",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2315",
+        "1791269225189284207",
+        "1791269225190284265"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/native.py",
+      "bytes": 44470,
+      "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230509",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44470",
+        "1791269225195284552",
+        "1791269225195284552"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/normalization.py",
+      "bytes": 12779,
+      "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230510",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12779",
+        "1791269225199284782",
+        "1791269225200284840"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/observer.py",
+      "bytes": 155367,
+      "sha256": "f47369f03041a26d77cfc9ea17fefd1b562e820b3e2e5f1be9b47f1300593e34",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230511",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "155367",
+        "1791269225206285185",
+        "1791269225206285185"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/operations.py",
+      "bytes": 24309,
+      "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230512",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24309",
+        "1791269225211285473",
+        "1791269225211285473"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/owned_prefix_bank.py",
+      "bytes": 44237,
+      "sha256": "89a1b8f0c86f426510ee45f0829e7d64dcb2a715d9b8eacc9ef2eb93b347a829",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230513",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44237",
+        "1791269225216285760",
+        "1791269225216285760"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/retention.py",
+      "bytes": 8465,
+      "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230514",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8465",
+        "1791269225220285990",
+        "1791269225221286048"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/roles.py",
+      "bytes": 5018,
+      "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230515",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5018",
+        "1791269225225286278",
+        "1791269225225286278"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/root_tool_adapter.py",
+      "bytes": 152270,
+      "sha256": "63fcdb47a76b4e31bd5215431f8c14565d603b58f91510e7d190d01045aee4fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230516",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "152270",
+        "1791269225230286565",
+        "1791269225231286623"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/selected_owned_values.py",
+      "bytes": 60827,
+      "sha256": "c7f2c5929bba7ab3cdceafc6e8d0bb9693bf5bb5785583bef92f727428ae6b31",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230517",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "60827",
+        "1791269225235286853",
+        "1791269225236286910"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/snapshot_producer.py",
+      "bytes": 4130,
+      "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230518",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4130",
+        "1791269225240287140",
+        "1791269225241287198"
+      ],
+      "stable9": true
+    }
+  ],
+  "current_candidate_files": 88,
+  "physical_count_with_manifest": 108,
+  "source_changed": [
+    "native/publisher_root_entry.c",
+    "native/publisher_root_entry.h",
+    "native/publisher_root_bank.h",
+    "native/publisher_root_bank.c",
+    "native/publisher_root_command.c",
+    "parent/publisher_root_command.py"
+  ],
+  "source_same": 55,
+  "candidate_same": 82,
+  "independent_acceptance": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

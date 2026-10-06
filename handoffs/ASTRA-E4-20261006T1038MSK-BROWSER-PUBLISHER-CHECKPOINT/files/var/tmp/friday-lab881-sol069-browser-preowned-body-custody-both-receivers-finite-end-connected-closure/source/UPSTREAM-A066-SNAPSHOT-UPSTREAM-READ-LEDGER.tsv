@@ -1,0 +1,26 @@
+operation	bytes_bound	path_or_scope
+read+hash	11876	A061 canonical contract 5938 bytes x2
+read	30558	A051 RESULT/MANIFEST/INDEX/REVIEW/TASK/receipt full
+hash	18094	A051 RESULT 9535 + MANIFEST6059 + receipt2500
+read+hash	24486	A046 RESULT12243 x2
+read+rg	200836	A046 TASK5141 and EXECUTOR/SUPERVISOR/BILL full scanned195695
+hash+read	667246	A046 four273718+A042TASK4369x2+A051source384790
+read+hash	78262	A039/A037 TASK/results reads38800; hashes39462
+read+hash	48248	A037 reread21770+A042RESULT6507+canonical contract/result hashes19971
+read	41741	A037 first125 bound21770+A042RESULT6507+3canonical contracts13464
+read	16691	A051 NATIVE.h4126+COMMON.c12565 whole
+read	39123	A051 BOOTSTRAP22435+OWNED10088+recipe2529+schema4071 whole
+read	41670	A051 CONTRACT16472+PRODUCER11503+OWNER6131+WORKER7564; output truncation noted, missing producer reread next
+read+hash+rg	440021	FULL12178+producer bounded full11503+owner2613+G1 scan46980+G1/R4/CA/owner/inventory hashes366747
+read	94596	A051 EXECUTOR+SUPERVISOR first chunks
+read+rg	219606	A051 EXECUTOR+SUPERVISOR/G1worker/control fork scan
+read	299600	A051 EXECUTOR+SUPERVISOR final chunks and BILL two scans; oversized bill line truncated, whole copy parsed below
+read	360619	A051 CONTROLS four scans+SUPERVISOR public main
+read	125275	SUPERVISOR tail+R4 two scans
+read	194448	CONTROLS two scans+R4 final scan
+source-copy	384790	15 A051 artifacts read wholly, held as text, new A061 files created via apply_patch; BILL inert JSON parse, no source evaluation
+# cumulative_bound=3337786; conservative full-file bounds per sed/rg call, including truncated output, source-copy/hashseal to be added. Metadata stat/wc excluded; implicit IO/RAM UNKNOWN_NOT_ZERO
+read_upper	2097152	ALL explicit source reads/rg/sed/cat after initial ledger, includes automatic continuation reads and edits. Conservative reserve over bounded actual files, not actual IO/RAM claim.
+read_upper	1048576	Metadata JSON/hash/pin-update reads plus final source checks from12:09 through substantive close. Upper reserve includes whole-file reads per command.
+seal_reserved_upper	2097152	Final all-member hashseal and registry hash/stat, repeated owned package seals if needed; maximum cumulative read bound <=8580666 bytes. Final actual sizes/hash recorded in MANIFEST.
+# Explicit-read cumulative conservative maximum=8580666 bytes (<67108864). Reservations cap known remaining reads; unused not an actual-read claim. RAM4GiB bounded contract, actual peak UNKNOWN_NOT_ZERO; implicitIO UNKNOWN_NOT_ZERO.

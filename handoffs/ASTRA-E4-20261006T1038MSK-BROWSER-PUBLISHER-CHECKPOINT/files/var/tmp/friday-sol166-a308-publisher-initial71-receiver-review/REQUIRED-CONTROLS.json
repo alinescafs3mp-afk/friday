@@ -1,0 +1,25 @@
+{
+  "schema": "friday.sol166.required-controls.v1",
+  "required": true,
+  "waiver": false,
+  "status": "REQUIRED_NOT_RUN",
+  "inherited": [
+    {"path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/REQUIRED-CONTROLS.json", "sha256": "3285dca43e1cb0c1023ce695be21fb82ed16766ec306b32e7329280f7735bb5c"},
+    {"path": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/REQUIRED-CHECKS.json", "sha256": "89be93e44d3ffd219b3a3386c6e78206c7bf9b854facc4162e545193db02848f"}
+  ],
+  "all_original": "ALL69/mandatory20/full140/v2/inherited/M37/I14/J20/K01-K33 unchanged, REQUIRED/no waiver/NOT_RUN",
+  "cases": [
+    ["P01", "Actual valid71/outcome3 traverses same initial proof gate then FULL raw/min/header/bind/phase aliases/first refusal/once-close/NEW immutable final error DATA; not a direct-helper injection."],
+    ["P02", "All PID/process/proof identity/actual returncode/reap/forced cleanup/kernel/writer/seal/uncertainty failures remain refusal."],
+    ["P03", "Unknown codes and71 with normal1/2 outcome, malformed/absent raw sample/header/aliases/birth/min domains remain failure with no success credit."],
+    ["P04", "SAME original InitialWorkFailure survives actual received finalizer; retain close/clock/copy/collection secondary errors and actual remaining partial DATA; no retry or old tuple mutation."],
+    ["P05", "All existing0/70/78/79 positives/negatives, exact original caps/debits/ABI/image/provider/source-admission and whole resource/custody gates remain required."],
+    ["P06", "Exact ONE code insertion and entire parent inverse +full61/current88 pinned byte context; no Sol164 whole self-acceptance, no Source execution or old result carry." ]
+  ],
+  "host_observations_are_not_Source_controls": true,
+  "protected_operational_controls": "Opaque/hash-only preserved as required; no execution/repair/qualification/waiver here",
+  "Source_tests": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

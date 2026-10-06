@@ -1,0 +1,165 @@
+{
+  "schema": "friday.work-snapshot.omissions.v1",
+  "selected_path_omissions": [
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTROLS.py",
+      "bytes": 276107,
+      "sha256": "315c95540e0472c0c07240a16718d3f6dd991ef500a7096b6c9223afdc1acb5b",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Browser current pinned current209 inventory; historical-named files remain historical context"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-FULL-CONTROLS.py",
+      "bytes": 65233,
+      "sha256": "6efe9b3bb6a14678b2d82d1952a5fd42e80b23b2544abf396e5704cb4482a3cb",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Browser current pinned current209 inventory; historical-named files remain historical context"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTROLS.py",
+      "bytes": 8976,
+      "sha256": "69aab635f72a3bd8521f2812b034ca6fd4a4da09c0108cc1fbe4adc0fd28fc49",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Browser current pinned current209 inventory; historical-named files remain historical context"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+      "bytes": 704,
+      "sha256": "4904b585110926cbb5971fff88e04421a366a1c3c856e907b2af9a4f87956460",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Browser current pinned current209 inventory; historical-named files remain historical context"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+      "bytes": 29558,
+      "sha256": "76c717e38b909d5b41e2ff48582dc27e3c4dc82fd0643ac8206748e97b8c70d1",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Browser current pinned current209 inventory; historical-named files remain historical context"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "bytes": 78027,
+      "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Browser current pinned current209 inventory; historical-named files remain historical context"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+      "bytes": 23060,
+      "sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Browser current pinned current209 inventory; historical-named files remain historical context"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Publisher current package"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/parent-evidence/ORIGINAL-CONTROL-DEFINITIONS.json",
+      "bytes": 95869,
+      "sha256": "1d3be7fc93ab0b1dd140603fd1d26a709020a00c5150c9938ad495a4c3b6f88d",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Publisher current package"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/read_data.py",
+      "bytes": 6206,
+      "sha256": "3d17cc78397c789b1fd1cfd7e1871f12518d4a3c7d57a631510a5df244c04011",
+      "reason": "HOST_ONLY_HELPER_NOT_PRODUCT_SOURCE; raw observations retained, helper reproduction omitted",
+      "roles": [
+        "Publisher current package"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/seal_data.py",
+      "bytes": 13489,
+      "sha256": "22bfcc883d481c1a63b35d7f298643c55941c6461122ca5ab0b8535c8895699b",
+      "reason": "HOST_ONLY_HELPER_NOT_PRODUCT_SOURCE; raw observations retained, helper reproduction omitted",
+      "roles": [
+        "Publisher current package"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Publisher Sol164 comparison baseline REJECTED_AS_SUBMITTED"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent-evidence/ORIGINAL-CONTROL-DEFINITIONS.json",
+      "bytes": 95869,
+      "sha256": "1d3be7fc93ab0b1dd140603fd1d26a709020a00c5150c9938ad495a4c3b6f88d",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; cannot reproduce complete controls from public export",
+      "roles": [
+        "Publisher Sol164 comparison baseline REJECTED_AS_SUBMITTED"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/read_data.py",
+      "bytes": 6206,
+      "sha256": "3d17cc78397c789b1fd1cfd7e1871f12518d4a3c7d57a631510a5df244c04011",
+      "reason": "HOST_ONLY_HELPER_NOT_PRODUCT_SOURCE; raw observations retained, helper reproduction omitted",
+      "roles": [
+        "Publisher Sol164 comparison baseline REJECTED_AS_SUBMITTED"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/seal_data.py",
+      "bytes": 13489,
+      "sha256": "22bfcc883d481c1a63b35d7f298643c55941c6461122ca5ab0b8535c8895699b",
+      "reason": "HOST_ONLY_HELPER_NOT_PRODUCT_SOURCE; raw observations retained, helper reproduction omitted",
+      "roles": [
+        "Publisher Sol164 comparison baseline REJECTED_AS_SUBMITTED"
+      ]
+    }
+  ],
+  "scope_omissions": [
+    {
+      "what": "Scanner/Sender/Node bodies",
+      "why": "Unchanged in this incremental checkpoint; earlier full snapshot retained unchanged in repository",
+      "impact": "This is not a fresh complete five-component capture; do not infer newer acceptance from old archive."
+    },
+    {
+      "what": "Private conversations, session/config/auth stores, owner unrelated files, enrollment keys or runtime authority artifacts",
+      "why": "Outside publication scope/private",
+      "impact": "Actual private runtime authority/custody cannot be independently established from this export."
+    },
+    {
+      "what": "Unselected transitive historical review packages and host helper/raw-span scripts",
+      "why": "Bounded current-plus-direct-baseline snapshot, not recursive history archive",
+      "impact": "Review decisions bind exact manifests, but not every historical review input can be re-executed/reproduced from this export."
+    },
+    {
+      "what": "Selected runtime image/compiler/ABI/installed system dependency bytes and live receipts",
+      "why": "Not qualified/created for these current source packages",
+      "impact": "Cannot compile/run/admit/claim resource fit or release GO from this snapshot. Source files and pinned static stock dependency bodies are included, not a runnable admitted environment."
+    }
+  ],
+  "no_source_rewrites": true,
+  "no_test_reruns": true,
+  "no_omission_is_waiver": true
+}

@@ -1,0 +1,792 @@
+--- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A071-ABI-MAPPING.json
++++ /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-ABI-MAPPING.json
+@@ -3209,53 +3209,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-SUPERVISOR.py",
+-        "bytes": 140834,
+-        "sha256": "4c4c38a5922679314ab853c9458fb5156e8e470d12ebc1f160262d3a1b14e811",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085848",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "140834",
+-          "1791256629916505078",
+-          "1791256629917402543"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
++        "bytes": 141121,
++        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229653",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141121",
++          "1791267716925502248",
++          "1791267716925502248"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 220820,
+-        "sha256": "f9739f0a6f9420717ab0fb9eb7500b7ebdb1b0ae99b6653f565a7d281251d5e1",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085849",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "220820",
+-          "1791256629924505541",
+-          "1791256629925537217"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221107,
++        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229654",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221107",
++          "1791267716927502361",
++          "1791267716927502361"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 77883,
+-        "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7086426",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "77883",
+-          "1791260668463443261",
+-          "1791260668463443261"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 78170,
++        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229655",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "78170",
++          "1791267716924502191",
++          "1791267716924502191"
+         ],
+         "stable9": true
+       },
+--- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A071-BUILD-RECIPE.json
++++ /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-BUILD-RECIPE.json
+@@ -2563,19 +2563,19 @@
+   },
+   "sol149_legacy_caller_staging": {
+     "A079-NATIVE-PUBLIC-DRIVER.py": {
+-      "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-      "bytes": 77883,
+-      "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
++      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++      "bytes": 78170,
++      "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+       "identity9_decimal_strings": [
+         "2050",
+-        "7086426",
++        "4229655",
+         "33152",
+         "1000",
+         "1000",
+         "1",
+-        "77883",
+-        "1791260668463443261",
+-        "1791260668463443261"
++        "78170",
++        "1791267716924502191",
++        "1791267716924502191"
+       ],
+       "stable9": true
+     },
+@@ -3904,53 +3904,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-SUPERVISOR.py",
+-        "bytes": 140834,
+-        "sha256": "4c4c38a5922679314ab853c9458fb5156e8e470d12ebc1f160262d3a1b14e811",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085848",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "140834",
+-          "1791256629916505078",
+-          "1791256629917402543"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
++        "bytes": 141121,
++        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229653",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141121",
++          "1791267716925502248",
++          "1791267716925502248"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 220820,
+-        "sha256": "f9739f0a6f9420717ab0fb9eb7500b7ebdb1b0ae99b6653f565a7d281251d5e1",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085849",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "220820",
+-          "1791256629924505541",
+-          "1791256629925537217"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221107,
++        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229654",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221107",
++          "1791267716927502361",
++          "1791267716927502361"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 77883,
+-        "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7086426",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "77883",
+-          "1791260668463443261",
+-          "1791260668463443261"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 78170,
++        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229655",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "78170",
++          "1791267716924502191",
++          "1791267716924502191"
+         ],
+         "stable9": true
+       },
+@@ -4239,19 +4239,19 @@
+     "GO": false
+   },
+   "sol151_actual_A079_caller": {
+-    "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-    "bytes": 77883,
+-    "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
++    "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++    "bytes": 78170,
++    "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+     "identity9_decimal_strings": [
+       "2050",
+-      "7086426",
++      "4229655",
+       "33152",
+       "1000",
+       "1000",
+       "1",
+-      "77883",
+-      "1791260668463443261",
+-      "1791260668463443261"
++      "78170",
++      "1791267716924502191",
++      "1791267716924502191"
+     ],
+     "stable9": true
+   }
+--- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A071-SUPERVISOR.py
++++ /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py
+@@ -268,10 +268,15 @@
+                             break
+         if item.get('schema') in ('friday.sol145.actual-root-ordinary.v1', 'friday.sol147.actual-root-ordinary.v2'): sol145_root_decode(item)
+         current = item.get('native_history', inherited) if native_trace or native_container else inherited
+-        if (native_trace or native_container) and 'native_history' in item: sol143_history_decode(current)
++        if (native_trace or native_container) and 'native_history' in item:
++            # The same validated history feeds the trace projection below.
++            # Keep the first decode/error ordering; do not parse it twice.
++            if native_trace: records = sol143_history_decode(current)
++            else: sol143_history_decode(current)
+         if native_trace:
+             need(current is not None, 'SOL143_NATIVE_HISTORY_REQUIRED_NOT_OLD344_ONLY')
+-            records = sol143_history_decode(current)
++            if 'native_history' not in item:
++                records = sol143_history_decode(current)
+             if records:
+                 last = records[-1]
+                 need(struct.unpack_from('<I', last, 4)[0] == item['phase'], 'SOL143_ACTUAL_LAST_PHASE_JOIN')
+--- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-ORACLES.json
++++ /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-ORACLES.json
+@@ -1195,53 +1195,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-SUPERVISOR.py",
+-        "bytes": 140834,
+-        "sha256": "4c4c38a5922679314ab853c9458fb5156e8e470d12ebc1f160262d3a1b14e811",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085848",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "140834",
+-          "1791256629916505078",
+-          "1791256629917402543"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
++        "bytes": 141121,
++        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229653",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141121",
++          "1791267716925502248",
++          "1791267716925502248"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 220820,
+-        "sha256": "f9739f0a6f9420717ab0fb9eb7500b7ebdb1b0ae99b6653f565a7d281251d5e1",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085849",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "220820",
+-          "1791256629924505541",
+-          "1791256629925537217"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221107,
++        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229654",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221107",
++          "1791267716927502361",
++          "1791267716927502361"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 77883,
+-        "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7086426",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "77883",
+-          "1791260668463443261",
+-          "1791260668463443261"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 78170,
++        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229655",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "78170",
++          "1791267716924502191",
++          "1791267716924502191"
+         ],
+         "stable9": true
+       },
+--- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py
++++ /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py
+@@ -239,10 +239,15 @@
+                             break
+         if item.get('schema') in ('friday.sol145.actual-root-ordinary.v1', 'friday.sol147.actual-root-ordinary.v2'): sol145_root_decode(item)
+         current = item.get('native_history', inherited) if native_trace or native_container else inherited
+-        if (native_trace or native_container) and 'native_history' in item: sol143_history_decode(current)
++        if (native_trace or native_container) and 'native_history' in item:
++            # The same validated history feeds the trace projection below.
++            # Keep the first decode/error ordering; do not parse it twice.
++            if native_trace: records = sol143_history_decode(current)
++            else: sol143_history_decode(current)
+         if native_trace:
+             need(current is not None, 'SOL143_NATIVE_HISTORY_REQUIRED_NOT_OLD344_ONLY')
+-            records = sol143_history_decode(current)
++            if 'native_history' not in item:
++                records = sol143_history_decode(current)
+             if records:
+                 last = records[-1]
+                 need(struct.unpack_from('<I', last, 4)[0] == item['phase'], 'SOL143_ACTUAL_LAST_PHASE_JOIN')
+--- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A087-ABI-CONTRACT.json
++++ /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-ABI-CONTRACT.json
+@@ -1137,53 +1137,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-SUPERVISOR.py",
+-        "bytes": 140834,
+-        "sha256": "4c4c38a5922679314ab853c9458fb5156e8e470d12ebc1f160262d3a1b14e811",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085848",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "140834",
+-          "1791256629916505078",
+-          "1791256629917402543"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
++        "bytes": 141121,
++        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229653",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141121",
++          "1791267716925502248",
++          "1791267716925502248"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 220820,
+-        "sha256": "f9739f0a6f9420717ab0fb9eb7500b7ebdb1b0ae99b6653f565a7d281251d5e1",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085849",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "220820",
+-          "1791256629924505541",
+-          "1791256629925537217"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221107,
++        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229654",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221107",
++          "1791267716927502361",
++          "1791267716927502361"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 77883,
+-        "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7086426",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "77883",
+-          "1791260668463443261",
+-          "1791260668463443261"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 78170,
++        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229655",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "78170",
++          "1791267716924502191",
++          "1791267716924502191"
+         ],
+         "stable9": true
+       },
+--- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A087-PUBLIC-DRIVER.py
++++ /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py
+@@ -560,10 +560,15 @@
+                             break
+         if item.get('schema') in ('friday.sol145.actual-root-ordinary.v1', 'friday.sol147.actual-root-ordinary.v2'): sol145_root_decode(item)
+         current = item.get('native_history', inherited) if native_trace or native_container else inherited
+-        if (native_trace or native_container) and 'native_history' in item: sol143_history_decode(current)
++        if (native_trace or native_container) and 'native_history' in item:
++            # The same validated history feeds the trace projection below.
++            # Keep the first decode/error ordering; do not parse it twice.
++            if native_trace: records = sol143_history_decode(current)
++            else: sol143_history_decode(current)
+         if native_trace:
+             need(current is not None, 'SOL143_NATIVE_HISTORY_REQUIRED_NOT_OLD344_ONLY')
+-            records = sol143_history_decode(current)
++            if 'native_history' not in item:
++                records = sol143_history_decode(current)
+             if records:
+                 last = records[-1]
+                 need(struct.unpack_from('<I', last, 4)[0] == item['phase'], 'SOL143_ACTUAL_LAST_PHASE_JOIN')
+--- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A104-ORDINARY-CONTRACTS.json
++++ /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A104-ORDINARY-CONTRACTS.json
+@@ -3558,53 +3558,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-SUPERVISOR.py",
+-        "bytes": 140834,
+-        "sha256": "4c4c38a5922679314ab853c9458fb5156e8e470d12ebc1f160262d3a1b14e811",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085848",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "140834",
+-          "1791256629916505078",
+-          "1791256629917402543"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
++        "bytes": 141121,
++        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229653",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141121",
++          "1791267716925502248",
++          "1791267716925502248"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 220820,
+-        "sha256": "f9739f0a6f9420717ab0fb9eb7500b7ebdb1b0ae99b6653f565a7d281251d5e1",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085849",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "220820",
+-          "1791256629924505541",
+-          "1791256629925537217"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221107,
++        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229654",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221107",
++          "1791267716927502361",
++          "1791267716927502361"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 77883,
+-        "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7086426",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "77883",
+-          "1791260668463443261",
+-          "1791260668463443261"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 78170,
++        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229655",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "78170",
++          "1791267716924502191",
++          "1791267716924502191"
+         ],
+         "stable9": true
+       },
+--- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A118-CONNECTED-CONTRACT.json
++++ /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A118-CONNECTED-CONTRACT.json
+@@ -266,19 +266,19 @@
+       "stable9": true
+     },
+     "A071-SUPERVISOR.py": {
+-      "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-SUPERVISOR.py",
+-      "bytes": 140834,
+-      "sha256": "4c4c38a5922679314ab853c9458fb5156e8e470d12ebc1f160262d3a1b14e811",
++      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
++      "bytes": 141121,
++      "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+       "identity9_decimal_strings": [
+         "2050",
+-        "7085848",
++        "4229653",
+         "33152",
+         "1000",
+         "1000",
+         "1",
+-        "140834",
+-        "1791256629916505078",
+-        "1791256629917402543"
++        "141121",
++        "1791267716925502248",
++        "1791267716925502248"
+       ],
+       "stable9": true
+     },
+@@ -334,19 +334,19 @@
+       "stable9": true
+     },
+     "A087-PUBLIC-DRIVER.py": {
+-      "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-PUBLIC-DRIVER.py",
+-      "bytes": 220820,
+-      "sha256": "f9739f0a6f9420717ab0fb9eb7500b7ebdb1b0ae99b6653f565a7d281251d5e1",
++      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
++      "bytes": 221107,
++      "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+       "identity9_decimal_strings": [
+         "2050",
+-        "7085849",
++        "4229654",
+         "33152",
+         "1000",
+         "1000",
+         "1",
+-        "220820",
+-        "1791256629924505541",
+-        "1791256629925537217"
++        "221107",
++        "1791267716927502361",
++        "1791267716927502361"
+       ],
+       "stable9": true
+     },
+@@ -2264,19 +2264,19 @@
+   },
+   "sol149_legacy_callers": {
+     "A079-NATIVE-PUBLIC-DRIVER.py": {
+-      "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-      "bytes": 77883,
+-      "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
++      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++      "bytes": 78170,
++      "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+       "identity9_decimal_strings": [
+         "2050",
+-        "7086426",
++        "4229655",
+         "33152",
+         "1000",
+         "1000",
+         "1",
+-        "77883",
+-        "1791260668463443261",
+-        "1791260668463443261"
++        "78170",
++        "1791267716924502191",
++        "1791267716924502191"
+       ],
+       "stable9": true
+     },
+@@ -3622,53 +3622,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-SUPERVISOR.py",
+-        "bytes": 140834,
+-        "sha256": "4c4c38a5922679314ab853c9458fb5156e8e470d12ebc1f160262d3a1b14e811",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085848",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "140834",
+-          "1791256629916505078",
+-          "1791256629917402543"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
++        "bytes": 141121,
++        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229653",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141121",
++          "1791267716925502248",
++          "1791267716925502248"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 220820,
+-        "sha256": "f9739f0a6f9420717ab0fb9eb7500b7ebdb1b0ae99b6653f565a7d281251d5e1",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7085849",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "220820",
+-          "1791256629924505541",
+-          "1791256629925537217"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221107,
++        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229654",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221107",
++          "1791267716927502361",
++          "1791267716927502361"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 77883,
+-        "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "7086426",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "77883",
+-          "1791260668463443261",
+-          "1791260668463443261"
++        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 78170,
++        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++        "identity9_decimal_strings": [
++          "2050",
++          "4229655",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "78170",
++          "1791267716924502191",
++          "1791267716924502191"
+         ],
+         "stable9": true
+       },
+@@ -3974,19 +3974,19 @@
+     "GO": false
+   },
+   "sol151_actual_caller": {
+-    "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-    "bytes": 77883,
+-    "sha256": "5cfe590c855795913ffd39e7ba9b033e0bb823681f8c82ef2887f9fe92c83f38",
++    "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
++    "bytes": 78170,
++    "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+     "identity9_decimal_strings": [
+       "2050",
+-      "7086426",
++      "4229655",
+       "33152",
+       "1000",
+       "1000",
+       "1",
+-      "77883",
+-      "1791260668463443261",
+-      "1791260668463443261"
++      "78170",
++      "1791267716924502191",
++      "1791267716924502191"
+     ],
+     "stable9": true
+   }

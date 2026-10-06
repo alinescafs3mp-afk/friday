@@ -1,0 +1,70 @@
+{
+  "schema": "friday.astra.a308.browser.required-checks.v1",
+  "required": true,
+  "waiver": false,
+  "execution": "REQUIRED_NOT_RUN",
+  "inherited": "All original216/29/6/9 + inherited + H01-H26 remain required; no reduced workload/cap/scope.",
+  "cases": [
+    [
+      "G01",
+      "All3 decoder bodies identical; canonical default callers still return full mutable alias graph without retirement."
+    ],
+    [
+      "G02",
+      "Actual A079 decode -> full native check -> guarded retirement -> mandatory third oracle -> retirement/status and positive-first join, not isolated helper."
+    ],
+    [
+      "G03",
+      "Scalar/None root, empty node table, empty list/dict, all existing legal scalar forms and full bytes/str/bytearray bodies preserve original encoded representation."
+    ],
+    [
+      "G04",
+      "Reachable self/mutual list/dict cycles AND disconnected/unreachable cyclic nodes are all covered by the SAME decoder values table; no root-only traversal or GC claim."
+    ],
+    [
+      "G05",
+      "Repeated references preserve aliases and distinct equal mutable nodes stay distinct through semantic check; no equal-body interning/dedup or content loss."
+    ],
+    [
+      "G06",
+      "Decode failure before table creation, during node creation and during edge fill retains actual acquired table/locals and original exception/traceback; no clear on this path."
+    ],
+    [
+      "G07",
+      "Native semantic-check failure leaves completed decoded root and full node table intact with original error; retirement not entered."
+    ],
+    [
+      "G08",
+      "Clock refusal before retirement, between nodes, before table release and after release prevents decoded_retired=true; actual original raw/errors/prefix retained and no retry."
+    ],
+    [
+      "G09",
+      "Retirement interruption/error after a prefix preserves complete original encoded values/alias topology and actual remaining state/first error; no claim that already-retired private edges remain in memory."
+    ],
+    [
+      "G10",
+      "SAME source raw frame/reference held before and after successful retirement; complete historical bytes and identities, not replacement digest or invented mapping/descriptor availability."
+    ],
+    [
+      "G11",
+      "Actual stream/native oracles, both canonical callers and positive-first retain required independent data/errors; no returned canonical graph cleared and no invented encoded substitute for its root-return API."
+    ],
+    [
+      "G12",
+      "Original256MiB/180s/work170/final10 complete selected-image workload, all extra owner/entry/clear/clock/allocator costs and retained failure prefixes accounted prospectively. No new caps/refunds/host-budget credit."
+    ],
+    [
+      "G13",
+      "24 current code pin blocks in6 metadata and current retention contract text agree; historical bytes untouched; Source15/current209/aux3 and actual dependencies rejoined."
+    ],
+    [
+      "G14",
+      "Concurrent/external access is not assumed absent from mere flags: independent source review must confirm actual single local consumption path has no outstanding decoded-graph consumer before edge retirement."
+    ]
+  ],
+  "acceptance_condition": "Authorized nonauthor review of complete changed producer/consumer/error/retirement relation and all current bindings; then required admitted qualification/execution on exact bytes. Author raw checks alone are not independent acceptance.",
+  "unsafe": "Opaque hash-only REQUIRED/no waiver",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

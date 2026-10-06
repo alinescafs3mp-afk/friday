@@ -1,0 +1,19 @@
+{
+  "schema": "friday.astra.a308.publisher.receiver71.raw-verification.v1",
+  "all_current88_verified_full_SHA_stable9": true,
+  "changed": [
+    "parent/publisher_root_command.py"
+  ],
+  "unchanged": 87,
+  "source_same": 60,
+  "inverse_to_Sol164_parent_exact": true,
+  "source_parser_or_execution": false,
+  "author_acceptance": false,
+  "base_physical_verified": 108,
+  "input_pins_verified": 311,
+  "directories_in_fresh_derivative": "0700, files0600; source bytes preserved except explicit parent guard",
+  "at_msk": "2026-10-06T10:12:00.622418+03:00",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

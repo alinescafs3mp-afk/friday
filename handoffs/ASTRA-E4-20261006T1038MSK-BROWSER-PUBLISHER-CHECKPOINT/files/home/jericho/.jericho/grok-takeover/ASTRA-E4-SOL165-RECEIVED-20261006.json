@@ -1,0 +1,82 @@
+{
+  "schema": "friday.astra.peer-result-received.v1",
+  "assignment": "ASTRA-E4-A308-BROWSER-ACTUAL-SUCCESS-GRAPH-RETIREMENT-NONAUTHOR-SOL165",
+  "generation": 1,
+  "event": "SOL-SOL165-R1",
+  "at_msk": "2026-10-06T10:15:43.845325+03:00",
+  "result": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL165-RESULT.json",
+    "bytes": 1749,
+    "sha256": "67fde80d0f1f9210925b7767ee26d98fd176ad6d2e291de404b824adc59a2152",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536863",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1749",
+      "1791270789762250641",
+      "1791270789762250641"
+    ],
+    "stable9": true
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/manifest.json",
+    "bytes": 7877,
+    "sha256": "c4d002a2f275f79bdeb6caa48bf7be334b6be779da5a2ca300c3bd8c6154ab27",
+    "identity9_decimal_strings": [
+      "2050",
+      "4230683",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "7877",
+      "1791270789756250295",
+      "1791270789757250353"
+    ],
+    "stable9": true
+  },
+  "review": {
+    "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/REVIEW.json",
+    "bytes": 11302,
+    "sha256": "704917d6b2c7bd586d09b350db126ff7d0cc96e1a2f63e3b81751eb706a84749",
+    "identity9_decimal_strings": [
+      "2050",
+      "4230676",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "11302",
+      "1791270753089141858",
+      "1791270789720248226"
+    ],
+    "stable9": true
+  },
+  "verification": {
+    "physical": 15,
+    "inputs": 269,
+    "full_SHA_stable9": true,
+    "complete_review_required_boundaries_read": true
+  },
+  "decision": "ACCEPT_EXACT_A308_CONNECTED_PRIVATE_SUCCESS_GRAPH_RETIREMENT_SCOPED_STATIC_ONLY",
+  "introduced_contradictions": [],
+  "credit": "Conditional normal successful private decoded graph accumulation addressed at actual last local reader, including disconnected cycles; full raw/aliases/errors/default canonical roots and original clocks preserved. Not whole fit or own Sol baseline acceptance.",
+  "native_completed": {
+    "id": "01a1100b-4c55-7f13-acf0-fceb44586130",
+    "items": [],
+    "itemsView": "notLoaded",
+    "status": "completed",
+    "error": null,
+    "startedAt": 1791270538,
+    "completedAt": 1791270802,
+    "durationMs": 263921
+  },
+  "queued_id": "01a1100f-4984-79d1-b77f-34d09519aed6",
+  "required": "ALL216/29/6/9 + inherited + H01-H26 + G01-G14 REQUIRED_NOT_RUN/no waiver",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

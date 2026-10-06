@@ -1,0 +1,90 @@
+{
+  "schema": "friday.sol135.connected.author-proof.v1",
+  "assignment": "ASTRA-E4-A283-PUBLISHER-ACTUAL-FD-CONTEXT-ERROR-CLOSURE-SOL135",
+  "generation": 1,
+  "classification": "AUTHOR_SCOPED_INERT_IMPLEMENTATION_NOT_INDEPENDENT_ACCEPTANCE",
+  "decision": "IMPLEMENTED_ACTUAL_FD_CONTEXT_AND_LAZY_CURSOR_REPRESENTATION_WITH_RAW_ROOT_CLOSE_CUSTODY_OPEN",
+  "scope_closed": [
+    "Actual injected consumer FD path no longer constructs either contextlib._GeneratorContextManager or a generator for this file scope.",
+    "Actual suspended fd_collection_roots local is a Source-bound finite cursor with complete ordinary dictionary state, not an unsupported foreign generator.",
+    "Three new ordinary classes use the already captured full held-module/class birth relation and existing primary/secondary/native/cold full-data consumers; no type-name whitelist or foreign-heap traversal was added.",
+    "Original raised entry/body/cleanup errors and actual locals are not cleared, clipped, rewritten, suppressed or reclassified as runtime support by the new code.",
+    "Root context keeps its own actual manager/journal/credit on UNKNOWN close or unconfirmed release. It never retires the manager merely because hold.release returned False."
+  ],
+  "precise_remaining_required_error_relation": {
+    "path": "source/lifetime.py:189-207, source/common.py:155-162 (UNCHANGED)",
+    "observation": "OwnedFDs._close_row catches an actual close exception and stores only error_fact projection in attempt/error/faults. That projection does not itself retain the raw caught exception or its traceback. The new Root context does not recover a lost original by synthesizing an exception from those facts.",
+    "effect": "Same-Root full raw cleanup-error custody is NOT closed by this package. Closed/UNKNOWN descriptor status and a bound context manager are not evidence that this swallowed original has a full native error-body recipient.",
+    "boundary": "Explicit Source writes are observer.py and consumer resource_meter.py with genuinely required adapter/selected-owned/native-reader joins. The actual common/lifetime producer is not changed through a wrapper, subclass override, monkeypatch or callback reroute. Astra must authorize and independently integrate the producer-side raw-original custody correction before whole error closure.",
+    "status": "OPEN_EXACT_WRITE_BOUNDARY_NOT_ZERO_NOT_PROVEN"
+  },
+  "actual_path_confirmation": {
+    "base_path": "source/consumer_bridge.py:31-54 -> resource_meter.bounded_file:429-450 and document_windows.py:84 -> resource_meter.fd_scope:392-397 -> RootObserver.owned_file:1954-1964",
+    "before": "Both file contexts are contextlib wrappers. Stock __enter__ retains self.gen and catches only StopIteration; a real reserve/open/entry failure retains the foreign wrapper through its traceback self. A closed underlying generator does not make that wrapper required DATA representable.",
+    "ordinary_exception_caveat": "Stock __exit__ restores the same exception's original traceback at contextlib.py:171/183/195. Do not claim every ordinary body error originally retained the temporary contextlib wrapper frame.",
+    "encoder": "observer.py base342-385,447-449 retains full error/cause/context/traceback/frame locals. A required foreign manager/generator remains unsupported. selected_owned_values.py:899-915,940-944 retains original errors and captures bound Source object state without erasing foreign required DATA.",
+    "stock_basis": "STOCK-NAMED-DATA.json: one pinned orig archive DATA-only pass over Lib/contextlib.py, Objects/genobject.c and immediately related Include/internal/pycore_frame.h. Full named member bytes/SHA match the pinned A283 evidence for both claimed bodies. No Source/stock parser, import, execution, archive script or compiler was used.",
+    "finalizer_caveat": "genobject.c:87-143 returns early only for FRAME_STATE_FINISHED; unfinished generators can close. Related frame header defines CREATED=-3,SUSPENDED=-2,SUSPENDED_YIELD_FROM=-1,EXECUTING=0,COMPLETED=1,CLEARED=4 and FINISHED>=COMPLETED. New manager/cursor has no __del__, generator or stored stock iterator; this is not a theorem about all callbacks/GC in the selected runtime.",
+    "patch_basis": "Pinned current STOCK-REQUEST-INPUTS.json patch_join.active_patches contains45 active patch target lists; no target Lib/contextlib.py, Objects/genobject.c or Include/internal/pycore_frame.h. Reused exact recorded census, not a second archive/recursive verifier. Actual image/ABI enrollment remains open."
+  },
+  "implementation": {
+    "changed_files": ["source/observer.py", "consumer/source/resource_meter.py"],
+    "unchanged_source": 55,
+    "RootOwnedFile": {
+      "constructor": "Only plain bound Source state; meter/path/maximum/flags, preexisting hold/journal/fd slots and one-shot cleanup flags. No open, reserve, callbacks, type whitelist, finalizer or retry at manager creation.",
+      "entry": "Reserve SAME original consumer-file-FD-before-open envelope131072B/3slots; retain actual partial manager before constructing/granting OwnedFDs; store actual journal; only then use unchanged open_absolute and its original preowned acquisition history. Partial reserve/native-token/mirror/Reservation/book/grant/publication failures remain original owner/error prefixes, not absent-FD or successful-end claims.",
+      "book_constructor_failure": "No new FD factory has run before book creation. Existing history/partial constructor and original credit remain held by native/Source prefix and the original traceback. No fabricated successful release or end is published.",
+      "open_failure": "__enter__ catches original BaseException only to perform one existing-book cleanup, then bare raises the SAME original. UNKNOWN descriptors keep the actual manager/journal/credit; no numeric-reuse close proof or factory replay.",
+      "cleanup": "Mark cleanup attempted before book.close. Close methods and preowned rows stay unchanged. Only if no active/UNKNOWN descriptors remain and hold.release IS True and retire_local_owner IS True is cleanup confirmed. False release retains actual manager and reservation; known closed rows are not raw error-body proof.",
+      "ordinary_body": "__exit__ returns False, preserving original error identity/traceback/locals. A new thrown cleanup error propagates with the active original error as ordinary exception context. No manual traceback restoration, error clear, suppression or DATA removal.",
+      "ordinary_uncertain_cleanup": "With no original body error, close/release uncertainty produces explicit Refused; with an original body error, the SAME original remains primary and completion flags remain unconfirmed. One-shot flags prevent duplicate close/release replay.",
+      "actual_export": "RootObserver.retain_local_owner(self) and self.fdjournal integrate with existing local_owner_graph, _export_attached_journal, retire_local_owner journal.fds check and complete_owner_graph's actual local values. Reservation and dictionary aliases are required ordinary state, not token-only fake ownership. MeterRPC already aliases the same owned_file and local-owner operations. No adapter/cold/native body edits were needed."
+    },
+    "ConsumerFileScope": {
+      "injected_path": "fd_scope now returns actual external(path,maximum,flags) directly. The existing held consumer loader still supplies self.meter.owned_file. No consumer generator-manager is created around the real outer owner.",
+      "fallback": "Only absent-external existing standalone path constructs _ConsumerFileScope. current/unknown/history65536/active128, same call/domain generation and preowned attempt/row gates remain before the one os.open. The manager's fd slot exists before acquisition; history publication precedes open; NO_RETURN never implies an acquired FD.",
+      "fstat_failure": "Acquired descriptor and actual row/domain remain in manager state. One _close is attempted before bare raising SAME fstat error. A close exception is retained as the ACTUAL exception in original attempt['error']; original fstat remains its active context and primary propagated exception.",
+      "close": "Original CLOSED/UNKNOWN status, generation/call_sequence, active decrement only on confirmed close, domain unknown and WholeMeter.cleanup_fault semantics are preserved. No close retry or EBADF inference. No new FD domain, service or unmetered history materialization.",
+      "whole_receiver": "Existing WholeMeter.completion_roots/finish_call retain exact full whole/result/error/domain/body_scope/completion_errors/cleanup_errors; HeldConsumerLoader.outer_complete_call checks their exact aliases, owns roots under existing consumer_arena and sets whole.accepted_call_custody before return. Unconfirmed rows or retirement still refuse completion."
+    },
+    "FDCollectionRoots": {
+      "actual_callers": "Base observer.py598 primary FD history checks;957-970 body/key role/index/type/repeated-key validators;1302-1303 typed DATA-route reconstruction. All call signatures and consumer checks remain unchanged.",
+      "state": "Actual body/name/chunks/count/current part and scalar chunk/root indexes/seen/started/finished. No suspended generator, foreign iterator, eager flatten, __del__ or finalizer. Constructor does not eagerly validate or traverse input.",
+      "semantics": "First next performs exact count type/range0..262144, chunks exact list/max512 check. Each reached part must be exact nonempty list/max512; each root must have exact int type, bool rejected. Seen and position commit before return. Repeated body roots are preserved; key duplicate, node-index and node-role checks stay with the actual callers. At terminal exhaustion seen must equal count. An iterator's own error ends it without prefix replay; a caller-side error leaves the exact finite cursor retained.",
+      "lazy_work": "No whole-history materialization is added. O(1) new scalar/cursor state and original aliases; O(reached chunks+roots) work. Existing consumers' explicit list(fd_collection_roots(...)) is unchanged; no new __len__ or length hint affects its bound. Nonmutation/actor/callback interval and all required old workload costs are still conditions, not waived."
+    }
+  },
+  "full_binding_and_both_end_join": {
+    "class_birth": "Existing native held Source/consumer eval installs actual own_class_factory before eval. It reserves original native class row, module/name/full held raw/compiled module/body/actual args BEFORE stock class construction; only local confirmed actual returned type forms authority. own_types includes actual captured classes, not a new string whitelist.",
+    "primary_binding": "FridayPublisherRootOwnBinding/Check checks actual module dictionary/full held raw/code/pin pointers, not sys.modules or filename assertion. OwnClassBody checks captured class and actual tp_dict. command_source_class base5989-6009 has actual captured own-class fallback beyond fixed memoization list, so new ASCII names in already enrolled observer/resource_meter need no fixed-list addition.",
+    "primary_values": "command_extended base6987-6996 identifies actual captured type, retains role0 type and actual GenericGetDict dictionary with existing prospective command_factory_begin. Source full_value_arena uses bound class and exact __dict__/binding. No unsupported value is silently converted to Source.",
+    "secondary": "selected_owned_values.py940-944 captures actual (kind,state) Source cut; native command_secondary_source8637-8650 and secondary consumer8981-8992 check actual type and original dictionary aliases. Error/traceback/frame/code source cut readers continue full required original graph; foreign or missing binding/cut remains unresolved.",
+    "native_command": "Existing actual CommandReceive preserves incoming original error cells before fallible operations, reads actual typed tuple13/full values/native bank; Source end still requires graph_consumed, required_values_complete, error_payload_complete, full body bytes, registrations/own registry/secondary/FD/region ends and no retained owners/errors/uncertainty. A local manager or cursor does not bypass those conditions.",
+    "cold_both": "publisher_root_command.c493-520 calls actual RootPerform then actual CommandReceive, converges BOTH normal and all early/error outcomes through cold_complete and actual prebound FinalReceive exactly once. FinalReceive reads full actual native/cold bodies, independently checks graph/Source/config/runtime/utility ends, settles ORIGINAL complete row/index credit history, rereads changed full bank before MOVE. No new optional completion callback or return-code acceptance.",
+    "C1_C2_preservation": "All native/publisher_root_entry.c and source/root_tool_adapter.py bytes equal accepted A282 input. Astra's independent pending-detach cause review and Sol134 accepted conditional selected stock requested terms are rejoined ONLY within their scope. New Root hold False does not clear Source or poison valid original pending rows; all A282 native debits/table extents/full consumers still execute on the same prospective original pool in a future authorized run.",
+    "immutable_and_mmap": "No exposed packet/status/row payload is rewritten, no mmap history/end or stopped child supplier/context/journal code changed, no Source detach True synthesized. Finite native ownership/error/FD/cold final predicates remain unchanged and mandatory."
+  },
+  "resource_and_validation_limits": {
+    "Source_parser": 0,
+    "Source_execution": 0,
+    "stock_code_parser": 0,
+    "compiler": 0,
+    "tests": "NOT_RUN_ABSTRACT_HASH_ONLY_REQUIRED_WAIVER_FALSE",
+    "independent_acceptance": false,
+    "resource_fit": "New class births/state/actual error reachability retain existing accounting/caps; whole physical allocator/GC/refcount/callback/body/cleanup costs and ALL required workload fit are UNKNOWN_NOT_ZERO_NOT_PROVEN, not justified by old nominal131072 reserve alone.",
+    "own_reader_failure": "Own host JSON query used a nonexistent metadata key after the successful one stock DATA pass. Host reader exited with charged146495187B; all prefix reads remain charged, no stock pass repeated, no Source effect or failed supplier action occurred. Sealing rereads only required bytes after lost RAM cache and records them; it does not rerun any Source/helper/control.",
+    "incidental_raw_window": "One early raw LF lifetime.py240-390 window included unchanged child-table lines. It was not used for diagnosis, changes, continuation, retry or reroute of stopped SOL107#2. No stopped implementation bytes were executed, parsed or changed; subsequent interpretation was restricted to actual Root OwnedFDs lines57-229."
+  },
+  "remaining": [
+    "Actual producer-side raw Root close exception/traceback custody above is OPEN; no synthesized original or projection-as-full-error claim.",
+    "Independent non-author review of this exact two-file author delta and required changed-path/control joins.",
+    "Finite SOL122-R1 selected TYPE/actor/callback/nonmutation interval through actual last loss; no arbitrary hostile private heap theorem.",
+    "Selected actual stock/image/header/compiler ABI and all new Source class/compiled-byte enrollment; old acceptance does not automatically bind new bytes.",
+    "Whole C1 ordinary/failed/birth/late/error bodies and R2-MAILBOX/stopped child/scanner work remain at their existing separate boundaries.",
+    "Whole C2 old+new required workload, hidden physical allocator/GC/refcount/code/final-end costs and all unchanged resource caps remain mandatory, unknown not zero.",
+    "Original69, mandatory20, inherited72 and new connected obligations remain full-text hash-only NOT_RUN; complete authorized admission/diagnostic/release/target/live/negative gates before final acceptance."
+  ],
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

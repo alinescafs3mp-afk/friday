@@ -1,0 +1,77 @@
+{
+  "schema": "friday.astra.e4.connected-nonauthor-source-review.v1",
+  "reviewer": "Astra epoch4",
+  "author": "Sol",
+  "package": {
+    "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/manifest.json",
+    "bytes": 82497,
+    "sha256": "83a4a43d7d5acce85bab0ef3064e6941e73227ab201c2b6f9c84d8a6f0e4a18e",
+    "identity9_decimal_strings": [
+      "2050",
+      "4230561",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "82497",
+      "1791269861184855339",
+      "1791269861185855397"
+    ],
+    "stable9": true
+  },
+  "result": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL164-RESULT.json",
+    "bytes": 1723,
+    "sha256": "121c22bce833e0c6cee8ec99998f24a1fc5ebf6a29998b775445fbe1fdab9bb7",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536859",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1723",
+      "1791269861190855685",
+      "1791269861190855685"
+    ],
+    "stable9": true
+  },
+  "decision": "REJECT_CONNECTED_SOL164_AS_SUBMITTED_ONE_ACTUAL_RECEIVER_ENTRY_MISMATCH_SCOPED_CREDITS_RETAINED",
+  "scope": "Original outside birth reservation -> native constructor initial work refusal -> cold/final numeric DATA -> getter/latch/Commit/publication -> actual parent receive/finalizer. Permitted numeric/wire/parent paths only; not protected stock/type/lifetime/worker qualification.",
+  "verification": {
+    "physical": 108,
+    "input_pins": 311,
+    "full_SHA_stable9": true,
+    "all_files600": true,
+    "root700": true,
+    "descendant_dirs775": true,
+    "Source_execution": false
+  },
+  "findings": [
+    {
+      "id": "A308-PUBLISHER-F1",
+      "class": "harness",
+      "invariant": "Every declared native terminal wire outcome must enter its actual parent's proof-gated receiver before full DATA/semantic/error retirement. Exit code alone remains insufficient.",
+      "producer": "candidate/native/publisher_root_bank.c:397 returns71 for BANK_INITIAL_WORK_DATA3 only after Commit and bank_publish.",
+      "consumer": "candidate/parent/publisher_root_command.py:923 receive initial proof predicate admits only0,70,78,79. It rejects71 before _retain_raw_bank at940.",
+      "consequence": "New lower71 min decoder/outcome3/InitialWorkData/InitialWorkFailure/finish_received branches are unreachable on the actual caller route. Complete published bank stays unconsumed by this path; typed HELD exception is not handoff.",
+      "closure": "Include71 in this same initial finite allowlist; retain exact process/PID/returncode/proof identity/actual reap/no forced cleanup. Then rejoin _retain_final_min/full body/no-writer evidence/header/phase/native outcome3/first error/once-close/new immutable result. Preserve explicit mismatch rejection for71 with normal0/70 outcomes and all other unknown codes.",
+      "required_controls": "K07/K12/K19-K27 + actual entry reachability on71; reject unrelated code and unmatched/uncertain process proof; all inherited positive/negative controls unchanged.",
+      "status": "Corrected only in fresh Astra A308 derivative; requires Sol nonauthor acceptance of Astra delta."
+    }
+  ],
+  "scoped_credits": [
+    "Native/parent v7 layout and reservation2 symbolic bank+F+U+C formulas agree on actual compiled constants/nine mandatory sizeof DATA order. Checked native128-bit and parent unbounded arithmetic keep original caps. Selected ABI/facts are still unqualified, no loading authorized.",
+    "Actual root_pool_start adopts original debit components before first sample, separates accounting from initialized/next-token/work/utility acquisition, retains raw sample and distinct phase5. Normal work gate remains; C is not charged a second time. No oldv6 default.",
+    "Actual ColdPool failure reaches early cold completion and final receiver. Separate original FULL clocks remain conditional on owned prepayment/exact numeric unattempted prefix; no utility/runtime/config/Source END or observation fabricated.",
+    "final_caller_read debits read_used, not read_credit: repeated eligibility equality checks do not themselves spend/replenish the reserved amount. No invented second credit or benign equality defect asserted.",
+    "Declared full bank and phase/fault alias data reach distinct71/outcome3 representation; B65/RP31 still restrictive. True initial/completion clock failure barriers remain; original larger D0 not substituted after failure.",
+    "Lower parent code already has strict71/raw fields/component sums/body/min proof, immutable InitialWorkData, same raised first InitialWorkFailure, actual received-failure once-close/new final result. These credits do not establish reachability through F1 until corrected.",
+    "Old normal0/70/78/79 paths and current output-only initialzero checks remain, except required new version/layout context. No whole baseline/runtime acceptance inferred."
+  ],
+  "not_closed": "Earlier applicable-cutoff authority/current generation/prelaunch/full-span; actual image/compilerABI/nine sizeof/provider/admission; full value/history/error/last-owner custody and selected whole resource/allocator/read/CPU/time fit. All original69/20/140/v2/M37/I14/J20+K01-K33 REQUIRED_NOT_RUN.",
+  "boundary_note": "Both author and this bounded review had location-oriented reads that emitted adjacent unchanged graph/class/runtime helper text. Those bodies are not interpreted/qualified or used for scoped credit; strict hash-only-read coverage is not claimed for incidental text. No stopped scope repair/retry/salvage or Source execution.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

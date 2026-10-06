@@ -1,0 +1,574 @@
+{
+  "schema": "friday.sol136.reversible.raw-LF.delta.v1",
+  "base_manifest_sha256": "7ff6788fd62b8222b1d18b6ee8beba86840624b5a5e488acd74bcb20e35fec0a",
+  "changed": [
+    {
+      "relative_path": "source/common.py",
+      "parent_pin": {
+        "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/common.py",
+        "bytes": 37411,
+        "sha256": "eedafb8804eae10c6919183f75c06333f99ce2e1b586a6314670b96b3ade00f8",
+        "identity9_decimal_strings": [
+          "2050",
+          "7084498",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "37411",
+          "1791229024316274725",
+          "1791229024316274725"
+        ],
+        "stable9": true
+      },
+      "candidate_pin": {
+        "path": "/var/tmp/friday-sol136-a284-publisher-root-close-errors-connected-inert-source/source/common.py",
+        "bytes": 38326,
+        "sha256": "d02a5488dd6cba3d1255aa4cbf13ecec9437e386f04e17a07c324c4bd56a3f51",
+        "identity9_decimal_strings": [
+          "2050",
+          "5404621",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "38326",
+          "1791232091303091163",
+          "1791232091303091163"
+        ],
+        "stable9": true
+      },
+      "hunks": [
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            107,
+            106
+          ],
+          "new_LF_lines": [
+            107,
+            123
+          ],
+          "before": "",
+          "after": "    def grow_error_storage(self,allocation):\n        # Sampling must not call RootObserver.grow/check and recursively\n        # acquire another sample FD. Native grow still checks the SAME pool.\n        # Keep the attached Source mirror on that exact original token.\n        integer(allocation,RAM_MAX)\n        if os.getpid()!=self.pid or self.closed:raise Refused('observer_error_storage_owner')\n        row=None\n        if self.observer is not None:\n            self.observer._owned()\n            row=self.observer.pending.get(self.token)\n            if row is None:raise Refused('observer_error_storage_credit')\n        self.master_pool.grow(self.token,allocation)\n        self.allocation+=allocation\n        if row is not None:\n            row['allocation']+=allocation\n            self.observer.live_alloc+=allocation\n            self.observer.peak_alloc=max(self.observer.peak_alloc,self.observer.live_alloc)\n",
+          "before_bytes": 0,
+          "after_bytes": 915,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "fb628f2faa9b6f609e2a6e8e97a3a52b02215476e1cea9c6aa10b41ba0bdb837"
+        }
+      ],
+      "forward_exact": true,
+      "inverse_exact": true
+    },
+    {
+      "relative_path": "source/lifetime.py",
+      "parent_pin": {
+        "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/lifetime.py",
+        "bytes": 49101,
+        "sha256": "4cbdbc7840fefc6c971043d3913c8833ca17e259cdfa95aaddb1e19b4ce1e8d6",
+        "identity9_decimal_strings": [
+          "2050",
+          "7084506",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "49101",
+          "1791229024316551244",
+          "1791229024316551244"
+        ],
+        "stable9": true
+      },
+      "candidate_pin": {
+        "path": "/var/tmp/friday-sol136-a284-publisher-root-close-errors-connected-inert-source/source/lifetime.py",
+        "bytes": 53987,
+        "sha256": "84affe919b12dca8871134991fda68ec5d7bccf66553e15cb2dfc5406f7ec482",
+        "identity9_decimal_strings": [
+          "2050",
+          "5404629",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "53987",
+          "1791232091304301727",
+          "1791232091304301727"
+        ],
+        "stable9": true
+      },
+      "hunks": [
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            38,
+            37
+          ],
+          "new_LF_lines": [
+            38,
+            39
+          ],
+          "before": "",
+          "after": "        if any(getattr(b,'prepare_pending',False) or any(not h.closed for h in getattr(b,'custody_holds',()))\n                for b in self.journals):return False\n",
+          "before_bytes": 0,
+          "after_bytes": 163,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "33f4b89218f14219d8e915a5b8683211b0b90ae8e803e654066f3904d045b765"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            61,
+            60
+          ],
+          "new_LF_lines": [
+            63,
+            66
+          ],
+          "before": "",
+          "after": "        # Strong ORIGINALS are distinct from the unchanged JSON wire rows.\n        # Every cell is published before its descriptor factory; the same\n        # FDState retains this book even after a local manager is retired.\n        self.error_cells={};self.custody_holds=[];self.prepare_pending=False\n",
+          "before_bytes": 0,
+          "after_bytes": 301,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "c02682de50a908e4bf0778138b52ee32ed4c68de0a94203ced3efed33d85502b"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            94,
+            93
+          ],
+          "new_LF_lines": [
+            100,
+            100
+          ],
+          "before": "",
+          "after": "        if self.prepare_pending:raise Refused('fd_preparation_prefix_unconfirmed')\n",
+          "before_bytes": 0,
+          "after_bytes": 83,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "5d47d71c701dd4a527434cc7af80418584f6db3a108885142ed372dfbb1daf42"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            97,
+            96
+          ],
+          "new_LF_lines": [
+            104,
+            105
+          ],
+          "before": "",
+          "after": "        self.prepare_pending=True\n        self._preown_error_storage(c,count)\n",
+          "before_bytes": 0,
+          "after_bytes": 78,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "2ec7da3f2ee3ddafa631645ecb2d9f19568a81f7df0be0a263c190d74dba2793"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            108,
+            107
+          ],
+          "new_LF_lines": [
+            117,
+            122
+          ],
+          "before": "",
+          "after": "            original={'row':row,'attempt':attempt,'close_claimed':False,'close_returned':False,\n                'factory_error':None,'acquisition_error':None,'acquisition_projection_error':None,\n                'acquisition_cleanup_error':None,'acquisition_publication_error':None,\n                'prepare_error':None,'prepare_metadata_error':None,'close_error':None,\n                'close_traceback':None,'close_metadata_error':None}\n            self.error_cells[row['generation']]=original\n",
+          "before_bytes": 0,
+          "after_bytes": 494,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "fe8a7570e42c42aff658fc82369fc2c82879e92c9342f81b91585bd4d2861fb7"
+        },
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            116,
+            118
+          ],
+          "new_LF_lines": [
+            131,
+            142
+          ],
+          "before": "            self._cancel(c,cells)\n            exc.retained_journal=self\n            if self.meter is not None:self.meter.retain_error_arena(exc)\n",
+          "after": "            for row in cells:self._error_cell(row)['prepare_error']=exc\n            try:\n                self._cancel(c,cells)\n                # Generation was advanced before publication; every actual\n                # cancellation returned with no FD and its original history.\n                # This is a confirmed no-return prefix, not an uncertain one.\n                self.prepare_pending=False\n                exc.retained_journal=self\n                if self.meter is not None:self.meter.retain_error_arena(exc)\n            except BaseException as secondary:\n                for row in cells:self._error_cell(row)['prepare_metadata_error']=secondary\n                raise\n",
+          "before_bytes": 145,
+          "after_bytes": 679,
+          "before_sha256": "7b7679acd67443c40de6a8d26f23399b4f56d6ad5f1dcb8f48b9edb40c13d695",
+          "after_sha256": "c8572fb1efbf641ec48fb1475ec419d15b2d7f4f0f361e3090cb212b7451d096"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            120,
+            119
+          ],
+          "new_LF_lines": [
+            144,
+            144
+          ],
+          "before": "",
+          "after": "        self.prepare_pending=False\n",
+          "before_bytes": 0,
+          "after_bytes": 35,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "5109fe93b49c518d314eb764b0805a4905d8f689a15a332f5a76816ebac63486"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            121,
+            120
+          ],
+          "new_LF_lines": [
+            146,
+            165
+          ],
+          "before": "",
+          "after": "    def _preown_error_storage(self,c,count):\n        # SAME original pool; no new cap, domain, slot or refund. A release\n        # moves allocation to native retained storage, it does not free it.\n        # Whole physical allocator/body/workload fit still needs qualification.\n        owner=getattr(c,'meter',None)\n        if owner is None:\n            if not hasattr(c,'grow_error_storage'):raise Refused('fd_original_error_credit')\n            c.grow_error_storage(count*8192)\n            c.read_debit(count*1024)\n            return\n        owner.grow(c.token,allocation=count*8192)\n        scan=owner.reserve('Root-FD-original-error-cell-before-effect',reads=count*1024)\n        self.custody_holds.append(scan)\n        scan.commit(reads=count*1024)\n        if scan.release() is not True:raise Refused('fd_error_cell_credit_end_unconfirmed')\n    def _error_cell(self,row):\n        cell=self.error_cells[row['generation']]\n        if cell['row'] is not row or cell['attempt'] is not row['close_cell']:\n            raise Refused('fd_original_error_row_alias','terminal')\n        return cell\n",
+          "before_bytes": 0,
+          "after_bytes": 1091,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "9aec50d1a1bd9fa91e9002da2405cb1185b0fd3b81cd4342fb85769ed6d5c4c2"
+        },
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            143,
+            145
+          ],
+          "new_LF_lines": [
+            188,
+            200
+          ],
+          "before": "            r[\"acquisition_error\"]=error_fact(exc,\"terminal\");exc.retained_journal=self\n            try:self._close_row(r)\n            except BaseException as secondary:self.faults.append(error_fact(secondary,\"terminal\"))\n",
+          "after": "            cell=self._error_cell(r);cell['acquisition_error']=exc\n            try:\n                exc.retained_journal=self\n                r[\"acquisition_error\"]=error_fact(exc,\"terminal\")\n            except BaseException as secondary:\n                cell['acquisition_projection_error']=secondary\n                raise\n            finally:\n                try:self._close_row(r)\n                except BaseException as secondary:\n                    # Keep the actual second exception/TB, never another\n                    # fallible projection which could discard both originals.\n                    cell['acquisition_cleanup_error']=secondary\n",
+          "before_bytes": 222,
+          "after_bytes": 650,
+          "before_sha256": "d682042e6a0d46d4694963d92e384bf8e6d8cef866d41ea027fda79d1543fa4b",
+          "after_sha256": "4906967d88af8a3b90f29d90491333771f1b51643a443d32072aefbfe7d0f938"
+        },
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            147,
+            147
+          ],
+          "new_LF_lines": [
+            202,
+            206
+          ],
+          "before": "        r[\"status\"]=\"HELD\";self._changed();return r[\"fd\"]\n",
+          "after": "        try:\n            r[\"status\"]=\"HELD\";self._changed();return r[\"fd\"]\n        except BaseException as exc:\n            self._error_cell(r)['acquisition_publication_error']=exc\n            raise\n",
+          "before_bytes": 58,
+          "after_bytes": 199,
+          "before_sha256": "51e3c5d4c86d668c1f932fc590dda42f1f9f2afe91f6105e0c4c12d16741aeb5",
+          "after_sha256": "f62bade373abad6487e34c924865189f857c906f06bb13379576f6e8664f11ae"
+        },
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            151,
+            151
+          ],
+          "new_LF_lines": [
+            210,
+            212
+          ],
+          "before": "        except BaseException:self._cancel(c,cells);raise\n",
+          "after": "        except BaseException as exc:\n            self._error_cell(cells[0])['factory_error']=exc\n            self._cancel(c,cells);raise\n",
+          "before_bytes": 57,
+          "after_bytes": 137,
+          "before_sha256": "dfc46a7d7b48f24c3f30bf91d82d1da812a5d1825fb4e575008fb7eb97296c2d",
+          "after_sha256": "4ac98d77a29b0fe0eaf7ca9d8c01fcab1603bb540a76c79985137673db3f3e66"
+        },
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            160,
+            160
+          ],
+          "new_LF_lines": [
+            221,
+            222
+          ],
+          "before": "        except BaseException:\n",
+          "after": "        except BaseException as exc:\n            self._error_cell(cells[0])['factory_error']=exc\n",
+          "before_bytes": 30,
+          "after_bytes": 97,
+          "before_sha256": "606b03dc6d8fbc84199761cf443a01d90efe27533673e538b96db5fa5441aebe",
+          "after_sha256": "24f3d252d094ec5371fc256d0f1fc310e0d489f3bafe9c9626f0c21a004c80f5"
+        },
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            163,
+            164
+          ],
+          "new_LF_lines": [
+            225,
+            230
+          ],
+          "before": "            if native.prepared_has_row(context,cells[0]):cells[0]['status']='UNKNOWN'\n            else:self._cancel(c,cells)\n",
+          "after": "            try:\n                if native.prepared_has_row(context,cells[0]):cells[0]['status']='UNKNOWN'\n                else:self._cancel(c,cells)\n            except BaseException as secondary:\n                self._error_cell(cells[0])['prepare_metadata_error']=secondary\n                raise\n",
+          "before_bytes": 125,
+          "after_bytes": 298,
+          "before_sha256": "70367abd81bcda6fd01c04ceefff9aa70f1cf7c7198e42520cbda702fd9cb2d4",
+          "after_sha256": "181b663a0ead993ac6e1b1f0418cb300da370e045555971938173b0702ee30d1"
+        },
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            170,
+            170
+          ],
+          "new_LF_lines": [
+            236,
+            238
+          ],
+          "before": "        except BaseException:self._cancel(c,cells);raise\n",
+          "after": "        except BaseException as exc:\n            for row in cells:self._error_cell(row)['factory_error']=exc\n            self._cancel(c,cells);raise\n",
+          "before_bytes": 57,
+          "after_bytes": 149,
+          "before_sha256": "dfc46a7d7b48f24c3f30bf91d82d1da812a5d1825fb4e575008fb7eb97296c2d",
+          "after_sha256": "b1ee9d3603dc86bbb8f7909e86c96d04697be17b897e843ef831b7771d3a39a0"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            185,
+            184
+          ],
+          "new_LF_lines": [
+            253,
+            254
+          ],
+          "before": "",
+          "after": "        dest._preown_error_storage(self.grants[r[\"credit\"]],1)\n        dest.error_cells[r['generation']]=self._error_cell(r)\n",
+          "before_bytes": 0,
+          "after_bytes": 125,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "8414190cbccb5639cbff1aceb5232fa0d43de40fc071dc728bae9f18658c58cb"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            191,
+            190
+          ],
+          "new_LF_lines": [
+            261,
+            265
+          ],
+          "before": "",
+          "after": "        cell=self._error_cell(r)\n        if cell['close_claimed']:return\n        # Claim before ANY history/status publication, including its failure.\n        # A partial successful close cannot later close a reused integer.\n        cell['close_claimed']=True\n",
+          "before_bytes": 0,
+          "after_bytes": 260,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "164007d7e51a834c484ec504d835038b8d1e1c50a88efca6f7bc9d252ee06a37"
+        },
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            192,
+            207
+          ],
+          "new_LF_lines": [
+            267,
+            296
+          ],
+          "before": "            from existing_root_caller import _native\n            native=_native();context=native.current()\n            if context is None:raise Refused('actual_native_prepared_close_context','terminal')\n            native.close_owned_row(context,r,self.grants[r[\"credit\"]])\n            self._changed();return\n        attempt=r[\"close_cell\"];r[\"close_history\"].append(attempt)\n        r[\"attempted_close\"]=\"ATTEMPTED\";attempt[\"status\"]=\"ATTEMPTED\"\n        try:os.close(r[\"fd\"])\n        except BaseException as exc:\n            # Numeric reuse and a later EBADF probe never prove this close.\n            r[\"status\"]=\"UNKNOWN\";r[\"attempted_close\"]=\"UNKNOWN\";attempt[\"status\"]=\"UNKNOWN\"\n            attempt[\"error\"]=error_fact(exc,\"terminal\");self.faults.append(attempt[\"error\"])\n        else:\n            r[\"status\"]=\"CLOSED\";r[\"attempted_close\"]=\"CLOSED\";attempt[\"status\"]=\"CLOSED\"\n            self.grants[r[\"credit\"]].fd_rows.pop(r[\"slot\"],None)\n        self._changed()\n",
+          "after": "            try:\n                from existing_root_caller import _native\n                native=_native();context=native.current()\n                if context is None:raise Refused('actual_native_prepared_close_context','terminal')\n                native.close_owned_row(context,r,self.grants[r[\"credit\"]])\n                cell['close_returned']=True\n                self._changed();return\n            except BaseException as exc:\n                cell['close_metadata_error']=exc\n                raise\n        try:\n            attempt=r[\"close_cell\"];r[\"close_history\"].append(attempt)\n            r[\"attempted_close\"]=\"ATTEMPTED\";attempt[\"status\"]=\"ATTEMPTED\"\n            try:os.close(r[\"fd\"])\n            except BaseException as exc:\n                # FIRST retain the REAL error in a preowned field. Traceback\n                # access, projection, fault append and notification can fail.\n                cell['close_error']=exc\n                cell['close_traceback']=exc.__traceback__\n                r[\"status\"]=\"UNKNOWN\";r[\"attempted_close\"]=\"UNKNOWN\";attempt[\"status\"]=\"UNKNOWN\"\n                attempt[\"error\"]=error_fact(exc,\"terminal\")\n                self.faults.append(attempt[\"error\"])\n            else:\n                cell['close_returned']=True\n                r[\"status\"]=\"CLOSED\";r[\"attempted_close\"]=\"CLOSED\";attempt[\"status\"]=\"CLOSED\"\n                self.grants[r[\"credit\"]].fd_rows.pop(r[\"slot\"],None)\n            self._changed()\n        except BaseException as secondary:\n            cell['close_metadata_error']=secondary\n            raise\n",
+          "before_bytes": 969,
+          "after_bytes": 1564,
+          "before_sha256": "e4c6e9b0a614d094d21fd67e4f872c111f4bb0e096d7ae2b8ddf151644900ac2",
+          "after_sha256": "ce63dc71975a5e8f173045b8289825136b3b0f486bbd1e8fac269a226a906a7b"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            225,
+            224
+          ],
+          "new_LF_lines": [
+            314,
+            314
+          ],
+          "before": "",
+          "after": "        if self.prepare_pending or any(not h.closed for h in self.custody_holds):return False\n",
+          "before_bytes": 0,
+          "after_bytes": 94,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "cfcf8e736e64130233a21a1feb991762020e4175a525edd95a170268331a6306"
+        },
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            229,
+            229
+          ],
+          "new_LF_lines": [
+            319,
+            319
+          ],
+          "before": "        self.rows.clear();self.grants.clear();self.faults.clear();self.meter=None;self.state=None\n",
+          "after": "        self.rows.clear();self.grants.clear();self.faults.clear();self.error_cells.clear();self.custody_holds.clear();self.meter=None;self.state=None\n",
+          "before_bytes": 98,
+          "after_bytes": 150,
+          "before_sha256": "75fd2799f215293c62c257a232ba82602a6f1c1cfa891014ef28a0449999d600",
+          "after_sha256": "20f69f62c2ba0bf60ca7621c5057f8d48c6fed60a67858503bbb140d9a01560d"
+        }
+      ],
+      "forward_exact": true,
+      "inverse_exact": true
+    },
+    {
+      "relative_path": "source/observer.py",
+      "parent_pin": {
+        "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/observer.py",
+        "bytes": 154909,
+        "sha256": "ed6931cae41590ee6601958cd9ed66875e4ed1edb1405e462f5071f82d6a1203",
+        "identity9_decimal_strings": [
+          "2050",
+          "7084510",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "154909",
+          "1791229564574650860",
+          "1791229564574650860"
+        ],
+        "stable9": true
+      },
+      "candidate_pin": {
+        "path": "/var/tmp/friday-sol136-a284-publisher-root-close-errors-connected-inert-source/source/observer.py",
+        "bytes": 155367,
+        "sha256": "f47369f03041a26d77cfc9ea17fefd1b562e820b3e2e5f1be9b47f1300593e34",
+        "identity9_decimal_strings": [
+          "2050",
+          "5404633",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "155367",
+          "1791231876818617531",
+          "1791231876818617531"
+        ],
+        "stable9": true
+      },
+      "hunks": [
+        {
+          "kind": "replace",
+          "old_LF_lines": [
+            2033,
+            2033
+          ],
+          "new_LF_lines": [
+            2033,
+            2034
+          ],
+          "before": "                hold.release();self.retire_local_owner(book)\n",
+          "after": "                if hold.release() is True:self.retire_local_owner(book)\n                else:self.note_cleanup({'cause':'RESERVATION_RELEASE_UNCONFIRMED','journal':book.graph()})\n",
+          "before_bytes": 61,
+          "after_bytes": 179,
+          "before_sha256": "87613ff4cc54dd8306c511cfeff31ba7af49ce4f7bc7810b16346591b8d185ac",
+          "after_sha256": "f62b78c0396dd56100fc974af2db405403737d95d70a024936b767b6b4d063a4"
+        },
+        {
+          "kind": "insert",
+          "old_LF_lines": [
+            2076,
+            2075
+          ],
+          "new_LF_lines": [
+            2077,
+            2081
+          ],
+          "before": "",
+          "after": "        # A closed/no-return local book can have left local_owners. Its\n        # original error cells MUST still reach both full DATA readers, not\n        # only FDState.graph()'s wire-safe scalar chronology. This is the same\n        # actual preowned FD domain, with its complete journal/row aliases.\n        errors.append(self.fd_state)\n",
+          "before_bytes": 0,
+          "after_bytes": 340,
+          "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_sha256": "86d8b4a5a1437aa75fcdc8410978392d6c78329d4761ae06eb7340d136a62d06"
+        }
+      ],
+      "forward_exact": true,
+      "inverse_exact": true
+    }
+  ],
+  "unchanged": [
+    "consumer/source/authority.py",
+    "consumer/source/bill.py",
+    "consumer/source/body_scope.py",
+    "consumer/source/canonical.py",
+    "consumer/source/capability.py",
+    "consumer/source/contract.py",
+    "consumer/source/declared_controls.py",
+    "consumer/source/document_vector.py",
+    "consumer/source/document_windows.py",
+    "consumer/source/effects.py",
+    "consumer/source/formats.py",
+    "consumer/source/ingress.py",
+    "consumer/source/material_literals.py",
+    "consumer/source/performing_contracts.py",
+    "consumer/source/pins.py",
+    "consumer/source/producer_consumer.py",
+    "consumer/source/receipt_chain.py",
+    "consumer/source/recipe_planner.py",
+    "consumer/source/resource_meter.py",
+    "consumer/source/runtime_consumer.py",
+    "consumer/source/schema_validate.py",
+    "consumer/source/semantics.py",
+    "consumer/source/whole_join.py",
+    "native/publisher_original_caller.c",
+    "native/publisher_original_caller.h",
+    "native/publisher_owned_custody.c",
+    "native/publisher_owned_custody.h",
+    "native/publisher_root_command.c",
+    "native/publisher_root_command.h",
+    "native/publisher_root_entry.c",
+    "native/publisher_root_entry.h",
+    "source/actor_bootstrap.py",
+    "source/actor_context.py",
+    "source/admission.py",
+    "source/alljob_cohort.py",
+    "source/capacity.py",
+    "source/class_semantics.py",
+    "source/consumer_bridge.py",
+    "source/custody.py",
+    "source/existing_root_caller.py",
+    "source/extraction.py",
+    "source/fact_bridge.py",
+    "source/independent_selector.py",
+    "source/launcher.py",
+    "source/master_pool.py",
+    "source/native.py",
+    "source/normalization.py",
+    "source/operations.py",
+    "source/owned_prefix_bank.py",
+    "source/retention.py",
+    "source/roles.py",
+    "source/root_tool_adapter.py",
+    "source/selected_owned_values.py",
+    "source/snapshot_producer.py"
+  ],
+  "source_count": 57,
+  "changed_count": 3,
+  "equal_count": 54,
+  "LF_hunk_count": 22,
+  "Source_parser": false,
+  "compiler": false,
+  "execution": false,
+  "checks": {
+    "stopped_ForkOwner_suffix_exact": true,
+    "RootOwnedFile_exact": true,
+    "FDCollectionRoots_exact": true,
+    "consumer_resource_meter_exact": true,
+    "error_fact_wire_projector_exact": true,
+    "all_native_and_adapter_exact": true
+  }
+}

@@ -1,0 +1,8 @@
+operation	conservative_explicit_bytes_upper	scope
+read_hash_scan_before_whole_capture	4194304	A066 contract/hash; A061 RESULT/MANIFEST/source selected chunks and scans; pinned A051/A046 RESULT; canonical A037/A039/A042/A046/A051 contracts; includes repeated/truncated BILL/scans and failed nonexistent-path diagnostics
+whole_source_text_capture_and_copy	1048576	All23 A061 members plus MANIFEST read wholly as text; stored inertly and copied using apply_patch; no evaluation/AST/import
+post_copy_changed_source_reads	2097152	A066 OWNED/CONTRACT/FULL/EXECUTOR/SUPERVISOR/SCHEMA/BILL selected source checks, original consumers selected reads, metadata/data JSON parse; no source execution
+provenance_hashes_and_upstream_copy_check	2097152	All24 UPSTREAM exact source hashes, contracts/results pins, A066 bill hashes; metadata stat excluded from logical content bytes
+final_source_read_and_integrity_seal_reserved	8388608	Every new member hash/stat, exact provenance comparison, final source/text and JSON consistency, manifest and registry hash verification; finite conservative bound for all remaining calls
+# Explicit-content reconstructed conservative upper=17825792 bytes (<67108864). Full-file sizes were bounded per path even for partial/truncated scans; remaining reserve is a maximum, not unused actual-read credit. This ledger is reconstructed from this assignment's tool calls and immutable source sizes; no pre-existing durable live IO meter was used.
+# Actual physical/implicit IO=UNKNOWN_NOT_ZERO; actual process/model RAM peak=UNKNOWN_NOT_ZERO. No archive bodies, retained316 bodies, product/Git, source evaluation, runtime/native/root/kernel/network/GET or peer history reads/effects. Source byte-copy is not a whole independent semantic review.

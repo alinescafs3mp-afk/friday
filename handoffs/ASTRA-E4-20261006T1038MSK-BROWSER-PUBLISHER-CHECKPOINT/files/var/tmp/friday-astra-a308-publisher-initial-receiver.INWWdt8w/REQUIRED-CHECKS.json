@@ -1,0 +1,53 @@
+{
+  "schema": "friday.astra.a308.publisher.receiver71.required-checks.v1",
+  "required": true,
+  "waiver": false,
+  "status": "REQUIRED_NOT_RUN",
+  "inherited": {
+    "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/REQUIRED-CONTROLS.json",
+    "bytes": 9268,
+    "sha256": "3285dca43e1cb0c1023ce695be21fb82ed16766ec306b32e7329280f7735bb5c",
+    "identity9_decimal_strings": [
+      "2050",
+      "4230557",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "9268",
+      "1791269861153853557",
+      "1791269861154853614"
+    ],
+    "stable9": true
+  },
+  "all_original": "69/20/140/v2/inherited/M37/I14/J20+K01-K33 unchanged",
+  "cases": [
+    [
+      "P01",
+      "Actual valid71/outcome3 traverses initial proof gate and FULL raw/min/alias/first refusal/once-close/final record; not direct helper injection."
+    ],
+    [
+      "P02",
+      "All PID/process/proof identity/actual returncode/reap/forced cleanup/no-writer failures still refuse."
+    ],
+    [
+      "P03",
+      "Unknown returncodes and71 with normal1/2 outcome, malformed raw sample/birth amounts/header/alias/min fail without success credit."
+    ],
+    [
+      "P04",
+      "Actual same InitialWorkFailure survives received finalization; secondary close/clock/copy errors retained, no retry or old tuple mutation."
+    ],
+    [
+      "P05",
+      "All existing0/70/78/79 positives/negatives and exact finite original caps/ABI/source-admission remain required."
+    ],
+    [
+      "P06",
+      "Exact one allowed code change; full61/current88 immutable context and all actual callers rejoined by nonauthor without self-accepting Sol164 baseline."
+    ]
+  ],
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

@@ -1,0 +1,31 @@
+{
+  "schema": "friday.astra.a306.browser.history-once.required-checks.v1",
+  "status": "REQUIRED_NOT_RUN",
+  "required": true,
+  "waiver": false,
+  "original_counts": {
+    "whole": 216,
+    "connected": 29,
+    "inner": 6,
+    "ordinary": 9
+  },
+  "inherited": "Every original obligation including A302 resolver cases retained; unsafe controls opaque/hash-only REQUIRED/no waiver.",
+  "changed_cases": [
+    "Own native_trace valid nonempty history: exactly one full history decode, same phase/expected/observed/status-redacted projections and full rows.",
+    "Own native_trace valid empty history: exactly one decode, same zero-rights requirement; no default positive.",
+    "Own None/non-dict/bad schema/pairs/count/overflow/unfinished row/receipt: original first decoder failure before projection, not a substituted required-current failure.",
+    "Inherited valid native_trace history: one decode after required-current; same projection and all rows.",
+    "Missing inherited None: original required-current refusal before decoder; no decode-to-positive.",
+    "Native container with own history but no native_trace: one full decoder call, no newly retained records list.",
+    "Non-native dict/list/tuple or scalar: same traversal/native-history exclusion/seen context and no new history decoding.",
+    "Repeated aliases and cycles across different inherited contexts: same (id(item),id(inherited)) key and exact traversal, no invalid cross-context cache.",
+    "First decoder actual error/caller catches: same retained original exception/context, no retry or reconstructed error.",
+    "Full real A079 consume -> actual outer/inner native checks -> oracle -> once-retirement/final clock and positive-first remain required; not helper-only acceptance.",
+    "Both canonical full_DATA_decode/a067_full_DATA_decode/resource alias-bijection interfaces unchanged and required.",
+    "All24 current bindings point to exact changed bytes; all historical-only pins stay original and do not confer current acceptance.",
+    "Current whole physical/transient/read/CPU/time fit under SAME original aggregate256MiB/180/170/final10; no new budget or lower workload cap."
+  ],
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

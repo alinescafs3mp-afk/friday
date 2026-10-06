@@ -1,0 +1,17 @@
+{
+  "schema": "friday.sol165.required-controls.v1",
+  "assignment": "ASTRA-E4-A308-BROWSER-ACTUAL-SUCCESS-GRAPH-RETIREMENT-NONAUTHOR-SOL165",
+  "generation": 1,
+  "required": true,
+  "waiver": false,
+  "status": "REQUIRED_NOT_RUN_NO_SOURCE_EXECUTION_AUTHORITY",
+  "original_counts": {"whole":216,"connected":29,"inner":6,"ordinary":9},
+  "inherited": "ALL original/inherited controls stay required on exact final bytes; no shortened cases/caps/gate or auto-transfer of execution. A302/A306 static byte relations are not runtime qualification.",
+  "H01_H26": {"path":"/var/tmp/friday-sol163-a306-browser-three-reader-history-once-review/REQUIRED-CONTROLS.json","status":"ALL_REQUIRED_NOT_RUN"},
+  "G01_G14": {"path":"/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/REQUIRED-CHECKS.json","sha256":"4d5f3cc7c9fcc336fe96ae0158c0db9d7b0d3ed6bfda5654cba5b358ccd4ef7d","status":"ALL_REQUIRED_NOT_RUN"},
+  "changed_context": "All3 full decoders/default root/canonical readers, actual successful last-local-reader, reachable/unreachable cycles/aliases, partial decode/native error and every retirement clock/release prefix, full raw/receipts/positive-first, current24pins24text and selected-image whole resources remain mandatory. No new test executed or invented test pass.",
+  "unsafe": "OPAQUE_HASH_ONLY_QUALIFICATION_REQUIRED_NO_WAIVER_NOT_RUN; accidental bounded text disclosure separately logged without qualification",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

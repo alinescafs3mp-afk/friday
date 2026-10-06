@@ -1,0 +1,141 @@
+{
+  "schema": "friday.astra.a285.connected-publisher-errors-integration.v1",
+  "state": "SEALED_INERT_IMPLEMENTATION_FOR_NONAUTHOR_CONNECTED_REVIEW_NOT_SOURCE_ACCEPTANCE",
+  "base_SOL136": {
+    "path": "/var/tmp/friday-sol136-a284-publisher-root-close-errors-connected-inert-source/manifest.json",
+    "bytes": 66708,
+    "sha256": "ce20854ab94e9474c8a475c3acfd8ea9eb3c79e6b470802f4a1abb796d1290c4",
+    "identity9_decimal_strings": [
+      "2050",
+      "4074032",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "66708",
+      "1791232333328507275",
+      "1791232333328507275"
+    ],
+    "stable9": true
+  },
+  "Astra_native_change": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A284-PREOWNED-ERROR-DRAFT-PRESERVED-20261005.json",
+    "bytes": 41262,
+    "sha256": "cd20d5df587c04fb64d0efbb7e9f9dc23418f6b70fae456279fc22795d30ef67",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536731",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "41262",
+      "1791231510715607053",
+      "1791231510732604424"
+    ],
+    "stable9": true
+  },
+  "source_count": 57,
+  "changes_against_SOL136": [
+    {
+      "relative_path": "native/publisher_original_caller.c",
+      "expected_sha256": "18fd8caeadb26b1daec81753b76dcb011b55ce66f7b385d622293d2bb0b7415e",
+      "base_sha256": "1b52975dbd7a69468f49ea2ec3d87ce057785c4065fdaaa87674b289d51f67b9",
+      "literal_LF_diff": "--- A282/native/publisher_original_caller.c\n+++ A284-draft/native/publisher_original_caller.c\n@@ -61,10 +61,17 @@\n        reads>UINT64_MAX-c->reads||output>UINT64_MAX-c->output||\n        hash>UINT64_MAX-c->hash||allocation>UINT64_MAX-c->allocation) {\n         /* Pure structural failure precedes a provider debit: no new Python\n-         * exception allocated here. Python-callable bridges use the exact\n-         * original Root preowned refusal if no original error is pending. */\n-        if(c==&caller_storage&&!PyErr_Occurred()&&c->original.preowned_refusal_type&&c->original.preowned_refusal_value)\n-            PyErr_SetObject(c->original.preowned_refusal_type,c->original.preowned_refusal_value);\n+         * exception allocated here. Keep pending/handled originals before\n+         * selecting the exact Root preowned refusal on an empty boundary. */\n+        if(c==&caller_storage&&!PyErr_Occurred()&&c->original.preowned_refusal_type&&c->original.preowned_refusal_value) {\n+            /* A currently handled original is still real error DATA even\n+             * with no raised indicator. Re-raise its owned reference, or\n+             * select the same preowned Root refusal only if it is absent.\n+             * No implicit causal-chain rewrite or overwritten old error. */\n+            PyObject *original=PyErr_GetHandledException();\n+            if(!original)original=Py_NewRef(c->original.preowned_refusal_value);\n+            PyErr_SetRaisedException(original);\n+        }\n         return -1;\n     }\n     /* Not a new grant/substitute ledger: original whole-pool provider is called\n"
+    },
+    {
+      "relative_path": "native/publisher_root_entry.c",
+      "expected_sha256": "cde12291f8ee49ce8b01c46dee1e7553e7614625cd0f0aaebfb515472f88a1dd",
+      "base_sha256": "d2ca58bc82fa4f2d15a579b1d6934f87f8d172d644e2785bdef1eeb00b93dded",
+      "literal_LF_diff": "--- A282/native/publisher_root_entry.c\n+++ A284-draft/native/publisher_root_entry.c\n@@ -442,12 +442,23 @@\n      * Python reference after the caller's actual final end. */\n     if(p==&root_storage.pool&&final_caller_binding.transferred)return -1;\n     if(p&&!p->refused){p->refused=1;p->fault=why;}\n-    /* Exact preowned refusal is installed only when there is no original\n-     * error. No allocation/normalization or overwritten provider exception. */\n+    /* Keep pending and handled originals; only their absence selects the\n+     * exact preowned refusal. No new/normalized provider exception. */\n     /* The actual cold command uses this pool before any interpreter exists.\n      * Do not ask for a Python error indicator without an initialized runtime. */\n-    if(Py_IsInitialized()&&p&&p->refusal_type&&p->refusal_value&&!PyErr_Occurred())\n-        PyErr_SetObject(p->refusal_type,p->refusal_value);\n+    if(Py_IsInitialized()&&p&&p->refusal_type&&p->refusal_value&&!PyErr_Occurred()) {\n+        /* An empty raised indicator does not mean no original: an active\n+         * handler still owns its actual exception. Preserve that instance\n+         * as the raised error; use the preowned refusal only without one.\n+         * PyErr_SetObject would instead traverse/rewrite causal chains.\n+         * The public getter returns an owned ref; the setter steals it with\n+         * the already-checked old indicator NULL. No context/TB rewrite,\n+         * normalization or new exception here. Later Python propagation\n+         * may add real traceback frames, which remain required error DATA. */\n+        PyObject *original=PyErr_GetHandledException();\n+        if(!original)original=Py_NewRef(p->refusal_value);\n+        PyErr_SetRaisedException(original);\n+    }\n     return -1;\n }\n static int root_pool_start(FridayPublisherRootStorage *s,uint64_t command_storage) {\n"
+    }
+  ],
+  "join": "Actual SOL136 three-file raw Root error custody plus actual Astra two-native-setter change. All55 other Source files match exact SOL136 bytes, including actual manager/cursor/consumer/error roots. All native input files in SOL136 equal the A282 native bases used for Astra change. No line overlay on differing native input.",
+  "pre_review_check": "Lead personally read SOL136 original error-cell/preparation/one-close/projection/UNKNOWN and same-pool sampling growth paths; common.error_fact wire unchanged. complete_owner_graph retains actual FDState outside local-owner lifetime, and actual receiver's error-root partition is a general exact root suffix, not exception-type-only. Both native generic Source/class/dict/error consumers and cold caller endpoints were read on same native bases. Full non-author producer decision remains separate and pending.",
+  "authorship": {
+    "Sol": [
+      "source/common.py",
+      "source/lifetime.py",
+      "source/observer.py",
+      "prior consumer/source/resource_meter.py"
+    ],
+    "Astra": [
+      "native/publisher_root_entry.c",
+      "native/publisher_original_caller.c"
+    ]
+  },
+  "review_partition": "Astra independently reviews Sol raw-custody producer/new context. Existing Sol independently reviews Astra actual native setters and integration dependencies/both-end failure semantics, never self-accepts own3-file implementation. Lead makes connected whole decision only after both exact-bound reviews; whole Source qualification and execution remain absent.",
+  "scoped_prior_review": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A285-SOL135-CONNECTED-FD-CONTEXT-CURSOR-REVIEW-20261005.json",
+    "bytes": 44998,
+    "sha256": "299c216b6ac30a79d880eaad10c5626b103faa650ebc59d6c8ae9fdde758214d",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536732",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "44998",
+      "1791232196312195107",
+      "1791232196330196148"
+    ],
+    "stable9": true
+  },
+  "scoped_rule": "SOL135 current exact scoped manager/cursor/withheld-release credits do not automatically accept SOL136 or changed native semantics. Rejoin changed inputs. Historical copied PROOF/LITERAL-DELTA/RESOURCE/CONTROL and BASE manifest refer to SOL136's own exact scope, not acceptance of this candidate.",
+  "controls": {
+    "files": [
+      {
+        "pin": {
+          "path": "/var/tmp/friday-astra-a285-publisher-connected-errors.NidXhx/CONTROL-HASHES.json",
+          "bytes": 66361,
+          "sha256": "87edc4f376ed71c1c37427fc4fa9c9bf865797a6a3835461d3585fe4582f836c",
+          "identity9_decimal_strings": [
+            "2050",
+            "5919748",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "66361",
+            "1791232333326314055",
+            "1791232669252114859"
+          ],
+          "stable9": true
+        },
+        "count": 118
+      },
+      {
+        "pin": {
+          "path": "/var/tmp/friday-astra-a285-publisher-connected-errors.NidXhx/A285-NATIVE-ERROR-OBLIGATIONS.json",
+          "bytes": 9004,
+          "sha256": "70a8c38bbc7834449afa4c6cf14f53c412a811df467b63be25c3c94d13bb9f01",
+          "identity9_decimal_strings": [
+            "2050",
+            "5919753",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "9004",
+            "1791232380048177652",
+            "1791232680771854545"
+          ],
+          "stable9": true
+        },
+        "count": 12
+      }
+    ],
+    "total_unique": 130,
+    "original69_mandatory20": "Required raw complete definitions preserved; NOT_RUN",
+    "no_execution_credit": true
+  },
+  "source_admission": "ABSTRACT_HASH_ONLY required=true waiver=false. No Source/stock parser/AST/compiler/preprocess/import/eval/exec/test/simulation/native/Root/live/install. Host JSON/stat/SHA/rawLF only.",
+  "stopped_scopes": "Do not read for diagnosis, modify, retry or reroute stopped SOL107#2 supplier/context/journal or ScannerSOL075. Opaque source pin checks only; no model/role/provider/TUI/guard changes.",
+  "remaining": "Non-author exact connected reviews; remaining C1/R2/finite actual TYPE/callback/actor/nonmutation; whole original physical/API/ABI/workload fit; Source/Root admission and full diagnostic/release/target conjunction. No newly executable release gate.",
+  "author_error": "Initial apply_patch was rejected before writes because raw unified numeric hunk header format was unsupported. Same intended hunks were applied with tool-format @@ headers; exact candidate hashes checked. No Source execution/retry of stopped operation.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}
+

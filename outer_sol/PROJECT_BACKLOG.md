@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-10-06 (A305: Publisher retained-min wire/parent join and initial-field correction independently scoped accepted; initial-constructor work/full closure active SOL162. Incremental inert Publisher source checkpoint prepared for main. Full custody/qualification remain open; no new executable release gate.)
+Updated: 2026-10-06 (A309: Publisher71 receiver delta independently accepted; stable Browser/Publisher snapshot; SOL167 active).
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -16,144 +16,117 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Current release frontier — 2026-10-06, A305
+## Current release frontier — 2026-10-06, A309
 
-Astra active Lead Architect epoch4; Kimi continuity deputy; goal ACTIVE.
-Existing native Sol only; Grok unavailable. Models/settings/guards unchanged.
-Stopped SOL107#2, ScannerSOL075 and SOL139 excluded: no retry/reroute/salvage.
-No new model/TUI/role/service/issuer/grant/pool/cap.
-Previous checkpoint: /home/jericho/.jericho/runtime/ASTRA-E4-CHECKPOINT-20261006T0831MSK-ACTIVE.json
-sha25680f9310d405581640d140b0b75cd748f29a20d8a14269e57f81e5fc2b181425d.
+Astra active Lead Architect epoch4, model gpt-6-astra/provider openai_https/
+reasoning ultra; Kimi continuity deputy; goal ACTIVE. Existing native Sol only,
+Grok unavailable. No model/settings/guard/role changes. Stopped SOL107#2,
+ScannerSOL075, SOL139/equivalents excluded; no retry/reroute/salvage/partial acceptance.
+Prior sealed checkpoint: /home/jericho/.jericho/runtime/ASTRA-E4-CHECKPOINT-20261006T1020MSK-ACTIVE.json
+sha25612b082a452a5c4fb91a2d4b8dc73f1a896087f2a9a42e30e79f943853264cdce.
 
-Publisher — harness/code with evidence/environment dependencies; Astra integration.
-Current connected A305 full61/current88/93physical:
- /var/tmp/friday-astra-a305-min-wire.k8srseMV/manifest.json
- sha2567b73d830d31e69ab52e997a4f9d33baa33d5e15ba74e32c6d779dc0f3834a175.
-Implemented/integrated/raw-checked; Astra initial-cell delta independently
-SCOPED_STATIC_ACCEPT by Sol161; NOT whole-source/ABI/image/target acceptance. One native-bank file changed
-versus Sol160;60 Source/87 candidate unchanged.
+Publisher — class harness, dependent evidence/environment; owner Astra integration.
+Current exact61/current88/94physical:
+ /var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/manifest.json
+ sha2562a5e9b96b3d8048992712531746a8009e5a01265874f93d96befef846686c6c4.
+Implemented/integrated/raw-checked; EXACT A308 DELTA independently accepted,
+whole source/admission/target verification FALSE.
+Required native full DATA/error -> actual parent receiver -> once-close/historical
+bytes -> new immutable final error record relation: original Sol164 emits71/
+outcome3 but its entry rejected71 before intake. ONE A308 entry insertion fixes
+the actual path; all60 otherSource/87candidate bytes exact. No success from71.
+Independent Sol166 REVIEW:
+ /var/tmp/friday-sol166-a308-publisher-initial71-receiver-review/REVIEW.json
+ sha256d14c6f1b0c13e813fc90464ff09cabb3d72a0267c3b2e9ee05cfc3db288f88f0.
+A308-PUBLISHER-F1 CLOSED only for exact static entry relation; introduced
+contradictions none.15physical/304input pins fullSHA/stable9; actual native
+completed10:24:51MSK,355.152s. Received, exact queue item consumed, BOTH CLOSED.
+Original Sol164 manifest83a4a43d7d5acce85bab0ef3064e6941e73227ab201c2b6f9c84d8a6f0e4a18e
+remains immutable REJECT_CONNECTED_AS_SUBMITTED, not retroaccepted or whole
+self-accepted. Lead review626d1e08b29874efbf4d396ec6a272f1ba80e872a8b76a598420e8f24f74e61b
+retains only demonstrated birth/clock/wire/lower-caller static credits.
+v7 bank/reservation2 prepays bank/final/utility/cold at original birth with9
+mandatory selected-image sizeof fields; initial valid WORK refusal remains
+terminal without work acquisition. Full declared DATA is not whole process/
+private-heap custody, image/ABI qualification or measured fit.
+Next closure: actual earlier applicable-cutoff identity/current generation,
+pre-acquisition/prelaunch/full-span authority and complete last-owner/value/
+native/error/alias/cost relations. Astra owns same-Root integration; use existing
+authority path, no invented scalar grant/issuer/service. Current source admission
+has independently signed issued_ns/expires_ns/nonce/root identity; outer helper
+merely assumes caller admission precedes it. This gap is not solved by D0.
+Selected image/compilerABI/nine sizeof/provider/whole workload RAM/read/CPU/time
+remain OPEN; true primitive/ENTERED/unreturned/bad-domain/FULL-expired barriers kept.
+Original69/20/140/v2/inherited/M37/I14/J20/K01-K33/P01-P06 REQUIRED_NOT_RUN.
 
-Existing invariant: SAME retained native full min must reach actual outside
-receiver without widening original S/D0, on normal and failure paths.
-SOL160 implemented v6 header B65 and v2 failure RP31, actual post-ColdPerform
-latch/Commit/clock/publication -> early parent extraction -> later reads/once-close/
-freeze/final timestamps and FOUR NEW immutable records. D0 reservation separate.
-No scalar grants admission, resets a clock or retroactively authorizes launch.
-Exact author package:
- /var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/manifest.json
- sha2566e2e06418fd01dfa452bddcc189a01c4b6ea79e185ca914035eea699e3c3917e.
-Astra nonauthor review:
- /home/jericho/.jericho/grok-takeover/ASTRA-E4-A305-SOL160-MIN-WIRE-REVIEW-20261006.json
- sha256bf597f8e72381294c72bd73d381c0234743e75964739836caeb34861b87f3713.
-Connected numeric transfer/normal0/70/valid79/verified78/data-failure scopes retain
-static credits; one source-contract F1: initial RP31 at4088 was outside native
-word128/bind-region zero checks despite required M08. Current A305 checks that
-fixed output-only cell before accepted bind, preserving all actual downstream
-consumers/positive paths. No runtime bypass claimed. Extra fixed-byte/local/branch
-costs UNKNOWN_NOT_ZERO; current compiler ABI and whole physical/time fit unproved.
-M15 reconciliation: second decoder failure may leave first restriction retained;
-actual caller cannot proceed to raw/final retirement without raw_body_retained.
-Do not invent a stronger universal helper-phase requirement.
+Browser — class harness, dependent evidence/environment; Astra integration.
+Current exact15/current209/aux3/20physical:
+ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json
+ sha256177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5.
+Implemented/integrated/raw-checked; exact A308 retirement delta independently
+accepted Sol165, whole source/admission/target verification FALSE.
+Invariant full values/aliases/default root API/errors: SAME optional node table
+captured before edges; actual A079 retires ALL private container edges only after
+full decode+native check, including disconnected cycles, then root/table, true
+marker LAST after original guard. Full raw preserved; failures retain actual
+prefix/errors, never invented already-cleared edges. N nodes add N+3 clock calls.
+Independent review704917d6b2c7bd586d09b350db126ff7d0cc96e1a2f63e3b81751eb706a84749.
+Conditional normal-success graph accumulation F1 addressed, not whole fit.
+A302 resolver/A306 history-once byte credits rejoined; no universal 2x claim.
+Remaining F2 header/RLE/node/Unicode transient multiplicity; F3 failed partials/
+tracebacks; F4 prospective aggregate256MiB workload share; remaining F5 reads/
+hash/CPU/180s/work170/final10. Root wait/proc-history/child setup/PreparedView
+actual caller and image/ABI/admission open. ALL216/29/6/9/inherited/H26/G14
+REQUIRED_NOT_RUN/no waiver.
 
-SOL160107physical/117final inputs authenticated stable9/fullSHA; received,
-exact queue01a10fb9-65dc-7813-b3d7-42a4056f45c3 consumed, BOTH lifecycle CLOSED.
-Original failed/reviewed source is immutable; correction is a fresh derivative.
+Native SOL167 active:
+ ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167#1.
+Connected all3 actual decoder RLE temporary reduction, full semantics/control/
+resource obligations preserved; fresh package, NOT accepted or in this snapshot.
+TASK /home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL167-TASK.txt
+sha256e480397e17ae23a2b0a216ab339584c97765d4192cbe5e2f9063eb7b0e4706da.
+INPUT /home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL167-INPUT-20261006.json
+sha256fad9161e47256e53e143390e655b6f47cf33af88370d8ab49ab3864a6909f955.
+Exactly one same-TUI compact99.702s after CLOSED166, idle/empty/error-null.
+Actual turn01a11024-56bf-7881-8733-2ab297b21f02 started10:36:19MSK;
+first TASK/ref/hash verified inProgress/error-null, queue empty.
+40min incl4seal cap11:16:19MSK NOT ETA; no Source execution/heavy slot use.
 
-Preserved accepted exact scopes:
-- Sol158 accepted Astra A303 work-stop kinds6/7, first raw refusal/no further work,
-  separately prepaid completion/getter/latch/Commit/publication. True primitive/
-  domain/unreturned/full-expired clocks remain terminal; no Sol155 self-acceptance.
-  Review6084aa1b8db2beca1dcfccf2f72c79fd25a8af47c41c5ae10733d552443b06d0.
-- Astra accepted Sol159 actual prelaunch check/post-start elapsed and all-outcome
-  caller: original prelaunch first error survives context exit; conservative
-  attempted state; normal/native/semantic/once-close/new immutable results.
-  Review0d4a1e54dd454024dcff57e51f32417c4b67fe5338db2f81ed5dd92079838cbb;
-  manifestef68bdffb351ae56578b937f7db1c90277dc6df127ed79b42428f196dbd379c4.
-  Actual run body byte-exact in Sol160/A305; original D0 only before min intake.
-- A301 original parent clock, A300 initial F1/F2/symbolic layout, A298 operand/raw,
-  A296 retirement remain exact scoped credits, not current whole acceptance.
-
-Remaining connected roots: earlier authoritative applicable-cutoff identity/
-generation/pre-acquisition/prelaunch/full-span witness; actual image/PID-start/
-signed admission/compiler ABI/provider and complete workload costs; full native/
-value/alias/history/error/last-writer transfer and final owners. Private working
-bank -> late copy still loses required surviving custody on forbidden-clock path;
-return79/HELD is not handoff. Root PID/start-bound admission is not automatically
-outside-parent authority; absent installed enrollment is later qualification,
-not permission absence or reason to omit concrete same-role source readers.
-C02 actual five-argument caller already has receiver and conditional completed
-owner/history/empty-PID-domain removal. Remaining ACCEPTED_SAME_PID_CALLS retained
-root lifetime/end is unproved; do not reapply old missing-receiver finding or
-invent mandatory noncold RootPerform. No stopped TYPE/callback/child repair.
-Canonical diagnostic-only keeps the same source admission, wheel/inventory,
-topology/deadline/cleanup prerequisites; no alternative execution credit.
-
-SOL161 independent closure:
- /var/tmp/friday-sol161-a305-publisher-initial-min-review/REVIEW.json
- sha2563e22f1ca31b4fc228695405dfee965f53c37949aa78e1fa578ff2043d97fe7b6.
-Exact A305 initial RP31 guard plus actual normal0/70/78/79/parent context
-SCOPED_STATIC_ACCEPT; introduced contradictions none. Own Sol160 whole source
-not self-accepted. 18 physical/211 exact inputs verified, received, exact
-queue01a10fcc-881d-7840-b336-90961df70a56 consumed, BOTH lifecycle CLOSED.
-Completed09:00:31MSK, actual374.055s; all required controls remain NOT_RUN.
-
-Active native SOL162:
- ASTRA-E4-A305-PUBLISHER-INITIAL-WORK-FULL-CLOCK-CONNECTED-SOL162#1.
-TASK /home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL162-TASK.txt
-sha256d76208d0ac655dee5d36aec06b0ee186ae60bef83681cbb8816c2d54c40b8506.
-One same-TUI compact91.388s completed after closed161/error-null/idle-empty.
-Actual turn01a10fd6-b7d3-79a3-8c61-076f6fe0fb08 started09:11:32MSK,
-first TASK/hash and actual executor read verified09:11:40 inProgress/error-null.
-30min/final3seal cap09:41:32MSK is NOT ETA. Preserve assignment/pins.
-Existing initial constructor gap: valid W0<T<=D0 is currently clock failure
-before original reservation adoption; close initial work refusal/eligible prepaid
-completion/getter/Commit/wire/parent as ONE package. No new work/grant/clock,
-no failed-clock revival or fake successful initialized pool. Astra independent
-review required. Do not enter stopped/opaque scopes. No wait loop.
-
-Browser — harness/code + evidence/environment, unchanged A302:
- /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/manifest.json
- sha2560799ec9e30ac7f1d5278933527d001101a5d55719f5f49aa2427e96e2bb539c1.
-Astra resolver/10 bindings independently scoped-accepted by Sol156 review
-7da4d8b9bf916fcfa43d29ed1933421fec563e367137ff1f76755fc8dbda0759.
-Actual sequence->rank->FULL equality->SAME object: M resolutions <=M comparisons;
-fullN once replaces N(N+1)/2 with <=N, source reasoning only/not measured fit.
-F1-F4 aggregate raw/decoded multiplicity/cycles/error/positive-negative custody,
-other F5 parse/hash/read/CPU and original256MiB/180/10 fit OPEN. Root wait/proc
-history, child setup, PreparedView outside caller, whole writer-end/image remain.
-Next owner Astra/Sol: connected workload/pre-effect reader costs and full graph/
-error custody; no body/cap reduction, target NOT_RUN.
-
-Other roots unchanged: harness/code plus evidence/environment; scoped credits
-only, whole independent acceptance and target verification FALSE:
+Other grouped roots — class harness, dependent evidence/environment; Astra owner;
+implemented/scoped checks exist, whole integration/independent acceptance/target
+verification NOT established. Next closure follows current pinned implementations:
 - Scanner LAB887 manifest3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee:
   existing-parent/factory/Source-main endpoints OPEN; stopped075 excluded.
 - Node A237 manifest8e9f2f157ea87785761578fd4ab3795b327c45016be8d29c43a55fe7d184f35f:
-  native pool/full graph-prefix/both ends/Q1Q2 OPEN.
+  native pool/full graph-prefix/both ends/Q1Q2 OPEN; no old findings reapplied blindly.
 - Sender SOL089 manifest2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133:
-  native/raw/error/both ends OPEN. Original Python scoped credits retained.
+  native/raw/error/both ends OPEN; original Python scoped credits retained.
 
-Product frozen cecd28a92ac4fd4e34c4d3813d0c598debe09436,0.208.64/schema50;
-index unchanged29ddfd4a. Installed0.208.58 last recorded/not reprobed; no new wheel.
-r5 immutable RED/no reuse; r6 absent; SourceReady/Root_admission/GO FALSE.
-Next newly executable release gate NONE. Independently accepted connected source
-then image/compiler ABI/grants/provider/resource/finite-clock qualification,
-stable collect-all diagnostics, exact change+exact union,160live,A+B(noBafterredA),
-B09,R10/all30/F0-F11,build/install,restore/rollback,target/independent acceptance
-remain required. Original69/mandatory20/full140/v2 and inherited clock/prelaunch
-controls REQUIRED_NOT_RUN/no waiver; unsafe bodies opaque/hash-only REQUIRED.
-External web ONLY OWNER_DEFERRED_POST_1_0, never PASS. No Source parser/compiler/
-import/native/runtime/tests/live/install or exclusive heavy run this turn.
-Movement A305: connected retained-min producer/receiver implemented with scoped
-nonauthor credits; initial-field mismatch fixed and independently scoped accepted. Remaining initial
-constructor work/full distinction assigned as connected SOL162, not a new root.
-Whole roots closed0/new product roots0/execution layers0. No unsupported ETA.
-Publication target: handoffs/ASTRA-E4-20261006T0842MSK-PUBLISHER-CHECKPOINT,
-incremental inert Publisher actual source/three versions/exact scoped reviews,
-NOT a new full five-component snapshot. Restricted control body and private/runtime
-materials omitted explicitly, no tests or source changes for export. Previous
-public main9b4ece8139669d1f6851d5e3989d427323519fb9 verified at isolated clone;
-publication success/full commit is recorded in the exact publication receipt.
+Product/deployment: frozen cecd28a92ac4fd4e34c4d3813d0c598debe09436,0.208.64/schema50;
+index29ddfd4a unchanged at preceding checkpoint. Installed0.208.58 last recorded/
+not reprobed; no new wheel. r5 immutable RED/no reuse; r6 absent.
+SourceReady/Root_admission/GO FALSE. Newly executable release gate NONE.
+Necessary connected source acceptance -> actual image/ABI/grants/provider/resource/
+finite-clock qualification -> stable collect-all diagnostics -> exact change+exact
+union/160live/A+B(noBafterredA)/B09/R10/all30/F0-F11/build/install/restore/rollback/
+target/independent acceptance remain mandatory. External web alone
+OWNER_DEFERRED_POST_1_0, never PASS. No reduced functions/cases/caps or unsupported ETA.
+Movement this checkpoint: Publisher receiver mismatch independently scoped closed;
+prior Browser successful-graph closure preserved. Whole roots closed0/new product
+roots0/execution layers0. Archive verification is not an acceptance execution.
+
+Publication: isolated checkout based on public63184bd6a1a59c1430efebbe64b7bab4760cc695.
+This checkpoint snapshot:
+ handoffs/ASTRA-E4-20261006T1038MSK-BROWSER-PUBLISHER-CHECKPOINT.
+433 actual immutable files/13,444,015 bytes: current Browser/Publisher, direct
+comparison baselines, author results and exact independent reviews.15 selected
+paths explicitly omitted (11 restricted control-body copies,4 host helpers);
+private conversations/session/auth/runtime authority and unrelated files excluded.
+Incremental TWO-component export, NOT a fresh complete five-component snapshot.
+Other components remain in earlier full archive20261004T2037MSK; no new acceptance
+or target execution inferred. New SOL167 changes excluded. Manifest/review binding/
+omission indices; no Source reruns/audit/fix for export or active checkout mutation.
+
 
 Superseded A242 sealed connected baseline, 04 October13:35MSK:
 product baseline `cecd28a92ac4fd4e34c4d3813d0c598debe09436` unchanged.

@@ -1,0 +1,29 @@
+{
+  "schema": "friday.sol164.timing-resource.v1",
+  "accepted_at": "2026-10-06T09:41:10+03:00",
+  "sealed_at": "2026-10-06T09:57:41.174381+03:00",
+  "actual_elapsed_seconds_at_seal": 991.174381,
+  "seconds_limit": 2400,
+  "seal_tail_seconds": 240,
+  "declared_read_limit_bytes": 536870912,
+  "known_successful_host_streamed_bytes": {
+    "prepare": 7904077,
+    "successful_author": 6649414,
+    "host_check1": 18063854,
+    "host_check2": 18064552,
+    "host_check3": 18065936,
+    "seal_streamed_bytes": 22406582
+  },
+  "failed_host_and_shell_streamed_bytes": "UNKNOWN_NOT_ZERO, conservatively reserved below; no Source run",
+  "all_host_material_read_reservation_bytes": 268435456,
+  "reserve_includes_failed_checks_shell_diagnostic_and_repeated_literal_reads": true,
+  "self_maxrss_KiB": 516804,
+  "host_child_maxrss_KiB": 70436,
+  "aggregate_RAM_CPU_IO_time": "UNKNOWN_NOT_ZERO, no measured Source fit",
+  "declared_RAM_limit": 8589934592,
+  "output_limit_bytes": 25165824,
+  "Source_exec_tests": 0,
+  "local": 1,
+  "children_models": 0,
+  "heavy": 0
+}

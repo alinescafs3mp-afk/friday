@@ -1,0 +1,30 @@
+{
+  "schema": "friday.sol136.host-resource.v1",
+  "limits": {
+    "read_bytes": 536870912,
+    "RAM_bytes": 8589934592,
+    "output_bytes": 33554432,
+    "wall_seconds": 2400,
+    "seal_reserve_seconds": 300,
+    "local_concurrency": 1,
+    "children": 0,
+    "heavy": 0
+  },
+  "reader_exact_charged": 3127570,
+  "sealer_exact_charged_before_resource": 5964884,
+  "administrative_shell_tool_and_final_send_read_upper": 134217728,
+  "total_read_upper_before_resource": 143310182,
+  "seal_read_reserve": 67108864,
+  "own_reader_max_rss_KiB": 516804,
+  "own_sealer_max_rss_KiB": 516804,
+  "administrative_and_model_host_peak": "UNKNOWN_NOT_ZERO_NOT_PROVEN; no whole-task measured RAM attestation",
+  "Source_stock_parsers": 0,
+  "Source_stock_compilers": 0,
+  "Source_stock_exec_tests_simulations_native_live": 0,
+  "archive_network": 0,
+  "local_concurrency": 1,
+  "children": 0,
+  "heavy": 0,
+  "failed_helper_runs": 0,
+  "Source_ready": false
+}

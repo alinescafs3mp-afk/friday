@@ -1,0 +1,11 @@
+--- /var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/parent/publisher_root_command.py
++++ /var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/parent/publisher_root_command.py
+@@ -920,7 +920,7 @@
+             and self.scope.process is not None and self.scope.process.pid == self.process_id
+             and self.scope.process.returncode == returncode
+             and proof.cleanup_clear and proof.leader_reaped
+-            and proof.leader_returncode == returncode and returncode in (0, 70, 78, 79)
++            and proof.leader_returncode == returncode and returncode in (0, 70, 71, 78, 79)
+             and not proof.forced_leader and not proof.forced_descendants
+         ):
+             raise BankUnconfirmed("bank_real_process_end_unconfirmed")

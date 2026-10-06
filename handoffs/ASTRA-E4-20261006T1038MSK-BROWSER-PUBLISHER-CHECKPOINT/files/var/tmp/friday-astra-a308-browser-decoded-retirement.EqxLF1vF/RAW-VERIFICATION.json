@@ -1,0 +1,203 @@
+{
+  "schema": "friday.astra.a308.browser.raw-author-verification.v1",
+  "verification_scope": "Raw byte/literal comparison and metadata JSON ONLY; no Source parser or execution.",
+  "source_inverse": {
+    "files": [
+      {
+        "file": "A079-NATIVE-PUBLIC-DRIVER.py",
+        "inverse_to_A306_exact": true
+      },
+      {
+        "file": "A071-SUPERVISOR.py",
+        "inverse_to_A306_exact": true
+      },
+      {
+        "file": "A087-PUBLIC-DRIVER.py",
+        "inverse_to_A306_exact": true
+      }
+    ],
+    "three_decoder_bytes_identical": true,
+    "old_decoder_body_after_removing_owner_hook_exact": true,
+    "actual_consumer_changed": true,
+    "no_source_parse_or_execution": true
+  },
+  "A079_final_clock_delta_inverse_exact": true,
+  "same_three_decoder_body": true,
+  "current_source_changed": [
+    "A071-ABI-MAPPING.json",
+    "A071-BUILD-RECIPE.json",
+    "A071-SUPERVISOR.py",
+    "A079-NATIVE-ORACLES.json",
+    "A079-NATIVE-PUBLIC-DRIVER.py",
+    "A087-ABI-CONTRACT.json",
+    "A087-PUBLIC-DRIVER.py",
+    "A104-ORDINARY-CONTRACTS.json",
+    "A118-CONNECTED-CONTRACT.json"
+  ],
+  "local_source_unchanged": [
+    "A071-BOOTSTRAP.c",
+    "A071-COMMON.c",
+    "A071-CONTRACT.py",
+    "A071-NATIVE.h",
+    "A071-PRODUCER.py"
+  ],
+  "metadata": [
+    {
+      "file": "A079-NATIVE-ORACLES.json",
+      "pin": {
+        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-ORACLES.json",
+        "bytes": 78339,
+        "sha256": "5f0ad6d1797f14fcf9a54cb407490c4d89fcdd24a32e858bbb2fae4a87a00844",
+        "identity9_decimal_strings": [
+          "2050",
+          "4230542",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "78339",
+          "1791269895143808046",
+          "1791269895143808046"
+        ],
+        "stable9": true
+      },
+      "inverse_to_A306_exact": true
+    },
+    {
+      "file": "A071-ABI-MAPPING.json",
+      "pin": {
+        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-ABI-MAPPING.json",
+        "bytes": 160473,
+        "sha256": "dab798360e67425c6ca26a39ca508fc19051886a402d7f9038799a76e1dddffc",
+        "identity9_decimal_strings": [
+          "2050",
+          "4230534",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "160473",
+          "1791269895141807931",
+          "1791269895141807931"
+        ],
+        "stable9": true
+      },
+      "inverse_to_A306_exact": true
+    },
+    {
+      "file": "A071-BUILD-RECIPE.json",
+      "pin": {
+        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-BUILD-RECIPE.json",
+        "bytes": 184596,
+        "sha256": "942f8bfdef4154a738d4fae1a2ebcf11b1ea85ba13def786a213b186e6d1b629",
+        "identity9_decimal_strings": [
+          "2050",
+          "4230536",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "184596",
+          "1791269895143808046",
+          "1791269895143808046"
+        ],
+        "stable9": true
+      },
+      "inverse_to_A306_exact": true
+    },
+    {
+      "file": "A087-ABI-CONTRACT.json",
+      "pin": {
+        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-ABI-CONTRACT.json",
+        "bytes": 78044,
+        "sha256": "a804b0f0d3cd354c7f4639e8ab013c55ebea5981b61adf73f371542ecdc276e5",
+        "identity9_decimal_strings": [
+          "2050",
+          "4230544",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "78044",
+          "1791269895144808104",
+          "1791269895144808104"
+        ],
+        "stable9": true
+      },
+      "inverse_to_A306_exact": true
+    },
+    {
+      "file": "A118-CONNECTED-CONTRACT.json",
+      "pin": {
+        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A118-CONNECTED-CONTRACT.json",
+        "bytes": 170363,
+        "sha256": "495e6e1f62d64066687efc961ffb9dc01e0d48f06ce79de4cf5e37daa2d0a6fd",
+        "identity9_decimal_strings": [
+          "2050",
+          "4230547",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "170363",
+          "1791269895146808218",
+          "1791269895146808218"
+        ],
+        "stable9": true
+      },
+      "inverse_to_A306_exact": true
+    },
+    {
+      "file": "A104-ORDINARY-CONTRACTS.json",
+      "pin": {
+        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A104-ORDINARY-CONTRACTS.json",
+        "bytes": 167293,
+        "sha256": "3339e783980f6d93bcc6d490ceee60a28dbd5aa9074d5a58ffbc80c3227d3859",
+        "identity9_decimal_strings": [
+          "2050",
+          "4230546",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "167293",
+          "1791269895145808162",
+          "1791269895145808162"
+        ],
+        "stable9": true
+      },
+      "inverse_to_A306_exact": true
+    }
+  ],
+  "metadata_delta": "24 current full pin blocks plus24 current implementation/resource statements; inverse restoration to all6 original A306 metadata byte-exact. All historical-only pins/text unchanged.",
+  "current_inventory": {
+    "Source15": {
+      "total": 15,
+      "changed": 5,
+      "unchanged": 10
+    },
+    "current209": {
+      "total": 209,
+      "changed": 9,
+      "unchanged": 200
+    },
+    "aux3": {
+      "total": 3,
+      "changed": 0,
+      "unchanged": 3
+    }
+  },
+  "rechecked": {
+    "current_unique_pins": 212,
+    "current_bytes": 4820450,
+    "full_SHA_and_stable9": true,
+    "at_msk": "2026-10-06T09:59:44.768780+03:00"
+  },
+  "source_execution": false,
+  "independent_acceptance": false,
+  "actual_target_observations": [],
+  "admin_corrections": "A metadata-only Python literal NameError, a truncated host-output JSON decode and an invalid duplicate-target patch were corrected before artifact sealing; no Source execution or frozen product write.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

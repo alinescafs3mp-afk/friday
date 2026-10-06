@@ -1,0 +1,549 @@
+{
+  "schema": "friday.sol165.source-comparison.v1",
+  "counts": {
+    "Source15": {
+      "total": 15,
+      "changed": 5,
+      "unchanged": 10
+    },
+    "current209": {
+      "total": 209,
+      "changed": 9,
+      "unchanged": 200
+    },
+    "aux3": {
+      "total": 3,
+      "changed": 0,
+      "unchanged": 3
+    }
+  },
+  "changed": {
+    "Source15": [
+      {
+        "name": "A071-ABI-MAPPING.json",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-ABI-MAPPING.json",
+          "bytes": 159580,
+          "sha256": "25227eaeb91db1d25980b96bc2564e5e7cf7ef18bdfb927cec5edb99da16c340",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229660",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "159580",
+            "1791267795464939005",
+            "1791267795464939005"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-ABI-MAPPING.json",
+          "bytes": 160473,
+          "sha256": "dab798360e67425c6ca26a39ca508fc19051886a402d7f9038799a76e1dddffc",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230534",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "160473",
+            "1791269895141807931",
+            "1791269895141807931"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A071-BUILD-RECIPE.json",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-BUILD-RECIPE.json",
+          "bytes": 183687,
+          "sha256": "c20d66e0020c92fcd685aa1e6dd74acbcfa5c79a654cb1eb929cca42a3e09038",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229661",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "183687",
+            "1791267795467939174",
+            "1791267795467939174"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-BUILD-RECIPE.json",
+          "bytes": 184596,
+          "sha256": "942f8bfdef4154a738d4fae1a2ebcf11b1ea85ba13def786a213b186e6d1b629",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230536",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "184596",
+            "1791269895143808046",
+            "1791269895143808046"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A071-SUPERVISOR.py",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+          "bytes": 141121,
+          "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229653",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "141121",
+            "1791267716925502248",
+            "1791267716925502248"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+          "bytes": 141617,
+          "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230541",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "141617",
+            "1791269577105520169",
+            "1791269577105520169"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A087-PUBLIC-DRIVER.py",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+          "bytes": 221107,
+          "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229654",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "221107",
+            "1791267716927502361",
+            "1791267716927502361"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+          "bytes": 221603,
+          "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230545",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "221603",
+            "1791269577106520227",
+            "1791269577106520227"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A118-CONNECTED-CONTRACT.json",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A118-CONNECTED-CONTRACT.json",
+          "bytes": 169438,
+          "sha256": "8c7dc4960faf5467473f7e674af0ecea7fe6414b269b50d98d1bc65a81de54f1",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229662",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "169438",
+            "1791267795473602893",
+            "1791267795473602893"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A118-CONNECTED-CONTRACT.json",
+          "bytes": 170363,
+          "sha256": "495e6e1f62d64066687efc961ffb9dc01e0d48f06ce79de4cf5e37daa2d0a6fd",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230547",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "170363",
+            "1791269895146808218",
+            "1791269895146808218"
+          ],
+          "stable9": true
+        }
+      }
+    ],
+    "current209": [
+      {
+        "name": "A071-ABI-MAPPING.json",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-ABI-MAPPING.json",
+          "bytes": 159580,
+          "sha256": "25227eaeb91db1d25980b96bc2564e5e7cf7ef18bdfb927cec5edb99da16c340",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229660",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "159580",
+            "1791267795464939005",
+            "1791267795464939005"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-ABI-MAPPING.json",
+          "bytes": 160473,
+          "sha256": "dab798360e67425c6ca26a39ca508fc19051886a402d7f9038799a76e1dddffc",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230534",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "160473",
+            "1791269895141807931",
+            "1791269895141807931"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A071-BUILD-RECIPE.json",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-BUILD-RECIPE.json",
+          "bytes": 183687,
+          "sha256": "c20d66e0020c92fcd685aa1e6dd74acbcfa5c79a654cb1eb929cca42a3e09038",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229661",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "183687",
+            "1791267795467939174",
+            "1791267795467939174"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-BUILD-RECIPE.json",
+          "bytes": 184596,
+          "sha256": "942f8bfdef4154a738d4fae1a2ebcf11b1ea85ba13def786a213b186e6d1b629",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230536",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "184596",
+            "1791269895143808046",
+            "1791269895143808046"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A071-SUPERVISOR.py",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+          "bytes": 141121,
+          "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229653",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "141121",
+            "1791267716925502248",
+            "1791267716925502248"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+          "bytes": 141617,
+          "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230541",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "141617",
+            "1791269577105520169",
+            "1791269577105520169"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A079-NATIVE-ORACLES.json",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-ORACLES.json",
+          "bytes": 77446,
+          "sha256": "d323995eaf876bd02ea25e0d218c1fcbaa92a187a3d2df327cfc9c0294d39ed6",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229658",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "77446",
+            "1791267795467939174",
+            "1791267795467939174"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-ORACLES.json",
+          "bytes": 78339,
+          "sha256": "5f0ad6d1797f14fcf9a54cb407490c4d89fcdd24a32e858bbb2fae4a87a00844",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230542",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78339",
+            "1791269895143808046",
+            "1791269895143808046"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A079-NATIVE-PUBLIC-DRIVER.py",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+          "bytes": 78170,
+          "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229655",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78170",
+            "1791267716924502191",
+            "1791267716924502191"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+          "bytes": 79836,
+          "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230543",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "79836",
+            "1791269895060803273",
+            "1791269895060803273"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A087-ABI-CONTRACT.json",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-ABI-CONTRACT.json",
+          "bytes": 77151,
+          "sha256": "e755d074b06ba58ab3fea731b7a63fec341c8e0c4a108a94bd1be3b00f99b014",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229657",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "77151",
+            "1791267795468939231",
+            "1791267795468939231"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-ABI-CONTRACT.json",
+          "bytes": 78044,
+          "sha256": "a804b0f0d3cd354c7f4639e8ab013c55ebea5981b61adf73f371542ecdc276e5",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230544",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "78044",
+            "1791269895144808104",
+            "1791269895144808104"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A087-PUBLIC-DRIVER.py",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+          "bytes": 221107,
+          "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229654",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "221107",
+            "1791267716927502361",
+            "1791267716927502361"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+          "bytes": 221603,
+          "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230545",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "221603",
+            "1791269577106520227",
+            "1791269577106520227"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A104-ORDINARY-CONTRACTS.json",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A104-ORDINARY-CONTRACTS.json",
+          "bytes": 166400,
+          "sha256": "408bb3c8ebab4a7f4c1a7a3fdb9c62c982bcd9079a89ea7a570bfbf69111c26b",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229659",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "166400",
+            "1791267795471455068",
+            "1791267795471455068"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A104-ORDINARY-CONTRACTS.json",
+          "bytes": 167293,
+          "sha256": "3339e783980f6d93bcc6d490ceee60a28dbd5aa9074d5a58ffbc80c3227d3859",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230546",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "167293",
+            "1791269895145808162",
+            "1791269895145808162"
+          ],
+          "stable9": true
+        }
+      },
+      {
+        "name": "A118-CONNECTED-CONTRACT.json",
+        "before": {
+          "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A118-CONNECTED-CONTRACT.json",
+          "bytes": 169438,
+          "sha256": "8c7dc4960faf5467473f7e674af0ecea7fe6414b269b50d98d1bc65a81de54f1",
+          "identity9_decimal_strings": [
+            "2050",
+            "4229662",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "169438",
+            "1791267795473602893",
+            "1791267795473602893"
+          ],
+          "stable9": true
+        },
+        "after": {
+          "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A118-CONNECTED-CONTRACT.json",
+          "bytes": 170363,
+          "sha256": "495e6e1f62d64066687efc961ffb9dc01e0d48f06ce79de4cf5e37daa2d0a6fd",
+          "identity9_decimal_strings": [
+            "2050",
+            "4230547",
+            "33152",
+            "1000",
+            "1000",
+            "1",
+            "170363",
+            "1791269895146808218",
+            "1791269895146808218"
+          ],
+          "stable9": true
+        }
+      }
+    ],
+    "aux3": []
+  },
+  "physical_membership": "EXACT_BOTH_MANIFESTS",
+  "current_unique_pins": 212,
+  "all_pins": "FULL_SHA_STABLE9",
+  "Source_execution": false
+}

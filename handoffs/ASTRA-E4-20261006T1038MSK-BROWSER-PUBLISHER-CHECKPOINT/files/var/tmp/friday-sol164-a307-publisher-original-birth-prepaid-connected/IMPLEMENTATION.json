@@ -1,0 +1,72 @@
+{
+  "schema": "friday.sol164.a307.publisher.original-birth.implementation.v1",
+  "assignment": "ASTRA-E4-A307-PUBLISHER-ORIGINAL-BIRTH-PREPAID-EARLY-FAILURE-CONNECTED-SOL164",
+  "generation": 1,
+  "author": "Sol",
+  "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_INDEPENDENT_REVIEW",
+  "independent_acceptance": false,
+  "base": {
+    "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/manifest.json",
+    "bytes": 71440,
+    "sha256": "7b73d830d31e69ab52e997a4f9d33baa33d5e15ba74e32c6d779dc0f3834a175"
+  },
+  "conflict": {
+    "path": "/var/tmp/friday-sol162-a305-publisher-initial-work-full-connected/CONFLICT.json",
+    "bytes": 10865,
+    "sha256": "2f3d4b64bbe92bad4954c8123fbca17fdb715d26565737ee459d13b3b88cbeae",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980770",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "10865",
+      "1791267592124452138",
+      "1791267652846882384"
+    ],
+    "stable9": true
+  },
+  "source61": 61,
+  "current88": 88,
+  "changed": [
+    "native/publisher_root_entry.c",
+    "native/publisher_root_entry.h",
+    "native/publisher_root_bank.h",
+    "native/publisher_root_bank.c",
+    "native/publisher_root_command.c",
+    "parent/publisher_root_command.py"
+  ],
+  "delta": [
+    "ONE existing outside reservation, BEFORE memfd/launch: v7 bank / v2 reservation includes disjoint seven-pass bank reads PLUS original final, utility, cold allowances, same compiled caps. Native checked 128-bit intermediates/alignment/narrowing; parent unbounded integer calculation rejects out-of-u64 domain and original interval overflow before acquisition. No postclock second debit of F/U/C.",
+    "Nine mandatory native selected-image sizeof facts have an exact numeric-only RootBankBirthLayout counterpart and identical parent order. No defaults/old v6 layout accepted; collecting/authenticating/qualifying these new facts is REQUIRED_NOT_RUN, NOT admission from getter invocation.",
+    "Native verifies/adopts exactly recomputed reservation and F/U/C receipts BEFORE first constructor clock. Birth accounting is separate from initialized/next_token/work ownership and utility acquisition. First raw sec/nsec/rc/immediate errno/observed_ns stays in original object.",
+    "Valid W0<T<=D0 is distinct terminal initial WORK_STOPPED5; initialized/next_token remain0; utility_preown/config/case/Source/runtime work never begins. Original Owns/MasterWorkClock/Before work gates unchanged. No work-clock resample/grant or timer extension. T==W0 preserves old strict-greater constructor boundary; later admission equality remains separately required.",
+    "Eligible early completion uses ONLY existing prepaid cold/final receipt clocks under the SAME original FULL S/D0, not a new work clock. True primitive failure, entered/unreturned, bad domain, FULL expiry and later failed/unknown completion retain strict no-retry/getter0/HELD barriers.",
+    "Actual failed ColdPool -> cold_complete -> FinalReceive -> getter/latch/B65/RP31 -> Commit/bank_publish -> return71 -> parent receive -> first failure finisher -> once-close/full immutable copy are connected. Cold/final early branch verifies actual numeric unattempted prefix, original receipt amounts/owner/layout/counters, unused work-clock fields, first error pointer identity, no Source/config/runtime/utility attempt/END/GO flags. No utility support or observation is acquired to create an eligible last user.",
+    "Early native receiver reads EVERY RootStorage byte and full ColdResult prefix under original F credit and actual finite FULL clocks. No success-only final_caller_credits/utility pool snapshot/settlement/producer transfer is performed. Original-owner-retained stays true locally; Source/config/runtime/utility END flags stay false. Full bank publication also carries binding/final record bytes through existing compare/copy passes.",
+    "Distinct existing zero header words66..79 carry first raw constructor facts and four original birth components. Parent validates raw domain/strict WORK range/component sum, matching qualified values/full raw retained bank/header/phase aliases and original fault body. Only71/outcome3 reaches InitialWorkData, not successful BankCompletion. Actual original outside case object is retained by identity BEFORE effects and in the new immutable error-data record; selected argv codec/body relation remains independently required.",
+    "Parent raises the SAME received InitialWorkFailure object after the actual received-failure finisher. Secondary close/clock/copy errors stay separately retained; uncertain/forced/reap/read/close states do not get complete transfer. NEW immutable BankFinalResult outcome is error DATA only, with all readiness/admission/GO false. Retire unchanged full raw bank using existing physical predicate, not normal/native success END.",
+    "Normal current work path retains actual MasterBefore(0) work/observation gate before first status; C is already paid at original birth, not charged twice. Later A303 valid work-stop and min-wire/prelaunch relationships unchanged except their newly joined birth/layout context requiring exact new-byte checks."
+  ],
+  "original_constraints": {
+    "S_seconds": 4200,
+    "R_seconds_INSIDE": 600,
+    "READ_CAP": 40960000000,
+    "RAM_CAP": 8589934592,
+    "OUTPUT_CAP": 33554432,
+    "new_pool_grant_role_model_TUI": false
+  },
+  "definition_of_full_DATA": "Full declared bank and existing RootStorage/ColdResult numeric prefix, actual phase/fault alias strings, header and original outside input object. NOT an entire process/argv/stack/private CPython heap, Source body/admission or all historical/implicit custody theorem.",
+  "remaining_conditions": [
+    "Astra independent nonauthor review on exact final bytes; no own final acceptance.",
+    "Compiler/selected-image native ABI including 128-bit support/padding/nine sizeof facts, enrollment/signature/current generation/provider/canonical caller and earlier applicable-min/prelaunch/full-span authority REQUIRED_NOT_RUN.",
+    "All whole original error/body/alias/last-consumer/publication/cleanup custody and actual original argv/input conversion/control observations remain REQUIRED; original protected policy/stock/type/callback/worker bodies unchanged and unqualified.",
+    "F/U/C are conservative symbolic allowances, NOT measured complete CPU/read/RAM/IO/time bounds. Added helper metadata guards, fields, branches, Python reference/storage and implicit primitive/allocator/provider costs UNKNOWN_NOT_ZERO. Same-cap workload fit and actual remaining FULL time must be independently qualified; any failure remains HELD.",
+    "Original69/mandatory20/full140/v2/inherited/M37/I14/J20 plus all new controls REQUIRED/no waiver/NOT_RUN. No positive credit or old acceptance transferred to new context."
+  ],
+  "Source_parser_compiler_import_AST_exec_tests_helpers_live_network_install": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

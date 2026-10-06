@@ -1,0 +1,161 @@
+{
+  "schema": "friday.astra.a285.native-error.fulltext-obligations.v1",
+  "base": {
+    "path": "/var/tmp/friday-astra-a282-publisher-connected-request-detach.zgEJ7O/manifest.json",
+    "bytes": 35347,
+    "sha256": "0748d139e668558ae391c0ba3f5f22cafa79bf33dde2b6ce0ae5978ba288be7a",
+    "identity9_decimal_strings": [
+      "2050",
+      "7084436",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "35347",
+      "1791227171550615466",
+      "1791227171569616546"
+    ],
+    "stable9": true
+  },
+  "changed_Source": [
+    {
+      "path": "/var/tmp/friday-astra-a284-publisher-preowned-error-connected.KcXy0c/native/publisher_original_caller.c",
+      "bytes": 15007,
+      "sha256": "18fd8caeadb26b1daec81753b76dcb011b55ce66f7b385d622293d2bb0b7415e",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084549",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15007",
+        "1791229746876014117",
+        "1791229746876014117"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a284-publisher-preowned-error-connected.KcXy0c/native/publisher_root_entry.c",
+      "bytes": 641159,
+      "sha256": "cde12291f8ee49ce8b01c46dee1e7553e7614625cd0f0aaebfb515472f88a1dd",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084555",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "641159",
+        "1791229746875014060",
+        "1791229746875014060"
+      ],
+      "stable9": true
+    }
+  ],
+  "cases": [
+    {
+      "id": "A285-NATIVE-PENDING-ORIGINAL",
+      "text": "For both actual refusal setters, preserve the exact already-raised original instance and full type/traceback/context when another exception is being handled too. Do not fetch/discard, normalize, replace, retry or invoke a new exception factory; native refusal fields may record the unchanged existing failure classification.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 324,
+      "sha256": "e9d22c6f6584ae2fe9dbcc3d6cf0921a8d6bad76d233a8cfb1629d1af49de035"
+    },
+    {
+      "id": "A285-NATIVE-HANDLED-ORIGINAL",
+      "text": "At both actual setters with NULL raised indicator and an active handled original, retain the same instance via PyErr_GetHandledException and install its owned reference with PyErr_SetRaisedException. Its actual args/dict/notes/cause/context/traceback, aliases and cycles must remain unchanged by the setter and required in both receivers.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 338,
+      "sha256": "c6c9dda66f4abe1d8ba4a8dd8b0388b51263c6e40f670ae2459e0b202855499a"
+    },
+    {
+      "id": "A285-NATIVE-EMPTY-PREOWNED",
+      "text": "With no raised or handled original, use exactly the already-owned Root refusal instance, not a new normalized exception. Root preowned storage, copied borrowed Bindings, selected original_debit and full Root owner MOVE must agree on identity and one reference per actual ownership.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 281,
+      "sha256": "6998935ded33fd98e0a00c98d7d761f2e19814b6014a6804d812aa044a6deaa1"
+    },
+    {
+      "id": "A285-NATIVE-PHASE-GUARDS",
+      "text": "Before interpreter initialization or before the refusal object exists, Root fault keeps the native refusal without calling a Python error API. After final_caller_binding.transferred, Root fault must return without changing the exposed native record or using old Python references. Preserve original actual-caller initialized-runtime precondition; do not infer arbitrary late API safety.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 386,
+      "sha256": "9f1e43f21f418c2b944830f210df78527e521e84efc9dd39e60248a27af41d5e"
+    },
+    {
+      "id": "A285-NATIVE-CONTEXT-NONMUTATION",
+      "text": "For original contexts containing the preowned refusal or a preexisting cause/context cycle, neither changed setter may traverse/rewrite that causal chain or decref a replaced current exception. Compare complete original aliases before/after the setter; required later traceback propagation is distinct and must be represented, not deleted.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 339,
+      "sha256": "ac5b6d1c76cd825564458f4e0860327ca27f8cb0f402ffe49987e18261484073"
+    },
+    {
+      "id": "A285-NATIVE-REFUSAL-BUDGET",
+      "text": "Exercise actual original_debit structural overflow/missing-provider/current-owner checks and Root provider refusal. Structural failure must not invoke provider/effects; real provider refusal preserves its exact pending/handled original. Success still debits same original pool before counters/effects; no extra allowance, cap change, refund, reset or new caller storage.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 370,
+      "sha256": "aff06573359265780c3054ef6d49622c4fb0eec1c2b328677b8eea1e82e3fa1a"
+    },
+    {
+      "id": "A285-NATIVE-ERROR-MOVE",
+      "text": "Follow native preSource initial_failure, actual caller entry_failure and invocation failure into their original preowned type/value/traceback fields. CommandReceive must move actual strong error owners once, not double-count borrowed refusal aliases; original required error graph/body/secondary routes cannot be replaced by type/message or a diagnostic pointer.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 362,
+      "sha256": "fcbae1ba84fd3c8791b163e25b998c8282f02e02f362382742d68d7d9743934e"
+    },
+    {
+      "id": "A285-NATIVE-BOTH-ENDS",
+      "text": "Run actual RootPerform -> CommandReceive -> cold_complete -> prebound FinalReceive on required normal and all failure cases once. No exposed tuple mutation, helper receipt or exit code establishes complete retirement. Unknown original graph, pending error, incomplete FD/mapping or lost admission must preserve exact unconfirmed state and stop the affected contour.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 365,
+      "sha256": "fffe93046b59af089a3d6da4d652351ab7db261dd7c88689926ecf333292fd28"
+    },
+    {
+      "id": "A285-NATIVE-PROPAGATION",
+      "text": "After a setter returns through actual native/Python caller, re-raised originals can acquire real traceback frames. Preserve refreshed complete errors/frame locals/caller objects through primary and secondary readers and final full-body consumption; acceptance of setter nonmutation is not acceptance of all later error state.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 325,
+      "sha256": "228ec763b954a37d78d10ea07cb42f5b4d3da2c2d5c97bd981ea3749255d4351"
+    },
+    {
+      "id": "A285-NATIVE-STOCK-RESOURCE-FIT",
+      "text": "Bind actual selected interpreter/image/compiler ABI and required workload before execution. errors.c GetHandledException traverses the real exception-stack chain and takes an owned reference; do not call its cost constant or zero. Include actual stack/lookup/refcount/body/final costs in unchanged original caps. Exact upstream raw body and zero active patch targets for Python/errors.c are source evidence only.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 412,
+      "sha256": "694179fb29af7d12f63d8d1c2f3a7c5b3314c920fc938ee098d39d70568225c4"
+    },
+    {
+      "id": "A285-NATIVE-CONNECTED-SOL136",
+      "text": "Before accepting a combined candidate, join exact SOL135/136 actual Root manager/cursor/raw close producer and both native setter changes. Verify real complete error/wire/owner/retirement compatibility and all changed resource terms; preserve scoped credits only with exact dependencies and current input context. Do not overlay incompatible native changes or accept Sol's own implementation by Sol.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 399,
+      "sha256": "6d861060a115bb899985cb51fcd959f08829c38aa577699aabef235e3b558922"
+    },
+    {
+      "id": "A285-NATIVE-REQUIRED-INVENTORY",
+      "text": "Keep original69/mandatory20 and full inherited positive/negative obligations, including later SOL135/136 required cases. Add these cases rather than substituting them. All current hash-only checks are NOT_RUN, not execution credit; no SourceReady, Root admission, qualification or release GO from this author package.",
+      "status": "NOT_RUN",
+      "origin": "A285_native_error_author",
+      "bytes": 317,
+      "sha256": "705ddfa573ae1e131c8eb940ab3ea7d73c73567a364a098ac8720091cea6ef12"
+    }
+  ],
+  "execution": "NOT_RUN_ABSTRACT_HASH_ONLY_REQUIRED",
+  "waiver": false,
+  "inherited": "A282/SOL134 full original obligations retained. Future SOL135/136 coherent union must retain theirs too; this is supplemental, not replacement.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}
+

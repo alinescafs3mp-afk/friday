@@ -1,0 +1,15 @@
+{
+  "schema":"friday.a087.source-only-resource-contract.v1",
+  "accepted_UTC":"2026-10-01T16:49:53Z","accepted_MSK":"2026-10-01T19:49:53+03:00",
+  "source_cutoff_UTC":"2026-10-01T18:09:53Z","hard_cutoff_UTC":"2026-10-01T18:19:53Z",
+  "wall_sec":5400,"source_work_sec_max":4800,"seal_reserve_sec_min":600,
+  "read_cap":67108864,"output_cap":16777216,"RAM_cap":4294967296,
+  "source_worker_models":1,"child_models":0,"source_runtime_workers":0,"initial_independent_read_utilities_parallel_max":3,
+  "ledger":"READ-LEDGER.tsv",
+  "physical_block_IO":"UNKNOWN_NOT_ZERO","implicit_IO":"UNKNOWN_NOT_ZERO","actual_RAM_peak":"UNKNOWN_NOT_ZERO","CPU_affinity_quota_pressure":"UNKNOWN_NOT_ZERO",
+  "counting":"All physical repeat reads are charged conservatively by entire-file upper bounds for sed/rg/apply_patch, full copy/hash/diff and final seals. Kernel cache does not reduce charged input; these are explicit upper allowances, not a claim of measured block IO.",
+  "current_effects":{"Source_edits_and_mechanical_path_labels":true,"owned_private_copy_hash_metadata":true,"Source_import":0,"AST":0,"compile":0,"eval_Source":0,"execute_Source":0,"native_build":0,"tests_controls":0,"Root_kernel_probes":0,"network_GET":0,"body_read":0,"product_Git":0,"build_install_live_gates_release":0,"model_settings_or_authority_writes":0},
+  "future_helper":"Separate actual Root-owned short reply helper in original inner4, AS48MiB and CPU180, real direct wait4/pidfd close. UID/GID transitions are actual existing Root's own real-ID transitions only under separate future typed admission.",
+  "future_own_syscall_restriction":"Actual irreversible local kernel filter; no mocked errno/credentials/receipt; failed close remains unconfirmed until owned actor kernel termination.",
+  "all_future_effects":"NOT_RUN_NOT_PROVEN","GO":false
+}

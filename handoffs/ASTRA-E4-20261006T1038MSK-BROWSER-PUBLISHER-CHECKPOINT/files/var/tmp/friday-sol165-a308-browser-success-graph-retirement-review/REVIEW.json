@@ -1,0 +1,70 @@
+{
+  "schema": "friday.sol165.a308.success-graph-retirement.nonauthor-review.v1",
+  "assignment": "ASTRA-E4-A308-BROWSER-ACTUAL-SUCCESS-GRAPH-RETIREMENT-NONAUTHOR-SOL165",
+  "generation": 1,
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A308_CONNECTED_PRIVATE_SUCCESS_GRAPH_RETIREMENT_DELTA_ONLY",
+  "reviewer_authorship": "Astra authored A308. Sol independently reviews exactly this changed producer/caller/error/retirement/metadata relation, NOT Sol's prior unchanged whole baseline. A306 history-once and A302 sequence resolver reuse is byte-exact changed-context rejoin only, not new execution acceptance.",
+  "snapshot": {"path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json", "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5"},
+  "base": {"path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/manifest.json", "sha256": "e9aaacce5b79a820244889712e00319f29be6dcc42c26795d6331c01ea216f7a"},
+  "findings": [
+    {
+      "id": "R1",
+      "decision": "SCOPED_STATIC_ACCEPT_COHERENT_SAME_TABLE_PRODUCER",
+      "where": "A079 sol069_decode1033-1103; Supervisor2003+; Public2726+",
+      "proof": "All three COMPLETE decoder bodies are byte-identical through the exact original root-return statement. The sole interface change is optional keyword-only node_owner=None and the fresh-owner guard/SAME values-list assignment. Existing full raw/frame/header/body/hash/RLE/scalar/node/reference/edge/root checks remain byte-exact. After full body validation and before first node or ANY edge population, that exact original values list is aliased into the existing entry. All successfully appended decoder-created nodes, including unreachable cyclic list/dict components, are in it. No second table, graph clone, interning, new holder role or body reduction. An allocation failure before append is still covered by the actual original decoder traceback/locals; this is NOT a promise that an unreturned allocation is present in the appended table."
+    },
+    {
+      "id": "R2",
+      "decision": "SCOPED_STATIC_ACCEPT_ACTUAL_LAST_LOCAL_READER",
+      "where": "A079 sol151_consume_planes1164-1201 -> run_public1282-1316; both canonical wrappers",
+      "proof": "Actual entry is published as pending and appended to decoded_originals BEFORE decode. Only this actual A079 caller supplies node_owner=entry. It calls the full decoder, assigns its SAME returned root, then calls the unchanged full sol143_native_check. That checker returns normally with no new fields/global graph holder; its transient stack/seen/records do not escape its normal return. Immediate return value of that check is discarded. The actual later mandatory reader parses retained outer/inner STREAMS, not entry.decoded; actual descriptor retirement, final status and positive-first join have no private decoded-field use. Both canonical wrappers call without node_owner and therefore retain/return their full original mutable roots and aliases. This verifies the declared sequential in-tree local consumer, NOT a universal absence of arbitrary external module introspection, concurrent mutation, or qualified whole runtime. The global custody alias remains charged, but this exact actual call graph does not publish the private graph to another canonical reader."
+    },
+    {
+      "id": "R3",
+      "decision": "SCOPED_STATIC_ACCEPT_COMPLETE_SUCCESSFUL_PRIVATE_EDGE_RETIREMENT",
+      "where": "A0791185-1196",
+      "proof": "Retirement is reached ONLY after decode and native check both return. SAME table keeps every node strong while each exact built-in list/dict node has its edges cleared, including disconnected cycles. Scalars/bytes/str/bytearray remain held until table/root release; equal but distinct mutable nodes were never merged. Empty table/scalar root is valid: transient=None is explicitly assigned even when no iteration occurs. Last iteration reference is released, root set None, original table cleared, table slot None, then original hard guard and decoded_retired=True LAST. This ends this entry's normal private decoded-reference accumulation; full DS69 encoded graph remains. It is not measured allocator/RSS reclamation, whole process/CPython heap closure, a refund or a guarantee every clear completes within the original interval."
+    },
+    {
+      "id": "R4",
+      "decision": "SCOPED_STATIC_ACCEPT_STAGED_FAILURE_AND_ORIGINAL_ERRORS",
+      "where": "A079 decoder owner hook and consume1177-1201 -> sol151_remember",
+      "proof": "Decode refusal before table creation retains existing original raw and exception locals, decoded_nodes=None. Node/edge-fill refusal retains SAME partial appended table plus original exception/traceback; assignment never reports a completed root. Native-check refusal retains the completed root/table; neither failure enters retirement. Retirement refusal before/among nodes leaves decoded_retired=false and the current partially cleared table/root; exact original exc is put in consumption_error, entry.original_error and original first/secondary ledger without reconstruction or traceback clearing. During root/table release a failure retains only the ACTUAL remaining state. After successful table release, final clock refusal can leave root/table None yet retired=false, with full encoded graph and original error still retained. No assertion that already-cleared derived edges, an already-released empty table, or every former private object survives in memory. There is no rollback/redecode/retry or collector. A prior successful entry's retired marker is local retirement fact, not a claim that a later-frame error or whole run succeeded."
+    },
+    {
+      "id": "R5",
+      "decision": "SCOPED_STATIC_ACCEPT_FULL_ORIGINAL_HISTORICAL_DATA",
+      "where": "entry reference/original, actual snapshot/resolver, run_public receipt/positive-first",
+      "proof": "Existing entry.reference and entry.original assignments are unchanged and neither is modified by new code. Original snapshotted complete DS69 bytes encode full header/body/node/edge/alias graph, including unreachable nodes; no digest/count/subset replaces them. SAME complete raw object is still returned by byte-exact A302 sequence2k resolver with full reference comparison. Both positive and fresh negative retain their actual complete receipts/raw/errors; normal retirement only changes the private successful derivative fields. Canonical root-return interface is NOT replaced by encoded bytes. Preexisting snapshot/containment/full custody/last-consumer qualifications stay conditional, not newly accepted."
+    },
+    {
+      "id": "R6",
+      "decision": "SCOPED_STATIC_ACCEPT_ORIGINAL_CLOCK_AND_REQUIRED_READERS",
+      "where": "A079 consume/actual terminal oracle/retirement/final status/run_positive_first",
+      "proof": "Original custody.hard_ns precedes entry, retirement start, each of N node clears, table/root release and final true marker. Added successful retirement guards are N+3; no new timer, grace, reset, cap, reservation or returned credit. A guard samples before an operation; it is not a prospective finite-time certificate for that operation. Actual later full stream/native oracle, kernel status/case/count/complement checks, existing descriptor retirement and original final guard remain byte-exact. Normal acceptance still requires all old semantic/no-error/confirmed-end/retirement predicates; decoded_retired is not an independent admission or success grant. A306 history-once full checkers/history/root validators and A302 resolver are exact; only their context is rejoined. Additional root-history parses and canonical separate decodes remain, no total-once/universal speedup credit."
+    },
+    {
+      "id": "R7",
+      "decision": "SCOPED_STATIC_ACCEPT_CURRENT_METADATA_AND_INVENTORY",
+      "where": "SOURCE-COMPARISON and RAW-RELATION-EVIDENCE",
+      "proof": "Both exact manifests have complete physical membership; 267 distinct intake pins fullSHA/stable9 verified, including ALL212 unique current209+aux3 files. Source15 changed5/unchanged10; current209 changed9/unchanged200; aux3 changed0/unchanged3. Three entire code files reverse exactly to A306 using ONLY the nominated decoder signature/owner hook and A079 entry/caller retirement literals. Six metadata files have exactly24 current full pin blocks and24 current retention/cost statements; reversing these48 JSON literal differences reconstructs ENTIRE base metadata byte-exact. Historical-only objects/pins/statements and every outside byte remain exact. Four statements repeat across six current contracts and correctly distinguish private-success retirement, unchanged canonical interface, retained errors and unqualified whole cost. Fresh Source bytes receive no old ABI/compiler/image/runtime/test admission."
+    },
+    {
+      "id": "R8",
+      "decision": "NARROW_LIVENESS_CREDIT_WITH_REMAINING_WHOLE_COST_OPEN",
+      "where": "SOL153 F1-F5 rejoin and A308 cost declarations",
+      "proof": "Conditional successful entry-to-entry private decoded graph accumulation F1 is addressed at its actual last local reader, including cycles; retained raw/headers/references/entry fields and positive-first two-receipt overlap remain. F2 header parse/slices/RLE overlap/node copies/Unicode/multiplicity and native temporary stacks remain unqualified. F3 decode/check partials plus all original exception tracebacks and retirement-failure prefixes remain charged; SAME table additionally holds otherwise-unreachable nodes on failures and is NOT free. F4 original aggregate256MiB prospective required-workload share/domain remains OPEN, not missing owner permission. A302 removes the old linear prefix scan only; remaining F5 full reads/hash/validation/traversal/CPU/time remains OPEN. Two fields, keyword/owner/branch/store, table-held liveness, N iterations/edge removals, deallocations, N+3 clocks and selected allocator/GC costs are UNKNOWN_NOT_ZERO. No measured RAM/RSS/time/CPU/IO fit or whole Source/Root acceptance."
+    }
+  ],
+  "introduced_contradictions": [],
+  "qualification": "36 trusted host raw literal/equality observations and 13 exact ordinary raw spans; manual changed-context reasoning only. NOT Source tests/parser/AST/runtime proof.",
+  "required_controls": "ALL original216/29/6/9 + inherited + H01-H26 + current G01-G14 REQUIRED/no waiver/NOT_RUN; no new controls executed or old execution transferred to changed bytes.",
+  "open": "Selected-image runtime/default canonical behavior/concurrency and full raw/error/alias/last-consumer/retirement/source admission remain required; whole256MiB/180s/work170/final10 cost OPEN. Protected Root wait/lifetime/stock/type/callback/controlled-worker bodies not qualified. No stopped scope review/reuse/salvage/reroute.",
+  "read_scope_disclosure": "One bounded location-oriented A0791032-1219 read inadvertently emitted the unchanged sol151_writer_end body. It was NOT used as review/qualification/change evidence or reread; only opaque byte-preservation credited. Therefore strict hash-only read discipline cannot be claimed for that accidental disclosure. This does not authorize or qualify its protected policy.",
+  "own_baseline_accepted": false,
+  "whole_fit": false,
+  "Source_execution": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

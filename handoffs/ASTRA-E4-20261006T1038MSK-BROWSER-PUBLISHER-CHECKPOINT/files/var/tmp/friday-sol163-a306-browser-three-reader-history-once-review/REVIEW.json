@@ -1,0 +1,73 @@
+{
+  "schema": "friday.sol163.a306.three-reader-history-once.nonauthor-review.v1",
+  "assignment": "ASTRA-E4-A306-BROWSER-THREE-READER-HISTORY-ONCE-NONAUTHOR-SOL163",
+  "generation": 1,
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A306_THREE_READER_HISTORY_ONCE_DELTA_ONLY",
+  "reviewer_authorship": "Astra authored the three checker edits and current metadata rebindings. Sol authored portions of the unchanged underlying baseline; this review does NOT independently accept that baseline or the whole connected Source.",
+  "snapshot": {
+    "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/manifest.json",
+    "sha256": "e9aaacce5b79a820244889712e00319f29be6dcc42c26795d6331c01ea216f7a"
+  },
+  "base": {
+    "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/manifest.json",
+    "sha256": "0799ec9e30ac7f1d5278933527d001101a5d55719f5f49aa2427e96e2bb539c1"
+  },
+  "findings": [
+    {
+      "id": "R1",
+      "decision": "SCOPED_STATIC_ACCEPT",
+      "where": "A079212-276; Supervisor241-305; Public533-597",
+      "proof": "Whole three current checker functions are byte-identical. Each full code file equals its pinned base with exactly one literal replacement: assign the FIRST own-history decode result to existing records only when native_trace, otherwise discard as before; run the later inherited decode only when the native_history key is absent. Every code byte outside that replacement is exact base, including A302 resolver, both full DATA decoders, actual callers, return interfaces, and producer context. No single-reader overlay or incompatible helper interface."
+    },
+    {
+      "id": "R2",
+      "decision": "SCOPED_STATIC_ACCEPT_COMPLETE_VALIDATION_AND_ERROR_ORDER",
+      "where": "A079186-276 and identical current bodies in both canonical readers",
+      "proof": "Own native_history is still decoded at the ORIGINAL first point before current-is-not-None and projections. Missing/None/wrong type/schema/pairs/count/hex/unfinished row/receipt/overflow retains the first ORIGINAL decoder refusal. Decoder schema, all declared rows, complete bit, every full792 row, full440 receipt, paired72 errors and final overflow checks are unchanged and complete. A successful full decode requires a dict and therefore cannot subsequently fail the None guard. The same returned records immediately feed unchanged phase, expected/observed96, status-redacted and empty-history zero-rights projections. Projection/root-event checks remain in their original order. The removed second parse's allocation failure is no longer an operation; this is not a claim that eliminated-operation exceptions must still occur or that all remaining allocation errors are impossible."
+    },
+    {
+      "id": "R3",
+      "decision": "SCOPED_STATIC_ACCEPT_CONTEXT_LOCAL_REUSE_ONLY",
+      "where": "A079212-276; canonical identical checker bodies",
+      "proof": "Own history present+trace: records is assigned before use. History absent+trace: required-current guard precedes one inherited decode, so missing/None refuses without using a prior records value. Native container without trace+own history: decoder result remains unassigned/discarded, hence no new persistent records-list root. Non-native dict ignores its own history for inheritance as before; scalar/list/tuple behavior is unchanged. Original seen key(id(item),id(inherited)), stack ordering, inherited propagation and native_history exclusion remain exact. Each distinct visited node/context performs its own required checks; no cross-node/history cache, alias merge, skipped graph rows, new holder/table/field, or global state. Return is the SAME original value, preserving original graph/value aliases rather than reconstructing them. No race-free whole runtime or unknown concurrent mutation theorem is granted."
+    },
+    {
+      "id": "R4",
+      "decision": "SCOPED_STATIC_ACCEPT_EXACT_CURRENT_BINDINGS",
+      "where": "SOURCE-COMPARISON.json and RAW-RELATION-EVIDENCE.json",
+      "proof": "Both manifests have exact physical membership. All260 distinct pinned input files were fullSHA/stable9 verified, including all current Source15/current209/aux3 before/after and declared actual dependencies; changed counts15=5/10,209=9/200,aux3=0/3. Six metadata files contain EXACTLY24 changed full current pin blocks:3 ABI mapping,5 build recipe,3 A079 oracle,3 Public ABI,3 ordinary contracts,7 connected contract. Each new block equals the exact current reader full path/size/SHA/id9/stable pin; each old block is verified real base bytes. Reversing only these24 literal JSON blocks reconstructs the complete old metadata bytes. All historical-only objects and ALL other metadata remain exact. New bytes receive no old ABI/compiler/image/runtime execution acceptance."
+    },
+    {
+      "id": "R5",
+      "decision": "CONNECTED_CONTEXT_REJOIN_NOT_WHOLE_BASELINE_ACCEPTANCE",
+      "where": "A0791033-1090,1157-1190,1258-1307; Supervisor308-314,350-365; Public601-604,1470-1534,2122-2133",
+      "proof": "Actual DS69 consumer retains original reference/raw and decoded object before safe native check; real checker exceptions go to the unchanged original per-entry/state/first-error custody rather than a reconstructed error. Canonical full_DATA_decode/inert and a067_full_DATA_decode/json_DATA wrappers still invoke the SAME changed checker on the full decoded value. Actual A079 outer and inner terminal checks/oracles, full stream/hash/framing/case/count/kernel-result/complement predicates remain required; successful history validation alone cannot set accepted. Original once-retirement/final-clock/positive-first call sites and actual Public error/oracle/retirement routes are byte-exact base. A079 completion still additionally requires original no-error and complete custody predicates. Public/whole routes retain their existing interfaces and false whole credits. This is a byte-exact connected rejoin, NOT an independent proof of unchanged process/wait/cleanup policy, full exception-ledger fit, every final clock, terminal authority, ownership closure, or whole baseline safety."
+    },
+    {
+      "id": "R6",
+      "decision": "NARROW_STATIC_OPERATION_COUNT_CREDIT_ONLY",
+      "where": "own-history direct decode sites A079242-250 / Supervisor271-279 / Public563-571",
+      "proof": "For a visited native trace with its own history, the TWO DIRECT history decoder calls in this selected branch become ONE; all rows/receipts/pairs still validated. For inherited traces direct count remains one; for standalone container-only own-history direct count remains one. This is NOT a universal total-history-count1 per node: unchanged sol145_root_decode itself calls sol143_history_decode, and existing root/preinterpreter branches can invoke that decoder in addition; repeated graph contexts and separate actual outer/inner/wrapper checks also remain. No universal2x speedup, history decode once per entire graph/process, whole memory/CPU/time fit, or new Target budget. Added membership/branch/frame/reference costs and remaining full reads/hash/DS69/native/root walks are UNKNOWN_NOT_ZERO."
+    }
+  ],
+  "introduced_contradictions": [],
+  "bounded_residual": [
+    "SOL153 F1-F4 whole raw/header/decoded/node multiplicity/transient/RLE/current traceback-context/cycles and simultaneous positive-first receipts remain OPEN under original aggregate256MiB.",
+    "Remaining F5 root/full-history repeated contexts and wrappers, all physical reads/hashes/DS69/native traversal/CPU/time remain OPEN under original180s/170s/final10s. Selected direct decode saving is not measured whole workload fit.",
+    "Root wait/proc history, child setup and PreparedView outside-caller ownership, original error/alias/retirement/last-consumer/final transfer, selected image/ABI/admission and full final gate remain OPEN. These unchanged scopes were not newly qualified.",
+    "Original216/29/6/9 and inherited/changed positive+negative obligations remain REQUIRED/no waiver/NOT_RUN. No observed Target pass/fail or universal impossibility is asserted."
+  ],
+  "evidence": {
+    "host_literal_equality_observations": 29,
+    "safe_raw_spans": 11,
+    "Source_tests": 0,
+    "Source_execution": "NOT_RUN",
+    "qualification": "Trusted host raw equality/hash and manual static reasoning only, not Source parsing or runtime observations"
+  },
+  "opaque_exclusions": "Protected-policy/stock/type/callback/worker bodies hash-only; stopped107#2/Scanner075/SOL139 not retried, salvaged, reviewed, rephrased or rerouted. Required opaque controls remain REQUIRED/no waiver.",
+  "own_baseline_accepted": false,
+  "whole_fit": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

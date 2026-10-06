@@ -1,0 +1,25 @@
+{
+  "schema": "friday.astra.a306.browser.connected-history-once.implementation.v1",
+  "author": "Astra Lead Architect epoch4",
+  "state": "AUTHOR_IMPLEMENTED_RAW_CHECKED_PENDING_NONAUTHOR_REVIEW",
+  "base": {
+    "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/manifest.json",
+    "bytes": 10196,
+    "sha256": "0799ec9e30ac7f1d5278933527d001101a5d55719f5f49aa2427e96e2bb539c1"
+  },
+  "scope": "SOL153 existing F5 reader CPU/allocation-cost portion only; not new root, not whole F1-F5 closure.",
+  "change": "Exact same native-check control-flow change in actual A079, Supervisor and Public. For native_trace carrying own native_history, the first full validated decode result is reused by the immediately following unchanged projection checks. The former second full decode is removed. Inherited histories decode once; standalone containers still decode once and do not retain a new records list.",
+  "producer_consumer": "Existing producer data and original DS69 full graph/value/alias interfaces unchanged. sol143_history_decode/receipt/pairs/hex implementations byte-exact, as are actual caller prefix/suffix outside checker; no dropped projection, field, record, error, body or oracle. A302 committed-sequence resolver exact preserved.",
+  "error_order": "Own native history is decoded at original first-decode point, before required-current check; malformed own None/type/schema retains first original failure. Inherited missing None still refuses before decoder. First actual decoder exception is retained by unchanged caller. No retry/cache/new holder. Removed duplicate successful parse is not repeated validation authority.",
+  "accounting": "Per visited own-history native trace: full history decodes 2 -> 1; complete history rows/paired records/receipt paths validated once, projections still all checked. This is a source-level call-count reduction, not measured 2x speedup or whole fit. Existing records variable reused, no new container/map/global owner. Added membership/branch costs UNKNOWN_NOT_ZERO.",
+  "metadata": "24 CURRENT pin blocks updated in six metadata files. Historical-only blocks unchanged. Whole15/current209/aux3 rejoined; both canonical callers included, no single-reader overlay.",
+  "remaining": [
+    "F1-F4 aggregate raw/decoded/node-multiplicity/cycles/actual traceback/context/both positive-first receipts and original256MiB prospective fit remain open.",
+    "Other F5 full reads/hashes/header/DS69/native graph walk/CPU/time and original180/170/10 qualification remain open.",
+    "Root wait/proc history, child setup, PreparedView actual outside caller and image/compiler ABI/admission remain open. No protected/stopped scope examined or repaired."
+  ],
+  "boundaries": "INERT raw safe data-checker edit only. No parser/compiler/preprocess/import/AST/eval/exec/tests/helpers/live/network/install, no stopped107#2/Scanner075/SOL139 retry/salvage/reroute, no new role/service/grant/pool/cap/model/TUI.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

@@ -1,0 +1,733 @@
+--- base/native/publisher_root_entry.c
++++ candidate/native/publisher_root_entry.c
+@@ -407,22 +407,66 @@
+ _Static_assert(_Alignof(FridayPublisherRootStorage)<=64,"Root bank alignment");
+ _Static_assert(_Alignof(RootFinalCallerBinding)<=64,"Caller bank alignment");
+ _Static_assert(_Alignof(FridayPublisherRootColdResult)<=64,"Cold bank alignment");
+-static uint64_t bank_align(uint64_t n) { return (n+63ULL)&~63ULL; }
++/* SAME original birth: disjoint bank, final, utility and cold allowances.
++ * 128-bit intermediates are checked before narrowing; selected ABI/cost remains
++ * REQUIRED_NOT_RUN. None of these receipts grants work or endpoint ownership. */
++static int bank_narrow(__uint128_t n,uint64_t *out) {
++    if(n>UINT64_MAX)return -1;*out=(uint64_t)n;return 0;
++}
++static int bank_align_checked(uint64_t a,uint64_t b,uint64_t *out) {
++    __uint128_t n=(__uint128_t)a+b+63ULL;
++    return bank_narrow(n&~(__uint128_t)63ULL,out);
++}
++int FridayPublisherRootBankBirthLayout(uint64_t out[9]) {
++    if(!out)return -1;
++    /* Mandatory selected-image sizeof facts, not runtime/pool provisioning.
++     * Exact order matches QualifiedBankLayout; qualification remains separate. */
++    out[0]=sizeof(FridayPublisherPoolRow);
++    out[1]=sizeof(final_caller_binding.set_scratch.marks);
++    out[2]=sizeof(root_storage.utility_result);out[3]=sizeof(root_storage.utility);
++    out[4]=sizeof(void *);out[5]=sizeof(FridayPublisherColdConfigText);
++    out[6]=sizeof(bank_cold_address->builtin_entries);
++    out[7]=sizeof(bank_cold_address->config);out[8]=sizeof(bank_cold_address->preconfig);
++    return 0;
++}
++static int bank_birth_reads(uint64_t out[3]) {
++    if(!out)return -1;
++    __uint128_t final=4*(__uint128_t)sizeof(FridayPublisherRootStorage)+
++        4*(__uint128_t)sizeof(FridayPublisherRootColdResult)+
++        3*(__uint128_t)(FRIDAY_ROOT_CASE_INPUT_MAX+1ULL)+
++        (__uint128_t)FRIDAY_ROOT_COMMAND_NODES*528ULL*64ULL+160ULL*64ULL+
++        8*(__uint128_t)FRIDAY_MASTER_HISTORY*sizeof(FridayPublisherPoolRow)+4096ULL;
++    final+=64*((__uint128_t)60*FRIDAY_ROOT_COMMAND_EDGES+
++        (__uint128_t)264*FRIDAY_ROOT_COMMAND_NODES+
++        (__uint128_t)56*((FRIDAY_ROOT_COMMAND_EDGES+1023ULL)/1024ULL)+
++        2*((sizeof(final_caller_binding.set_scratch.marks)+63ULL)/64ULL)+16ULL+128ULL);
++    __uint128_t utility=4*(__uint128_t)sizeof(root_storage.utility_result)+
++        8*(__uint128_t)sizeof(root_storage.utility)+2ULL*8193+
++        8*(__uint128_t)FRIDAY_MASTER_HISTORY*sizeof(FridayPublisherPoolRow)+4096ULL;
++    __uint128_t cold=4*(3*(__uint128_t)(FRIDAY_ROOT_COMMAND_TEXT+1ULL)+
++        (__uint128_t)FRIDAY_ROOT_CONFIG_ROWS*sizeof(void *))+
++        (__uint128_t)FRIDAY_ROOT_CONFIG_ROWS*(FRIDAY_ROOT_CONFIG_ROWS+1ULL)/2ULL*
++            sizeof(FridayPublisherColdConfigText)+
++        4*(__uint128_t)FRIDAY_ROOT_BUILTIN_NAMES+
++        2*(__uint128_t)sizeof(bank_cold_address->builtin_entries)+
++        2*(__uint128_t)sizeof(bank_cold_address->config)+sizeof(bank_cold_address->preconfig);
++    if(bank_narrow(final,&out[0])<0||bank_narrow(utility,&out[1])<0||
++       bank_narrow(cold,&out[2])<0)return -1;
++    return 0;
++}
+ int FridayPublisherRootBankLayout(uint64_t out[9]) {
+     if(!out)return -1;
+-    out[0]=FRIDAY_ROOT_BANK_HEADER;
+-    out[1]=sizeof(FridayPublisherRootStorage);
+-    out[2]=bank_align(out[0]+out[1]);out[3]=sizeof(FridayPublisherRootColdResult);
+-    out[4]=bank_align(out[2]+out[3]);out[5]=sizeof(RootFinalCallerBinding);
+-    /* Two actual bounded compare operands belong to this SAME bank/layout.
+-     * Preowned before memfd/launch and charged by the unchanged original2*T
+-     * and7*T+4*SCRATCH formulas/caps. Not a later allocation or new pool. */
+-    out[6]=bank_align(out[4]+out[5])+FRIDAY_ROOT_BANK_PUBLICATION_OPERAND_STORAGE;
+-    /* Seven full read passes: native copy+two-operand comparison (3),
+-     * parent read/hash/retained-copy (3), final immutable copy (1).
+-     * Same original READ_CAP, not an added grant or post-end refund. */
+-    out[7]=7ULL*out[6]+4ULL*FRIDAY_ROOT_BANK_PARENT_SCRATCH;
+-    out[8]=2ULL*out[6]+FRIDAY_ROOT_BANK_PARENT_SCRATCH;
++    out[0]=FRIDAY_ROOT_BANK_HEADER;out[1]=sizeof(FridayPublisherRootStorage);
++    if(bank_align_checked(out[0],out[1],&out[2])<0)return -1;
++    out[3]=sizeof(FridayPublisherRootColdResult);
++    if(bank_align_checked(out[2],out[3],&out[4])<0)return -1;
++    out[5]=sizeof(RootFinalCallerBinding);
++    uint64_t end,reads[3];
++    if(bank_align_checked(out[4],out[5],&end)<0||bank_birth_reads(reads)<0||
++       bank_narrow((__uint128_t)end+FRIDAY_ROOT_BANK_PUBLICATION_OPERAND_STORAGE,&out[6])<0||
++       bank_narrow(7*(__uint128_t)out[6]+4ULL*FRIDAY_ROOT_BANK_PARENT_SCRATCH+
++            reads[0]+reads[1]+reads[2],&out[7])<0||
++       bank_narrow(2*(__uint128_t)out[6]+FRIDAY_ROOT_BANK_PARENT_SCRATCH,&out[8])<0)return -1;
+     return out[6]<FRIDAY_ROOT_BANK_RAM_CAP&&out[8]<FRIDAY_ROOT_BANK_RAM_CAP&&
+         out[7]<FRIDAY_ROOT_BANK_READ_CAP?0:-1;
+ }
+@@ -502,6 +546,7 @@
+        clock->phase==FRIDAY_POOL_START_PRECLOCK) {
+         if(p->initialized||p->started_ns||p->deadline_ns||p->work_deadline_ns||
+            p->spent_read||p->spent_output||p->spent_hash||
++           p->birth_adopted||p->birth_final_read||p->birth_utility_read||p->birth_cold_read||
+            clock->raw.tv_sec||clock->raw.tv_nsec||clock->observed_ns||
+            clock->rc||clock->error||
+            p->work_clock.phase!=FRIDAY_NATIVE_CLOCK_UNUSED)return 0;
+@@ -514,6 +559,10 @@
+          * interval. A partial entered/failed constructor cannot reach this. */
+         return original;
+     }
++    if(clock->phase==FRIDAY_POOL_CLOCK_WORK_STOPPED) {
++        if(!FridayPublisherRootInitialWorkData(c))return 0;
++        return p->deadline_ns; /* restrictive DATA only, no work or end grant */
++    }
+     if(clock->phase!=FRIDAY_POOL_CLOCK_VALID||clock->rc||clock->error||
+        clock->raw.tv_sec<0||clock->raw.tv_nsec<0||clock->raw.tv_nsec>=1000000000L||
+        (uint64_t)clock->raw.tv_sec>(UINT64_MAX-(uint64_t)clock->raw.tv_nsec)/1000000000ULL||
+@@ -542,7 +591,7 @@
+      * pool from Python. All three debit amounts are recomputed by THIS image. */
+     return reads==v[7]&&allocation==v[8]&&output==FRIDAY_ROOT_BANK_HEADER&&
+         w[B_RESERVATION_MAGIC]==FRIDAY_ROOT_BANK_RESERVATION_MAGIC&&
+-        w[B_RESERVATION_VERSION]==1&&w[B_RESERVATION_GENERATION]==1&&
++        w[B_RESERVATION_VERSION]==FRIDAY_ROOT_BANK_RESERVATION_VERSION&&w[B_RESERVATION_GENERATION]==1&&
+         w[B_RESERVATION_OWNER]==w[B_PARENT_PID]&&w[B_PARENT_PID]==(uint64_t)getppid()&&
+         w[B_RESERVATION_STARTED]==w[B_STARTED]&&
+         w[B_RESERVATION_DEADLINE]==w[B_DEADLINE]&&
+@@ -621,9 +670,27 @@
+         root_storage.utility_result.copy_complete&&
+         root_storage.utility_result.resource_bounds_confirmed&&
+         root_storage.utility_result.pool_fault_complete&&!p->observation_unknown;
++    int initial_data=rc==0&&FridayPublisherRootInitialWorkData(c)&&
++        c->completion_returned&&!c->completion_clock_failed&&h->sealed&&
++        h->native_read_complete&&h->cold_read_complete&&h->cold_data_complete&&
++        h->source_data_complete&&h->clock_complete&&!h->clock_failed&&text_complete&&
++        !h->command_owner_end_confirmed&&!h->producer_transfer_confirmed&&h->original_owner_retained;
++    if(initial_data) {
++        w[B_INITIAL_PHASE]=p->initial_clock.phase;w[B_INITIAL_RC]=(uint64_t)(int64_t)p->initial_clock.rc;
++        w[B_INITIAL_ERRNO]=(uint64_t)(int64_t)p->initial_clock.error;
++        w[B_INITIAL_SEC]=(uint64_t)p->initial_clock.raw.tv_sec;
++        w[B_INITIAL_NSEC]=(uint64_t)p->initial_clock.raw.tv_nsec;
++        w[B_INITIAL_OBSERVED]=p->initial_clock.observed_ns;
++        uint64_t reads[3];if(bank_birth_reads(reads)<0)return -1;
++        if(bank_narrow(7*(__uint128_t)bank_bytes+4ULL*FRIDAY_ROOT_BANK_PARENT_SCRATCH,
++                &w[B_BIRTH_BANK_READ])<0)return -1;
++        w[B_BIRTH_FINAL_READ]=reads[0];w[B_BIRTH_UTILITY_READ]=reads[1];w[B_BIRTH_COLD_READ]=reads[2];
++        w[B_BIRTH_ADOPTED]=p->birth_adopted;w[B_EARLY_NATIVE_DATA]=1;
++        w[B_UTILITY_NOT_ACQUIRED]=1;w[B_INITIAL_WORK_DATA]=1;
++    }
+     w[B_PARTIAL_PREFIX]=prefix;
+     w[B_OUTCOME]=(h->command_owner_end_confirmed&&text_complete)?BANK_LOCAL_END:
+-        (prefix?BANK_EARLY_PREFIX:BANK_HELD);
++        (initial_data?BANK_INITIAL_WORK_DATA:(prefix?BANK_EARLY_PREFIX:BANK_HELD));
+     /* The original exposed ColdResult/CommandReceipt/final_handoff are NEVER
+      * rewritten. Parent cannot consume this new record before actual reap. */
+     struct timespec t={0,0};
+@@ -793,16 +860,14 @@
+     }
+     return -1;
+ }
++static const char initial_work_fault[]="Root_original_initial_WORK_exhausted";
+ static int root_pool_start(FridayPublisherRootStorage *s,uint64_t command_storage) {
+     FridayPublisherMasterPool *p=&s->pool;
+     FridayPublisherPoolInitialClock *clock=&p->initial_clock;
+     if(clock->phase!=FRIDAY_POOL_START_NONE)return -1;
+     clock->phase=FRIDAY_POOL_START_PRECLOCK;
+     if(p->initialized||p->started_ns||p->spent_read||p->spent_output||p->spent_hash||
+-       p->native_allocation||(p->pid&&p->pid!=getpid()))return -1;
+-    /* Inline rows sit inside this object. sizeof(*s) pays that static
+-     * storage only. Each later lookup, copy, and strong reference is
+-     * debited before its effect in this same pool. No new grant. */
++       p->native_allocation||(p->pid&&p->pid!=getpid())||p->birth_adopted)return -1;
+     p->pid=getpid();p->native_allocation=sizeof(*s)+sizeof(final_caller_binding);
+     if(plus(&p->native_allocation,command_storage)<0||
+        plus(&p->native_allocation,FridayPublisherRootBankExtraAllocation())<0||
+@@ -810,80 +875,109 @@
+         p->refused=1;p->fault="Root_static_command_storage_bound";return -1;
+     }
+     p->started_ns=FridayPublisherRootBankStart();
+-    /* This exact original call and its result live in preowned native storage.
+-     * An entered/failed/domain/expired sample cannot look like no attempt to
+-     * the actual ColdPerform -> FinalReceive -> BankCommit/publication path. */
+-    clock->raw=(struct timespec){0,0};
+-    clock->phase=FRIDAY_POOL_CLOCK_ENTERED;
++    uint64_t v[9],reads[3];
++    if(!p->started_ns||p->started_ns>UINT64_MAX-4200ULL*1000000000ULL||
++       FridayPublisherRootBankDeadline()!=p->started_ns+4200ULL*1000000000ULL||
++       FridayPublisherRootBankLayout(v)<0||bank_birth_reads(reads)<0||
++       !FridayPublisherRootBankReservationMatches(v[7],p->native_allocation,FRIDAY_ROOT_BANK_HEADER)||
++       v[7]>READ_CAP||FRIDAY_ROOT_BANK_HEADER>OUTPUT_CAP||
++       final_caller_binding.caller!=bank_cold_address||final_caller_binding.pid!=getpid()||
++       command_storage!=sizeof(*bank_cold_address)) {
++        p->refused=1;p->fault="original_preowned_bank_reservation_mismatch";return -1;
++    }
++    /* Adopt ONE outside debit, before the first work-clock sample. These
++     * receipts are disjoint components of v[7], NOT subsequent pool debits.
++     * No runtime/utility is initialized and no work ownership is granted. */
++    p->deadline_ns=FridayPublisherRootBankDeadline();
++    p->work_deadline_ns=p->deadline_ns-600ULL*1000000000ULL;
++    p->spent_read=v[7];p->spent_output=FRIDAY_ROOT_BANK_HEADER;
++    p->birth_final_read=reads[0];p->birth_utility_read=reads[1];p->birth_cold_read=reads[2];
++    final_caller_binding.read_credit=reads[0];final_caller_binding.credit_reserved=1;
++    s->utility_tail_remaining=reads[1];s->utility_tail_total=reads[1];s->utility_tail_reserved=1;
++    bank_cold_address->completion_reserved=1;p->birth_adopted=1;
++    bank_cold_address->started_ns=p->started_ns;bank_cold_address->deadline_ns=p->deadline_ns;
++    clock->raw=(struct timespec){0,0};clock->phase=FRIDAY_POOL_CLOCK_ENTERED;
+     clock->rc=clock_gettime(CLOCK_MONOTONIC,&clock->raw);
+-    clock->error=clock->rc<0?errno:0;
++    clock->error=clock->rc<0?errno:0; /* FIRST immediate primitive errno */
+     int valid=clock->rc==0&&clock->raw.tv_sec>=0&&clock->raw.tv_nsec>=0&&
+         clock->raw.tv_nsec<1000000000L&&
+         (uint64_t)clock->raw.tv_sec<=(UINT64_MAX-(uint64_t)clock->raw.tv_nsec)/1000000000ULL;
+     uint64_t current=valid?(uint64_t)clock->raw.tv_sec*1000000000ULL+
+         (uint64_t)clock->raw.tv_nsec:0;
+     clock->observed_ns=current;
+-    if(!p->started_ns||p->started_ns>UINT64_MAX-4200ULL*1000000000ULL||
+-       !current||current<p->started_ns||
+-       FridayPublisherRootBankDeadline()!=p->started_ns+4200ULL*1000000000ULL||
+-       current>FridayPublisherRootBankDeadline()-600ULL*1000000000ULL) {
++    if(!valid||!current||current<p->started_ns||current>p->deadline_ns) {
+         clock->phase=FRIDAY_POOL_CLOCK_FAILED;
+         p->refused=1;p->fault="Root_initial_finite_clock_unavailable";return -1;
+     }
+-    p->deadline_ns=p->started_ns+4200ULL*1000000000ULL;
+-    p->work_deadline_ns=p->deadline_ns-600ULL*1000000000ULL;
++    if(current>p->work_deadline_ns) {
++        clock->phase=FRIDAY_POOL_CLOCK_WORK_STOPPED;
++        p->refused=1;p->fault=initial_work_fault;return -1;
++    }
+     clock->phase=FRIDAY_POOL_CLOCK_VALID;
+-    /* Adopt the SAME original fixed reservation made before parent memfd/
+-     * launch effects. Python supplies no token rows, caps or replenishment.
+-     * Recompute the debit from the native layout; a claimed header is not
+-     * allowed to configure the native master. Preserve the original clock. */
+-    uint64_t v[9];
+-    if(FridayPublisherRootBankLayout(v)<0||
+-       !FridayPublisherRootBankReservationMatches(v[7],p->native_allocation,FRIDAY_ROOT_BANK_HEADER)||
+-       v[7]>READ_CAP||FRIDAY_ROOT_BANK_HEADER>OUTPUT_CAP) {
+-        p->refused=1;p->fault="original_preowned_bank_reservation_mismatch";return -1;
+-    }
+-    p->spent_read=v[7];p->spent_output=FRIDAY_ROOT_BANK_HEADER;
+     p->initialized=1;p->next_token=1;
+-    /* All later Source/native debits extend these original counters. There is
+-     * no second bank charge, newly granted cap, reset, or spent-IO refund. */
+-    if(final_caller_binding.caller) {
+-        uint64_t final_read=4ULL*sizeof(*s)+4ULL*command_storage+
+-            3ULL*(FRIDAY_ROOT_CASE_INPUT_MAX+1ULL)+
+-            (uint64_t)FRIDAY_ROOT_COMMAND_NODES*528ULL*64ULL+160ULL*64ULL+
+-            8ULL*FRIDAY_MASTER_HISTORY*sizeof(FridayPublisherPoolRow)+4096ULL;
+-        /* A277 full error-cell/failure and per-original-cell numeric joins are reserved BEFORE
+-         * Source/Root effects in the SAME READ_CAP; no post-end grant. */
+-        /* A275 exact finite additional set-reader upper, paid HERE at original
+-         * constructor birth, not replenished after Source/utility end. One
+-         * set shape: 160+16q+(12+16q)n+(8+16q)ceil(n/1024) scan steps.
+-         * q<=3, sum original members<=EDGES, sets<=NODES. Receiver scratch
+-         * gets ONE charged reset; region facts get a fixed paid scan. These
+-         * unchanged capacities bound work, NOT actual workload/ABI duration.
+-         * All terms consume the same READ_CAP, never a new grant or refund. */
+-        uint64_t set_final=64ULL*(60ULL*FRIDAY_ROOT_COMMAND_EDGES+
+-            264ULL*FRIDAY_ROOT_COMMAND_NODES+
+-            56ULL*((FRIDAY_ROOT_COMMAND_EDGES+1023ULL)/1024ULL)+
+-            2ULL*((sizeof(final_caller_binding.set_scratch.marks)+63ULL)/64ULL)+16ULL+128ULL);
+-        if(plus(&final_read,set_final)<0)
+-            return FridayPublisherMasterFault(p,"original_final_set_reader_credit_overflow");
+-        if(final_read>READ_CAP||plus(&p->spent_read,final_read)<0||p->spent_read>READ_CAP)
+-            return FridayPublisherMasterFault(p,"original_final_caller_read_credit");
+-        final_caller_binding.read_credit=final_read;
+-        final_caller_binding.credit_reserved=1;
+-    }
+-    /* Same pool, before any observation. Acquisition does not call
+-     * MasterBefore: that observation is what reads this endpoint. */
+-    uint64_t tail=4ULL*sizeof(s->utility_result)+8ULL*sizeof(s->utility)+2ULL*8193+
+-        8ULL*FRIDAY_MASTER_HISTORY*sizeof(FridayPublisherPoolRow)+4096ULL;
+-    if(tail>READ_CAP||plus(&p->spent_read,tail)<0||p->spent_read>READ_CAP)
+-        return FridayPublisherMasterFault(p,"utility_original_tail_credit");
+-    s->utility_tail_remaining=tail;s->utility_tail_total=tail;s->utility_tail_reserved=1;
++    /* Acquisitions remain strictly AFTER valid WORK. A prepaid numeric
++     * completion allowance is not a receipt for any acquired endpoint. */
+     if(utility_preown(s)<0) {
+         p->observation_unknown=1;
+         return FridayPublisherMasterFault(p,"utility_endpoint_unestablished");
+     }
+     return 0;
++}
++int FridayPublisherRootInitialWorkData(const FridayPublisherRootColdResult *c) {
++    if(!c||!FridayPublisherRootBankAttached()||c!=bank_cold_address)return 0;
++    const FridayPublisherRootStorage *s=&root_storage;
++    const FridayPublisherMasterPool *p=&s->pool;
++    const FridayPublisherPoolInitialClock *k=&p->initial_clock;
++    uint64_t v[9],reads[3];
++    if(!p->birth_adopted||p->initialized||p->pid!=getpid()||p->next_token||p->count||
++       p->preowner_started||p->preowner_token||p->source_detached||p->observation_unknown||p->native_live_slots||
++       p->refusal_type||p->refusal_value||
++       p->spent_hash||p->retained_allocation||p->observed_read||p->observed_output||
++       p->observed_ram||p->observed_workers||!p->refused||p->fault!=initial_work_fault||
++       k->phase!=FRIDAY_POOL_CLOCK_WORK_STOPPED||k->rc||k->error||
++       k->raw.tv_sec<0||k->raw.tv_nsec<0||k->raw.tv_nsec>=1000000000L||
++       (uint64_t)k->raw.tv_sec>(UINT64_MAX-(uint64_t)k->raw.tv_nsec)/1000000000ULL)return 0;
++    uint64_t actual=(uint64_t)k->raw.tv_sec*1000000000ULL+(uint64_t)k->raw.tv_nsec;
++    if(!p->started_ns||p->started_ns>UINT64_MAX-4200ULL*1000000000ULL||
++       p->started_ns!=FridayPublisherRootBankStart()||
++       p->deadline_ns!=p->started_ns+4200ULL*1000000000ULL||
++       p->deadline_ns!=FridayPublisherRootBankDeadline()||
++       p->work_deadline_ns!=p->deadline_ns-600ULL*1000000000ULL||
++       actual!=k->observed_ns||actual<=p->work_deadline_ns||actual>p->deadline_ns||
++       FridayPublisherRootBankLayout(v)<0||bank_birth_reads(reads)<0||
++       !FridayPublisherRootBankReservationMatches(v[7],p->native_allocation,FRIDAY_ROOT_BANK_HEADER)||
++       p->spent_read!=v[7]||p->spent_output!=FRIDAY_ROOT_BANK_HEADER||
++       p->birth_final_read!=reads[0]||p->birth_utility_read!=reads[1]||p->birth_cold_read!=reads[2]||
++       !final_caller_binding.credit_reserved||final_caller_binding.read_credit!=reads[0]||
++       final_caller_binding.caller!=c||final_caller_binding.pid!=getpid()||final_caller_binding.transferred||
++       !s->utility_tail_reserved||s->utility_tail_total!=reads[1]||
++       s->utility_tail_remaining!=reads[1]||s->utility_tail_active||s->utility_preowned||
++       s->utility_result.attempted||s->attempted||s->initialized||s->bootstrap.attempted||
++       s->image_inventory.attempted||s->held_count||s->prepared_count||
++       !s->cold_pool_started||c->pool!=p||c->owner_pid!=getpid()||!c->attempted||
++       !c->completion_reserved||c->configuration_owned||c->config_receipt.attempted||
++       c->config_receipt.clear_attempted||c->case_input.attempted||c->first_status_saved||
++       c->preinit_attempted||c->preinit_completed||c->init_attempted||c->init_completed||c->runtime_was_external||
++       c->runtime_owned||c->partial_runtime_owned||c->builtin_attempted||c->builtin_installed||
++       c->builtin_copy_complete||c->runtime_present_after_init||c->config_end_confirmed||
++       c->finalization_runtime_present_before||c->finalization_runtime_present_after||
++       c->receiver_attempted||c->receiver_returned||c->utility_end_confirmed||
++       c->root_runtime_support_end_confirmed||c->command_end_confirmed||
++       c->SourceReady||c->Root_admission||c->GO||
++       c->perform_attempted||c->receipt||c->finalization_attempted||c->utility_receiver_attempted||
++       p->work_clock.phase!=FRIDAY_NATIVE_CLOCK_UNUSED||p->work_clock.raw.tv_sec||p->work_clock.raw.tv_nsec||
++       p->work_clock.observed_ns||p->work_clock.lower_ns||p->work_clock.limit_ns||p->work_clock.site||
++       p->work_clock.rc||p->work_clock.error||p->work_clock.fault_kind)return 0;
++    return 1; /* numeric unattempted prefix; NOT measured support END */
++}
++int FridayPublisherMasterCompletionClockBlocked(const FridayPublisherMasterPool *p) {
++    if(!FridayPublisherRootBankAttached()||p!=&root_storage.pool)return 1;
++    const FridayPublisherRootColdResult *c=bank_cold_address;
++    if(!FridayPublisherRootInitialWorkData(c))return FridayPublisherMasterClockBlocked(p);
++    return c->completion_clock_failed||c->final_handoff.clock_failed||
++        root_storage.utility_result.clock_failed||native_clock_unconfirmed(&c->completion_clock_original)||
++        native_clock_unconfirmed(&c->final_handoff.clock_original)||
++        native_clock_unconfirmed(&root_storage.utility_result.clock_original);
+ }
+ int FridayPublisherRootColdPool(FridayPublisherRootColdResult *caller,FridayPublisherMasterPool **out) {
+     if(!FridayPublisherRootBankAttached())return -1;
+@@ -10814,7 +10908,7 @@
+ 
+ static int final_caller_clock(FridayPublisherRootFinalHandoff *h,uint64_t *out) {
+     if(h->clock_failed)return -1;
+-    if(FridayPublisherMasterClockBlocked(&root_storage.pool)) {
++    if(FridayPublisherMasterCompletionClockBlocked(&root_storage.pool)) {
+         h->clock_failed=1;h->clock_fault_kind=6;return -1;
+     }
+     h->clock_attempted=1;
+@@ -11150,6 +11244,26 @@
+     }
+     if(!b->credit_reserved||final_caller_clock(h,&h->started_ns)<0) {
+         h->phase="original_caller_credit_or_finite_clock_UNCONFIRMED";goto sealed;
++    }
++    if(s->pool.initial_clock.phase==FRIDAY_POOL_CLOCK_WORK_STOPPED) {
++        /* FULL numeric DATA only. No utility acquisition/observation, runtime
++         * finalizer, success-only credit settlement or fabricated END receipt. */
++        if(!FridayPublisherRootInitialWorkData(caller)||!caller->completion_returned) {
++            h->phase="initial_WORK_original_prefix_or_completion_UNCONFIRMED";goto sealed;
++        }
++        h->native_body=s;h->native_body_bytes=sizeof(*s);
++        h->cold_body=caller;h->cold_body_bytes=offsetof(FridayPublisherRootColdResult,final_handoff);
++        if(final_caller_read(h,s,sizeof(*s),&h->full_native_bytes)<0||
++           final_caller_read(h,caller,h->cold_body_bytes,&h->full_cold_bytes)<0) {
++            h->phase="initial_WORK_full_original_data_or_clock_UNCONFIRMED";goto sealed;
++        }
++        h->native_read_complete=h->full_native_bytes==sizeof(*s);
++        h->cold_read_complete=h->full_cold_bytes==h->cold_body_bytes;
++        h->clock_complete=final_caller_clock(h,&h->finished_ns)==0;
++        h->cold_data_complete=h->native_read_complete&&h->cold_read_complete&&h->clock_complete;
++        h->source_data_complete=h->cold_data_complete&&!caller->perform_attempted&&!s->attempted;
++        h->phase="initial_WORK_full_data_only_support_NOT_ACQUIRED";
++        goto sealed; /* original owner remains until the actual outer end */
+     }
+     /* Reserve the complete bounded structural validation scan BEFORE its
+      * first read. Edge ranges are a disjoint partition; each numeric edge
+--- base/native/publisher_root_entry.h
++++ candidate/native/publisher_root_entry.h
+@@ -28,7 +28,7 @@
+ enum {
+     FRIDAY_POOL_START_NONE=0, FRIDAY_POOL_START_PRECLOCK,
+     FRIDAY_POOL_CLOCK_ENTERED, FRIDAY_POOL_CLOCK_FAILED,
+-    FRIDAY_POOL_CLOCK_VALID
++    FRIDAY_POOL_CLOCK_VALID, FRIDAY_POOL_CLOCK_WORK_STOPPED
+ };
+ /* Preowned original constructor facts, inside the SAME native pool and every
+  * existing sizeof-based complete pool copy. ENTERED/FAILED never authorize
+@@ -70,6 +70,8 @@
+     uint64_t observed_read,observed_output,observed_ram,observed_workers,native_live_slots;
+     uint64_t next_token,count,preowner_token;
+     int initialized,preowner_started,source_detached,refused,observation_unknown;
++    int birth_adopted;
++    uint64_t birth_final_read,birth_utility_read,birth_cold_read;
+     FridayPublisherPoolInitialClock initial_clock;
+     FridayPublisherNativeClockAttempt work_clock;
+     const char *fault;
+@@ -86,6 +88,8 @@
+ int FridayPublisherMasterOwns(FridayPublisherMasterPool *);
+ int FridayPublisherNativeClockSample(FridayPublisherNativeClockAttempt *,
+     uint64_t,uint64_t,uint64_t,uint64_t *);
++int FridayPublisherRootInitialWorkData(const FridayPublisherRootColdResult *);
++int FridayPublisherMasterCompletionClockBlocked(const FridayPublisherMasterPool *);
+ int FridayPublisherMasterClockBlocked(const FridayPublisherMasterPool *);
+ int FridayPublisherMasterWorkClock(FridayPublisherMasterPool *,uint64_t,
+     uint64_t,uint64_t *);
+--- base/native/publisher_root_bank.h
++++ candidate/native/publisher_root_bank.h
+@@ -10,7 +10,8 @@
+ #include <stddef.h>
+ #define FRIDAY_ROOT_BANK_HEADER 4096ULL
+ #define FRIDAY_ROOT_BANK_MAGIC UINT64_C(0x314b4e4142445246)
+-#define FRIDAY_ROOT_BANK_VERSION 6ULL
++#define FRIDAY_ROOT_BANK_VERSION 7ULL
++#define FRIDAY_ROOT_BANK_RESERVATION_VERSION 2ULL
+ #define FRIDAY_ROOT_BANK_RESERVATION_MAGIC UINT64_C(0x3156534552445246)
+ #define FRIDAY_ROOT_BANK_RAM_CAP UINT64_C(8589934592)
+ #define FRIDAY_ROOT_BANK_READ_CAP UINT64_C(40960000000)
+@@ -113,13 +114,20 @@
+     /* Word65 was zero-reserved in v5. Restrictive final DATA, never admission.
+      * Original B_DEADLINE/reservation remain immutable. Zero is not D0. */
+     B_FINAL_DEADLINE,
++    /* Original first constructor sample and disjoint birth receipts: DATA
++     * for the separate early WORK-error route, no END/admission flags. */
++    B_INITIAL_PHASE,B_INITIAL_RC,B_INITIAL_ERRNO,B_INITIAL_SEC,B_INITIAL_NSEC,
++    B_INITIAL_OBSERVED,B_BIRTH_BANK_READ,B_BIRTH_FINAL_READ,B_BIRTH_UTILITY_READ,
++    B_BIRTH_COLD_READ,B_BIRTH_ADOPTED,B_EARLY_NATIVE_DATA,
++    B_UTILITY_NOT_ACQUIRED,B_INITIAL_WORK_DATA,
+     B_WORDS
+ };
+-enum { BANK_HELD=0, BANK_LOCAL_END=1, BANK_EARLY_PREFIX=2 };
++enum { BANK_HELD=0, BANK_LOCAL_END=1, BANK_EARLY_PREFIX=2, BANK_INITIAL_WORK_DATA=3 };
+ typedef struct { uint64_t word[128]; unsigned char reserved[3072]; } FridayPublisherRootBankHeader;
+ /* Stable-layout DATA only. Calling it still requires the existing source/image
+  * admission; these declarations are not permission to load or execute it. */
+ int FridayPublisherRootBankLayout(uint64_t out[9]);
++int FridayPublisherRootBankBirthLayout(uint64_t out[9]);
+ int FridayPublisherRootBankAttach(void *root,void *cold,void *caller,
+     FridayPublisherRootBankHeader *,uint64_t);
+ int FridayPublisherRootBankAttached(void);
+--- base/native/publisher_root_bank.c
++++ candidate/native/publisher_root_bank.c
+@@ -194,7 +194,7 @@
+         w[B_DEADLINE]==w[B_STARTED]+4200000000000ULL&&
+         w[B_READ_RESERVE]==v[7]&&w[B_IMAGE_ID_AT]==2048&&w[B_IMAGE_ID_BYTES]==64&&
+         w[15]==0&&w[B_RESERVATION_MAGIC]==FRIDAY_ROOT_BANK_RESERVATION_MAGIC&&
+-        w[B_RESERVATION_VERSION]==1&&w[B_RESERVATION_OWNER]==w[B_PARENT_PID]&&
++        w[B_RESERVATION_VERSION]==FRIDAY_ROOT_BANK_RESERVATION_VERSION&&w[B_RESERVATION_OWNER]==w[B_PARENT_PID]&&
+         w[B_RESERVATION_STARTED]==w[B_STARTED]&&
+         w[B_RESERVATION_DEADLINE]==w[B_DEADLINE]&&
+         w[B_RESERVATION_READ]==v[7]&&w[B_RESERVATION_RAM]==v[8]&&
+@@ -394,6 +394,7 @@
+      * own new receipt. Failure remains failure even with complete custody. */
+     if(bank_working->word[B_OUTCOME]==BANK_LOCAL_END)return 0;
+     if(bank_working->word[B_OUTCOME]==BANK_EARLY_PREFIX)return 70;
++    if(bank_working->word[B_OUTCOME]==BANK_INITIAL_WORK_DATA)return 71;
+     FridayPublisherRootBankFault(RP_OP_OUTCOME,-1,0,
+         (uint64_t)(uintptr_t)bank_working,0,bank_extent,bank_working->word[B_OUTCOME]);
+     return bank_failed_publication();
+--- base/native/publisher_root_command.c
++++ candidate/native/publisher_root_command.c
+@@ -91,7 +91,7 @@
+ 
+ static int completion_clock(FridayPublisherRootColdResult *r,uint64_t *out) {
+     if(r->completion_clock_failed)return -1; /* keep FIRST uncertainty;no retry */
+-    if(FridayPublisherMasterClockBlocked(r->pool)) {
++    if(FridayPublisherMasterCompletionClockBlocked(r->pool)) {
+         r->completion_clock_failed=1;return -1;
+     }
+     if(FridayPublisherNativeClockSample(&r->completion_clock_original,
+@@ -284,6 +284,19 @@
+     if(r->completion_attempted)return;
+     r->completion_attempted=1;r->operation_phase=r->phase;
+     r->completion_phase="cold_original_completion";
++    if(r->pool&&r->pool->initial_clock.phase==FRIDAY_POOL_CLOCK_WORK_STOPPED) {
++        /* Preserve the actual work refusal. No Source/config/runtime or
++         * unacquired utility operation is attempted to make it look complete. */
++        r->completion_phase="initial_WORK_original_prepaid_DATA_only";
++        if(!FridayPublisherRootInitialWorkData(r)||!r->completion_reserved||
++           completion_clock(r,&r->completion_started_ns)<0) {
++            r->completion_phase="initial_WORK_original_DATA_or_FULL_clock_UNCONFIRMED";return;
++        }
++        if(completion_clock(r,&r->completion_ended_ns)<0) {
++            r->completion_phase="initial_WORK_original_final_clock_UNCONFIRMED";return;
++        }
++        r->completion_returned=1;return; /* DATA, not utility/config END */
++    }
+     if(!r->pool||!r->completion_reserved) {
+         r->completion_phase="cold_no_effect_cleanup_reserve";goto done;
+     }
+@@ -410,16 +423,13 @@
+      * factory. A later work-pool refusal cannot erase its error-copy credit.
+      * Buffers themselves were included in sizeof(*r) at original bank/pool birth.
+      * Overflow remains retained/incomplete, never silently truncated. */
+-    if(FridayPublisherMasterBefore(r->pool,
+-            4ULL*(3ULL*(FRIDAY_ROOT_COMMAND_TEXT+1ULL)+
+-                FRIDAY_ROOT_CONFIG_ROWS*sizeof(void *))+
+-            (uint64_t)FRIDAY_ROOT_CONFIG_ROWS*(FRIDAY_ROOT_CONFIG_ROWS+1ULL)/2ULL*
+-                sizeof(FridayPublisherColdConfigText)+
+-            4ULL*FRIDAY_ROOT_BUILTIN_NAMES+2ULL*sizeof(r->builtin_entries)+
+-            2ULL*sizeof(r->config)+sizeof(r->preconfig),0,0,0)<0) {
++    /* The disjoint whole first-status/config completion allowance is already
++     * adopted at original birth. Retain the actual work/observation gate,
++     * but do not charge this SAME allowance a second time after the clock. */
++    if(!r->pool->birth_adopted||!r->completion_reserved||
++       FridayPublisherMasterBefore(r->pool,0,0,0,0)<0) {
+         r->phase="cold_first_status_read_reserve_refused";goto complete;
+     }
+-    r->completion_reserved=1;
+     r->phase="cold_original_case_full_copy_before_runtime";
+     if(FridayPublisherRootCaseCopy(r->pool,&r->case_input,case_id)<0)goto complete;
+     PyPreConfig_InitIsolatedConfig(&r->preconfig);
+--- base/parent/publisher_root_command.py
++++ candidate/parent/publisher_root_command.py
+@@ -20,7 +20,8 @@
+ from .quality_gate_process import OwnedCommandScope, CleanupProof
+ 
+ MAGIC = 0x314B4E4142445246
+-BANK_VERSION = 6
++BANK_VERSION = 7
++RESERVATION_VERSION = 2
+ HEADER = 4096
+ READ_CAP = 40_960_000_000
+ RAM_CAP = 8_589_934_592
+@@ -121,11 +122,38 @@
+     total: int
+     read_reserve: int
+     allocation: int
++    # Mandatory selected-image sizeof facts, NOT guessed defaults or new caps.
++    pool_row_bytes: int
++    set_marks_bytes: int
++    utility_result_bytes: int
++    utility_array_bytes: int
++    pointer_bytes: int
++    config_text_bytes: int
++    builtin_entries_bytes: int
++    config_bytes: int
++    preconfig_bytes: int
++
++    def completion_reads(self) -> tuple[int, int, int]:
++        final = (4*self.root_bytes + 4*self.cold_bytes + 3*2_000_001
++                 + 262_144*528*64 + 160*64 + 8*262_144*self.pool_row_bytes + 4096
++                 + 64*(60*1_048_576 + 264*262_144 + 56*((1_048_576+1023)//1024)
++                       + 2*((self.set_marks_bytes+63)//64) + 16 + 128))
++        utility = (4*self.utility_result_bytes + 8*self.utility_array_bytes + 2*8193
++                   + 8*262_144*self.pool_row_bytes + 4096)
++        cold = (4*(3*2_000_001 + 4096*self.pointer_bytes)
++                + (4096*4097//2)*self.config_text_bytes + 4*65536
++                + 2*self.builtin_entries_bytes + 2*self.config_bytes + self.preconfig_bytes)
++        if any(type(x) is not int or not 0 < x < 2**64 for x in (final, utility, cold)):
++            raise BankUnconfirmed("bank_disjoint_completion_read_domain")
++        return final, utility, cold
+ 
+     def check(self) -> None:
+         values = (self.root_at, self.root_bytes, self.cold_at, self.cold_bytes,
+                   self.caller_at, self.caller_bytes, self.total,
+-                  self.read_reserve, self.allocation)
++                  self.read_reserve, self.allocation, self.pool_row_bytes,
++                  self.set_marks_bytes, self.utility_result_bytes, self.utility_array_bytes,
++                  self.pointer_bytes, self.config_text_bytes, self.builtin_entries_bytes,
++                  self.config_bytes, self.preconfig_bytes)
+         if any(type(x) is not int or x <= 0 or x >= 2**64 for x in values):
+             raise BankUnconfirmed("bank_layout_integer_domain")
+         align = lambda n: (n + 63) & ~63
+@@ -135,7 +163,7 @@
+             and self.caller_at == align(self.cold_at + self.cold_bytes)
+             and self.total == align(self.caller_at + self.caller_bytes)+PUBLICATION_OPERAND_STORAGE
+             and self.allocation == 2*self.total + SCRATCH < RAM_CAP
+-            and self.read_reserve == 7 * self.total + 4 * SCRATCH < READ_CAP
++            and self.read_reserve == 7*self.total + 4*SCRATCH + sum(self.completion_reads()) < READ_CAP
+         ):
+             raise BankUnconfirmed("bank_layout_original_caps_or_offsets")
+ 
+@@ -155,6 +183,30 @@
+     SourceReady: bool = False
+     Root_admission: bool = False
+     GO: bool = False
++
++
++@dataclass(frozen=True)
++class InitialWorkData:
++    header: bytes
++    original_words: tuple[int, ...]
++    full_bytes_read: int
++    data_sha256: str
++    cleanup: CleanupProof
++    retained_deadline_ns: int
++    original_case_id: str
++    SourceReady: bool = False
++    Root_admission: bool = False
++    GO: bool = False
++    work_success: bool = False
++    resource_observation: str = "NOT_ATTEMPTED"
++
++
++class InitialWorkFailure(BankUnconfirmed):
++    """Received original valid WORK refusal. Complete DATA is not success."""
++    def __init__(self, bank: PublisherBank, record: InitialWorkData):
++        super().__init__("bank_original_initial_WORK_exhausted_DATA_only")
++        self.bank = bank
++        self.record = record
+ 
+ 
+ @dataclass(frozen=True)
+@@ -284,6 +336,9 @@
+                 or any(c not in "0123456789abcdef" for c in image_sha256)):
+             raise BankUnconfirmed("bank_image_identity_domain")
+         self.layout = layout
++        self.initial_work_data = None
++        self.initial_work_fault = None
++        self.original_case_id = None
+         self.image_sha256 = image_sha256
+         self.owner_pid = os.getpid()
+         self.fd = -1
+@@ -390,6 +445,8 @@
+                 and self.layout.allocation < RAM_CAP and HEADER <= OUTPUT_CAP):
+             raise BankUnconfirmed("bank_original_reservation_caps")
+         self.started = started
++        if started > 2**64-1-4_200_000_000_000:
++            raise BankUnconfirmed("bank_original_interval_overflow_before_acquisition")
+         self.deadline = started + 4_200_000_000_000
+         self.retained_deadline = self.deadline
+         self.original_reservation = OriginalBankReservation(
+@@ -423,7 +480,7 @@
+         words[:15] = [MAGIC, BANK_VERSION, v.total, v.root_at, v.root_bytes, v.cold_at,
+                       v.cold_bytes, v.caller_at, v.caller_bytes, self.owner_pid,
+                       self.started, self.deadline, v.read_reserve, 2048, 64]
+-        words[16:25] = [RESERVATION_MAGIC, 1, reservation.parent_pid,
++        words[16:25] = [RESERVATION_MAGIC, RESERVATION_VERSION, reservation.parent_pid,
+                         reservation.started_ns, reservation.deadline_ns,
+                         reservation.read_bytes, reservation.allocation_bytes,
+                         reservation.output_bytes, reservation.generation]
+@@ -516,7 +573,7 @@
+             self.min_wire_phase = "FAILED"
+             self.min_wire_error = BankUnconfirmed("bank_final_min_no_valid_restrictive_data")
+             raise self.min_wire_error
+-        if returncode in (0, 70):
++        if returncode in (0, 70, 71):
+             valid = (self.min_header_value == self.retained_deadline
+                      and self.min_publication_value == 0)
+         elif returncode == 79:
+@@ -820,7 +877,7 @@
+         if self.received_seals_after != FINAL_SEALS:
+             raise BankUnconfirmed("bank_publication_no_writer_unconfirmed")
+         if (len(header) != HEADER or header[:256] != self.input_header[:256]
+-                or header[66*8:BIND_AT] != self.input_header[66*8:BIND_AT]
++                or header[80*8:BIND_AT] != self.input_header[80*8:BIND_AT]
+                 or header[2048:2304] != self.input_header[2048:2304]):
+             raise BankUnconfirmed("bank_publication_original_input_binding_changed")
+         self._bind_record(header, False)
+@@ -894,7 +951,7 @@
+         w = struct.unpack_from("<128Q", header)
+         # Immutable input and unused bytes are never a status publication area.
+         if (header[:256] != self.input_header[:256]
+-                or header[66*8:BIND_AT] != self.input_header[66*8:BIND_AT]
++                or header[80*8:BIND_AT] != self.input_header[80*8:BIND_AT]
+                 or header[2048:2304] != self.input_header[2048:2304]
+                 or header[3840:] != self.input_header[3840:]):
+             raise BankUnconfirmed("bank_parent_binding_or_reserved_bytes_changed")
+@@ -922,7 +979,7 @@
+             w[32] == self.process_id and w[33] == 1 and w[36] == 0
+             and w[65] == self.min_header_value == self.retained_deadline
+             and self.started <= w[35] <= self.retained_deadline
+-            and w[41] == w[42] == w[43] == 1 and w[47] == w[48] == 0
++            and w[41] == w[42] == 1 and w[43] == (0 if returncode == 71 else 1) and w[47] == w[48] == 0
+             and w[54] == self.layout.read_reserve <= w[49] <= READ_CAP
+             and reservation.output_bytes <= w[50] <= OUTPUT_CAP
+             and w[51] >= self.layout.allocation
+@@ -935,6 +992,33 @@
+             and w[35] <= w[64] <= self.retained_deadline
+         ):
+             raise BankUnconfirmed("bank_full_actual_cold_data_or_original_resources")
++        if returncode != 71 and any(w[66:80]):
++            raise BankUnconfirmed("bank_noninitial_original_clock_cells_changed")
++        if w[34] == 3:
++            if self.original_case_id is None:
++                raise BankUnconfirmed("bank_initial_WORK_original_outside_input_not_retained")
++            actual = w[69]*1_000_000_000 + w[70]
++            if not (returncode == 71 and w[37] == w[38] == w[39] == w[40] == 0
++                    and w[43] == w[44] == w[45] == w[46] == w[58] == w[59] == 0
++                    and w[66] == 5 and w[67] == w[68] == 0
++                    and 0 <= w[69] <= (2**64-1-w[70])//1_000_000_000
++                    and w[70] < 1_000_000_000 and actual == w[71]
++                    and self.deadline-600_000_000_000 < actual <= self.retained_deadline
++                    and w[72] == 7*self.layout.total + 4*SCRATCH
++                    and w[73:76] == self.layout.completion_reads()
++                    and sum(w[72:76]) == self.layout.read_reserve
++                    and w[76] == w[77] == w[78] == w[79] == 1
++                    and strings[5][1] == len(b"Root_original_initial_WORK_exhausted")
++                    and strings[5][2][:strings[5][1]] == b"Root_original_initial_WORK_exhausted"):
++                raise BankUnconfirmed("bank_initial_WORK_full_original_data_relation")
++            # The initial raw sample and FULL body are retained, not converted
++            # into Source/runtime/utility success or a resource observation.
++            record = InitialWorkData(header, tuple(w[66:80]), self.body_bytes_written,
++                                     self.raw_data_sha256, proof, self.retained_deadline,
++                                     self.original_case_id)
++            self.initial_work_data = record
++            self.initial_work_fault = InitialWorkFailure(self, record)
++            raise self.initial_work_fault
+         if w[34] == 1:
+             if returncode != 0 or not (w[44] == w[45] == w[46] == 1):
+                 raise BankUnconfirmed("bank_local_end_relation")
+@@ -976,6 +1060,16 @@
+             outcome = self.completion.outcome
+             returncode = self.completion.returncode
+             digest = self.completion.data_sha256
++        elif self.initial_work_data is not None:
++            record = self.initial_work_data
++            if (self.body_buffer is None or self.body_bytes_written != self.layout.total
++                    or len(self.body_buffer) != self.layout.total
++                    or self.received_header != record.header):
++                raise BankUnconfirmed("bank_initial_WORK_without_full_retained_body")
++            header = record.header
++            outcome = "INITIAL_WORK_ERROR_FULL_DATA_ONLY_ROOT_PROCESS_ENDED"
++            returncode = 71
++            digest = record.data_sha256
+         elif self.publication_end_confirmed:
+             if (self.publication_fault is None or self.native_publication is None
+                     or self.body_buffer is None or self.body_bytes_written != self.layout.total
+@@ -996,7 +1090,10 @@
+         # This call checks the still-live descriptor and original finite clock.
+         # All checks after it use retained bytes/history and confirmed close,
+         # never fstat/pread on a descriptor which must already be closed.
+-        self.close_consumed()
++        if self.initial_work_data is not None:
++            self._close_retained_raw() # complete raw DATA + actual proof, not success END
++        else:
++            self.close_consumed()
+         self._clock()
+         if self.raw_body_retained:
+             # The receiving memfd has now ended. At most the two full-size
+@@ -1196,6 +1293,7 @@
+             or "\0" in case_id or len(case_id.encode("utf-8")) > 2_000_000):
+         raise BankUnconfirmed("bank_actual_command_inputs")
+     bank = PublisherBank(layout, image_sha256)
++    bank.original_case_id = case_id # SAME original object, retained BEFORE effects.
+     retained_evidence.append(bank)  # Before memfd/acquisition/launch; errors retain it.
+     prelaunch_clock_error = None
+     try:
+@@ -1242,7 +1340,7 @@
+         return bank.finish_received()
+     except BaseException as exc:
+         if (prelaunch_clock_error is None
+-                and isinstance(exc, (BankNativeFailure, BankPublicationFailure))):
++                and isinstance(exc, (BankNativeFailure, BankPublicationFailure, InitialWorkFailure))):
+             # Full native failure is the first outcome, not operation success.
+             # Finish its actual received bank as well; a secondary finalization
+             # failure is retained without replacing or retrying the original.

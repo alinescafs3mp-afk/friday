@@ -1,0 +1,21 @@
+{
+  "schema": "friday.sol164.boundaries.v1",
+  "Source_execution_parser_compiler_import_AST_eval_tests_helpers_live_network_install": 0,
+  "protected_body_changes": 0,
+  "frozen_checkout_or_published_package_writes": 0,
+  "git_changes_push": 0,
+  "children_models": 0,
+  "heavy": 0,
+  "local": 1,
+  "stopped_scopes": "107#2/Scanner075/SOL139 excluded, no execution/review/retry/salvage/reroute/partial acceptance.",
+  "opaque_handling": "Hash-only/copy unchanged protected bodies, never executed or used as qualification.",
+  "read_scope_incident": "Two location-oriented sed ranges unintentionally emitted unrelated existing class/image body text (10120..10290 and trailing11228..11288 in base entry). Not used as author/review evidence, no diagnosis/modification/qualification or Source execution there, not repeated. Strict hash-only read scope cannot be claimed for those accidental bounded disclosures; only byte-unchanged body relations are credited.",
+  "host_failures": 2,
+  "failed_host_checks": "One prewrite unique-literal count and one host global span-marker count corrected. No Source operation rejection/retry.",
+  "models_reasoning_tier_unchanged": true,
+  "author_not_independent_acceptance": true,
+  "resource_unknowns": "Added symbolic numeric guards/storage/branches/Python references and all implicit physical/time costs UNKNOWN_NOT_ZERO; budgets are not qualified whole upper bounds.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

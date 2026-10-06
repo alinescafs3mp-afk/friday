@@ -1,0 +1,36 @@
+{
+  "schema": "friday.astra.a308.publisher.receiver71.implementation.v1",
+  "state": "AUTHOR_DERIVATIVE_PENDING_NONAUTHOR_REVIEW_INERT",
+  "base": {
+    "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/manifest.json",
+    "bytes": 82497,
+    "sha256": "83a4a43d7d5acce85bab0ef3064e6941e73227ab201c2b6f9c84d8a6f0e4a18e",
+    "identity9_decimal_strings": [
+      "2050",
+      "4230561",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "82497",
+      "1791269861184855339",
+      "1791269861185855397"
+    ],
+    "stable9": true
+  },
+  "review_ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A308-SOL164-CONNECTED-REVIEW-20261006.json",
+  "invariant": "New native71/outcome3 must reach actual parent full-data receiver, not fail in stale old-code entry predicate.",
+  "change": "ONLY returncode in(0,70,78,79) -> in(0,70,71,78,79) in actual receive proof gate. No weakened PID/proof identity/reap/no-forced-cleanup predicates and no success from71.",
+  "connected_rejoin": "Native Commit+publish selects71; actual scope.wait returns71; receive verifies SAME actual process/proof/return code; _retain_final_min already71 -> complete raw/header/alias/outcome3 -> InitialWorkData+same first InitialWorkFailure -> actual caller finish_received -> _close_retained_raw -> retained historical bytes and NEW immutable error final record. All branches beyond allowlist byte-exact Sol164.",
+  "counterpaths": "71 with outcome1/2 or malformed/absent raw data fails strict lower predicates; unrelated codes still refuse before intake; uncertain actual cleanup/writer/clock/read/close never gains successful completion. Normal0/70 and verified78/79 controls unchanged.",
+  "source61": 61,
+  "current88": 88,
+  "source_changed": 1,
+  "source_same": 60,
+  "candidate_same": 87,
+  "resource": "One additional finite code comparison, unchanged original caps/debits/layout/storage/clock. Added comparison cost UNKNOWN_NOT_ZERO, not measured. Sol164 complete cost/ABI/current-image and existing open custody authority remain required.",
+  "test_execution": "NOT_RUN; raw exact inverse/manifest/static caller review only.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

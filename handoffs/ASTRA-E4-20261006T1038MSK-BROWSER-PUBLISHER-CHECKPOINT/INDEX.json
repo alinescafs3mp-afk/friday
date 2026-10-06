@@ -1,0 +1,122 @@
+{
+  "schema": "friday.work-snapshot.index.v1",
+  "snapshot_time_msk": "2026-10-06T10:37:27.738188+03:00",
+  "snapshot_directory": "handoffs/ASTRA-E4-20261006T1038MSK-BROWSER-PUBLISHER-CHECKPOINT",
+  "scope": "INCREMENTAL_BROWSER_AND_PUBLISHER_WITH_COMPARISON_BASELINES; NOT_A_NEW_COMPLETE_FIVE_COMPONENT_EXPORT",
+  "state": "INERT_NOT_RELEASE_APPROVAL_NOT_EXECUTION_AUTHORITY",
+  "previous_published_head": "63184bd6a1a59c1430efebbe64b7bab4760cc695",
+  "previous_snapshot": "handoffs/ASTRA-E4-20261006T0842MSK-PUBLISHER-CHECKPOINT",
+  "earlier_full_snapshot": "handoffs/ASTRA-E4-20261004T2037MSK-WORK-SNAPSHOT",
+  "lead": {
+    "name": "Astra",
+    "role": "active Lead Architect",
+    "epoch": 4,
+    "model": "gpt-6-astra",
+    "provider": "openai_https",
+    "reasoning": "ultra",
+    "service_tier": "unchanged; not returned by metadata read",
+    "deputy": "Kimi",
+    "basis": "current operational checkpoint and native thread metadata; no authority/model/settings change"
+  },
+  "product": {
+    "baseline_sha": "cecd28a92ac4fd4e34c4d3813d0c598debe09436",
+    "candidate_version": "0.208.64",
+    "schema": 50,
+    "frozen": true,
+    "built_wheel": "NO_NEW_ARTIFACT",
+    "installed": "0.208.58 last recorded, NOT_REPROBED",
+    "archive_commit_is_product_candidate": false
+  },
+  "packages": {
+    "Browser": {
+      "manifest": {
+        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json",
+        "bytes": 10781,
+        "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5",
+        "identity9_decimal_strings": [
+          "2050",
+          "4230566",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10781",
+          "1791270177829870695",
+          "1791270177847283442"
+        ],
+        "stable9": true
+      },
+      "source_inventory": 15,
+      "source_files_archived": 15,
+      "current209_aux3_unique": 212,
+      "current_unique_archived": 205,
+      "implementation_state": "A308 implemented/raw-checked/integrated; exact retirement delta independently accepted by Sol165; whole package NOT accepted/target NOT verified",
+      "superseded": "A306 comparison package; historical-named current inventory remains pinned context, not current top-level implementation"
+    },
+    "Publisher": {
+      "manifest": {
+        "path": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/manifest.json",
+        "bytes": 75190,
+        "sha256": "2a5e9b96b3d8048992712531746a8009e5a01265874f93d96befef846686c6c4",
+        "identity9_decimal_strings": [
+          "2050",
+          "4230689",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "75190",
+          "1791270876923262608",
+          "1791270876945263873"
+        ],
+        "stable9": true
+      },
+      "source_inventory": 61,
+      "source_files_archived": 60,
+      "current_files": 88,
+      "implementation_state": "Sol164 v7/reservation2 + exact A308 receiver71 derivative. Delta independently accepted by Sol166; whole package/admission/target NOT accepted",
+      "superseded": "Sol164 original REJECT_CONNECTED; copied unchanged solely for comparison, not retroaccepted"
+    },
+    "unchanged_other_roots": "Unchanged ScannerLAB887 manifest3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee existing-parent/factory/Source-main endsOPEN(stopped075excluded); NodeA2378e9f2f157ea87785761578fd4ab3795b327c45016be8d29c43a55fe7d184f35f nativepool/fullgraph-prefix/bothends/Q1Q2OPEN; SenderSol0892b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133 native/raw/error/bothendsOPEN. Exact refs inherit through previous checkpoint and canonical backlog; no target/whole acceptance."
+  },
+  "changes_since_previous_publication": [
+    "Browser A302/A306 source lineage now represented in A308 current joined inventory; one direct history decode per call; actual successful private graph retirement covers disconnected cycles with preserved canonical root-return and errors.",
+    "Publisher Sol164 original birth now prepays bank/final/utility/cold components; v7 bank/reservation2;9 required selected-image size facts; initial WORK refusal full DATA path. Astra detected actual receiver rejected native71 and corrected exact entry; Sol166 independently accepted this delta.",
+    "No runtime test, Source execution, compiler, build, installation or production effects performed to create this export."
+  ],
+  "accepted_closures": [
+    "Browser conditional normal-success private graph accumulation: exact scoped static closure, not full resource-fit closure.",
+    "Publisher A308-PUBLISHER-F1 native71 entry mismatch: exact scoped static closure, not whole source/admission closure."
+  ],
+  "remaining_blockers": {
+    "Publisher": "Earlier applicable-min identity/generation/pre-acquisition/prelaunch/full-span authority; full actual value/native/body/error/alias/history/last-owner custody; actual current image/compilerABI/nine sizeof/provider/admission/whole costs. Initial true primitive/entered/unreturned/bad-domain/full-expired clock contours remain barriers. No wider D0 fallback or fabricated support END.",
+    "Browser": "F2 node-copy/Unicode/header/RLE/transient multiplicity; F3 failed partial/traceback/retirement prefixes; F4 prospective original256MiB actual workload share; remaining F5 reads/hash/CPU/180/170/final10 fit. Root wait/proc history, child setup, PreparedView caller and image/ABI/admission open.",
+    "other": "Scanner existing-parent/factory/Source-main; Sender native/raw/error/both ends; Node native pool/full graph prefixes/both ends/Q1Q2. Exact identities retained in unchanged_other_roots."
+  },
+  "active_unpublished_work": {
+    "Sol167": {
+      "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+      "state": "IN_PROGRESS_ACTUAL_FIRST_TASK_VERIFIED",
+      "scope": "Browser three-reader RLE transient reduction",
+      "new_changes_in_snapshot": false
+    }
+  },
+  "next_required_release_stage": "Independent acceptance of connected necessary source, then actual image/compilerABI/grants/provider/resource/finite-clock qualification before stable collect-all diagnostics; no release gate newly executable from these scoped credits.",
+  "release": {
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false,
+    "r5": "immutable RED/no reuse",
+    "r6": "absent",
+    "mandatory": "Existing exact change+exact union,160live,A+B(no B after red A),B09/R10/all30/F0-F11/build/install/restore/rollback/target/independent acceptance retained. External web OWNER_DEFERRED_POST_1_0, never PASS."
+  },
+  "coverage": {
+    "files": 433,
+    "bytes": 13444015,
+    "omitted_selected_paths": 15,
+    "review_bindings": "REVIEW-BINDINGS.json",
+    "manifest": "MANIFEST.json",
+    "limits": "OMISSIONS.json"
+  },
+  "status_register": "../../outer_sol/PROJECT_BACKLOG.md; this index is immutable snapshot metadata only"
+}

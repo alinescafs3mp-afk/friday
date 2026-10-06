@@ -1,0 +1,25 @@
+{
+  "schema": "friday.sol166.result.v1",
+  "assignment": "ASTRA-E4-A308-PUBLISHER-ACTUAL-INITIAL71-RECEIVER-CONNECTED-NONAUTHOR-SOL166",
+  "generation": 1,
+  "event": "SOL-SOL166-R1",
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A308_ACTUAL_INITIAL71_RECEIVER_ENTRY_DELTA_ONLY",
+  "accepted_msk": "2026-10-06T10:19:00+03:00",
+  "completed_msk": "2026-10-06T10:24:43.989283+03:00",
+  "elapsed_seconds": 343.989,
+  "manifest": {
+    "path": "/var/tmp/friday-sol166-a308-publisher-initial71-receiver-review/manifest.json",
+    "sha256": "5c46698b82962df78a6f07b91653ad7db325dd96299935de1c93b820349605ce"
+  },
+  "review": {
+    "path": "/var/tmp/friday-sol166-a308-publisher-initial71-receiver-review/REVIEW.json",
+    "sha256": "d14c6f1b0c13e813fc90464ff09cabb3d72a0267c3b2e9ee05cfc3db288f88f0"
+  },
+  "credits": "Exact ONE71 insertion; full parent inverse;61=1/60,88=1/87. Actual declared native71/outcome3 -> same process proof -> restrictive min/full raw/alias DATA -> SAME first InitialWorkFailure -> actual finisher once-close/historical bytes/NEW immutable error record.0/70/78/79 and unknown refusals preserved.",
+  "limits": "Exact Astra delta only, NOT own Sol164 whole acceptance or runtime/fit.31 host literal observations/14 spans NOT Source tests; protected policy/stock/type/worker bodies opaque. Added cost UNKNOWN_NOT_ZERO; image/ABI/provider/authority/whole custody/resource fit OPEN.",
+  "controls": "ALL69/20/140/v2/inherited/M37/I14/J20/K33+P06 REQUIRED/no waiver/NOT_RUN.",
+  "boundary": "Source parse/compiler/import/AST/exec/tests/helpers/live/network/install0; source edits0;local1/children0/heavy0; stopped107#2/075/139 excluded. Two corrected host-only checks disclosed; no Source execution.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

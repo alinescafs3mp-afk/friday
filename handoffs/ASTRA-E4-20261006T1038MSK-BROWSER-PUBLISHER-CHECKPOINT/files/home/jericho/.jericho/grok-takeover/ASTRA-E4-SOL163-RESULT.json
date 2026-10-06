@@ -1,0 +1,25 @@
+{
+  "schema": "friday.sol163.result.v1",
+  "assignment": "ASTRA-E4-A306-BROWSER-THREE-READER-HISTORY-ONCE-NONAUTHOR-SOL163",
+  "generation": 1,
+  "event": "SOL-SOL163-R1",
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A306_THREE_READER_HISTORY_ONCE_DELTA_ONLY",
+  "accepted_msk": "2026-10-06T09:31:05+03:00",
+  "completed_msk": "2026-10-06T09:35:45.897572+03:00",
+  "elapsed_seconds": 280.898,
+  "manifest": {
+    "path": "/var/tmp/friday-sol163-a306-browser-three-reader-history-once-review/manifest.json",
+    "sha256": "b363ce10d69d412f009abdd1f3d625014e8c67d0d8253ff2b61c7192c98498b7"
+  },
+  "review": {
+    "path": "/var/tmp/friday-sol163-a306-browser-three-reader-history-once-review/REVIEW.json",
+    "sha256": "8625f8704328e266d417af04350f548da55b7c45e7e469143a4083bd9414b2ac"
+  },
+  "credits": "Same3 exact checker delta; complete first decode reused ONLY in same own-history trace/context; inherited/container and all projections/error order intact.24 current pin blocks in6 metadata inverse-byte-exact.15=5/10;209=9/200;aux3=0/3.",
+  "qualification": "29 host literal observations/11 raw spans, NOT Source tests. Selected DIRECT calls2->1, not total1 per node: unchanged root DATA extra calls remain; no universal2x or whole fit.",
+  "remaining": "F1-F4 and remainingF5/whole256MiB/180/170/10, original error/custody/retirement/ABI/image/admission OPEN. ALL216/29/6/9+inherited+H26 REQUIRED/no waiver/NOT_RUN. No whole own-baseline acceptance.",
+  "boundary": "INERT safe data-validator raw review only; Source parser/compiler/import/AST/exec/tests/helpers/live/network/install0; source writes0; local1/children0/heavy0; protected opaque/stopped scopes excluded.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

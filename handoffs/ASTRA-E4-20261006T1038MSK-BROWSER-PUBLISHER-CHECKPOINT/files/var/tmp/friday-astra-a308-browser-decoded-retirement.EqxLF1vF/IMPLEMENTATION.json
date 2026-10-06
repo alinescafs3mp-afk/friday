@@ -1,0 +1,162 @@
+{
+  "schema": "friday.astra.a308.browser.success-graph-retirement.v1",
+  "assignment": "ASTRA-E4-A308-BROWSER-ACTUAL-SUCCESS-GRAPH-RETIREMENT",
+  "generation": 1,
+  "state": "AUTHOR_CONNECTED_DELTA_PENDING_NONAUTHOR_REVIEW_INERT",
+  "base": {
+    "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/manifest.json",
+    "bytes": 10524,
+    "sha256": "e9aaacce5b79a820244889712e00319f29be6dcc42c26795d6331c01ea216f7a"
+  },
+  "prior_scoped_review": {
+    "path": "/var/tmp/friday-sol163-a306-browser-three-reader-history-once-review/REVIEW.json",
+    "bytes": 8673,
+    "sha256": "8625f8704328e266d417af04350f548da55b7c45e7e469143a4083bd9414b2ac"
+  },
+  "invariant": "Full actual values/alias topology and first/secondary original errors must survive; normal successful private transient graphs need not accumulate after their last local reader. No accepted fact or graph is replaced by hash/count/subset.",
+  "existing_authority": [
+    {
+      "path": "/var/tmp/friday-sol153-a300-browser-aggregate-body-consumption/ACTUAL-READERS-AND-LIVENESS.json",
+      "bytes": 6175,
+      "sha256": "aa1a131477c4913ad508463d2e2271ceef0c31bdcaccd8da5587fe79f721facb",
+      "identity9_decimal_strings": [
+        "2050",
+        "6313902",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6175",
+        "1791258836462393682",
+        "1791258836463522815"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol153-a300-browser-aggregate-body-consumption/FIT-CONFLICT.json",
+      "bytes": 8930,
+      "sha256": "72d4c251969ed533bc4dac63b73d261870144ac1c1fcd0edaffdb7b007070115",
+      "identity9_decimal_strings": [
+        "2050",
+        "6313904",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8930",
+        "1791258931170880837",
+        "1791258931171880895"
+      ],
+      "stable9": true
+    }
+  ],
+  "actual_connected_path": [
+    "All3 actual sol069_decode functions share one optional keyword-only node_owner=None interface. Default Supervisor/Public callers keep original full-root return and identity semantics.",
+    "Only actual A079 sol151_consume_planes supplies its already-published entry, with decoded_nodes initially None. Decoder aliases its existing values list into that slot BEFORE nodes/edges are populated. No graph/table copy, cache or new owner role.",
+    "After decoder AND sol143_native_check return normally, actual A079 clears every decoder-created list/dict node's edges, including nodes unreachable from root and cyclic components. The table holds all nodes during edge clearing; original DS69 bytes/reference never change.",
+    "Original hard_ns guard precedes retirement, each node, table release and final completion publication. Last iteration variable is dropped, then root and SAME table references are released; decoded_retired becomes true LAST after original hard-clock check.",
+    "Decoder/check failure skips retirement entirely. Partial table and exact original traceback/exception remain. Retirement failure keeps full encoded graph, remaining table/prefix and original error with decoded_retired=false; no retry or fake reclamation.",
+    "Actual mandatory third stream/native oracle, descriptor retirement, final status/error gates and positive-first retained receipt remain byte-exact. Successful local historical representation is COMPLETE encoded graph, not a reference/hash substitute. All canonical consumers still receive intact decoded graphs."
+  ],
+  "source": [
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-CONTRACT.py",
+      "bytes": 30209,
+      "sha256": "6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230538",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30209",
+        "1791256629909504672",
+        "1791269499029667865"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-PRODUCER.py",
+      "bytes": 21229,
+      "sha256": "34715072ba19c02d40aa9571051ba41eea99f0fc68ca0a24759c5cbcd2d6b743",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230540",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21229",
+        "1791256629935506179",
+        "1791269499029722536"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+      "bytes": 141617,
+      "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230541",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "141617",
+        "1791269577105520169",
+        "1791269577105520169"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+      "bytes": 79836,
+      "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230543",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "79836",
+        "1791269895060803273",
+        "1791269895060803273"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 221603,
+      "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230545",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "221603",
+        "1791269577106520227",
+        "1791269577106520227"
+      ],
+      "stable9": true
+    }
+  ],
+  "scope_condition": "Conditional source-level normal successful local graph retirement. Not full graph/resource-root acceptance, image qualification, measured runtime or release GO.",
+  "costs": {
+    "same_table": "No second node table; optional owner adds a reference to the existing values list. Captures all nodes, including otherwise-unreachable cycles, until explicit normal retirement or retained failure.",
+    "new_costs": "2 per-entry fields; optional keyword/owner condition and dictionary assignment; existing-list iteration and container-edge retirement; for N nodes, N+3 additional original hard-clock checks on a full successful retirement. Actual object/allocator/CPU/time costs UNKNOWN_NOT_ZERO.",
+    "normal_relation": "If the actual exclusive private reader and guarded retirement complete, successful decoded graphs are no longer held across subsequent frames/positive-first receipts. Full raw/reference/header/receipt contents remain charged. This is NOT an observed RSS reduction or reservation refund.",
+    "open": "SOL153 F2 per-node/Unicode/header/RLE/transient costs, F3 retained failed partials/tracebacks and retirement failures, F4 original prospective whole 256MiB workload share, remaining F5 full read/hash/CPU/time; canonical graphs, positive+negative raw receipts and runtime allocator behavior remain required."
+  },
+  "preservation": "A302 reference resolver and A306 history-once exact bodies retained. Existing216/29/6/9,inherited,H01-H26 remain REQUIRED_NOT_RUN; changed decoder/caller context still needs independent rejoin, no context-free prior credit.",
+  "no_new_caps_roles_services_grants_pools": true,
+  "execution": "Source parser/compiler/preprocess/import/AST/eval/exec/tests/helpers/live/network/install NOT_RUN",
+  "stopped_scopes": "SOL107#2/ScannerSOL075/SOL139 and equivalents excluded. Protected Root wait/lifetime/stock/type/callback/controlled-worker qualification unchanged/opaque; unsafe controls hash-only REQUIRED/no waiver.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

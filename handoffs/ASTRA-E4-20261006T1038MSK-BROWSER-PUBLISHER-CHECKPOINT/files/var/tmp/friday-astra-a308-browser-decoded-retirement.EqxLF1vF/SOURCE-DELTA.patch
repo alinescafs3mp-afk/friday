@@ -1,0 +1,1020 @@
+--- /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-ABI-MAPPING.json
++++ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-ABI-MAPPING.json
+@@ -3134,8 +3134,8 @@
+       "held_capture actual mapping routes exactly these original plane FDs to required131..134 together with original four streams1/2/128/129. The child descriptor sweep keeps those mapped writers, but the real caller never execs away and retains its readonly originals. Same native Root/Common validation, strict source/capsule checks, clocks, work/cleanup policy and original three case/count/status predicates remain.",
+       "After actual external kernel reap, the caller reads BOTH capsule-bound hierarchical cgroup.events through the original descriptors120/121 using the existing18-slot metadata ledger. No Root exit/typed flag/hash alone is treated as last-writer proof. Raw group evidence and errors remain held. This is CONDITIONAL on the existing qualified Root containment/FD-transfer contract, not independent admission.",
+       "Only on confirmed no-writers: consume every committed original48-byte record header, full frame, hash and exact reference from each original backing. Stable original credential/mode/seals/slot/capsule/version/generation/sequence/end/poison/retired/header and full final header agree. Incomplete suffix remains full raw plus original FD/view; poison, drift, mapping close or snapshot failure cannot retire or complete it.",
+-      "Actual outside full-body consumer calls byte-identical existing canonical DS69 graph decoder for each committed codec frame, with same alias-preserving graph semantics. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
+-      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle still execute in the same caller after raw/body retention. Both normal and failed paths retire only fully snapshotted original planes, or confirmed unborn caller-owned originals; all descriptors close at most once. Complete raw originals/decoded graphs/error aliases remain in the actual receipt before close. A final original hard-clock check prevents later completion from expired/failed time.",
++      "Actual outside full-body consumer calls the SAME canonical DS69 graph decoder for each committed codec frame. A308 optional node_owner retains that decoder's existing values table before edges are populated, including nodes unreachable from the root; default canonical callers keep their original root interface. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
++      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle remain mandatory after raw/body retention. Only after a successful DS69 decode AND native check does A079 clear its private decoder-created container edges, then drop its root/node-table references and set decoded_retired last; full encoded values/aliases remain in original bytes. Decode/check failures do not enter retirement; retirement failures retain complete encoded data, the remaining table and original exception with decoded_retired false. Canonical consumers still receive intact graphs. Descriptor retirement, all-outcome error custody and final original hard-clock predicates are unchanged.",
+       "Original mandatory F_SEAL_SEAL makes adding F_SEAL_WRITE impossible; no such seal or freeze is invented. Writer-end plus original readonly views/stable full headers underpin only the bounded conditional physical-frame transfer, not full native/error ownership or global lifetime acceptance.",
+       "Default run_positive_first invokes the new actual provisioner automatically for independently pinned positive, then negative only after positive accepted. Bare supplied FD tuples without an actual outside owner contract are explicitly refused, while direct legacy held_capture optional routing and original PreparedView.finish implementation remain unchanged."
+     ],
+@@ -3209,53 +3209,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+-        "bytes": 141121,
+-        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229653",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "141121",
+-          "1791267716925502248",
+-          "1791267716925502248"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
++        "bytes": 141617,
++        "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230541",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141617",
++          "1791269577105520169",
++          "1791269577105520169"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 221107,
+-        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229654",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "221107",
+-          "1791267716927502361",
+-          "1791267716927502361"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221603,
++        "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230545",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221603",
++          "1791269577106520227",
++          "1791269577106520227"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 78170,
+-        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229655",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "78170",
+-          "1791267716924502191",
+-          "1791267716924502191"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 79836,
++        "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230543",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "79836",
++          "1791269895060803273",
++          "1791269895060803273"
+         ],
+         "stable9": true
+       },
+@@ -3421,7 +3421,7 @@
+         "new_normal_capsule_read_request": 849,
+         "maximum_records_per_plane_only_from_minimum_record_extent": 342392
+       },
+-      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair, codec entry and optional expanded graph; raw object reused on resolve. No per-record encoded-body substitution.",
++      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair and codec entry; raw object reused on resolve. A308 aliases the existing decoder values table without copying it. After the successful local reader, complete raw DS69 bytes retain values/alias topology while private decoded nodes are retired; failure prefixes and canonical consumer graphs remain charged. Two additional entry fields, keyword/owner checks and all retirement work have nonzero unqualified costs; no body-to-hash/reference substitution.",
+       "retained_overlap": "All four full plane raw frame prefixes, record/reference/dict/list/tuple intentions, full original four streams and their buffers, canonical decoded objects/aliases, exception graphs, temporary slices/hash/base64/header/raw bodies and mappings; UNKNOWN_NOT_ZERO. A sparse64MiB extent is not64MiB observed RAM.",
+       "cost_warning": "Original per-frame DS69 expanded<=16MiB and each plane16MiB do NOT bound aggregate expanded graphs/implicit overhead under256MiB. Exact original finite case/record/alias/workload bounds and prepaid outside role budget remain REQUIRED. No caps/pool enlargement, early cleanup cut or new availability assumed.",
+       "write_seal": "Original GROW|SHRINK|SEAL=7, mandatory SEAL_SEAL prevents later F_SEAL_WRITE; no write-seal credit or mutation of Source writer sequence/poison/end/retired by outside reader.",
+@@ -3511,7 +3511,7 @@
+       "Existing held_capture repeated retention/select/cleanup histories and allocation/freezing of the receipt can still be incomplete or fail. New caller publishes original acquired buffers/launch objects/planes beforehand and retains fixed field/error prefixes, but no universal complete entered-error graph/history or allocation-failure guarantee is asserted.",
+       "Generic A201 snapshot poison/refused record/undecodable suffix retains original fd/readonly view/mapping and complete acquired prefix; it does not certify full native/error objects or a new expiry-time transfer authority. Original Source objects stay owned/charged on uncertain end/clock/close; no unqualified reentry/close retry/new holder.",
+       "The two original cgroup emptiness reads establish kernel no-members only under the independently qualified original Root namespace/containment/FD-transfer contract; no external writer/descriptor escape or authenticated selected runtime qualification is inferred from zero text alone.",
+-      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation is not closed. In particular every retained record dictionary/header/reference/frame plus per-record DS69 expanded graph may dominate the declared plane capacity. Exact finite actual workload bounds under original caps are REQUIRED, not a new pool/cap or full-cost credit."
++      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation remains open. A308 authors normal local successful-graph retirement only; whole fit still includes all retained raw/header/reference/entry objects, current transient graph with per-node mutable/Unicode copies, failed partial tables/tracebacks, canonical graphs and positive-first overlap. Runtime reclamation/allocator/time is not measured. Exact finite actual workload bounds under original caps remain REQUIRED; no new pool/cap or full-cost credit."
+     ],
+     "UNKNOWN_NOT_ZERO": [
+       "Selected authenticated image/compiler/native/kernel/CMSG/CPython ABI, native actor qualification, full directional FD/containment contract and current exact capsule admission: UNKNOWN_NOT_ZERO / REQUIRED_NOT_RUN.",
+--- /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-BUILD-RECIPE.json
++++ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-BUILD-RECIPE.json
+@@ -2563,19 +2563,19 @@
+   },
+   "sol149_legacy_caller_staging": {
+     "A079-NATIVE-PUBLIC-DRIVER.py": {
+-      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-      "bytes": 78170,
+-      "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++      "bytes": 79836,
++      "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+       "identity9_decimal_strings": [
+         "2050",
+-        "4229655",
++        "4230543",
+         "33152",
+         "1000",
+         "1000",
+         "1",
+-        "78170",
+-        "1791267716924502191",
+-        "1791267716924502191"
++        "79836",
++        "1791269895060803273",
++        "1791269895060803273"
+       ],
+       "stable9": true
+     },
+@@ -3829,8 +3829,8 @@
+       "held_capture actual mapping routes exactly these original plane FDs to required131..134 together with original four streams1/2/128/129. The child descriptor sweep keeps those mapped writers, but the real caller never execs away and retains its readonly originals. Same native Root/Common validation, strict source/capsule checks, clocks, work/cleanup policy and original three case/count/status predicates remain.",
+       "After actual external kernel reap, the caller reads BOTH capsule-bound hierarchical cgroup.events through the original descriptors120/121 using the existing18-slot metadata ledger. No Root exit/typed flag/hash alone is treated as last-writer proof. Raw group evidence and errors remain held. This is CONDITIONAL on the existing qualified Root containment/FD-transfer contract, not independent admission.",
+       "Only on confirmed no-writers: consume every committed original48-byte record header, full frame, hash and exact reference from each original backing. Stable original credential/mode/seals/slot/capsule/version/generation/sequence/end/poison/retired/header and full final header agree. Incomplete suffix remains full raw plus original FD/view; poison, drift, mapping close or snapshot failure cannot retire or complete it.",
+-      "Actual outside full-body consumer calls byte-identical existing canonical DS69 graph decoder for each committed codec frame, with same alias-preserving graph semantics. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
+-      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle still execute in the same caller after raw/body retention. Both normal and failed paths retire only fully snapshotted original planes, or confirmed unborn caller-owned originals; all descriptors close at most once. Complete raw originals/decoded graphs/error aliases remain in the actual receipt before close. A final original hard-clock check prevents later completion from expired/failed time.",
++      "Actual outside full-body consumer calls the SAME canonical DS69 graph decoder for each committed codec frame. A308 optional node_owner retains that decoder's existing values table before edges are populated, including nodes unreachable from the root; default canonical callers keep their original root interface. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
++      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle remain mandatory after raw/body retention. Only after a successful DS69 decode AND native check does A079 clear its private decoder-created container edges, then drop its root/node-table references and set decoded_retired last; full encoded values/aliases remain in original bytes. Decode/check failures do not enter retirement; retirement failures retain complete encoded data, the remaining table and original exception with decoded_retired false. Canonical consumers still receive intact graphs. Descriptor retirement, all-outcome error custody and final original hard-clock predicates are unchanged.",
+       "Original mandatory F_SEAL_SEAL makes adding F_SEAL_WRITE impossible; no such seal or freeze is invented. Writer-end plus original readonly views/stable full headers underpin only the bounded conditional physical-frame transfer, not full native/error ownership or global lifetime acceptance.",
+       "Default run_positive_first invokes the new actual provisioner automatically for independently pinned positive, then negative only after positive accepted. Bare supplied FD tuples without an actual outside owner contract are explicitly refused, while direct legacy held_capture optional routing and original PreparedView.finish implementation remain unchanged."
+     ],
+@@ -3904,53 +3904,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+-        "bytes": 141121,
+-        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229653",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "141121",
+-          "1791267716925502248",
+-          "1791267716925502248"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
++        "bytes": 141617,
++        "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230541",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141617",
++          "1791269577105520169",
++          "1791269577105520169"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 221107,
+-        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229654",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "221107",
+-          "1791267716927502361",
+-          "1791267716927502361"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221603,
++        "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230545",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221603",
++          "1791269577106520227",
++          "1791269577106520227"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 78170,
+-        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229655",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "78170",
+-          "1791267716924502191",
+-          "1791267716924502191"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 79836,
++        "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230543",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "79836",
++          "1791269895060803273",
++          "1791269895060803273"
+         ],
+         "stable9": true
+       },
+@@ -4133,7 +4133,7 @@
+         "new_normal_capsule_read_request": 849,
+         "maximum_records_per_plane_only_from_minimum_record_extent": 342392
+       },
+-      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair, codec entry and optional expanded graph; raw object reused on resolve. No per-record encoded-body substitution.",
++      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair and codec entry; raw object reused on resolve. A308 aliases the existing decoder values table without copying it. After the successful local reader, complete raw DS69 bytes retain values/alias topology while private decoded nodes are retired; failure prefixes and canonical consumer graphs remain charged. Two additional entry fields, keyword/owner checks and all retirement work have nonzero unqualified costs; no body-to-hash/reference substitution.",
+       "retained_overlap": "All four full plane raw frame prefixes, record/reference/dict/list/tuple intentions, full original four streams and their buffers, canonical decoded objects/aliases, exception graphs, temporary slices/hash/base64/header/raw bodies and mappings; UNKNOWN_NOT_ZERO. A sparse64MiB extent is not64MiB observed RAM.",
+       "cost_warning": "Original per-frame DS69 expanded<=16MiB and each plane16MiB do NOT bound aggregate expanded graphs/implicit overhead under256MiB. Exact original finite case/record/alias/workload bounds and prepaid outside role budget remain REQUIRED. No caps/pool enlargement, early cleanup cut or new availability assumed.",
+       "write_seal": "Original GROW|SHRINK|SEAL=7, mandatory SEAL_SEAL prevents later F_SEAL_WRITE; no write-seal credit or mutation of Source writer sequence/poison/end/retired by outside reader.",
+@@ -4223,7 +4223,7 @@
+       "Existing held_capture repeated retention/select/cleanup histories and allocation/freezing of the receipt can still be incomplete or fail. New caller publishes original acquired buffers/launch objects/planes beforehand and retains fixed field/error prefixes, but no universal complete entered-error graph/history or allocation-failure guarantee is asserted.",
+       "Generic A201 snapshot poison/refused record/undecodable suffix retains original fd/readonly view/mapping and complete acquired prefix; it does not certify full native/error objects or a new expiry-time transfer authority. Original Source objects stay owned/charged on uncertain end/clock/close; no unqualified reentry/close retry/new holder.",
+       "The two original cgroup emptiness reads establish kernel no-members only under the independently qualified original Root namespace/containment/FD-transfer contract; no external writer/descriptor escape or authenticated selected runtime qualification is inferred from zero text alone.",
+-      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation is not closed. In particular every retained record dictionary/header/reference/frame plus per-record DS69 expanded graph may dominate the declared plane capacity. Exact finite actual workload bounds under original caps are REQUIRED, not a new pool/cap or full-cost credit."
++      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation remains open. A308 authors normal local successful-graph retirement only; whole fit still includes all retained raw/header/reference/entry objects, current transient graph with per-node mutable/Unicode copies, failed partial tables/tracebacks, canonical graphs and positive-first overlap. Runtime reclamation/allocator/time is not measured. Exact finite actual workload bounds under original caps remain REQUIRED; no new pool/cap or full-cost credit."
+     ],
+     "UNKNOWN_NOT_ZERO": [
+       "Selected authenticated image/compiler/native/kernel/CMSG/CPython ABI, native actor qualification, full directional FD/containment contract and current exact capsule admission: UNKNOWN_NOT_ZERO / REQUIRED_NOT_RUN.",
+@@ -4239,19 +4239,19 @@
+     "GO": false
+   },
+   "sol151_actual_A079_caller": {
+-    "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-    "bytes": 78170,
+-    "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++    "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++    "bytes": 79836,
++    "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+     "identity9_decimal_strings": [
+       "2050",
+-      "4229655",
++      "4230543",
+       "33152",
+       "1000",
+       "1000",
+       "1",
+-      "78170",
+-      "1791267716924502191",
+-      "1791267716924502191"
++      "79836",
++      "1791269895060803273",
++      "1791269895060803273"
+     ],
+     "stable9": true
+   }
+--- /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py
++++ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py
+@@ -2000,7 +2000,7 @@
+     check(8+len(head)+sum(len(r[1]) for r in bodies)<=cap,'SOL069_FULL_FRAME_FIT_NO_CUT')
+     return b'DS69'+len(head).to_bytes(4,'big')+head+b''.join(r[1] for r in bodies)
+ 
+-def sol069_decode(raw,cap,check,parse):
++def sol069_decode(raw,cap,check,parse,*,node_owner=None):
+     physical = type(raw) is bytes and raw[:8] == A201_REF_MAGIC
+     raw = a201_resolve_body(raw)
+     check(type(raw) is bytes and 8<=len(raw)<=(A201_BODY_CAP if physical else cap) and raw[:4]==b'DS69','SOL069_FULL_FRAME')
+@@ -2028,7 +2028,14 @@
+             'SOL069_COMPLETE_BODY_PREIMAGE_SHA')
+         blobs.append(chunk)
+     check(at==len(raw) and expanded==head['expanded'],'SOL069_COMPLETE_FRAME_NO_TRAILER')
++    if node_owner is not None:
++        check(type(node_owner) is dict and 'decoded_nodes' in node_owner and
++            node_owner['decoded_nodes'] is None,'SOL151_FRESH_DECODE_NODE_OWNER')
+     values=[]
++    # Optional SAME table custody, not a graph copy. The canonical callers
++    # omit this argument and still receive the original decoded root.
++    # Capture before edges exist, including nodes unreachable from that root.
++    if node_owner is not None:node_owner['decoded_nodes']=values
+     for node in head['nodes']:
+         check(type(node) is dict and node.get('kind') in ('str','bytes','bytearray','list','dict'),
+             'SOL069_NODE_KIND')
+--- /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-ORACLES.json
++++ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-ORACLES.json
+@@ -1120,8 +1120,8 @@
+       "held_capture actual mapping routes exactly these original plane FDs to required131..134 together with original four streams1/2/128/129. The child descriptor sweep keeps those mapped writers, but the real caller never execs away and retains its readonly originals. Same native Root/Common validation, strict source/capsule checks, clocks, work/cleanup policy and original three case/count/status predicates remain.",
+       "After actual external kernel reap, the caller reads BOTH capsule-bound hierarchical cgroup.events through the original descriptors120/121 using the existing18-slot metadata ledger. No Root exit/typed flag/hash alone is treated as last-writer proof. Raw group evidence and errors remain held. This is CONDITIONAL on the existing qualified Root containment/FD-transfer contract, not independent admission.",
+       "Only on confirmed no-writers: consume every committed original48-byte record header, full frame, hash and exact reference from each original backing. Stable original credential/mode/seals/slot/capsule/version/generation/sequence/end/poison/retired/header and full final header agree. Incomplete suffix remains full raw plus original FD/view; poison, drift, mapping close or snapshot failure cannot retire or complete it.",
+-      "Actual outside full-body consumer calls byte-identical existing canonical DS69 graph decoder for each committed codec frame, with same alias-preserving graph semantics. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
+-      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle still execute in the same caller after raw/body retention. Both normal and failed paths retire only fully snapshotted original planes, or confirmed unborn caller-owned originals; all descriptors close at most once. Complete raw originals/decoded graphs/error aliases remain in the actual receipt before close. A final original hard-clock check prevents later completion from expired/failed time.",
++      "Actual outside full-body consumer calls the SAME canonical DS69 graph decoder for each committed codec frame. A308 optional node_owner retains that decoder's existing values table before edges are populated, including nodes unreachable from the root; default canonical callers keep their original root interface. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
++      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle remain mandatory after raw/body retention. Only after a successful DS69 decode AND native check does A079 clear its private decoder-created container edges, then drop its root/node-table references and set decoded_retired last; full encoded values/aliases remain in original bytes. Decode/check failures do not enter retirement; retirement failures retain complete encoded data, the remaining table and original exception with decoded_retired false. Canonical consumers still receive intact graphs. Descriptor retirement, all-outcome error custody and final original hard-clock predicates are unchanged.",
+       "Original mandatory F_SEAL_SEAL makes adding F_SEAL_WRITE impossible; no such seal or freeze is invented. Writer-end plus original readonly views/stable full headers underpin only the bounded conditional physical-frame transfer, not full native/error ownership or global lifetime acceptance.",
+       "Default run_positive_first invokes the new actual provisioner automatically for independently pinned positive, then negative only after positive accepted. Bare supplied FD tuples without an actual outside owner contract are explicitly refused, while direct legacy held_capture optional routing and original PreparedView.finish implementation remain unchanged."
+     ],
+@@ -1195,53 +1195,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+-        "bytes": 141121,
+-        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229653",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "141121",
+-          "1791267716925502248",
+-          "1791267716925502248"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
++        "bytes": 141617,
++        "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230541",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141617",
++          "1791269577105520169",
++          "1791269577105520169"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 221107,
+-        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229654",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "221107",
+-          "1791267716927502361",
+-          "1791267716927502361"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221603,
++        "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230545",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221603",
++          "1791269577106520227",
++          "1791269577106520227"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 78170,
+-        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229655",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "78170",
+-          "1791267716924502191",
+-          "1791267716924502191"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 79836,
++        "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230543",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "79836",
++          "1791269895060803273",
++          "1791269895060803273"
+         ],
+         "stable9": true
+       },
+@@ -1373,7 +1373,7 @@
+         "new_normal_capsule_read_request": 849,
+         "maximum_records_per_plane_only_from_minimum_record_extent": 342392
+       },
+-      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair, codec entry and optional expanded graph; raw object reused on resolve. No per-record encoded-body substitution.",
++      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair and codec entry; raw object reused on resolve. A308 aliases the existing decoder values table without copying it. After the successful local reader, complete raw DS69 bytes retain values/alias topology while private decoded nodes are retired; failure prefixes and canonical consumer graphs remain charged. Two additional entry fields, keyword/owner checks and all retirement work have nonzero unqualified costs; no body-to-hash/reference substitution.",
+       "retained_overlap": "All four full plane raw frame prefixes, record/reference/dict/list/tuple intentions, full original four streams and their buffers, canonical decoded objects/aliases, exception graphs, temporary slices/hash/base64/header/raw bodies and mappings; UNKNOWN_NOT_ZERO. A sparse64MiB extent is not64MiB observed RAM.",
+       "cost_warning": "Original per-frame DS69 expanded<=16MiB and each plane16MiB do NOT bound aggregate expanded graphs/implicit overhead under256MiB. Exact original finite case/record/alias/workload bounds and prepaid outside role budget remain REQUIRED. No caps/pool enlargement, early cleanup cut or new availability assumed.",
+       "write_seal": "Original GROW|SHRINK|SEAL=7, mandatory SEAL_SEAL prevents later F_SEAL_WRITE; no write-seal credit or mutation of Source writer sequence/poison/end/retired by outside reader.",
+@@ -1463,7 +1463,7 @@
+       "Existing held_capture repeated retention/select/cleanup histories and allocation/freezing of the receipt can still be incomplete or fail. New caller publishes original acquired buffers/launch objects/planes beforehand and retains fixed field/error prefixes, but no universal complete entered-error graph/history or allocation-failure guarantee is asserted.",
+       "Generic A201 snapshot poison/refused record/undecodable suffix retains original fd/readonly view/mapping and complete acquired prefix; it does not certify full native/error objects or a new expiry-time transfer authority. Original Source objects stay owned/charged on uncertain end/clock/close; no unqualified reentry/close retry/new holder.",
+       "The two original cgroup emptiness reads establish kernel no-members only under the independently qualified original Root namespace/containment/FD-transfer contract; no external writer/descriptor escape or authenticated selected runtime qualification is inferred from zero text alone.",
+-      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation is not closed. In particular every retained record dictionary/header/reference/frame plus per-record DS69 expanded graph may dominate the declared plane capacity. Exact finite actual workload bounds under original caps are REQUIRED, not a new pool/cap or full-cost credit."
++      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation remains open. A308 authors normal local successful-graph retirement only; whole fit still includes all retained raw/header/reference/entry objects, current transient graph with per-node mutable/Unicode copies, failed partial tables/tracebacks, canonical graphs and positive-first overlap. Runtime reclamation/allocator/time is not measured. Exact finite actual workload bounds under original caps remain REQUIRED; no new pool/cap or full-cost credit."
+     ],
+     "UNKNOWN_NOT_ZERO": [
+       "Selected authenticated image/compiler/native/kernel/CMSG/CPython ABI, native actor qualification, full directional FD/containment contract and current exact capsule admission: UNKNOWN_NOT_ZERO / REQUIRED_NOT_RUN.",
+--- /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py
++++ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py
+@@ -1030,7 +1030,7 @@
+ 
+ SOL069_EXPANDED_BYTES = 16 * 1048576
+ 
+-def sol069_decode(raw,cap,check,parse):
++def sol069_decode(raw,cap,check,parse,*,node_owner=None):
+     physical = type(raw) is bytes and raw[:8] == A201_REF_MAGIC
+     raw = a201_resolve_body(raw)
+     check(type(raw) is bytes and 8<=len(raw)<=(A201_BODY_CAP if physical else cap) and raw[:4]==b'DS69','SOL069_FULL_FRAME')
+@@ -1058,7 +1058,14 @@
+             'SOL069_COMPLETE_BODY_PREIMAGE_SHA')
+         blobs.append(chunk)
+     check(at==len(raw) and expanded==head['expanded'],'SOL069_COMPLETE_FRAME_NO_TRAILER')
++    if node_owner is not None:
++        check(type(node_owner) is dict and 'decoded_nodes' in node_owner and
++            node_owner['decoded_nodes'] is None,'SOL151_FRESH_DECODE_NODE_OWNER')
+     values=[]
++    # Optional SAME table custody, not a graph copy. The canonical callers
++    # omit this argument and still receive the original decoded root.
++    # Capture before edges exist, including nodes unreachable from that root.
++    if node_owner is not None:node_owner['decoded_nodes']=values
+     for node in head['nodes']:
+         check(type(node) is dict and node.get('kind') in ('str','bytes','bytearray','list','dict'),
+             'SOL069_NODE_KIND')
+@@ -1160,14 +1167,33 @@
+         try:
+             for reference,original in state["snapshotted_original_frames"]:
+                 a201_guard(custody["hard_ns"])
+-                entry={"reference":reference,"original":original,"decoded":None,"original_error":None}
++                entry={"reference":reference,"original":original,"decoded":None,"original_error":None,
++                       "decoded_nodes":None,"decoded_retired":False}
+                 state["pending_decoded_original"]=entry
+                 state["decoded_originals"].append(entry)
+                 # Original non-codec records stay full raw; they are not
+                 # certified as native/error objects merely by this snapshot.
+                 if original[:4]==b"DS69":
+-                    entry["decoded"]=sol069_decode(reference,1048576,need,strict_json)
++                    entry["decoded"]=sol069_decode(reference,1048576,need,strict_json,node_owner=entry)
+                     sol143_native_check(entry["decoded"])
++                    # All local readers of this private graph succeeded. Its
++                    # complete DS69 bytes still retain every value and alias.
++                    # Break ALL decoder-owned container edges, including
++                    # unreachable cycles, before dropping the SAME node table.
++                    # No collector, error/traceback clearing or failed-decode
++                    # retirement: failures retain their exact acquired prefix.
++                    a201_guard(custody["hard_ns"])
++                    for transient in entry["decoded_nodes"]:
++                        a201_guard(custody["hard_ns"])
++                        if type(transient) is list or type(transient) is dict:
++                            transient.clear()
++                    transient=None
++                    a201_guard(custody["hard_ns"])
++                    entry["decoded"]=None
++                    entry["decoded_nodes"].clear()
++                    entry["decoded_nodes"]=None
++                    a201_guard(custody["hard_ns"])
++                    entry["decoded_retired"]=True
+         except BaseException as exc:
+             state["consumption_error"]=exc
+             if state["pending_decoded_original"] is not None:
+--- /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-ABI-CONTRACT.json
++++ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-ABI-CONTRACT.json
+@@ -1062,8 +1062,8 @@
+       "held_capture actual mapping routes exactly these original plane FDs to required131..134 together with original four streams1/2/128/129. The child descriptor sweep keeps those mapped writers, but the real caller never execs away and retains its readonly originals. Same native Root/Common validation, strict source/capsule checks, clocks, work/cleanup policy and original three case/count/status predicates remain.",
+       "After actual external kernel reap, the caller reads BOTH capsule-bound hierarchical cgroup.events through the original descriptors120/121 using the existing18-slot metadata ledger. No Root exit/typed flag/hash alone is treated as last-writer proof. Raw group evidence and errors remain held. This is CONDITIONAL on the existing qualified Root containment/FD-transfer contract, not independent admission.",
+       "Only on confirmed no-writers: consume every committed original48-byte record header, full frame, hash and exact reference from each original backing. Stable original credential/mode/seals/slot/capsule/version/generation/sequence/end/poison/retired/header and full final header agree. Incomplete suffix remains full raw plus original FD/view; poison, drift, mapping close or snapshot failure cannot retire or complete it.",
+-      "Actual outside full-body consumer calls byte-identical existing canonical DS69 graph decoder for each committed codec frame, with same alias-preserving graph semantics. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
+-      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle still execute in the same caller after raw/body retention. Both normal and failed paths retire only fully snapshotted original planes, or confirmed unborn caller-owned originals; all descriptors close at most once. Complete raw originals/decoded graphs/error aliases remain in the actual receipt before close. A final original hard-clock check prevents later completion from expired/failed time.",
++      "Actual outside full-body consumer calls the SAME canonical DS69 graph decoder for each committed codec frame. A308 optional node_owner retains that decoder's existing values table before edges are populated, including nodes unreachable from the root; default canonical callers keep their original root interface. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
++      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle remain mandatory after raw/body retention. Only after a successful DS69 decode AND native check does A079 clear its private decoder-created container edges, then drop its root/node-table references and set decoded_retired last; full encoded values/aliases remain in original bytes. Decode/check failures do not enter retirement; retirement failures retain complete encoded data, the remaining table and original exception with decoded_retired false. Canonical consumers still receive intact graphs. Descriptor retirement, all-outcome error custody and final original hard-clock predicates are unchanged.",
+       "Original mandatory F_SEAL_SEAL makes adding F_SEAL_WRITE impossible; no such seal or freeze is invented. Writer-end plus original readonly views/stable full headers underpin only the bounded conditional physical-frame transfer, not full native/error ownership or global lifetime acceptance.",
+       "Default run_positive_first invokes the new actual provisioner automatically for independently pinned positive, then negative only after positive accepted. Bare supplied FD tuples without an actual outside owner contract are explicitly refused, while direct legacy held_capture optional routing and original PreparedView.finish implementation remain unchanged."
+     ],
+@@ -1137,53 +1137,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+-        "bytes": 141121,
+-        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229653",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "141121",
+-          "1791267716925502248",
+-          "1791267716925502248"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
++        "bytes": 141617,
++        "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230541",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141617",
++          "1791269577105520169",
++          "1791269577105520169"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 221107,
+-        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229654",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "221107",
+-          "1791267716927502361",
+-          "1791267716927502361"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221603,
++        "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230545",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221603",
++          "1791269577106520227",
++          "1791269577106520227"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 78170,
+-        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229655",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "78170",
+-          "1791267716924502191",
+-          "1791267716924502191"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 79836,
++        "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230543",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "79836",
++          "1791269895060803273",
++          "1791269895060803273"
+         ],
+         "stable9": true
+       },
+@@ -1297,7 +1297,7 @@
+         "new_normal_capsule_read_request": 849,
+         "maximum_records_per_plane_only_from_minimum_record_extent": 342392
+       },
+-      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair, codec entry and optional expanded graph; raw object reused on resolve. No per-record encoded-body substitution.",
++      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair and codec entry; raw object reused on resolve. A308 aliases the existing decoder values table without copying it. After the successful local reader, complete raw DS69 bytes retain values/alias topology while private decoded nodes are retired; failure prefixes and canonical consumer graphs remain charged. Two additional entry fields, keyword/owner checks and all retirement work have nonzero unqualified costs; no body-to-hash/reference substitution.",
+       "retained_overlap": "All four full plane raw frame prefixes, record/reference/dict/list/tuple intentions, full original four streams and their buffers, canonical decoded objects/aliases, exception graphs, temporary slices/hash/base64/header/raw bodies and mappings; UNKNOWN_NOT_ZERO. A sparse64MiB extent is not64MiB observed RAM.",
+       "cost_warning": "Original per-frame DS69 expanded<=16MiB and each plane16MiB do NOT bound aggregate expanded graphs/implicit overhead under256MiB. Exact original finite case/record/alias/workload bounds and prepaid outside role budget remain REQUIRED. No caps/pool enlargement, early cleanup cut or new availability assumed.",
+       "write_seal": "Original GROW|SHRINK|SEAL=7, mandatory SEAL_SEAL prevents later F_SEAL_WRITE; no write-seal credit or mutation of Source writer sequence/poison/end/retired by outside reader.",
+@@ -1387,7 +1387,7 @@
+       "Existing held_capture repeated retention/select/cleanup histories and allocation/freezing of the receipt can still be incomplete or fail. New caller publishes original acquired buffers/launch objects/planes beforehand and retains fixed field/error prefixes, but no universal complete entered-error graph/history or allocation-failure guarantee is asserted.",
+       "Generic A201 snapshot poison/refused record/undecodable suffix retains original fd/readonly view/mapping and complete acquired prefix; it does not certify full native/error objects or a new expiry-time transfer authority. Original Source objects stay owned/charged on uncertain end/clock/close; no unqualified reentry/close retry/new holder.",
+       "The two original cgroup emptiness reads establish kernel no-members only under the independently qualified original Root namespace/containment/FD-transfer contract; no external writer/descriptor escape or authenticated selected runtime qualification is inferred from zero text alone.",
+-      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation is not closed. In particular every retained record dictionary/header/reference/frame plus per-record DS69 expanded graph may dominate the declared plane capacity. Exact finite actual workload bounds under original caps are REQUIRED, not a new pool/cap or full-cost credit."
++      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation remains open. A308 authors normal local successful-graph retirement only; whole fit still includes all retained raw/header/reference/entry objects, current transient graph with per-node mutable/Unicode copies, failed partial tables/tracebacks, canonical graphs and positive-first overlap. Runtime reclamation/allocator/time is not measured. Exact finite actual workload bounds under original caps remain REQUIRED; no new pool/cap or full-cost credit."
+     ],
+     "UNKNOWN_NOT_ZERO": [
+       "Selected authenticated image/compiler/native/kernel/CMSG/CPython ABI, native actor qualification, full directional FD/containment contract and current exact capsule admission: UNKNOWN_NOT_ZERO / REQUIRED_NOT_RUN.",
+--- /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py
++++ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py
+@@ -2723,7 +2723,7 @@
+     check(8+len(head)+sum(len(r[1]) for r in bodies)<=cap,'SOL069_FULL_FRAME_FIT_NO_CUT')
+     return b'DS69'+len(head).to_bytes(4,'big')+head+b''.join(r[1] for r in bodies)
+ 
+-def sol069_decode(raw,cap,check,parse):
++def sol069_decode(raw,cap,check,parse,*,node_owner=None):
+     physical = type(raw) is bytes and raw[:8] == A201_REF_MAGIC
+     raw = a201_resolve_body(raw)
+     check(type(raw) is bytes and 8<=len(raw)<=(A201_BODY_CAP if physical else cap) and raw[:4]==b'DS69','SOL069_FULL_FRAME')
+@@ -2751,7 +2751,14 @@
+             'SOL069_COMPLETE_BODY_PREIMAGE_SHA')
+         blobs.append(chunk)
+     check(at==len(raw) and expanded==head['expanded'],'SOL069_COMPLETE_FRAME_NO_TRAILER')
++    if node_owner is not None:
++        check(type(node_owner) is dict and 'decoded_nodes' in node_owner and
++            node_owner['decoded_nodes'] is None,'SOL151_FRESH_DECODE_NODE_OWNER')
+     values=[]
++    # Optional SAME table custody, not a graph copy. The canonical callers
++    # omit this argument and still receive the original decoded root.
++    # Capture before edges exist, including nodes unreachable from that root.
++    if node_owner is not None:node_owner['decoded_nodes']=values
+     for node in head['nodes']:
+         check(type(node) is dict and node.get('kind') in ('str','bytes','bytearray','list','dict'),
+             'SOL069_NODE_KIND')
+--- /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A104-ORDINARY-CONTRACTS.json
++++ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A104-ORDINARY-CONTRACTS.json
+@@ -3483,8 +3483,8 @@
+       "held_capture actual mapping routes exactly these original plane FDs to required131..134 together with original four streams1/2/128/129. The child descriptor sweep keeps those mapped writers, but the real caller never execs away and retains its readonly originals. Same native Root/Common validation, strict source/capsule checks, clocks, work/cleanup policy and original three case/count/status predicates remain.",
+       "After actual external kernel reap, the caller reads BOTH capsule-bound hierarchical cgroup.events through the original descriptors120/121 using the existing18-slot metadata ledger. No Root exit/typed flag/hash alone is treated as last-writer proof. Raw group evidence and errors remain held. This is CONDITIONAL on the existing qualified Root containment/FD-transfer contract, not independent admission.",
+       "Only on confirmed no-writers: consume every committed original48-byte record header, full frame, hash and exact reference from each original backing. Stable original credential/mode/seals/slot/capsule/version/generation/sequence/end/poison/retired/header and full final header agree. Incomplete suffix remains full raw plus original FD/view; poison, drift, mapping close or snapshot failure cannot retire or complete it.",
+-      "Actual outside full-body consumer calls byte-identical existing canonical DS69 graph decoder for each committed codec frame, with same alias-preserving graph semantics. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
+-      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle still execute in the same caller after raw/body retention. Both normal and failed paths retire only fully snapshotted original planes, or confirmed unborn caller-owned originals; all descriptors close at most once. Complete raw originals/decoded graphs/error aliases remain in the actual receipt before close. A final original hard-clock check prevents later completion from expired/failed time.",
++      "Actual outside full-body consumer calls the SAME canonical DS69 graph decoder for each committed codec frame. A308 optional node_owner retains that decoder's existing values table before edges are populated, including nodes unreachable from the root; default canonical callers keep their original root interface. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
++      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle remain mandatory after raw/body retention. Only after a successful DS69 decode AND native check does A079 clear its private decoder-created container edges, then drop its root/node-table references and set decoded_retired last; full encoded values/aliases remain in original bytes. Decode/check failures do not enter retirement; retirement failures retain complete encoded data, the remaining table and original exception with decoded_retired false. Canonical consumers still receive intact graphs. Descriptor retirement, all-outcome error custody and final original hard-clock predicates are unchanged.",
+       "Original mandatory F_SEAL_SEAL makes adding F_SEAL_WRITE impossible; no such seal or freeze is invented. Writer-end plus original readonly views/stable full headers underpin only the bounded conditional physical-frame transfer, not full native/error ownership or global lifetime acceptance.",
+       "Default run_positive_first invokes the new actual provisioner automatically for independently pinned positive, then negative only after positive accepted. Bare supplied FD tuples without an actual outside owner contract are explicitly refused, while direct legacy held_capture optional routing and original PreparedView.finish implementation remain unchanged."
+     ],
+@@ -3558,53 +3558,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+-        "bytes": 141121,
+-        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229653",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "141121",
+-          "1791267716925502248",
+-          "1791267716925502248"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
++        "bytes": 141617,
++        "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230541",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141617",
++          "1791269577105520169",
++          "1791269577105520169"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 221107,
+-        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229654",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "221107",
+-          "1791267716927502361",
+-          "1791267716927502361"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221603,
++        "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230545",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221603",
++          "1791269577106520227",
++          "1791269577106520227"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 78170,
+-        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229655",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "78170",
+-          "1791267716924502191",
+-          "1791267716924502191"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 79836,
++        "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230543",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "79836",
++          "1791269895060803273",
++          "1791269895060803273"
+         ],
+         "stable9": true
+       },
+@@ -3753,7 +3753,7 @@
+         "new_normal_capsule_read_request": 849,
+         "maximum_records_per_plane_only_from_minimum_record_extent": 342392
+       },
+-      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair, codec entry and optional expanded graph; raw object reused on resolve. No per-record encoded-body substitution.",
++      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair and codec entry; raw object reused on resolve. A308 aliases the existing decoder values table without copying it. After the successful local reader, complete raw DS69 bytes retain values/alias topology while private decoded nodes are retired; failure prefixes and canonical consumer graphs remain charged. Two additional entry fields, keyword/owner checks and all retirement work have nonzero unqualified costs; no body-to-hash/reference substitution.",
+       "retained_overlap": "All four full plane raw frame prefixes, record/reference/dict/list/tuple intentions, full original four streams and their buffers, canonical decoded objects/aliases, exception graphs, temporary slices/hash/base64/header/raw bodies and mappings; UNKNOWN_NOT_ZERO. A sparse64MiB extent is not64MiB observed RAM.",
+       "cost_warning": "Original per-frame DS69 expanded<=16MiB and each plane16MiB do NOT bound aggregate expanded graphs/implicit overhead under256MiB. Exact original finite case/record/alias/workload bounds and prepaid outside role budget remain REQUIRED. No caps/pool enlargement, early cleanup cut or new availability assumed.",
+       "write_seal": "Original GROW|SHRINK|SEAL=7, mandatory SEAL_SEAL prevents later F_SEAL_WRITE; no write-seal credit or mutation of Source writer sequence/poison/end/retired by outside reader.",
+@@ -3843,7 +3843,7 @@
+       "Existing held_capture repeated retention/select/cleanup histories and allocation/freezing of the receipt can still be incomplete or fail. New caller publishes original acquired buffers/launch objects/planes beforehand and retains fixed field/error prefixes, but no universal complete entered-error graph/history or allocation-failure guarantee is asserted.",
+       "Generic A201 snapshot poison/refused record/undecodable suffix retains original fd/readonly view/mapping and complete acquired prefix; it does not certify full native/error objects or a new expiry-time transfer authority. Original Source objects stay owned/charged on uncertain end/clock/close; no unqualified reentry/close retry/new holder.",
+       "The two original cgroup emptiness reads establish kernel no-members only under the independently qualified original Root namespace/containment/FD-transfer contract; no external writer/descriptor escape or authenticated selected runtime qualification is inferred from zero text alone.",
+-      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation is not closed. In particular every retained record dictionary/header/reference/frame plus per-record DS69 expanded graph may dominate the declared plane capacity. Exact finite actual workload bounds under original caps are REQUIRED, not a new pool/cap or full-cost credit."
++      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation remains open. A308 authors normal local successful-graph retirement only; whole fit still includes all retained raw/header/reference/entry objects, current transient graph with per-node mutable/Unicode copies, failed partial tables/tracebacks, canonical graphs and positive-first overlap. Runtime reclamation/allocator/time is not measured. Exact finite actual workload bounds under original caps remain REQUIRED; no new pool/cap or full-cost credit."
+     ],
+     "UNKNOWN_NOT_ZERO": [
+       "Selected authenticated image/compiler/native/kernel/CMSG/CPython ABI, native actor qualification, full directional FD/containment contract and current exact capsule admission: UNKNOWN_NOT_ZERO / REQUIRED_NOT_RUN.",
+--- /var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A118-CONNECTED-CONTRACT.json
++++ /var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A118-CONNECTED-CONTRACT.json
+@@ -266,19 +266,19 @@
+       "stable9": true
+     },
+     "A071-SUPERVISOR.py": {
+-      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+-      "bytes": 141121,
+-      "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
++      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
++      "bytes": 141617,
++      "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+       "identity9_decimal_strings": [
+         "2050",
+-        "4229653",
++        "4230541",
+         "33152",
+         "1000",
+         "1000",
+         "1",
+-        "141121",
+-        "1791267716925502248",
+-        "1791267716925502248"
++        "141617",
++        "1791269577105520169",
++        "1791269577105520169"
+       ],
+       "stable9": true
+     },
+@@ -334,19 +334,19 @@
+       "stable9": true
+     },
+     "A087-PUBLIC-DRIVER.py": {
+-      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+-      "bytes": 221107,
+-      "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
++      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
++      "bytes": 221603,
++      "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+       "identity9_decimal_strings": [
+         "2050",
+-        "4229654",
++        "4230545",
+         "33152",
+         "1000",
+         "1000",
+         "1",
+-        "221107",
+-        "1791267716927502361",
+-        "1791267716927502361"
++        "221603",
++        "1791269577106520227",
++        "1791269577106520227"
+       ],
+       "stable9": true
+     },
+@@ -2264,19 +2264,19 @@
+   },
+   "sol149_legacy_callers": {
+     "A079-NATIVE-PUBLIC-DRIVER.py": {
+-      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-      "bytes": 78170,
+-      "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++      "bytes": 79836,
++      "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+       "identity9_decimal_strings": [
+         "2050",
+-        "4229655",
++        "4230543",
+         "33152",
+         "1000",
+         "1000",
+         "1",
+-        "78170",
+-        "1791267716924502191",
+-        "1791267716924502191"
++        "79836",
++        "1791269895060803273",
++        "1791269895060803273"
+       ],
+       "stable9": true
+     },
+@@ -3547,8 +3547,8 @@
+       "held_capture actual mapping routes exactly these original plane FDs to required131..134 together with original four streams1/2/128/129. The child descriptor sweep keeps those mapped writers, but the real caller never execs away and retains its readonly originals. Same native Root/Common validation, strict source/capsule checks, clocks, work/cleanup policy and original three case/count/status predicates remain.",
+       "After actual external kernel reap, the caller reads BOTH capsule-bound hierarchical cgroup.events through the original descriptors120/121 using the existing18-slot metadata ledger. No Root exit/typed flag/hash alone is treated as last-writer proof. Raw group evidence and errors remain held. This is CONDITIONAL on the existing qualified Root containment/FD-transfer contract, not independent admission.",
+       "Only on confirmed no-writers: consume every committed original48-byte record header, full frame, hash and exact reference from each original backing. Stable original credential/mode/seals/slot/capsule/version/generation/sequence/end/poison/retired/header and full final header agree. Incomplete suffix remains full raw plus original FD/view; poison, drift, mapping close or snapshot failure cannot retire or complete it.",
+-      "Actual outside full-body consumer calls byte-identical existing canonical DS69 graph decoder for each committed codec frame, with same alias-preserving graph semantics. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
+-      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle still execute in the same caller after raw/body retention. Both normal and failed paths retire only fully snapshotted original planes, or confirmed unborn caller-owned originals; all descriptors close at most once. Complete raw originals/decoded graphs/error aliases remain in the actual receipt before close. A final original hard-clock check prevents later completion from expired/failed time.",
++      "Actual outside full-body consumer calls the SAME canonical DS69 graph decoder for each committed codec frame. A308 optional node_owner retains that decoder's existing values table before edges are populated, including nodes unreachable from the root; default canonical callers keep their original root interface. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
++      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle remain mandatory after raw/body retention. Only after a successful DS69 decode AND native check does A079 clear its private decoder-created container edges, then drop its root/node-table references and set decoded_retired last; full encoded values/aliases remain in original bytes. Decode/check failures do not enter retirement; retirement failures retain complete encoded data, the remaining table and original exception with decoded_retired false. Canonical consumers still receive intact graphs. Descriptor retirement, all-outcome error custody and final original hard-clock predicates are unchanged.",
+       "Original mandatory F_SEAL_SEAL makes adding F_SEAL_WRITE impossible; no such seal or freeze is invented. Writer-end plus original readonly views/stable full headers underpin only the bounded conditional physical-frame transfer, not full native/error ownership or global lifetime acceptance.",
+       "Default run_positive_first invokes the new actual provisioner automatically for independently pinned positive, then negative only after positive accepted. Bare supplied FD tuples without an actual outside owner contract are explicitly refused, while direct legacy held_capture optional routing and original PreparedView.finish implementation remain unchanged."
+     ],
+@@ -3622,53 +3622,53 @@
+         "stable9": true
+       },
+       "A071-SUPERVISOR.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+-        "bytes": 141121,
+-        "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229653",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "141121",
+-          "1791267716925502248",
+-          "1791267716925502248"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
++        "bytes": 141617,
++        "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230541",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "141617",
++          "1791269577105520169",
++          "1791269577105520169"
+         ],
+         "stable9": true
+       },
+       "A087-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+-        "bytes": 221107,
+-        "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229654",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "221107",
+-          "1791267716927502361",
+-          "1791267716927502361"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
++        "bytes": 221603,
++        "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230545",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "221603",
++          "1791269577106520227",
++          "1791269577106520227"
+         ],
+         "stable9": true
+       },
+       "A079-NATIVE-PUBLIC-DRIVER.py": {
+-        "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-        "bytes": 78170,
+-        "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+-        "identity9_decimal_strings": [
+-          "2050",
+-          "4229655",
+-          "33152",
+-          "1000",
+-          "1000",
+-          "1",
+-          "78170",
+-          "1791267716924502191",
+-          "1791267716924502191"
++        "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++        "bytes": 79836,
++        "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
++        "identity9_decimal_strings": [
++          "2050",
++          "4230543",
++          "33152",
++          "1000",
++          "1000",
++          "1",
++          "79836",
++          "1791269895060803273",
++          "1791269895060803273"
+         ],
+         "stable9": true
+       },
+@@ -3868,7 +3868,7 @@
+         "new_normal_capsule_read_request": 849,
+         "maximum_records_per_plane_only_from_minimum_record_extent": 342392
+       },
+-      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair, codec entry and optional expanded graph; raw object reused on resolve. No per-record encoded-body substitution.",
++      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair and codec entry; raw object reused on resolve. A308 aliases the existing decoder values table without copying it. After the successful local reader, complete raw DS69 bytes retain values/alias topology while private decoded nodes are retired; failure prefixes and canonical consumer graphs remain charged. Two additional entry fields, keyword/owner checks and all retirement work have nonzero unqualified costs; no body-to-hash/reference substitution.",
+       "retained_overlap": "All four full plane raw frame prefixes, record/reference/dict/list/tuple intentions, full original four streams and their buffers, canonical decoded objects/aliases, exception graphs, temporary slices/hash/base64/header/raw bodies and mappings; UNKNOWN_NOT_ZERO. A sparse64MiB extent is not64MiB observed RAM.",
+       "cost_warning": "Original per-frame DS69 expanded<=16MiB and each plane16MiB do NOT bound aggregate expanded graphs/implicit overhead under256MiB. Exact original finite case/record/alias/workload bounds and prepaid outside role budget remain REQUIRED. No caps/pool enlargement, early cleanup cut or new availability assumed.",
+       "write_seal": "Original GROW|SHRINK|SEAL=7, mandatory SEAL_SEAL prevents later F_SEAL_WRITE; no write-seal credit or mutation of Source writer sequence/poison/end/retired by outside reader.",
+@@ -3958,7 +3958,7 @@
+       "Existing held_capture repeated retention/select/cleanup histories and allocation/freezing of the receipt can still be incomplete or fail. New caller publishes original acquired buffers/launch objects/planes beforehand and retains fixed field/error prefixes, but no universal complete entered-error graph/history or allocation-failure guarantee is asserted.",
+       "Generic A201 snapshot poison/refused record/undecodable suffix retains original fd/readonly view/mapping and complete acquired prefix; it does not certify full native/error objects or a new expiry-time transfer authority. Original Source objects stay owned/charged on uncertain end/clock/close; no unqualified reentry/close retry/new holder.",
+       "The two original cgroup emptiness reads establish kernel no-members only under the independently qualified original Root namespace/containment/FD-transfer contract; no external writer/descriptor escape or authenticated selected runtime qualification is inferred from zero text alone.",
+-      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation is not closed. In particular every retained record dictionary/header/reference/frame plus per-record DS69 expanded graph may dominate the declared plane capacity. Exact finite actual workload bounds under original caps are REQUIRED, not a new pool/cap or full-cost credit."
++      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation remains open. A308 authors normal local successful-graph retirement only; whole fit still includes all retained raw/header/reference/entry objects, current transient graph with per-node mutable/Unicode copies, failed partial tables/tracebacks, canonical graphs and positive-first overlap. Runtime reclamation/allocator/time is not measured. Exact finite actual workload bounds under original caps remain REQUIRED; no new pool/cap or full-cost credit."
+     ],
+     "UNKNOWN_NOT_ZERO": [
+       "Selected authenticated image/compiler/native/kernel/CMSG/CPython ABI, native actor qualification, full directional FD/containment contract and current exact capsule admission: UNKNOWN_NOT_ZERO / REQUIRED_NOT_RUN.",
+@@ -3974,19 +3974,19 @@
+     "GO": false
+   },
+   "sol151_actual_caller": {
+-    "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+-    "bytes": 78170,
+-    "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
++    "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
++    "bytes": 79836,
++    "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+     "identity9_decimal_strings": [
+       "2050",
+-      "4229655",
++      "4230543",
+       "33152",
+       "1000",
+       "1000",
+       "1",
+-      "78170",
+-      "1791267716924502191",
+-      "1791267716924502191"
++      "79836",
++      "1791269895060803273",
++      "1791269895060803273"
+     ],
+     "stable9": true
+   }

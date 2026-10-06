@@ -1,0 +1,82 @@
+{
+  "schema": "friday.work-snapshot.references.v1",
+  "resolution": "All MANIFEST original_path entries map to exact archived bytes. Original absolute paths inside immutable files are not rewritten.",
+  "current": {
+    "Browser": {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json",
+      "bytes": 10781,
+      "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230566",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10781",
+        "1791270177829870695",
+        "1791270177847283442"
+      ],
+      "stable9": true
+    },
+    "Publisher": {
+      "path": "/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/manifest.json",
+      "bytes": 75190,
+      "sha256": "2a5e9b96b3d8048992712531746a8009e5a01265874f93d96befef846686c6c4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230689",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75190",
+        "1791270876923262608",
+        "1791270876945263873"
+      ],
+      "stable9": true
+    }
+  },
+  "comparison": {
+    "BrowserA306": {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/manifest.json",
+      "bytes": 10524,
+      "sha256": "e9aaacce5b79a820244889712e00319f29be6dcc42c26795d6331c01ea216f7a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849832",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10524",
+        "1791267970351818526",
+        "1791267970368819487"
+      ],
+      "stable9": true
+    },
+    "PublisherSol164": {
+      "path": "/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/manifest.json",
+      "bytes": 82497,
+      "sha256": "83a4a43d7d5acce85bab0ef3064e6941e73227ab201c2b6f9c84d8a6f0e4a18e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230561",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "82497",
+        "1791269861184855339",
+        "1791269861185855397"
+      ],
+      "stable9": true
+    }
+  },
+  "publication_lineage": {
+    "previous_commit": "63184bd6a1a59c1430efebbe64b7bab4760cc695",
+    "previous_incremental_snapshot": "handoffs/ASTRA-E4-20261006T0842MSK-PUBLISHER-CHECKPOINT",
+    "earlier_full_snapshot": "handoffs/ASTRA-E4-20261004T2037MSK-WORK-SNAPSHOT"
+  },
+  "unresolved_reference_policy": "References outside manifest are not claimed included: selected omissions listed by exact path/hash; older transitive paths and actual runtime authority/environment are not complete coverage. Never reconstruct missing artifacts from prose."
+}

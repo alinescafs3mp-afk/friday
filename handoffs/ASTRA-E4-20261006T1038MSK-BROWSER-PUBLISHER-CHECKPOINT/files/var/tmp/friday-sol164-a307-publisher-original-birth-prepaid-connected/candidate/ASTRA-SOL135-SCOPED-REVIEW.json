@@ -1,0 +1,1346 @@
+{
+  "schema": "friday.astra.a285.sol135.connected-independent-source-review.v1",
+  "reviewer": "Astra, non-author of SOL135 implementation",
+  "recorded_msk": "2026-10-05T23:29:56.000+03:00",
+  "review_key": "SOL135#1 exact manifest7ff6788f; actual file-manager/cursor representation, actual callers and required original-value receivers; C1/SOL122-R1 scoped causes, not whole qualification",
+  "snapshot": {
+    "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/manifest.json",
+    "bytes": 44876,
+    "sha256": "7ff6788fd62b8222b1d18b6ee8beba86840624b5a5e488acd74bcb20e35fec0a",
+    "identity9_decimal_strings": [
+      "2050",
+      "7084643",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "44876",
+      "1791229707921641610",
+      "1791229707921641610"
+    ],
+    "stable9": true
+  },
+  "author_result": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL135-RESULT.json",
+    "bytes": 1933,
+    "sha256": "17330f3b20e390da5b5e6681e3d010f05bf212b2d22621aad57d2dfdbe8fcc52",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536727",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1933",
+      "1791229746201975799",
+      "1791229746218976766"
+    ],
+    "stable9": true
+  },
+  "decision": "ACCEPT_SCOPED_CONNECTED_FD_CONTEXT_CURSOR_REPRESENTATION_AND_WITHHELD_RELEASE_NOT_WHOLE_SOURCE",
+  "interpretation": "This independently accepts removal of the named foreign contextlib/generator required-DATA causes on actual selected paths and confirms exact lazy validation/order and withheld-release semantics. It is NOT acceptance of complete cleanup-error custody, all TYPE/actor/callback/finite ends, all physical costs, SourceReady or executable release.",
+  "independently_closed_scoped": [
+    {
+      "id": "A283-FD-CONTEXT-FOREIGN-REQUIRED-DATA",
+      "invariant": "Actual required entry/body/cleanup errors and their retained frame locals must be representable through the existing bound Source and native full-value receivers without erasure, name-only authority or weakened failure semantics.",
+      "before": "Actual held consumer calls were double wrapped with contextlib._GeneratorContextManager/generator; retained actual entry-error wrapper was foreign required DATA.",
+      "current_path": "consumer_bridge.py31-54 sets OUTER_FD_SCOPE to actual RootObserver.owned_file; resource_meter.py438-445 returns that manager directly. observer.py1470-1519 retains actual partial manager before book creation, has one-shot cleanup and returns False for ordinary original body error. Missing constructor/completion proof is never called a completed lifetime.",
+      "receiver_join": "observer.py341-384 retains actual exception/context/traceback/frame locals and Source instance dictionary with actual binding. selected_owned_values.py899-915,940-944 stores actual error/type/dictionary aliases. Native own_class_factory4057-4109 preowns and captures local actual classes; OwnBinding4352-4372 and OwnClassBody4387-4396 check full held source/compiled relations; generic actual class fallback5989-6009 and primary6986-6996 accept captured new classes without fixed-name authority. Secondary8638-8650,8981-8988 checks same actual type/dictionary; cold actual493-520 invokes CommandReceive and FinalReceive on both outcomes.",
+      "limits": "Raw close producer still loses original in exact unchanged lifetime.py203; this scoped representation credit cannot close it. No claim that every original contextlib ordinary body error retained the wrapper, or that every remaining selected frame is now representable."
+    },
+    {
+      "id": "A283-FD-CURSOR-FOREIGN-SUSPENDED-LOCAL",
+      "invariant": "Actual retained failed validation local remains complete DATA; preserve lazy count/chunk/root checks, order/multiplicity and all caller role/index/key checks.",
+      "current_path": "observer.py475-517 holds body/name/chunks/count/current part/scalar positions in an actual captured Source object, without a stored stock generator or iterator. Exact int checks reject bool; chunks/parts require exact list and512 limits; count0..262144 and terminal equality preserved. Own error permanently ends cursor; caller error retains current cursor state without a new eager traversal.",
+      "callers": "629-654 history/alias and ordered journal projection;988-1001 node role/index/type/duplicate-key checks;1332-1334 unchanged explicit list materialization for typed DATA-route accounting.",
+      "receiver_join": "Same actual class/dictionary/full error and native primary/secondary/cold relations above. No new whitelist, support reclassification, finalizer or history copy.",
+      "limits": "O(1) cursor state and O(reached chunks+roots) explicit traversal only; not zero allocation/hidden cost, callback/nonmutation interval or whole required workload acceptance."
+    },
+    {
+      "id": "A283-FD-SCOPE-RELEASE-CONFIRMATION",
+      "invariant": "Known closed FD rows do not authorize retiring a still-retained original reservation or local manager.",
+      "current_path": "observer.py1496-1519 requires no remaining FDs, hold.release() is True, and retire_local_owner() is True before cleanup_confirmed. False/unknown retains actual manager/credit and ordinary success refuses. Reservation1528-1534 and RootObserver.release1842-1860 preserve same original pool/no pending clear after False; retire_local_owner1967-1970 refuses active journal.",
+      "receiver_join": "complete_owner_graph2070-2085 passes actual local owners and errors to full-value arena; fd_state histories remain until actual accepted completion. Native10355-10380 still requires full required graph/error bytes, source registrations, FD/region/own/secondary retirement and no unresolved originals; cold FinalReceive10701-10747 retains same Root on incomplete graph/end.",
+      "limits": "No overall C1 retirement acceptance; thrown/partial producer or release metadata errors still require complete original-data and finite-end proof."
+    }
+  ],
+  "standalone_join": {
+    "path": "resource_meter.py391-436 preowns same history row and manager FD field before one open; original history65536/active128 caps and domain kept. Actual fstat failure attempts close once then bare raises same primary. Close exception stored as original attempt.error; UNKNOWN retains domain and sets whole cleanup_fault.",
+    "actual_completion": "WholeMeter.finish_call227-270 obtains actual receiver custody and only accepts CLOSED/NO_RETURN rows, retired body scopes, zero active slots and no cleanup_fault. WholeMeter.__exit__197-201 turns a normal body with failed completion into refusal. HeldConsumerLoader55-70 takes actual root aliases in existing consumer_arena before its receipt.",
+    "not_waived": "Partial post-open metadata failure remains an unconfirmed prefix, not a fabricated close. Required original error custody and physical resource fit are not inferred from fixed reservation."
+  },
+  "remaining": [
+    {
+      "class": "harness",
+      "id": "SOL135-RAW-ROOT-CLOSE-CUSTODY-OPEN",
+      "path": "source/lifetime.py189-207 and common.py155-161",
+      "state": "OPEN, already explicitly assigned SOL136; unchanged author-projected error_fact is not raw original exception/traceback",
+      "next": "Independently verify SOL136 actual original captured before fallible projection and all wire/primary/secondary/native/error/finite-end joins on its new coherent bytes."
+    },
+    {
+      "class": "evidence/environment",
+      "id": "SOL122-R1-REMAINING",
+      "state": "Finite selected TYPE/actor/callback/nonmutation and actual image/ABI remain open. Scope above only removes these exact retained foreign manager/cursor causes."
+    },
+    {
+      "class": "harness/environment",
+      "id": "C2-WHOLE-REQUIRED-FIT",
+      "state": "Original caps and A282 requested set terms preserved, but new class births/manager/cursor/raw error reachability/implicit allocator/refcount/GC and complete workload fit UNKNOWN_NOT_ZERO."
+    },
+    {
+      "class": "harness/evidence",
+      "id": "WHOLE-C1-R2",
+      "state": "Connected remaining caller/producer/wire/body and both actual final ends not wholly accepted. Stopped SOL107#2 and ScannerSOL075 actions not retried or rerouted."
+    }
+  ],
+  "mechanical": {
+    "manifest": {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/manifest.json",
+      "bytes": 44876,
+      "sha256": "7ff6788fd62b8222b1d18b6ee8beba86840624b5a5e488acd74bcb20e35fec0a",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084643",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44876",
+        "1791229707921641610",
+        "1791229707921641610"
+      ],
+      "stable9": true
+    },
+    "source_count": 57,
+    "equal_other_source": 55,
+    "changed_source": [
+      "consumer/source/resource_meter.py",
+      "source/observer.py"
+    ],
+    "hunks": [
+      {
+        "path": "consumer/source/resource_meter.py",
+        "hunks": 3,
+        "forward_exact": true,
+        "inverse_exact": true
+      },
+      {
+        "path": "source/observer.py",
+        "hunks": 6,
+        "forward_exact": true,
+        "inverse_exact": true
+      }
+    ],
+    "method": "Independent raw LF hunk bodies/hashes and forward/inverse byte reconstruction; full57 Source file SHA/stable9 checked; no Source parser/execution."
+  },
+  "source_pins": [
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/observer.py",
+      "bytes": 154909,
+      "sha256": "ed6931cae41590ee6601958cd9ed66875e4ed1edb1405e462f5071f82d6a1203",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084510",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "154909",
+        "1791229564574650860",
+        "1791229564574650860"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/resource_meter.py",
+      "bytes": 30206,
+      "sha256": "50b7c70a35f6a1f960555071bca3aef9defe57c4ff7f506fe6a586b51eace3ce",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084477",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30206",
+        "1791229163073826849",
+        "1791229163073826849"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/lifetime.py",
+      "bytes": 49101,
+      "sha256": "4cbdbc7840fefc6c971043d3913c8833ca17e259cdfa95aaddb1e19b4ce1e8d6",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084506",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49101",
+        "1791229024316551244",
+        "1791229024316551244"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/common.py",
+      "bytes": 37411,
+      "sha256": "eedafb8804eae10c6919183f75c06333f99ce2e1b586a6314670b96b3ade00f8",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084498",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "37411",
+        "1791229024316274725",
+        "1791229024316274725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/consumer_bridge.py",
+      "bytes": 21315,
+      "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084499",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21315",
+        "1791229024316328664",
+        "1791229024316328664"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/selected_owned_values.py",
+      "bytes": 60827,
+      "sha256": "c7f2c5929bba7ab3cdceafc6e8d0bb9693bf5bb5785583bef92f727428ae6b31",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084516",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "60827",
+        "1791229024317020981",
+        "1791229024317020981"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_root_entry.c",
+      "bytes": 640459,
+      "sha256": "d2ca58bc82fa4f2d15a579b1d6934f87f8d172d644e2785bdef1eeb00b93dded",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084489",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "640459",
+        "1791229024315710331",
+        "1791229024315710331"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_root_command.c",
+      "bytes": 27772,
+      "sha256": "51fd8c4a662b802bc8f5910e4b34cc94804faeb89b480bfcac6c4072f2c2dc1b",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084487",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27772",
+        "1791229024315639081",
+        "1791229024315639081"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/custody.py",
+      "bytes": 31225,
+      "sha256": "a9b19529d1410188e916f11c6ae38f7834a1c8818afd42dd2b541f6d236ad4af",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084500",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31225",
+        "1791229024316370238",
+        "1791229024316370238"
+      ],
+      "stable9": true
+    }
+  ],
+  "full_inventory_pins": [
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/authority.py",
+      "bytes": 16580,
+      "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084459",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16580",
+        "1791229024314298728",
+        "1791229024314298728"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/bill.py",
+      "bytes": 24098,
+      "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084460",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24098",
+        "1791229024314382323",
+        "1791229024314382323"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/body_scope.py",
+      "bytes": 7655,
+      "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084461",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7655",
+        "1791229024314429937",
+        "1791229024314429937"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/canonical.py",
+      "bytes": 3825,
+      "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084462",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3825",
+        "1791229024314474177",
+        "1791229024314474177"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/capability.py",
+      "bytes": 11981,
+      "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084463",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11981",
+        "1791229024314513843",
+        "1791229024314513843"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/contract.py",
+      "bytes": 2099,
+      "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084464",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2099",
+        "1791229024314546263",
+        "1791229024314546263"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084465",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "39603",
+        "1791229024314581882",
+        "1791229024314581882"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/document_vector.py",
+      "bytes": 17709,
+      "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084466",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17709",
+        "1791229024314632143",
+        "1791229024314632143"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/document_windows.py",
+      "bytes": 7707,
+      "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084467",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7707",
+        "1791229024314684357",
+        "1791229024314684357"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/effects.py",
+      "bytes": 690,
+      "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084468",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "690",
+        "1791229024314725776",
+        "1791229024314725776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/formats.py",
+      "bytes": 13628,
+      "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084469",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13628",
+        "1791229024314763902",
+        "1791229024314763902"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/ingress.py",
+      "bytes": 3025,
+      "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084470",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3025",
+        "1791229024314803335",
+        "1791229024314803335"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/material_literals.py",
+      "bytes": 5689,
+      "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084471",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5689",
+        "1791229024314830541",
+        "1791229024314830541"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/performing_contracts.py",
+      "bytes": 18209,
+      "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084472",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18209",
+        "1791229024314858909",
+        "1791229024314858909"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/pins.py",
+      "bytes": 9147,
+      "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084473",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9147",
+        "1791229024314899672",
+        "1791229024314899672"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/producer_consumer.py",
+      "bytes": 3243,
+      "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084474",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3243",
+        "1791229024314948801",
+        "1791229024314948801"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/receipt_chain.py",
+      "bytes": 16263,
+      "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084475",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16263",
+        "1791229024314996216",
+        "1791229024314996216"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/recipe_planner.py",
+      "bytes": 102799,
+      "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084476",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "102799",
+        "1791229024315190830",
+        "1791229024315190830"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/resource_meter.py",
+      "bytes": 30206,
+      "sha256": "50b7c70a35f6a1f960555071bca3aef9defe57c4ff7f506fe6a586b51eace3ce",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084477",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30206",
+        "1791229163073826849",
+        "1791229163073826849"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/runtime_consumer.py",
+      "bytes": 13297,
+      "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084478",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13297",
+        "1791229024315282849",
+        "1791229024315282849"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/schema_validate.py",
+      "bytes": 6776,
+      "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084479",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6776",
+        "1791229024315319500",
+        "1791229024315319500"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/semantics.py",
+      "bytes": 2578,
+      "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084480",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2578",
+        "1791229024315350879",
+        "1791229024315350879"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/consumer/source/whole_join.py",
+      "bytes": 18213,
+      "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084481",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18213",
+        "1791229024315393643",
+        "1791229024315393643"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_original_caller.c",
+      "bytes": 14605,
+      "sha256": "1b52975dbd7a69468f49ea2ec3d87ce057785c4065fdaaa87674b289d51f67b9",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084483",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14605",
+        "1791229024315464362",
+        "1791229024315464362"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_original_caller.h",
+      "bytes": 6596,
+      "sha256": "94ef97754d8789c3fdd0810c1379147c73d191c3f01d66ff127dea8c20096c10",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084484",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6596",
+        "1791229024315517248",
+        "1791229024315517248"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_owned_custody.c",
+      "bytes": 70396,
+      "sha256": "974ab116b0672c17a8adbbd9a349394238d284e0719428a0f5db99ec11808b2f",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084485",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "70396",
+        "1791229024315559255",
+        "1791229024315559255"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_owned_custody.h",
+      "bytes": 6522,
+      "sha256": "e1905df1072950b8b92ca7b6bf0fc42e0dc6fc7d35cf9c24f1ebd5e075a75bb0",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084486",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6522",
+        "1791229024315599626",
+        "1791229024315599626"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_root_command.c",
+      "bytes": 27772,
+      "sha256": "51fd8c4a662b802bc8f5910e4b34cc94804faeb89b480bfcac6c4072f2c2dc1b",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084487",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27772",
+        "1791229024315639081",
+        "1791229024315639081"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_root_command.h",
+      "bytes": 4777,
+      "sha256": "7af5c2b27f9b748f2253ac4f8235912bf5105857e1d001fc6af09b0651dcb9bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084488",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4777",
+        "1791229024315682255",
+        "1791229024315682255"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_root_entry.c",
+      "bytes": 640459,
+      "sha256": "d2ca58bc82fa4f2d15a579b1d6934f87f8d172d644e2785bdef1eeb00b93dded",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084489",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "640459",
+        "1791229024315710331",
+        "1791229024315710331"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/native/publisher_root_entry.h",
+      "bytes": 22370,
+      "sha256": "0819e74de6adcd2fee998c5c2ff6d407a5cef30b1a38ad68d3036e94444764c1",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084490",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "22370",
+        "1791229024315897816",
+        "1791229024315897816"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/actor_bootstrap.py",
+      "bytes": 61339,
+      "sha256": "f47505b651e88b60d19b6a2fcef555d1709f4607433043e79229cf9c9af751df",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084492",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "61339",
+        "1791229024315963490",
+        "1791229024315963490"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/actor_context.py",
+      "bytes": 25298,
+      "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084493",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25298",
+        "1791229024316030255",
+        "1791229024316030255"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/admission.py",
+      "bytes": 14621,
+      "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084494",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14621",
+        "1791229024316083934",
+        "1791229024316083934"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/alljob_cohort.py",
+      "bytes": 24686,
+      "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084495",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24686",
+        "1791229024316125334",
+        "1791229024316125334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/capacity.py",
+      "bytes": 20946,
+      "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084496",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20946",
+        "1791229024316171409",
+        "1791229024316171409"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/class_semantics.py",
+      "bytes": 19516,
+      "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084497",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19516",
+        "1791229024316234244",
+        "1791229024316234244"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/common.py",
+      "bytes": 37411,
+      "sha256": "eedafb8804eae10c6919183f75c06333f99ce2e1b586a6314670b96b3ade00f8",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084498",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "37411",
+        "1791229024316274725",
+        "1791229024316274725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/consumer_bridge.py",
+      "bytes": 21315,
+      "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084499",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21315",
+        "1791229024316328664",
+        "1791229024316328664"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/custody.py",
+      "bytes": 31225,
+      "sha256": "a9b19529d1410188e916f11c6ae38f7834a1c8818afd42dd2b541f6d236ad4af",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084500",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31225",
+        "1791229024316370238",
+        "1791229024316370238"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/existing_root_caller.py",
+      "bytes": 47382,
+      "sha256": "6e8c932a4b214eb8696ed7a8c2efd18a84ccba8587e2b29376fe546eefa7991c",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084501",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47382",
+        "1791229024316408671",
+        "1791229024316408671"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/extraction.py",
+      "bytes": 27923,
+      "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084502",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27923",
+        "1791229024316443013",
+        "1791229024316443013"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/fact_bridge.py",
+      "bytes": 14689,
+      "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084503",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14689",
+        "1791229024316471462",
+        "1791229024316471462"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/independent_selector.py",
+      "bytes": 7718,
+      "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084504",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7718",
+        "1791229024316498042",
+        "1791229024316498042"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/launcher.py",
+      "bytes": 11634,
+      "sha256": "3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084505",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11634",
+        "1791229024316524130",
+        "1791229024316524130"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/lifetime.py",
+      "bytes": 49101,
+      "sha256": "4cbdbc7840fefc6c971043d3913c8833ca17e259cdfa95aaddb1e19b4ce1e8d6",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084506",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49101",
+        "1791229024316551244",
+        "1791229024316551244"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/master_pool.py",
+      "bytes": 2315,
+      "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084507",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2315",
+        "1791229024316583638",
+        "1791229024316583638"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/native.py",
+      "bytes": 44470,
+      "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084508",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44470",
+        "1791229024316620665",
+        "1791229024316620665"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/normalization.py",
+      "bytes": 12779,
+      "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084509",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12779",
+        "1791229024316664096",
+        "1791229024316664096"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/observer.py",
+      "bytes": 154909,
+      "sha256": "ed6931cae41590ee6601958cd9ed66875e4ed1edb1405e462f5071f82d6a1203",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084510",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "154909",
+        "1791229564574650860",
+        "1791229564574650860"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/operations.py",
+      "bytes": 24309,
+      "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084511",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24309",
+        "1791229024316797804",
+        "1791229024316797804"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/owned_prefix_bank.py",
+      "bytes": 44237,
+      "sha256": "89a1b8f0c86f426510ee45f0829e7d64dcb2a715d9b8eacc9ef2eb93b347a829",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084512",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44237",
+        "1791229024316840406",
+        "1791229024316840406"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/retention.py",
+      "bytes": 8465,
+      "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084513",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8465",
+        "1791229024316880576",
+        "1791229024316880576"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/roles.py",
+      "bytes": 5018,
+      "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084514",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5018",
+        "1791229024316920950",
+        "1791229024316920950"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/root_tool_adapter.py",
+      "bytes": 152270,
+      "sha256": "63fcdb47a76b4e31bd5215431f8c14565d603b58f91510e7d190d01045aee4fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084515",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "152270",
+        "1791229024316958064",
+        "1791229024316958064"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/selected_owned_values.py",
+      "bytes": 60827,
+      "sha256": "c7f2c5929bba7ab3cdceafc6e8d0bb9693bf5bb5785583bef92f727428ae6b31",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084516",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "60827",
+        "1791229024317020981",
+        "1791229024317020981"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/source/snapshot_producer.py",
+      "bytes": 4130,
+      "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084517",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4130",
+        "1791229024317062437",
+        "1791229024317062437"
+      ],
+      "stable9": true
+    }
+  ],
+  "evidence": {
+    "author_proof": {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/PROOF.json",
+      "bytes": 15889,
+      "sha256": "8e8182a41f2281367d7b891c62ad7aabb50bd522da5b045b64cab5b54dc3530c",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084600",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15889",
+        "1791229564575650917",
+        "1791229564593651940"
+      ],
+      "stable9": true
+    },
+    "literal_delta": {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/LITERAL-DELTA.json",
+      "bytes": 18876,
+      "sha256": "bd5cc379c77c11dc0c53c7c7a12c1bb6adb0665aea1de93356862da57aa879cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084606",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18876",
+        "1791229637472946409",
+        "1791229637472946409"
+      ],
+      "stable9": true
+    },
+    "controls": {
+      "path": "/var/tmp/friday-sol135-a283-publisher-fd-context-error-connected-inert-source/CONTROL-HASHES.json",
+      "bytes": 49628,
+      "sha256": "2b12d945c2de8e879340839da627295bd3ac74951053d12d2c1ca45f2131ab32",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084632",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49628",
+        "1791229637475191790",
+        "1791229637475191790"
+      ],
+      "stable9": true
+    }
+  },
+  "validation": {
+    "full_text_unique_hashes_verified": 92,
+    "new_obligations_reviewed": 20,
+    "execution": "NOT_RUN_ABSTRACT_HASH_ONLY_REQUIRED_WAIVER_FALSE",
+    "original69_mandatory20": "Required, unchanged inherited definitions; not runtime collection or pass.",
+    "further_required": "Run unchanged mandatory positive/negative inventories only after authorized exact source/admission boundary; no mocked substitute or skipped nodes."
+  },
+  "prior_credit_join": "Native57 inventory shows unchanged A282 native request/debit and actual pending-detach implementation; actual new manager obeys old False/True contract. Only scoped old credits retained; byte equality alone not whole caller-context acceptance.",
+  "future_input_rule": "SOL136 is active on SOL135. This review cannot automatically accept any changed producer/receiver context in SOL136; rejoin exact delta before connected decision. Astra two-native-file A284 draft remains separate/unsealed/unaccepted.",
+  "resources": {
+    "mechanical_source_read_bytes": 4600098,
+    "review_read_upper_including_rg_and_repeated_metadata": 33554432,
+    "read_upper_basis": "Conservative bound for this finite review through seal: every explicit file pass and named rg scan, including one oversized/truncated raw display, remains below32MiB; no archive or network pass.",
+    "peak_RSS": "UNMEASURED_NOT_ZERO; no whole-task RAM attestation",
+    "local_concurrency": 1,
+    "children": 0,
+    "heavy": 0
+  },
+  "administrative": {
+    "previous_goal_turn": "PROGRESS: post-reboot authority/native/files verified, exact SOL135 lifecycle closed and136 received, draft/backlog/checkpoint preserved.",
+    "source_writes": 0,
+    "active_frozen_checkout_writes": 0,
+    "native_task_interruption": 0,
+    "read_display_issue": "An initial overbroad raw display was truncated; required paths were subsequently read as bounded exact LF windows. No unobserved truncated text used for acceptance; no Source or stopped action execution."
+  },
+  "Source_parser": 0,
+  "Source_execution": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}
+

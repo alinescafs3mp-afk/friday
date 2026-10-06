@@ -1,0 +1,81 @@
+{
+  "schema": "friday.astra.peer-result-received.v1",
+  "assignment": "ASTRA-E4-A308-PUBLISHER-ACTUAL-INITIAL71-RECEIVER-CONNECTED-NONAUTHOR-SOL166",
+  "generation": 1,
+  "event": "SOL-SOL166-R1",
+  "at_msk": "2026-10-06T10:34:00+03:00",
+  "result": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL166-RESULT.json",
+    "bytes": 1781,
+    "sha256": "b676d8051188ad7a6235f179748ae4fc3c2533c399dc210aa2b02dbf0ba489ca",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536868",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1781",
+      "1791271484005167365",
+      "1791271484006167422"
+    ],
+    "stable9": true
+  },
+  "manifest": {
+    "path": "/var/tmp/friday-sol166-a308-publisher-initial71-receiver-review/manifest.json",
+    "bytes": 8212,
+    "sha256": "5c46698b82962df78a6f07b91653ad7db325dd96299935de1c93b820349605ce",
+    "identity9_decimal_strings": [
+      "2050",
+      "4372382",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "8212",
+      "1791271483999167020",
+      "1791271484000167078"
+    ],
+    "stable9": true
+  },
+  "review": {
+    "path": "/var/tmp/friday-sol166-a308-publisher-initial71-receiver-review/REVIEW.json",
+    "bytes": 10682,
+    "sha256": "d14c6f1b0c13e813fc90464ff09cabb3d72a0267c3b2e9ee05cfc3db288f88f0",
+    "identity9_decimal_strings": [
+      "2050",
+      "4372375",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "10682",
+      "1791271429315023070",
+      "1791271483962164893"
+    ],
+    "stable9": true
+  },
+  "verification": {
+    "physical": 15,
+    "inputs": 304,
+    "full_SHA_stable9": true,
+    "verified_at_msk": "2026-10-06T10:28:58.032371+03:00",
+    "complete_review_required_boundaries_read": true
+  },
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A308_ACTUAL_INITIAL71_RECEIVER_ENTRY_DELTA_ONLY",
+  "introduced_contradictions": [],
+  "credit": "A308-PUBLISHER-F1 CLOSED only for exact static native71 -> receiver -> original first error -> actual finisher once-close historical-byte immutable-result relation. Sol164 rejected submission remains immutable; no whole acceptance.",
+  "native_completed": {
+    "id": "01a11014-6d5a-7be1-a668-8106d94a4c3b",
+    "status": "completed",
+    "error": null,
+    "startedAt": 1791271136,
+    "completedAt": 1791271491,
+    "durationMs": 355152
+  },
+  "queued_id": "01a11019-cfbe-7ab2-86fa-4870132d0db2",
+  "required": "ALL69/20/140/v2/inherited/M37/I14/J20/K33+P06 REQUIRED/no waiver/NOT_RUN.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

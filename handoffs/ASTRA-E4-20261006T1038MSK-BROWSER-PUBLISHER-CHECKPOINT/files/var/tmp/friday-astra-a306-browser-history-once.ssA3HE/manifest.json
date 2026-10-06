@@ -1,0 +1,377 @@
+{
+  "schema": "friday.astra.a306.browser.coherent-inert-source-manifest.v1",
+  "state": "AUTHOR_DRAFT_PENDING_NONAUTHOR_REVIEW_NOT_EXECUTION_AUTHORITY",
+  "root": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE",
+  "base": {
+    "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/manifest.json",
+    "bytes": 10196,
+    "sha256": "0799ec9e30ac7f1d5278933527d001101a5d55719f5f49aa2427e96e2bb539c1"
+  },
+  "files": [
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/CURRENT-SOURCE-JOIN.json",
+      "bytes": 213413,
+      "sha256": "e09fc9179383ec1b0e0384754b6d946845abade6bb5404cc3ab87e05bd9fc134",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849827",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "213413",
+        "1791267857699454675",
+        "1791267857721883264"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/IMPLEMENTATION.json",
+      "bytes": 3033,
+      "sha256": "7f549ef234c5767f962af1402c275e6abf5d3993fa0116ab3ca572c399aa8921",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849828",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3033",
+        "1791267926816359167",
+        "1791267926938366060"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/RAW-VERIFICATION.json",
+      "bytes": 12453,
+      "sha256": "691557d459df97419b2012089c6abd472918c296aa704d863ed2ee508a06d362",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849831",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12453",
+        "1791267970250812820",
+        "1791267970267813781"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/REQUIRED-CHECKS.json",
+      "bytes": 2239,
+      "sha256": "68900da3f8129207c914dc2e728d04ff5a86f74a1ea95d3adf2c0d354e9447ce",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849829",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2239",
+        "1791267926822359506",
+        "1791267926938366060"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/SOURCE-DELTA.patch",
+      "bytes": 29014,
+      "sha256": "a75e088cb54b5a9788fcfd6b6d37bd169701637db661a7a1d3587e2e74827873",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849830",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "29014",
+        "1791267926921365099",
+        "1791267926938366060"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-ABI-MAPPING.json",
+      "bytes": 159580,
+      "sha256": "25227eaeb91db1d25980b96bc2564e5e7cf7ef18bdfb927cec5edb99da16c340",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229660",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "159580",
+        "1791267795464939005",
+        "1791267795464939005"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-BOOTSTRAP.c",
+      "bytes": 78617,
+      "sha256": "af41fbbee1c04c93ac01f8f7157b10004784eac88d1df131e82a8259efd351e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229649",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78617",
+        "1791256629893503744",
+        "1791267716893615776"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-BUILD-RECIPE.json",
+      "bytes": 183687,
+      "sha256": "c20d66e0020c92fcd685aa1e6dd74acbcfa5c79a654cb1eb929cca42a3e09038",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229661",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "183687",
+        "1791267795467939174",
+        "1791267795467939174"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-COMMON.c",
+      "bytes": 23536,
+      "sha256": "a05d5ff816a0a905e57f03a86b39a60814158b278f3eef17ab9efefe841fe222",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229650",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23536",
+        "1791256629899504092",
+        "1791267716893684450"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-CONTRACT.py",
+      "bytes": 30209,
+      "sha256": "6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229652",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30209",
+        "1791256629909504672",
+        "1791267716893738880"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-NATIVE.h",
+      "bytes": 13204,
+      "sha256": "ec1efbf610c4b015df6e59e0275c8a2b9115b293814631b5387c93f13e10347b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229651",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13204",
+        "1791256629904504382",
+        "1791267716893716413"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-PRODUCER.py",
+      "bytes": 21229,
+      "sha256": "34715072ba19c02d40aa9571051ba41eea99f0fc68ca0a24759c5cbcd2d6b743",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229656",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21229",
+        "1791256629935506179",
+        "1791267716893899562"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+      "bytes": 141121,
+      "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229653",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "141121",
+        "1791267716925502248",
+        "1791267716925502248"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-ORACLES.json",
+      "bytes": 77446,
+      "sha256": "d323995eaf876bd02ea25e0d218c1fcbaa92a187a3d2df327cfc9c0294d39ed6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229658",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "77446",
+        "1791267795467939174",
+        "1791267795467939174"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+      "bytes": 78170,
+      "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229655",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78170",
+        "1791267716924502191",
+        "1791267716924502191"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-ABI-CONTRACT.json",
+      "bytes": 77151,
+      "sha256": "e755d074b06ba58ab3fea731b7a63fec341c8e0c4a108a94bd1be3b00f99b014",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229657",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "77151",
+        "1791267795468939231",
+        "1791267795468939231"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 221107,
+      "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229654",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "221107",
+        "1791267716927502361",
+        "1791267716927502361"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A104-ORDINARY-CONTRACTS.json",
+      "bytes": 166400,
+      "sha256": "408bb3c8ebab4a7f4c1a7a3fdb9c62c982bcd9079a89ea7a570bfbf69111c26b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229659",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "166400",
+        "1791267795471455068",
+        "1791267795471455068"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A118-CONNECTED-CONTRACT.json",
+      "bytes": 169438,
+      "sha256": "8c7dc4960faf5467473f7e674af0ecea7fe6414b269b50d98d1bc65a81de54f1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229662",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "169438",
+        "1791267795473602893",
+        "1791267795473602893"
+      ],
+      "stable9": true
+    }
+  ],
+  "current_join": {
+    "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/CURRENT-SOURCE-JOIN.json",
+    "bytes": 213413,
+    "sha256": "e09fc9179383ec1b0e0384754b6d946845abade6bb5404cc3ab87e05bd9fc134",
+    "identity9_decimal_strings": [
+      "2050",
+      "3849827",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "213413",
+      "1791267857699454675",
+      "1791267857721883264"
+    ],
+    "stable9": true
+  },
+  "physical_count_with_manifest": 20,
+  "source_inventory": {
+    "Source15": {
+      "total": 15,
+      "changed": 5,
+      "unchanged": 10
+    },
+    "current209": {
+      "total": 209,
+      "changed": 9,
+      "unchanged": 200
+    },
+    "aux3": {
+      "total": 3,
+      "changed": 0,
+      "unchanged": 3
+    }
+  },
+  "verified_current_unique_pins": 212,
+  "byte_relation": "Same7-line control-flow change in3 actual checkers,24 current pin blocks in6 metadata files; all remaining code/historical metadata byte-exact. No imported acceptance across changed caller context.",
+  "local_source_context": "All14 immediate source files copied; exact CURRENT-SOURCE-JOIN retains all current209/Source15/aux3 and2 actual immutable dependencies. No execution.",
+  "at_msk": "2026-10-06T09:26:10.321840+03:00",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}
