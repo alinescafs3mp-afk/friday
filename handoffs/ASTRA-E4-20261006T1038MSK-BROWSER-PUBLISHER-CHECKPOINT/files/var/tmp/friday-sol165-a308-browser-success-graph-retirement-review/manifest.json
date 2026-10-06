@@ -1,0 +1,275 @@
+{
+  "schema": "friday.sol165.sealed-review-manifest.v1",
+  "assignment": "ASTRA-E4-A308-BROWSER-ACTUAL-SUCCESS-GRAPH-RETIREMENT-NONAUTHOR-SOL165",
+  "generation": 1,
+  "state": "SEALED_SCOPED_STATIC_NONAUTHOR_REVIEW_NOT_EXECUTION_AUTHORITY",
+  "root": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review",
+  "files": [
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/ADDITIONAL-INPUT-PINS.json",
+      "bytes": 1034,
+      "sha256": "0dd79037e910d3f30ed7a60bad85a5c2efb575cff7426c0f67141c4ffc113e26",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230680",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1034",
+        "1791270789732248915",
+        "1791270789732248915"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/BOUNDARIES.json",
+      "bytes": 1259,
+      "sha256": "bdbcef0a3e909d0cd25af586bcc624283364a5662b2d3f905a65183dd994f4d1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230678",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1259",
+        "1791270753089141858",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/FINAL-INPUT-RECHECK.json",
+      "bytes": 135851,
+      "sha256": "0edfbf31aaf1745887c15ce01dd91582ae328a3ae5b22c371539b58d047aafa9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230681",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "135851",
+        "1791270789739249318",
+        "1791270789740249376"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/INPUT-PINS.json",
+      "bytes": 134890,
+      "sha256": "3a487d39dd6156d1074c2aac8c97beae80e028e6e35b670b7cde14bed02702cc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230570",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "134890",
+        "1791270590539794903",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/RAW-RELATION-EVIDENCE.json",
+      "bytes": 72998,
+      "sha256": "a7e8c98bef3b8ae95a4ea55dee5d7a8ef104007210a7847f3bd1066cd7e93d9b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230674",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "72998",
+        "1791270673208548554",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/RAW-SPANS.json",
+      "bytes": 42613,
+      "sha256": "64a0f87356894752c828430cd1d6678425fc6ee687be130806b5cf0e6b25385f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230675",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "42613",
+        "1791270673214548899",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/REQUIRED-CONTROLS.json",
+      "bytes": 1499,
+      "sha256": "f28b7a16b1d67496580a8b8d5a2a4914f5f7f5e50466f31970bc9a4384937431",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230677",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1499",
+        "1791270753089141858",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/REVIEW.json",
+      "bytes": 11302,
+      "sha256": "704917d6b2c7bd586d09b350db126ff7d0cc96e1a2f63e3b81751eb706a84749",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230676",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11302",
+        "1791270753089141858",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/SOURCE-COMPARISON.json",
+      "bytes": 16726,
+      "sha256": "1c3ede60f6108d5b1b9e671570214c6a04f352cc4dc0b98a4d4444ec7ab870fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230571",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16726",
+        "1791270590545795248",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/TIMING-RESOURCE.json",
+      "bytes": 1409,
+      "sha256": "f11c9f84b4f278b4534e329400b7af2d4ef629656645fe803a247b9ed30b4171",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230682",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1409",
+        "1791270789745249663",
+        "1791270789745249663"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/host_relations.py",
+      "bytes": 10031,
+      "sha256": "e8aa715d7b78fec1c1e616e430f17dfc15adbb014afbabe0e092332f8645b908",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230673",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10031",
+        "1791270673158545679",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/host_seal.py",
+      "bytes": 7942,
+      "sha256": "f554e32ba54b6734e03a54b293b968b618a652e10bfd55df2341e0440e7a6f70",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230679",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7942",
+        "1791270789688246385",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/host_verify.py",
+      "bytes": 5840,
+      "sha256": "4847a847bed23014bd6c6dfec10873ad460898ca4ab2a34e7d423b7d56d11515",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230569",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5840",
+        "1791270590458790246",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/received.json",
+      "bytes": 519,
+      "sha256": "c53f452b3e37753a1d2608ad94bc632581e906c2fa4946ec57dfd3cd3589f4ef",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230568",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "519",
+        "1791270590457790188",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    }
+  ],
+  "physical_count_with_manifest": 15,
+  "snapshot": {
+    "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json",
+    "bytes": 10781,
+    "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5",
+    "identity9_decimal_strings": [
+      "2050",
+      "4230566",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "10781",
+      "1791270177829870695",
+      "1791270177847283442"
+    ],
+    "stable9": true
+  },
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A308_CONNECTED_PRIVATE_SUCCESS_GRAPH_RETIREMENT_DELTA_ONLY",
+  "own_baseline_accepted": false,
+  "host_literal_observations": 36,
+  "safe_raw_spans": 13,
+  "required_controls": "ALL216/29/6/9 + inherited + H01-H26 + G01-G14 required/no waiver/NOT_RUN",
+  "read_scope_disclosure": "Bounded unrelated unchanged writer-end text accidentally emitted, not reviewed/qualified/reused; BOUNDARIES/REVIEW record limitation",
+  "Source_execution": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

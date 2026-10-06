@@ -1,0 +1,25 @@
+{
+  "schema": "friday.sol165.result.v1",
+  "assignment": "ASTRA-E4-A308-BROWSER-ACTUAL-SUCCESS-GRAPH-RETIREMENT-NONAUTHOR-SOL165",
+  "generation": 1,
+  "event": "SOL-SOL165-R1",
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A308_CONNECTED_PRIVATE_SUCCESS_GRAPH_RETIREMENT_DELTA_ONLY",
+  "accepted_msk": "2026-10-06T10:09:02+03:00",
+  "completed_msk": "2026-10-06T10:13:09.740847+03:00",
+  "elapsed_seconds": 247.741,
+  "manifest": {
+    "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/manifest.json",
+    "sha256": "c4d002a2f275f79bdeb6caa48bf7be334b6be779da5a2ca300c3bd8c6154ab27"
+  },
+  "review": {
+    "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/REVIEW.json",
+    "sha256": "704917d6b2c7bd586d09b350db126ff7d0cc96e1a2f63e3b81751eb706a84749"
+  },
+  "credits": "All3 SAME-table decoders coherent; actual A079 last-local-reader -> guarded all-node private-success retirement; canonical full roots/errors/raw aliases preserved.24pins+24texts in6meta inverse-exact.15=5/10;209=9/200;aux3=0/3;212unique current.",
+  "qualification": "36 host byte/literal observations,13 raw spans,269 final pins; NOT Source tests. A306/A302 byte-exact changed-context rejoin only, not own whole baseline acceptance.",
+  "remaining": "F2/F3/F4/otherF5 and whole256MiB/180/170/10/custody/image/admission OPEN; addedcost UNKNOWN_NOT_ZERO. ALL216/29/6/9+inherited+H26+G14 REQUIRED/no waiver/NOT_RUN.",
+  "boundary": "Source parse/compiler/import/AST/exec/tests/helpers/live/network/install0; source writes0;local1/children0/heavy0. Stopped scopes excluded. One bounded unrelated writer-end text disclosure logged, not reviewed/qualified/reused.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

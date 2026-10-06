@@ -25,7 +25,6 @@
 163ccdc3fe5fc0ec32eb572d496af8be068fbcd2236f2946d6a483c0220a7acd  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_rights.json
 1763e6c261af84f38f6461830ef0d3ea03c434a4ad252a6a5c8106795e884595  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-drain_pending.json
 177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5  files/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json
-1885c0c8bc49082717e728c95efcab3396860c56718b8b41e652dc6b9a050b39  MANIFEST.json
 18bbf54405a0fee6443d6bf26a12dd34e71947626841ab95d4fc33572445ae40  files/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/SOURCE-DELTA.patch
 18d023bddcd1bcea08a2b865316b0ed4112fa5483877028af02fce3c859b154d  files/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/IMPLEMENTATION.json
 18fd8caeadb26b1daec81753b76dcb011b55ce66f7b385d622293d2bb0b7415e  files/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/native/publisher_original_caller.c
@@ -105,6 +104,7 @@
 3cca295b70ac51488e0f347b4f9461837919fd1d5d1e2b969fd7ba949a9ee636  files/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/SOURCE-DELTA.patch
 3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000  files/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/source/launcher.py
 3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000  files/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/launcher.py
+3ce8b67365638e5c67120bc739c79d796e6d64139fc83ff718eec6c1ac8eb8e0  INDEX.json
 3d9b65557f37657ec1f620e9faf03bd12adc9a1208a425edadf0751a0363d10a  files/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A025-G1-R4.py
 3da975b7fedadf79efb783b5169928301efede0b91395426abf287bfecf4d113  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_owner_birth.json
 404bd558726cbb599186d1874f3c0aa48cb5ab68d8a398c9830d49152496ad69  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_origin_uid.json
@@ -172,6 +172,7 @@
 6565cda0ff2a58ada0d543520c58da77aa569b7566baae5ff76236c4c8a6402c  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A091-EXPECTED-CONTROLS.json
 65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd  files/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/consumer/source/contract.py
 65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd  files/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/consumer/source/contract.py
+67fde80d0f1f9210925b7767ee26d98fd176ad6d2e291de404b824adc59a2152  files/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL165-RESULT.json
 68900da3f8129207c914dc2e728d04ff5a86f74a1ea95d3adf2c0d354e9447ce  files/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/REQUIRED-CHECKS.json
 68d64441d12262d68298379e1ef9318a20a7c4a773fba922d37946d095dce610  REVIEW-BINDINGS.json
 691557d459df97419b2012089c6abd472918c296aa704d863ed2ee508a06d362  files/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/RAW-VERIFICATION.json
@@ -183,6 +184,7 @@
 6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777  files/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-CONTRACT.py
 6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777  files/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-CONTRACT.py
 6b351c03e24613e2be3ca79ee45fe0489ec4f44720828c5c81b638ee618d7aac  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_sequence.json
+6bbcafaca0ae3ef3ca17a0ec15a240d1cf2b7b2f37b0db5351d0fd63eae4ecca  MANIFEST.json
 6d0be6d6e71b3db57b7323d125e57b26e2ae2eeef45fcb4135b45a1d4e160d6e  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_owner.json
 6d9319d66619f5cc614ca37d8804abd9988d76e13ea18b174b78cf085877ded0  files/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/native/publisher_root_entry.h
 6d9319d66619f5cc614ca37d8804abd9988d76e13ea18b174b78cf085877ded0  files/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/native/publisher_root_entry.h
@@ -328,6 +330,7 @@ c20d66e0020c92fcd685aa1e6dd74acbcfa5c79a654cb1eb929cca42a3e09038  files/var/tmp/
 c27d60165426fc52ea9991a8842d1728c149a5fbd54404ec1697015e261f662d  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-INDEX.md
 c360df2ef38d395e1c7d2630748bbdc6a154011b9760a8e408922c06c5fd3fb6  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-transport_closed.json
 c49e92cae56c27e0f4f73c7f691f80f5c44e45a1f957877e4ed3aba388949d7a  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_role.json
+c4d002a2f275f79bdeb6caa48bf7be334b6be779da5a2ca300c3bd8c6154ab27  files/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/manifest.json
 c7f2c5929bba7ab3cdceafc6e8d0bb9693bf5bb5785583bef92f727428ae6b31  files/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/source/selected_owned_values.py
 c7f2c5929bba7ab3cdceafc6e8d0bb9693bf5bb5785583bef92f727428ae6b31  files/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/selected_owned_values.py
 c84e9fbbba05c5462ed01d440e802207026f092087d3c7d3d70a51109d8aa90b  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/REVIEW-A087.md
@@ -370,7 +373,6 @@ d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380  files/var/tmp/
 d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380  files/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/actor_context.py
 da4ed7f2cd9a8e3a7d20660c04f4269a78b13c37d64b1a2caad187fefdbb4c3e  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-register_invalid_ACK.json
 dab798360e67425c6ca26a39ca508fc19051886a402d7f9038799a76e1dddffc  files/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-ABI-MAPPING.json
-dc7b9a540f7eccab2c7dfee23e07e3a418115694ef7aed479a29d5007ec72156  INDEX.json
 dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3  files/var/tmp/friday-astra-a308-publisher-initial-receiver.INWWdt8w/candidate/source/operations.py
 dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3  files/var/tmp/friday-sol164-a307-publisher-original-birth-prepaid-connected/candidate/source/operations.py
 dd4249a75e6cfc5124513a91ce5da9506f82ceae61dd6a3011e91a41c859db97  files/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py

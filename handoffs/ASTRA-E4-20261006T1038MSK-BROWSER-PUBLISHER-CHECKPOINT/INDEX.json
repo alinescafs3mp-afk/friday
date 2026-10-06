@@ -111,12 +111,17 @@
     "mandatory": "Existing exact change+exact union,160live,A+B(no B after red A),B09/R10/all30/F0-F11/build/install/restore/rollback/target/independent acceptance retained. External web OWNER_DEFERRED_POST_1_0, never PASS."
   },
   "coverage": {
-    "files": 433,
-    "bytes": 13444015,
+    "files": 435,
+    "bytes": 13453641,
     "omitted_selected_paths": 15,
     "review_bindings": "REVIEW-BINDINGS.json",
     "manifest": "MANIFEST.json",
     "limits": "OMISSIONS.json"
   },
-  "status_register": "../../outer_sol/PROJECT_BACKLOG.md; this index is immutable snapshot metadata only"
+  "status_register": "../../outer_sol/PROJECT_BACKLOG.md; this index is immutable snapshot metadata only",
+  "supplement": {
+    "time_msk": "2026-10-06T10:42:37.201530+03:00",
+    "reason": "Two already-sealed Sol165 result/manifest files were missing from first export selection; added unchanged. All source bytes and acceptance decisions unchanged.",
+    "initial_publication_commit": "2adf2f6ee9f107a782b630aa8ca75b005206ad12"
+  }
 }

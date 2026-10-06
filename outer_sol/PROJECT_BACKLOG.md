@@ -118,7 +118,7 @@ roots0/execution layers0. Archive verification is not an acceptance execution.
 Publication: isolated checkout based on public63184bd6a1a59c1430efebbe64b7bab4760cc695.
 This checkpoint snapshot:
  handoffs/ASTRA-E4-20261006T1038MSK-BROWSER-PUBLISHER-CHECKPOINT.
-433 actual immutable files/13,444,015 bytes: current Browser/Publisher, direct
+435 actual immutable files/13,453,641 bytes: current Browser/Publisher, direct
 comparison baselines, author results and exact independent reviews.15 selected
 paths explicitly omitted (11 restricted control-body copies,4 host helpers);
 private conversations/session/auth/runtime authority and unrelated files excluded.

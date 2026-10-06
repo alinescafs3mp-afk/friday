@@ -3929,11 +3929,30 @@
       "roles": [
         "Publisher Sol164 comparison baseline REJECTED_AS_SUBMITTED"
       ]
+    },
+    {
+      "original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL165-RESULT.json",
+      "archived_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL165-RESULT.json",
+      "bytes": 1749,
+      "sha256": "67fde80d0f1f9210925b7767ee26d98fd176ad6d2e291de404b824adc59a2152",
+      "roles": [
+        "Browser Sol165 existing independent reviewer result/manifest supplement"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/manifest.json",
+      "archived_path": "files/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/manifest.json",
+      "bytes": 7877,
+      "sha256": "c4d002a2f275f79bdeb6caa48bf7be334b6be779da5a2ca300c3bd8c6154ab27",
+      "roles": [
+        "Browser Sol165 existing independent reviewer result/manifest supplement"
+      ]
     }
   ],
   "verification": {
     "method": "nofollow regular owned single-link files; exact SHA256, size and stat9 before/during/after each read/copy; final all-input recheck",
     "stable": true
   },
-  "omissions_file": "OMISSIONS.json"
+  "omissions_file": "OMISSIONS.json",
+  "supplement_time_msk": "2026-10-06T10:42:37.201530+03:00"
 }
