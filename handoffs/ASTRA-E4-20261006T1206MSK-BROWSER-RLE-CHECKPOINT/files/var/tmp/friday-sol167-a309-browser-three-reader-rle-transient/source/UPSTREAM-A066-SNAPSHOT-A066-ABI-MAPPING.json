@@ -1,0 +1,19 @@
+{
+  "schema": "friday.a066.actual-owned-wait-source-dataflow.v1",
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "wire": "A061 v1 fixed848/208/56/1088/96B unchanged;19 roles; types1..14 unchanged",
+  "public_entry": "held110 --held-a061",
+  "new_actual_graph": [
+    "CONTRACT.native_bridge declares4-argument fr_fixture_wait",
+    "enable_fixture_forks.waitpid calls fr_fixture_wait instead of Python wait status + fr_fixture_reap",
+    "fr_fixture_wait chooses only actual native clone table/current coordinator",
+    "fr_own_wait consumes waitpid exact direct child; durable status+UNKNOWN precedes root ACK",
+    "ACK checks real parent SCM_CREDENTIALS PID UID0 GID0, no SCM_RIGHTS, every packet/session/type/sequence/role/PID/owner/status/detail/birth/owner_birth/deadline field",
+    "Only exact ACK changes native record UNKNOWN -> REAPED; unconfirmed ACK leaves UNKNOWN",
+    "Unknown signal/close/deadline/transaction latches fixture generation against later creation; no reset API"
+  ],
+  "legacy_symbol": "fr_fixture_reap retained but refuses caller-supplied wait status",
+  "root_service_added": false,
+  "all216_integration": "ABSENT; explicit source blocker",
+  "actual_observations": "NOT_RUN"
+}

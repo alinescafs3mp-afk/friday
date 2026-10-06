@@ -1,0 +1,75 @@
+{
+  "schema": "friday.a061.future-bounded-build-recipe.v1",
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "admission": "Independent WHOLE A079 changed-byte review required before any build; full registry controls remain SOURCE_INCOMPLETE and this recipe is NOT admitted now.",
+  "allowed_output": "A NEW independently chosen private0700 build directory; outputs0600 regular nlink1; never overwrite this sealed source package or frozen A046/candidate/quarantine.",
+  "compiler": "Exact independently reviewed held compiler executable FD200 with its SAME protected complete compiler/loader/library/toolchain view; no named-host compiler or shell fallback.",
+  "entry": "Future reviewed build owner calls execve(200, argv, exact_environment), holds exact source descriptor bytes at fixed paths in that same admitted source view, drains both outputs continuously, tracks only actual owned compiler process/generations and exact owned child tools.",
+  "bounds": {
+    "wall_seconds": 120,
+    "CPU_seconds": 90,
+    "AS_bytes": 1073741824,
+    "aggregate_RSS_bytes": 1073741824,
+    "FSIZE_bytes": 16777216,
+    "NOFILE": 512,
+    "CORE": 0,
+    "output_each_bytes": 1048576,
+    "tools_parallel": 1,
+    "child_models": 0,
+    "network": 0,
+    "install": 0,
+    "setuid_or_capabilities": 0
+  },
+  "environment": {
+    "PATH": "/usr/bin:/bin",
+    "LANG": "C",
+    "LC_ALL": "C",
+    "SOURCE_DATE_EPOCH": "0"
+  },
+  "steps": [
+    {
+      "output": "friday-a061-native",
+      "argv": [
+        "ADMITTED_COMPILER_FD200",
+        "-std=c11",
+        "-O2",
+        "-fstack-protector-strong",
+        "-fno-strict-aliasing",
+        "-static",
+        "-Wl,-z,noexecstack",
+        "-o",
+        "NEW_BUILD/friday-a061-native",
+        "A071-BOOTSTRAP.c",
+        "A071-COMMON.c",
+        "A071-RUNTIME.c"
+      ]
+    },
+    {
+      "output": "libfriday-a061-owned.so",
+      "argv": [
+        "ADMITTED_COMPILER_FD200",
+        "-std=c11",
+        "-O2",
+        "-fPIC",
+        "-fstack-protector-strong",
+        "-fno-strict-aliasing",
+        "-shared",
+        "-Wl,-z,now,-z,relro,-z,noexecstack",
+        "-o",
+        "NEW_BUILD/libfriday-a061-owned.so",
+        "A071-OWNED.c",
+        "A071-COMMON.c",
+        "A071-RUNTIME.c"
+      ]
+    }
+  ],
+  "link_contract": "Shared PyOS_BeforeFork/PyOS_AfterFork_Parent/PyOS_AfterFork_Child are resolved from the exact admitted CPython interpreter, not a separately mutable libpython. Static outer intentionally excludes OWNED.c and needs no interpreter. COMMON.c calls fr_runtime_verify from RUNTIME.c in BOTH targets; exact same header is used. No compile occurred.",
+  "post_build_required": "Independent exact ELF/ABI/symbol/static-link review, exact executable SHA, actual same image inclusion of bridge at /usr/lib/x86_64-linux-gnu/libfriday-a061-owned.so, separate root/kernel/runtime capsule admission. Compilation alone is NOT source readiness or execution acceptance.",
+  "cleanup": "Finite owned-only stop/reap. Unknown descendants or cleanup stays STOP_UNCONFIRMED, no group kill or guessed PID.",
+  "performed_now": false,
+  "ABI_changes": {
+    "fr_recv": "int(int,packet*,passfd*,pid*,uid*,gid*,uint64_deadline)",
+    "fr_own_spawn": "int(int_sock,unsigned_role,int_config,int_body,int_event,int_python,int_gate,uint64_deadline,child*)",
+    "abort_ack": 14
+  }
+}

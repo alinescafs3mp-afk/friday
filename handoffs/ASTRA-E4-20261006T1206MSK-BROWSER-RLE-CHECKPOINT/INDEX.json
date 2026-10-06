@@ -1,0 +1,72 @@
+{
+  "schema": "friday.work-snapshot.index.v1",
+  "snapshot_time_msk": "2026-10-06T12:07:05.123695+03:00",
+  "snapshot_directory": "handoffs/ASTRA-E4-20261006T1206MSK-BROWSER-RLE-CHECKPOINT",
+  "scope": "INCREMENTAL_CURRENT_BROWSER_AND_INDEPENDENT_SCOPED_REVIEW_NOT_FIVE_COMPONENT_EXPORT",
+  "state": "INERT_NOT_RELEASE_APPROVAL_NOT_EXECUTION_AUTHORITY",
+  "previous_published_head": "dc422b67ab3d1e126bf1d08ea13cfe52d0fb6750",
+  "previous_snapshot": "handoffs/ASTRA-E4-20261006T1038MSK-BROWSER-PUBLISHER-CHECKPOINT",
+  "earlier_full_snapshot": "handoffs/ASTRA-E4-20261004T2037MSK-WORK-SNAPSHOT",
+  "lead": {
+    "lead": "Astra epoch4",
+    "deputy": "Kimi",
+    "executor": "existing native Sol",
+    "grok": "unavailable",
+    "models_reasoning_tier_provider_guards_settings": "unchanged",
+    "actual_lead_model": "gpt-6-astra",
+    "provider": "openai_https",
+    "reasoning": "ultra",
+    "tier": "unchanged; not returned by native metadata"
+  },
+  "product": {
+    "baseline_sha": "cecd28a92ac4fd4e34c4d3813d0c598debe09436",
+    "version": "0.208.64/schema50",
+    "frozen": true,
+    "installed": "0.208.58 last recorded NOT_REPROBED",
+    "wheel": "NO_NEW_ARTIFACT",
+    "archive_is_product_candidate": false
+  },
+  "current": {
+    "Browser": {
+      "manifest_sha256": "a561b74fca898a7031a4c97cccab223f8ae07eb0f78d70819b5d556d5c0e18e7",
+      "full_source_inventory": 15,
+      "source_files_archived": 15,
+      "current_unique": 212,
+      "current_unique_archived": 205,
+      "implemented": true,
+      "locally_raw_checked": true,
+      "integrated": true,
+      "independently_accepted": "EXACT_CONNECTED_RLE_AND_CURRENT_PIN_DELTA_ONLY",
+      "whole_source_accepted": false,
+      "target_verified": false
+    }
+  },
+  "changes": [
+    "Three actual decoders avoid complete stored-RLE slice, full-count temporary and stale successful builder retention while preserving full output/domain/aliases and meaningful failure paths.",
+    "Six metadata files rejoin 100 actual current pin dictionaries; author95 summary not adopted as complete count; original controls preserved.",
+    "Astra independent A310 review binds exact current manifest; no old runtime credit. Q+r logical scratch bound is not measured whole resource fit."
+  ],
+  "accepted_closures": [
+    "Browser F2 specified avoidable transient/retention terms and actual three-reader current-pin join; SCOPED_STATIC_ONLY"
+  ],
+  "remaining_blockers": {
+    "Browser": "F2 remaining copies/header/Unicode/native temporaries,F3 failed prefixes/tracebacks,F4 original256MiB whole workload share,F5 reads/hash/CPU180/170/final10; Root wait/proc-history/child setup/PreparedView,image/ABI/source admission OPEN.",
+    "Publisher": "SOL169 conditional phase contract adopted, not implemented or admitted. SOL170 same-Root connected implementation active; not captured while changing. Current source A308 unchanged and in previous snapshot.",
+    "others": "ScannerLAB887, NodeA237, SenderSol089 unchanged; earlier snapshot/backlog exact identities retained."
+  },
+  "coverage": {
+    "actual_file_copies": 225,
+    "bytes": 5558906,
+    "omissions": 13,
+    "limits": "See OMISSIONS.json. Seven required restricted control bodies hash-only; no standalone full control reproduction. Host review helpers/private protocol state not published. Older comparison sources resolve through previous snapshot manifest, not private paths alone. Not every historical input pin is re-exported."
+  },
+  "next_required_release_stage": "Necessary connected source independent acceptance, then exact image/compiler ABI/provider/grants/resources/finite clocks, before stable collect-all diagnostics. No newly executable release gate.",
+  "release": {
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false,
+    "r5": "immutable RED/no reuse",
+    "r6": "absent",
+    "tests_run_for_export": 0
+  }
+}

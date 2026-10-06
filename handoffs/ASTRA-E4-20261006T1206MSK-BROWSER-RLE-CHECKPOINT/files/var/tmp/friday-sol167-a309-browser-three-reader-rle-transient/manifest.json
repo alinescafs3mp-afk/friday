@@ -1,0 +1,3968 @@
+{
+  "schema": "friday.sol167.coherent-inert-source-manifest.v1",
+  "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+  "generation": 1,
+  "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+  "root": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient",
+  "base": {
+    "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json",
+    "bytes": 10781,
+    "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5",
+    "identity9_decimal_strings": [
+      "2050",
+      "4230566",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "10781",
+      "1791270177829870695",
+      "1791270177847283442"
+    ],
+    "stable9": true
+  },
+  "current_join": {
+    "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/CURRENT-SOURCE-JOIN.json",
+    "bytes": 266517,
+    "sha256": "ddc63ab7befc4bd71e2ebc8bfdcd41595b14cd07ef28a4357e03f025745937e9",
+    "identity9_decimal_strings": [
+      "2050",
+      "3559133",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "266517",
+      "1791272383540851227",
+      "1791272383541851285"
+    ],
+    "stable9": true
+  },
+  "source_inventory": {
+    "Source15": {
+      "total": 15,
+      "changed": 5,
+      "unchanged": 10
+    },
+    "current209": {
+      "total": 209,
+      "changed": 9,
+      "unchanged": 200
+    },
+    "aux3": {
+      "total": 3,
+      "changed": 0,
+      "unchanged": 3
+    }
+  },
+  "current_unique_pins": 212,
+  "source_physical_files": 212,
+  "files": [
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/BOUNDARIES.json",
+      "bytes": 1789,
+      "sha256": "e1235fd52c3dd4d8d2cb253c0f46dc6966af596f057af4f6893c85df9e593798",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559142",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1789",
+        "1791272610428868758",
+        "1791272693338625640"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/CURRENT-SOURCE-JOIN.json",
+      "bytes": 266517,
+      "sha256": "ddc63ab7befc4bd71e2ebc8bfdcd41595b14cd07ef28a4357e03f025745937e9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559133",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "266517",
+        "1791272383540851227",
+        "1791272383541851285"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/FINAL-INPUT-RECHECK.json",
+      "bytes": 123397,
+      "sha256": "0b19a079feb374865032cfa69aaa48f0cdb95d03c99de36865f18ab441735208",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559144",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "123397",
+        "1791272693357626730",
+        "1791272693358626788"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/IMPLEMENTATION.json",
+      "bytes": 8996,
+      "sha256": "9c544c8e78d9e21dc629337a6275715b4aae9a024f6fe13284c48583a53c195a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3554654",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8996",
+        "1791272610428868758",
+        "1791272693338625640"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/INPUT-PINS.json",
+      "bytes": 123308,
+      "sha256": "d0453d4241afae21659e692e197df4e5e42b607ce73f0b44490dd1ee50cd5398",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558916",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "123308",
+        "1791272285518227244",
+        "1791272693338625640"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/RAW-RELATION-EVIDENCE.json",
+      "bytes": 22780,
+      "sha256": "93c8e0a3b5bcdf003a95cf69151cfb1266026cc34b8e5e09e041cd59bf44c998",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559137",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "22780",
+        "1791272478664308865",
+        "1791272478664308865"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/RAW-SPANS.json",
+      "bytes": 26275,
+      "sha256": "4b7729db6aeadda7cd801e211b4039ab0b748e5a739b0e324f3cdb68c5b155bf",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559138",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "26275",
+        "1791272478669309152",
+        "1791272478669309152"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/REQUIRED-CHECKS.json",
+      "bytes": 3497,
+      "sha256": "df843e52c5417b3be46a7f5e1c99d05226796fff26e715211ab86b74a5c014c5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559141",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3497",
+        "1791272610428868758",
+        "1791272693338625640"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/RESOURCE-ARITHMETIC.json",
+      "bytes": 5447,
+      "sha256": "133aa79e0b6d2c67d7f14c90f692b10efc254d0c19ea9e66e3c8bf10027d96b9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559140",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5447",
+        "1791272610428868758",
+        "1791272693338625640"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/SOURCE-COMPARISON.json",
+      "bytes": 11058,
+      "sha256": "1ca5a2b40be80052d3989e9f696ba37afd04cb49fdececc546a4228aa04931bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559135",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11058",
+        "1791272383567852777",
+        "1791272383567852777"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/SOURCE-DELTA.patch",
+      "bytes": 103015,
+      "sha256": "30e53e9573a3fb84bace44aa5cacfe3384a966ebf9e125d4013b3bb3dcd32d56",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559134",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "103015",
+        "1791272383562852489",
+        "1791272383562852489"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/TIMING-RESOURCE.json",
+      "bytes": 1212,
+      "sha256": "32c043403860089ffbc95cad803cea9cd33a27df75055c6728007c637d59be29",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559145",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1212",
+        "1791272693363627074",
+        "1791272693363627074"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/host_build.py",
+      "bytes": 11671,
+      "sha256": "f0b1ef37376042e2491ec7e025300e0e9cccf201ab79c0188d5e9441f409eb54",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558917",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11671",
+        "1791272478620306341",
+        "1791272693338625640"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/host_prepare.py",
+      "bytes": 4293,
+      "sha256": "f0f7ecd8f6382f465a1b3cbbf202ad36cd1ea817dd978bacda4f2ee3e5fed6a3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558915",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4293",
+        "1791272285461223974",
+        "1791272285481225122"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/host_relations.py",
+      "bytes": 11588,
+      "sha256": "faf70cef5cef51f6dcdf15a864b3f0e44123de69c7ba744da49e70b0a6a4cef8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559136",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11588",
+        "1791272478621306398",
+        "1791272693338625640"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/host_seal.py",
+      "bytes": 7957,
+      "sha256": "6ca6d73a31d0bbb3c221229108ff649eae89255a55b7c8b9f4a46d37ce87d7fd",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559143",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7957",
+        "1791272693175616287",
+        "1791272693338625640"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/received.json",
+      "bytes": 1566,
+      "sha256": "56417453c3132317481ea61db99fe826bc81a703a1596c5ac5b6da451afeefa1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558573",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1566",
+        "1791272209021838298",
+        "1791272285481225122"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A025-G1-R4.py",
+      "bytes": 57456,
+      "sha256": "3d9b65557f37657ec1f620e9faf03bd12adc9a1208a425edadf0751a0363d10a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559124",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57456",
+        "1791272383474847441",
+        "1791272383475847498"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A025-G1.py",
+      "bytes": 104446,
+      "sha256": "8c8382979b1047777f0141d21e6d76c22032aef7d59d83739e7bebc0d69ec40a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559125",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "104446",
+        "1791272383480847785",
+        "1791272383480847785"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A069-DATA-CODEC.py",
+      "bytes": 32698,
+      "sha256": "2ba463599fed44a675c411cd78bfe6220165cd4289ddc815c9bd6885dbe09874",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559126",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32698",
+        "1791272383485848071",
+        "1791272383486848129"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-ABI-MAPPING.json",
+      "bytes": 162659,
+      "sha256": "b55a05e3d963980f6ace57bfaeabc6f742f0b6ed439a0266880e1756f394434a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559127",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "162659",
+        "1791272383493848530",
+        "1791272383493848530"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BILL.json",
+      "bytes": 149014,
+      "sha256": "eb9cc38144f33e25a6a5dc5630fd8b38565d0c75a87a31d69a0a44d1587157cc",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558919",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "149014",
+        "1791272382497791383",
+        "1791272382498791441"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c",
+      "bytes": 78617,
+      "sha256": "af41fbbee1c04c93ac01f8f7157b10004784eac88d1df131e82a8259efd351e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558920",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78617",
+        "1791272382503791727",
+        "1791272382504791785"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BUILD-RECIPE.json",
+      "bytes": 186757,
+      "sha256": "795617c10b3f664e07bcc72f6f78a928a363c368f3ea3a14f0a2cdef83909a7d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559128",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "186757",
+        "1791272383501848989",
+        "1791272383502849047"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c",
+      "bytes": 23536,
+      "sha256": "a05d5ff816a0a905e57f03a86b39a60814158b278f3eef17ab9efefe841fe222",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558921",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23536",
+        "1791272382509792071",
+        "1791272382509792071"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTRACT.py",
+      "bytes": 30209,
+      "sha256": "6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558922",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30209",
+        "1791272382514792359",
+        "1791272382514792359"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTROL-COVERAGE.json",
+      "bytes": 331035,
+      "sha256": "615c6db31e76e053bbb91972b29051595f997bfc4d653f44850b89a073418d4c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558923",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "331035",
+        "1791272382522792818",
+        "1791272382523792875"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTROLS.py",
+      "bytes": 276107,
+      "sha256": "315c95540e0472c0c07240a16718d3f6dd991ef500a7096b6c9223afdc1acb5b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558924",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "276107",
+        "1791272382529793219",
+        "1791272382530793277"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-EXECUTOR.py",
+      "bytes": 75365,
+      "sha256": "528eae1f6cdec9819eb901584d882dda012f17702411c4a5b4db223f7055d768",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558925",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75365",
+        "1791272382535793563",
+        "1791272382536793621"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-FULL-CONTROLS.py",
+      "bytes": 65233,
+      "sha256": "6efe9b3bb6a14678b2d82d1952a5fd42e80b23b2544abf396e5704cb4482a3cb",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558926",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "65233",
+        "1791272382541793907",
+        "1791272382541793907"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h",
+      "bytes": 13204,
+      "sha256": "ec1efbf610c4b015df6e59e0275c8a2b9115b293814631b5387c93f13e10347b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558927",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13204",
+        "1791272382545794137",
+        "1791272382546794195"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c",
+      "bytes": 43977,
+      "sha256": "e27bd01f01c2cdf6dd881e07c3c3e90148ab1b1e62e0c007903a651d68f5aa54",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558928",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "43977",
+        "1791272382550794424",
+        "1791272382550794424"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNER.py",
+      "bytes": 9774,
+      "sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558929",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9774",
+        "1791272382555794711",
+        "1791272382556934114"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py",
+      "bytes": 21229,
+      "sha256": "34715072ba19c02d40aa9571051ba41eea99f0fc68ca0a24759c5cbcd2d6b743",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558930",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21229",
+        "1791272382559794940",
+        "1791272382560794998"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-RUNTIME.c",
+      "bytes": 7458,
+      "sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558931",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7458",
+        "1791272382564795228",
+        "1791272382564795228"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SCHEMA.json",
+      "bytes": 18931,
+      "sha256": "a1ace93c26eca44eaf2f6b623d010bb2da70fc3a74fb086f746721840a636639",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558932",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18931",
+        "1791272382569795514",
+        "1791272382569795514"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SUPERVISOR.py",
+      "bytes": 142333,
+      "sha256": "d01b1e4e106dc9d3e21ebef69317b8826551d999afd2389a072aee6af45cf5ba",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558933",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "142333",
+        "1791272382574795801",
+        "1791272382575795858"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-WORKER.py",
+      "bytes": 9557,
+      "sha256": "5131a4191ca4c02a7d2c8705270d04040a89b048a793fb310678d507f20ccdac",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558934",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9557",
+        "1791272382580796146",
+        "1791272382580796146"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-CALLER-STATUS-DATA.json",
+      "bytes": 280,
+      "sha256": "f24801464aea2fae3a81ea77d25627986f5a717c639631c348a9ea441720cde7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558935",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "280",
+        "1791272382586801062",
+        "1791272382586801062"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-ORACLES.json",
+      "bytes": 80533,
+      "sha256": "501c18d2d60c9d6886ea2a8adbb8ba5f923a45226280e416fe268fa367c00ac6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559129",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "80533",
+        "1791272383508849392",
+        "1791272383508849392"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py",
+      "bytes": 80552,
+      "sha256": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558936",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "80552",
+        "1791272382592035308",
+        "1791272382592035308"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-ORDINARY-POSITIVE-DATA.json",
+      "bytes": 270,
+      "sha256": "4536ca15335392725103545e1ef1027745dfbc6fb2834d0eeab0406cbe0ed2aa",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558937",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "270",
+        "1791272382598016112",
+        "1791272382598016112"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-REGISTRY-COVERAGE.json",
+      "bytes": 4539,
+      "sha256": "450e69a264549ac5d3badbe23ad1ee8623bca103cf29a382ba0e4bd9f846be20",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558938",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4539",
+        "1791272382602675622",
+        "1791272382602675622"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-WAIT-FLAGS-DATA.json",
+      "bytes": 277,
+      "sha256": "1f94b36280021e99031901576157ab889cf471af6ba32082b394261e85eb5691",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558939",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "277",
+        "1791272382607222690",
+        "1791272382607222690"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-ABI-CONTRACT.json",
+      "bytes": 80238,
+      "sha256": "d48c792c1130966f130e61e1eeffbd1810899af5c8987a962cad68f3c531f093",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559130",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "80238",
+        "1791272383514849735",
+        "1791272383516757463"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-CALLER-MAP.json",
+      "bytes": 2715,
+      "sha256": "a922823c93577a6433d7abd8a9d7ae78fae42920ccd0fcc79765da37b7a483e9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558940",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2715",
+        "1791272382610797866",
+        "1791272382611797924"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-EXPECTED-CONTROLS.json",
+      "bytes": 35381,
+      "sha256": "0032135e44769f0993f0c4d2389db41485c9dec0de2cc4645fbb207804daebb4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558941",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "35381",
+        "1791272382616798211",
+        "1791272382616798211"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-abort_invalid_ACK.json",
+      "bytes": 231,
+      "sha256": "dfcd096fde7e4fc61c78d7d2cb6d39a6c2806a6ce02079678234e75f06946396",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558942",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "231",
+        "1791272382620798440",
+        "1791272382621798498"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-abort_lost_ACK.json",
+      "bytes": 228,
+      "sha256": "903d0052b3179951bc2a4e0501949e9ce590bde62751ba0ebc6d560b349646ea",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558943",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1791272382624798670",
+        "1791272382625798728"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-abort_positive.json",
+      "bytes": 228,
+      "sha256": "0ebc7de92dd8bd3c18cc27cd0b01d0f9ac5cf7284f4165f23fbf6cbf7ea3a1d4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558944",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1791272382629798957",
+        "1791272382629798957"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_deadline.json",
+      "bytes": 226,
+      "sha256": "26fe311dd2ebca5780d63223d87b85ab1a8aac95a1208ddf8771979ff2ff2636",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558945",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1791272382633799187",
+        "1791272382633799187"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_many_rights.json",
+      "bytes": 229,
+      "sha256": "dd657a4efd8ccb582c7d29355550bb34eda53fca206b8e4b58e5d088bf61f597",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558946",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1791272382637799416",
+        "1791272382637799416"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_origin_gid.json",
+      "bytes": 228,
+      "sha256": "cedca23fe4811e4af9366ac16846fd477a49529f84053dabf1e7e4f6a62c3765",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558947",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1791272382641799646",
+        "1791272382642799702"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_origin_pid.json",
+      "bytes": 228,
+      "sha256": "824d291985107233048dfd7e08204d067af0c40989714bfca0d0ab994e7e22d9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558948",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1791272382646799932",
+        "1791272382646799932"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_origin_uid.json",
+      "bytes": 228,
+      "sha256": "404bd558726cbb599186d1874f3c0aa48cb5ab68d8a398c9830d49152496ad69",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558949",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1791272382651318460",
+        "1791272382651318460"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_owner.json",
+      "bytes": 223,
+      "sha256": "28f84252bdb72a392d887e56203a70d91ba3e2623f252f60278665166e33ad8c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558950",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "223",
+        "1791272382654800391",
+        "1791272382655800449"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_owner_birth.json",
+      "bytes": 229,
+      "sha256": "3da975b7fedadf79efb783b5169928301efede0b91395426abf287bfecf4d113",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558951",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1791272382659800678",
+        "1791272382659800678"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_rights.json",
+      "bytes": 224,
+      "sha256": "163ccdc3fe5fc0ec32eb572d496af8be068fbcd2236f2946d6a483c0220a7acd",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558952",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "224",
+        "1791272382663800908",
+        "1791272382663800908"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_role.json",
+      "bytes": 222,
+      "sha256": "7e05656c8c895dcd1172864cf1f99c87ad546246a0bcd5be07e447f6312ab609",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558953",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "222",
+        "1791272382667801137",
+        "1791272382668801194"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_sequence_future.json",
+      "bytes": 233,
+      "sha256": "d937b0eaf77132da0b9cb6c9855ac91b657fac3eaa07143e08dccf6529212dbc",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558954",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "233",
+        "1791272382671801367",
+        "1791272382672801424"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_sequence_replay.json",
+      "bytes": 233,
+      "sha256": "70d2b79e35288d6a3da72405333408dbc8f757028e6f9a90ec88198bd28dfd2e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558955",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "233",
+        "1791272382675801596",
+        "1791272382676801653"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-ack_session.json",
+      "bytes": 225,
+      "sha256": "051478a6a02c830c65875f29f5449ce52503cff3028f4d41645c9eac867e4cd2",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558956",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "225",
+        "1791272382680801883",
+        "1791272382680801883"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-caller_status_DATA.json",
+      "bytes": 232,
+      "sha256": "20d1b08485c83a15653bff99ccc3b734d4afb46b69380dd9778d8f6556e2c51e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558957",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "232",
+        "1791272382685802170",
+        "1791272382685802170"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-close_denied.json",
+      "bytes": 226,
+      "sha256": "81ebcb569e376fe3eb1f03eb9ff1c757968f5c5d20cd71e26974bd31c63cbf8e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558958",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1791272382692802571",
+        "1791272382692802571"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-copy_birth.json",
+      "bytes": 224,
+      "sha256": "f73abe4c9c6a7f16b41853eab8b8e0ce5fce6447844c823a5482c3ca2019b4d1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558959",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "224",
+        "1791272382696802801",
+        "1791272382697802859"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-copy_pid.json",
+      "bytes": 222,
+      "sha256": "2c586b0f0d3861697d257eee77a9c69c2fae99fec6aea0b5c9f9d16dff0ac02e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558960",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "222",
+        "1791272382701803088",
+        "1791272382702803145"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-copy_pidfd.json",
+      "bytes": 224,
+      "sha256": "cc5ad8e47bc9ee5440a141b14cb6cb4938e001c0a266a9d0891f5872e944530b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558961",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "224",
+        "1791272382706803374",
+        "1791272382706803374"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-copy_role.json",
+      "bytes": 223,
+      "sha256": "242f13c7f4cf666b31b01aa42bd921ee8852f81250bae9ec9a3a6fb43161e9fa",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558962",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "223",
+        "1791272382710803605",
+        "1791272382711803662"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-deadline_expired.json",
+      "bytes": 230,
+      "sha256": "8ac5e45dcb39712a6b1de9823444a452f1f03a07958ad5acb05807c295b36c8f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558963",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1791272382723804350",
+        "1791272382724804408"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-pidfd_closed.json",
+      "bytes": 226,
+      "sha256": "bdd0b4d4b5ab3a6585458214c2c4bb5e89e1a9dc56900ed5b0a41eef7c92d144",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558964",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1791272382728804638",
+        "1791272382728804638"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-pidfd_plaintext.json",
+      "bytes": 229,
+      "sha256": "1ba7ce5e0fbf2e1b5832eef398cbfd379c40606775f5a2b50b308b9b439e3472",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558965",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1791272382732804867",
+        "1791272382733804924"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-positive.json",
+      "bytes": 222,
+      "sha256": "8fe48f7495a8f8f77d65efe3e0781fc32c7e8befe65cc72b825b7390fe02d4e0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558966",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "222",
+        "1791272382737805153",
+        "1791272382737805153"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-reap_invalid_ACK.json",
+      "bytes": 230,
+      "sha256": "d636e8cbc6a4235dc606802952627654c0a8ccdf4f325a7ade028d9820bc47b5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558967",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1791272382741805383",
+        "1791272382741805383"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-reap_lost_ACK.json",
+      "bytes": 227,
+      "sha256": "913914051ced6f9a7ccea1681402823a910e516823976ce867fd38a37db8558d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558968",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "227",
+        "1791272382745805612",
+        "1791272382745805612"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-register_delayed_ACK.json",
+      "bytes": 234,
+      "sha256": "511c2f01a0cd4505517326cde1b909632cb42e0c5d2fefb6c43d1311230e9a32",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558969",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "234",
+        "1791272382749805842",
+        "1791272382749805842"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-register_invalid_ACK.json",
+      "bytes": 234,
+      "sha256": "da4ed7f2cd9a8e3a7d20660c04f4269a78b13c37d64b1a2caad187fefdbb4c3e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558970",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "234",
+        "1791272382754806129",
+        "1791272382755771067"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-register_lost_ACK.json",
+      "bytes": 231,
+      "sha256": "ce96cd82aca5e97852f42fbfe39e4f95df368057f939b6175030484cbe7fb499",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558971",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "231",
+        "1791272382758806359",
+        "1791272382758806359"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-role_invalid.json",
+      "bytes": 226,
+      "sha256": "327f57d3e63fc9758ae36e13917de110aac3803d23c09c3fd9685e4a19847cbe",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558972",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1791272382763806645",
+        "1791272382763806645"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-session_restart.json",
+      "bytes": 229,
+      "sha256": "e3f58ff31e2fcf10c1fccdbe7a8b8c7caab857cdb1b7dcb2a37a9667a81050fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558973",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1791272382767806875",
+        "1791272382768806933"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-signal_denied.json",
+      "bytes": 227,
+      "sha256": "2842e698b1ea34438a87aa298c18168650242dfb62dc63206db33650281e0312",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558974",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "227",
+        "1791272382772807162",
+        "1791272382772807162"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-start_deadline.json",
+      "bytes": 228,
+      "sha256": "8d2a1aca159d3cea98d0ac1614e1b17847c55ff40d45accda805ad3b75da12ed",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558975",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1791272382776807392",
+        "1791272382777807448"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-start_origin_gid.json",
+      "bytes": 230,
+      "sha256": "4228475b0b06646a394f849e0222e6c630ddd4db1e14f8e093d1cc2ab2019468",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558976",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1791272382781807678",
+        "1791272382781807678"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-start_origin_pid.json",
+      "bytes": 230,
+      "sha256": "10f1ab3af95cddf5f59c5d5923148f1305c7b04b0c4e21622bb023c350c4b5f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558977",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1791272382786807965",
+        "1791272382786807965"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-start_origin_uid.json",
+      "bytes": 230,
+      "sha256": "8b3495afb5547e66ec2c855d716d356b496ff39a00bd6cc20bac0e982d9f658f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558978",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1791272382790808195",
+        "1791272382790808195"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-start_owner.json",
+      "bytes": 225,
+      "sha256": "6d0be6d6e71b3db57b7323d125e57b26e2ae2eeef45fcb4135b45a1d4e160d6e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558979",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "225",
+        "1791272382795808481",
+        "1791272382795808481"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-start_owner_birth.json",
+      "bytes": 231,
+      "sha256": "967dace9bc566855b5a77b3635ee2565d0bef4d736dc46bf3e41e5b327014343",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558980",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "231",
+        "1791272382799808711",
+        "1791272382800808769"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-start_rights.json",
+      "bytes": 226,
+      "sha256": "72fba0e277218d8f13d585d3abbae20a4fa3b4927db6437e17a15aa0de392f9a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558981",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1791272382804808998",
+        "1791272382804808998"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-start_role.json",
+      "bytes": 224,
+      "sha256": "c49e92cae56c27e0f4f73c7f691f80f5c44e45a1f957877e4ed3aba388949d7a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558982",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "224",
+        "1791272382808809228",
+        "1791272382808809228"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-start_sequence.json",
+      "bytes": 228,
+      "sha256": "6b351c03e24613e2be3ca79ee45fe0489ec4f44720828c5c81b638ee618d7aac",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558983",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1791272382812809457",
+        "1791272382812809457"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-transport_closed.json",
+      "bytes": 230,
+      "sha256": "c360df2ef38d395e1c7d2630748bbdc6a154011b9760a8e408922c06c5fd3fb6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558984",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1791272382816809687",
+        "1791272382817809743"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-INPUT-wait_flags_DATA.json",
+      "bytes": 229,
+      "sha256": "a7d4932df9035a838d5278e1a68af07f91d556cd8602a28a3f397e78165b840e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558985",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1791272382820809916",
+        "1791272382821809973"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 222319,
+      "sha256": "2938eb4812404bc16af83579da954043f0d96d08bcae42f1559b08e5e6e1d242",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558986",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "222319",
+        "1791272382827810318",
+        "1791272382828810375"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-RESOURCES.json",
+      "bytes": 1820,
+      "sha256": "d8a74df0ede67c2ff1edc8a56cd5ce13dd7f0e3e8695e848e955d37a7581e425",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558987",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1820",
+        "1791272382832810604",
+        "1791272382833810662"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-SCOPE-PRESERVATION.json",
+      "bytes": 2065,
+      "sha256": "21a7540ec4afef2c5ba15bfd4fe6e945d1fecd45c21a243043b91dc0a387ef16",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558988",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2065",
+        "1791272382836810834",
+        "1791272382837810892"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-ABI-MAPPING.json",
+      "bytes": 9853,
+      "sha256": "a647b86779ad7dc84fa1ff50a5b0d8b9e831f77b2974e8668b1e0bf6c8e812de",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558989",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9853",
+        "1791272382841811121",
+        "1791272382841811121"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-EXPECTED-CONTROLS.json",
+      "bytes": 9798,
+      "sha256": "6565cda0ff2a58ada0d543520c58da77aa569b7566baae5ff76236c4c8a6402c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558990",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9798",
+        "1791272382845811351",
+        "1791272382845811351"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-STOCK-CALLER.h",
+      "bytes": 33691,
+      "sha256": "9e2b4631b6c6346f29b2a8d5bb810063ef236f012fa077a06806747e533df5f3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558991",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "33691",
+        "1791272382850811637",
+        "1791272382850811637"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-Root_signal_denied.json",
+      "bytes": 134,
+      "sha256": "af7fe96ffa798b9f08dfb9443d856e69a61b2b96c307375c6fd29f1f2ee9499d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558992",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "134",
+        "1791272382854811867",
+        "1791272382854811867"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-Root_signal_positive.json",
+      "bytes": 136,
+      "sha256": "bf988b578eea566c544a41dbe92f31dbf11edf12fb93dac7ffc365404211bb6b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558993",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1791272382858812096",
+        "1791272382859812154"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-Root_transport_close_denied.json",
+      "bytes": 143,
+      "sha256": "0493732e850c41b12a2391720a409b3cd8d26c5a609e2e89ab25bcfa0022c753",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558994",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "143",
+        "1791272382863812384",
+        "1791272382863812384"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-abort_detail.json",
+      "bytes": 128,
+      "sha256": "14fc6e9448b4eb02463e55d4d6528fb8ecc2bab9774d69ea7bd4f5df7f7dce02",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558995",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "128",
+        "1791272382867812613",
+        "1791272382868812670"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-abort_positive.json",
+      "bytes": 130,
+      "sha256": "cdc6ebc45c8cb64b4ae3b92b7d394f288e61d0e455c097e797576be87d52aad6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558996",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "130",
+        "1791272382871812843",
+        "1791272382872812899"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-abort_right.json",
+      "bytes": 127,
+      "sha256": "dee8fc515eff42f7bb851c83441c4185bf586f826c31bdb7ad221fa5876e1819",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558997",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "127",
+        "1791272382876813129",
+        "1791272382876813129"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-abort_without_intent.json",
+      "bytes": 136,
+      "sha256": "569f8d984b54c3ce93bbb207396f27d422ac13b04f7f39feaef05344c656f654",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558998",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1791272382881813416",
+        "1791272382881813416"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-deadline.json",
+      "bytes": 124,
+      "sha256": "19419be7a70c8e164d58664e90a9a498bfdad6d170d07cfa1b7fc988f38044ff",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558999",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1791272382885813646",
+        "1791272382885813646"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-drain_live.json",
+      "bytes": 126,
+      "sha256": "7b06c9a725ff65948286bf40d72a1ccc19853bc7653ee25cacff12f34dc203a1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559000",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "126",
+        "1791272382889813875",
+        "1791272382890813932"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-drain_pending.json",
+      "bytes": 129,
+      "sha256": "1763e6c261af84f38f6461830ef0d3ea03c434a4ad252a6a5c8106795e884595",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559001",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129",
+        "1791272382894814162",
+        "1791272382894814162"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-finish_without_drain.json",
+      "bytes": 136,
+      "sha256": "646292cba47784a5e65178ae68e84da4dd58ea9810fa8e4be286ab262e57a329",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559002",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1791272382899814449",
+        "1791272382899814449"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-frame_session.json",
+      "bytes": 129,
+      "sha256": "79d97be72a875011e83edd29c07d5e12aed82cf180e26594a5ae016dfa09d1fc",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559003",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129",
+        "1791272382903814679",
+        "1791272382904814735"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-inherited_start_owner.json",
+      "bytes": 137,
+      "sha256": "e7fbe90bcce384a1e84711f35d5d6d2910a7b466fd097be70842ee9c0ddd07a0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559004",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "137",
+        "1791272382908814965",
+        "1791272382908814965"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-intent_right.json",
+      "bytes": 128,
+      "sha256": "9ac8f47bcab9ab6ba112f5fc23f6996e8c7553f5faebe7b947c302ad374af5af",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559005",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "128",
+        "1791272382912815194",
+        "1791272382913815252"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-origin_birth_argument.json",
+      "bytes": 137,
+      "sha256": "ef9145c2b4c0f17aef38631a78e4619db29808f9efa05c2a6ecb4a4c1a2104cc",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559006",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "137",
+        "1791272382917815482",
+        "1791272382917815482"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-origin_parent_argument.json",
+      "bytes": 138,
+      "sha256": "4eb341c563f704e82af4d5c6ba3247120c32e229e55043cbfc740f7023eafa7d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559007",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "138",
+        "1791272382921815711",
+        "1791272382921815711"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-owner.json",
+      "bytes": 121,
+      "sha256": "f7e0f339f399bf2410cc4f6646e139c4acf798ce2b0ad4bf1894f30ca2a3a1c0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559008",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "121",
+        "1791272382925815941",
+        "1791272382926815998"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-owner_birth.json",
+      "bytes": 127,
+      "sha256": "f07b3743b2e814f7dcfcbfafcf87711dadef50137320a269e7d3995a44171c8c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559009",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "127",
+        "1791272382930816227",
+        "1791272382930816227"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-peer_gid.json",
+      "bytes": 124,
+      "sha256": "08f33b1d91414cb83b7d65386504de83e46240483555cca4bc4d7d5861fae5fc",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559010",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1791272382934816457",
+        "1791272382934816457"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-peer_pid.json",
+      "bytes": 124,
+      "sha256": "b6b4011c5008536b886cf2fd7679ab9ed5793137ffb96748bb51d8d7855da1bf",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559011",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1791272382938816686",
+        "1791272382938816686"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-peer_uid.json",
+      "bytes": 124,
+      "sha256": "bd848e5c3088a64b17c2db1d24cd2fd774f0565a20bb91262e657269d2a47160",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559012",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1791272382942816916",
+        "1791272382943816973"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-pending_timeout.json",
+      "bytes": 131,
+      "sha256": "51be837cf55a8ccbcf1ca56f9f47f649d493bcf918215c834baa6aa6783107ac",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559013",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "131",
+        "1791272382946817146",
+        "1791272382947817203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-positive.json",
+      "bytes": 124,
+      "sha256": "b8a4cfeacd76d23aa6af44722bd5f10bb5a5826afd3076997786c0598c2d5710",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559014",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1791272382951817432",
+        "1791272382951817432"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-reap_birth.json",
+      "bytes": 126,
+      "sha256": "3caf6b00dc8f4d21135773cf8fe227a814fe5f3169d6750689ea5e10dcb80cda",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559015",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "126",
+        "1791272382955817662",
+        "1791272382956817720"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-reap_invalid_ACK.json",
+      "bytes": 132,
+      "sha256": "4a9592c190fb7fa4ef8ec8fa2050bf37812dba1e17f465b49ce7cc44aa64e2dd",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559016",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "132",
+        "1791272382960817949",
+        "1791272382960817949"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-reap_live.json",
+      "bytes": 125,
+      "sha256": "8a9c273430a3520e9597599763c82adbcf9da90d2f204487635dcca63b5affb9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559017",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "125",
+        "1791272382964818179",
+        "1791272382965818235"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-reap_lost_ACK.json",
+      "bytes": 129,
+      "sha256": "e0d40b4ea72f94b4c7cf14787fad1e0cd0174af96272f11acdc8771a43d8aff5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559018",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129",
+        "1791272382969818465",
+        "1791272382970818523"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-reap_pid.json",
+      "bytes": 124,
+      "sha256": "106e59eae19c4a90463cb236eedb3046d5f8269b367e4174d4f228118d233064",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559019",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1791272382974818752",
+        "1791272382974818752"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-reap_right.json",
+      "bytes": 126,
+      "sha256": "20268d57bf7d04120b00f06856f8fb0bf7f47b84ef328575e3f9b66fa136d73a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559020",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "126",
+        "1791272382979819039",
+        "1791272382979819039"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-reap_status.json",
+      "bytes": 127,
+      "sha256": "474cdca6dd64fe5a1240d5164c99df62787676f53556d18fe2ebddf5f6d001f6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559021",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "127",
+        "1791272382983819268",
+        "1791272382984819326"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-register_birth.json",
+      "bytes": 130,
+      "sha256": "e72f50ec21f41d3623add628094f5323f962014a6d23d8a1b01d384effe6e071",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559022",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "130",
+        "1791272382988819556",
+        "1791272382989819612"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-register_late.json",
+      "bytes": 129,
+      "sha256": "864a0ba20038195e9af2c1be301fde73a9ff1b3ee18338f858a0b733eca924e9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559023",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129",
+        "1791272382993819842",
+        "1791272382993819842"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-register_many_rights.json",
+      "bytes": 136,
+      "sha256": "5834c0387334126bcfe1f37c91f011a2c50c371ec2a0c4aaf026403f62f574e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559024",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1791272382997820071",
+        "1791272382997820071"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-register_other_owned_pidfd.json",
+      "bytes": 142,
+      "sha256": "90b440ec5019724caeecde8702d6621b66e7c7469b7a63d6c7dc8be53668af05",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559025",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "142",
+        "1791272383002820359",
+        "1791272383002820359"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-register_parent.json",
+      "bytes": 131,
+      "sha256": "cb12a184b81037209857a5a4e787140cb9f7f70bac024931b5177184acb4ca9f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559026",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "131",
+        "1791272383006820588",
+        "1791272383007820645"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-register_plaintext.json",
+      "bytes": 134,
+      "sha256": "1dfbe162c47a13184508643dd08de4cab99cc17bdf157c8f8f3d05201c525be7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559027",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "134",
+        "1791272383011820875",
+        "1791272383011820875"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-register_stale_pidfd.json",
+      "bytes": 136,
+      "sha256": "59f48c56b214f9f88050a95265ab15cf8fc08a84953343a192593d0d8f9d27b8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559028",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1791272383016821162",
+        "1791272383016821162"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-register_without_intent.json",
+      "bytes": 139,
+      "sha256": "7565e5d9a3030e826c7fef0db6dd8ead55f4f071743015d65ea67c466549082c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559029",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "139",
+        "1791272383020821392",
+        "1791272383021821448"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-register_zero_rights.json",
+      "bytes": 136,
+      "sha256": "a3e8d5db7efbc376469f1c527d7744b75a463a27e15ed136816acd8f6de25a2a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559030",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1791272383024821621",
+        "1791272383025821678"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-role.json",
+      "bytes": 120,
+      "sha256": "0f6d050155414bc9f74299a73122f075f6cbef979d11838b335584755291a9a2",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559031",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "120",
+        "1791272383029821907",
+        "1791272383029821907"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-sequence_future.json",
+      "bytes": 131,
+      "sha256": "6ed7900bc1de9d458ab9f9b3932e6bdf04f0c809b87cd2d2795c72e3a48c7adc",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559032",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "131",
+        "1791272383033822137",
+        "1791272383033822137"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-sequence_replay.json",
+      "bytes": 131,
+      "sha256": "21e909505d1620a3ef4f5612ba74a390063eb1021b94a56ef1fe6507146d6464",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559033",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "131",
+        "1791272383037822366",
+        "1791272383038822424"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-transport_closed.json",
+      "bytes": 132,
+      "sha256": "294b6bbddffe562b9bd20d970c513e99f9073bc575c715c45980bbf8f8032b37",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559034",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "132",
+        "1791272383042822654",
+        "1791272383042822654"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-type.json",
+      "bytes": 120,
+      "sha256": "1aadc7bfd68b2ec33e87da575a8dde674fae9595eccaaad72c840ba95d010176",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559035",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "120",
+        "1791272383046822883",
+        "1791272383046822883"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-INPUT-version.json",
+      "bytes": 123,
+      "sha256": "313e742e16bd6c0260d78399de085621ff5c7d66dab2a096e301009cd8bc60e1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559036",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "123",
+        "1791272383050823113",
+        "1791272383051823170"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-NESTED216-RESIDUALS.json",
+      "bytes": 280122,
+      "sha256": "39a5a7145a14602f258c119fc937f9fb0d35585ae83c8665c0f18d2d704168c8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559037",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "280122",
+        "1791272383058823572",
+        "1791272383059823630"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-ORDINARY-CONTRACTS.json",
+      "bytes": 169446,
+      "sha256": "1cae058d58aa9e9ffa10dd2f2423c962139c43abb0d154191faf2c21559d83ca",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559131",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "169446",
+        "1791272383522850194",
+        "1791272383523850252"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A118-CONNECTED-CONTRACT.json",
+      "bytes": 172553,
+      "sha256": "d0ff1c4b9b53886ed4f32f54d3a8b6d2a2bad71d65f2cdbd33578572ae5d6ee1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559132",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "172553",
+        "1791272383531850711",
+        "1791272383532850768"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/CONTRACT-A071.md",
+      "bytes": 3929,
+      "sha256": "eb46835cea1d30a2f8465b67bf0629529456054b36b80712e8dc255f42356b76",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559038",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3929",
+        "1791272383063823859",
+        "1791272383064823916"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/CONTRACT-A079.md",
+      "bytes": 3798,
+      "sha256": "ac98979759c33f8ddd5207627ff829138e2681efd5be0f1c4ea846420aea3bbb",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559039",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3798",
+        "1791272383068824145",
+        "1791272383069824203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/CONTRACT-A087.md",
+      "bytes": 4685,
+      "sha256": "70575fdf6233697215e5add3e673cd0d6e08a759f44cbbc912a8550899c0c955",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559040",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4685",
+        "1791272383073824433",
+        "1791272383073824433"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/DELTA-COMPLEMENT.json",
+      "bytes": 41604,
+      "sha256": "f7cbe7844d92faeb5a90a168560a837009c1543757b23df42ca7e64f63a981d9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559041",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "41604",
+        "1791272383078824719",
+        "1791272383078824719"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INDEX.md",
+      "bytes": 2151,
+      "sha256": "fd6529b551b069d7678717fc1760586fa8715f1147cc7fa01a760e252216b7d5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559042",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2151",
+        "1791272383083825007",
+        "1791272383083825007"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A071-MANIFEST.json",
+      "bytes": 19586,
+      "sha256": "5e4e8f95c1b6ccd4b13ca8fc1dd1e12dbb807caa5da682b26dfd42098e9c6aaa",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559043",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19586",
+        "1791272383087825236",
+        "1791272383088825293"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-ABI-MAPPING.json",
+      "bytes": 2173,
+      "sha256": "1cbd33a0f2999dde9886e7509d26fa2c056c92ce664925dd2fb59275599fc8e4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559044",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2173",
+        "1791272383092825522",
+        "1791272383093825580"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-BOOTSTRAP.c",
+      "bytes": 27697,
+      "sha256": "fb4dc6a35d460d5fa9c41b4d5083a2b7ad0a4a0f997c66ba789367065180a01a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559045",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27697",
+        "1791272383097825810",
+        "1791272383097825810"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-BUILD-RECIPE.json",
+      "bytes": 3340,
+      "sha256": "5c62653f9bb767067ca3bcba87d396fb0812b1d7f0fef030855b4e8d7723fee0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559046",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3340",
+        "1791272383102826096",
+        "1791272383102826096"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-COMMON.c",
+      "bytes": 13216,
+      "sha256": "932393df67e0b77bd1b615e1f044540de5620d9838010d98ca417d925573ed63",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559047",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13216",
+        "1791272383106826326",
+        "1791272383107826384"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+      "bytes": 21170,
+      "sha256": "8ecd1009c613b21b119f5b393256eb239b17ad8515b06b057552d566cab01aa2",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559048",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21170",
+        "1791272383112789634",
+        "1791272383112789634"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-CONTROLS.py",
+      "bytes": 8976,
+      "sha256": "69aab635f72a3bd8521f2812b034ca6fd4a4da09c0108cc1fbe4adc0fd28fc49",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559049",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8976",
+        "1791272383115826843",
+        "1791272383116826899"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+      "bytes": 46228,
+      "sha256": "a06660c9c8abbb3562083ab020e02c7097cdab52ee661f86dd018174508133f5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559050",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46228",
+        "1791272383120827129",
+        "1791272383121827187"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-NATIVE.h",
+      "bytes": 5310,
+      "sha256": "71ec4f8edf1d460f140c2da7737a9fac1e5c4fdce2b1347b62c2388793d53be0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559051",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5310",
+        "1791272383125827416",
+        "1791272383125827416"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-OWNED.c",
+      "bytes": 24872,
+      "sha256": "a508fdb07cd41fd4995aee597269838b5002acafb1986ecf54f1fcfcf7bb0ecc",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559052",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24872",
+        "1791272383129827646",
+        "1791272383130827703"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-OWNER.py",
+      "bytes": 7757,
+      "sha256": "5b7711388865e464f9b3f30a2c1d250fdc33645d742a7776d457805e4557a6cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559053",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7757",
+        "1791272383134827932",
+        "1791272383134827932"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-PRODUCER.py",
+      "bytes": 19436,
+      "sha256": "0d09bbe45fd6eb839672532412c7234eaa46ff2d84ea131efa006ef925cc4b3c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559054",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19436",
+        "1791272383139828220",
+        "1791272383141100953"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+      "bytes": 50384,
+      "sha256": "b13434128b413ebe730110d9cba0fb559a45c4cc5e9de0f38439b3681498cb53",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559055",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "50384",
+        "1791272383144606945",
+        "1791272383146136984"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-WORKER.py",
+      "bytes": 7966,
+      "sha256": "64fe2967b220aa5fe17872913fcf5d03c5f0818e7d2f81491cec607eaa7dc534",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559056",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7966",
+        "1791272383148958442",
+        "1791272383150325071"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-DELTA-COMPLEMENT.json",
+      "bytes": 31995,
+      "sha256": "23d573b421f88938a33682e35fef9ebf897fbd1fa589094f2b1222a3d2460d4d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559057",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31995",
+        "1791272383153829023",
+        "1791272383154941552"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-INDEX.md",
+      "bytes": 2674,
+      "sha256": "c27d60165426fc52ea9991a8842d1728c149a5fbd54404ec1697015e261f662d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559058",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2674",
+        "1791272383157836841",
+        "1791272383159422835"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-MANIFEST.json",
+      "bytes": 25268,
+      "sha256": "395c6e3e0ba12324e158730d5918a1bf77e61fea95a23ba3d2b62f6bdd1dd674",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559059",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25268",
+        "1791272383164071299",
+        "1791272383164071299"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-RAW-DELTA.patch",
+      "bytes": 98050,
+      "sha256": "ec50e5c5102bdc75acb92772da036ceb2f8a04b7693b9dae5b76745067d46e4c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559060",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "98050",
+        "1791272383168829883",
+        "1791272383168829883"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-READ-LEDGER.tsv",
+      "bytes": 1340,
+      "sha256": "8b0b7b06c551c958525ef2961f3c4f20223de9b029414dd789f32bc56c1d5aa0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559061",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1340",
+        "1791272383172830113",
+        "1791272383173830170"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-RESULT.json",
+      "bytes": 8429,
+      "sha256": "93d53a0ef85de6f095ab92b20cab01fe2a577f707c99e3b48a0c153772d2612f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559062",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8429",
+        "1791272383177830400",
+        "1791272383178830458"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-REVIEW-REQUEST.md",
+      "bytes": 2316,
+      "sha256": "1fd82a04c37061613fc39d3245584f3eb8d4567edcc9dc663cec9c7dae853f34",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559063",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2316",
+        "1791272383182830687",
+        "1791272383182830687"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/RAW-DELTA.patch",
+      "bytes": 171773,
+      "sha256": "2666aa7313acbe5f5a9dff0263796529afaaf1863d171b0cf5e496c4c8e81e06",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559064",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "171773",
+        "1791272383188831031",
+        "1791272383189831088"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/READ-LEDGER.tsv",
+      "bytes": 1871,
+      "sha256": "1b3c29b046d98169610b95ea0ff9e0978663f5678d5aa8f9ef4a1e69b1be3256",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559065",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1871",
+        "1791272383193831318",
+        "1791272383193831318"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/RESULT.json",
+      "bytes": 7212,
+      "sha256": "80cddfa04065d1a10dead34cd3911fa11b141d1d52a228b11232f87abef5d46b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559066",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7212",
+        "1791272383197831547",
+        "1791272383198831605"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/REVIEW-A087.md",
+      "bytes": 2809,
+      "sha256": "c84e9fbbba05c5462ed01d440e802207026f092087d3c7d3d70a51109d8aa90b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559067",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2809",
+        "1791272383202831835",
+        "1791272383203831891"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/REVIEW-REQUEST.md",
+      "bytes": 402,
+      "sha256": "fcec6bb7124c15c50235850ac60ca78bd2fd98073222a1cd044671036739ab88",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559068",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "402",
+        "1791272383207832121",
+        "1791272383207832121"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-ABI-MAPPING.json",
+      "bytes": 1222,
+      "sha256": "e395295b700f1b76d0f8555bafc2ce6fed78e0d5267c93a426e4a2b0c7af1a87",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559069",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1222",
+        "1791272383212832408",
+        "1791272383212832408"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-BILL.json",
+      "bytes": 105071,
+      "sha256": "a5ad77e70d1a2d540ce2bf18f75da0af760383900a716563ffe1232c5bf36fa1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559070",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "105071",
+        "1791272383216832638",
+        "1791272383217832695"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+      "bytes": 23716,
+      "sha256": "198c895663016ac2a1a6c7a5445c30e640167cd97b0595f474b5a7cd5b945bd9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559071",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23716",
+        "1791272383221832924",
+        "1791272383222832982"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-BUILD-RECIPE.json",
+      "bytes": 3285,
+      "sha256": "d4780f915524badaedcbb3d17a1b20820e7de80b1b660fd95e7ef0209b97cd9e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559072",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3285",
+        "1791272383226833212",
+        "1791272383226833212"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-COMMON.c",
+      "bytes": 13215,
+      "sha256": "31cda48199bee974c0204a4662fc9852ddf43f24c9629016fed369823d068fc2",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559073",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13215",
+        "1791272383230833441",
+        "1791272383230833441"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+      "bytes": 19885,
+      "sha256": "93bda86a667817e5cbc06a94c7e0c0b513bfafbb3f891a8696f6b4fbaa973cde",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559074",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19885",
+        "1791272383234833671",
+        "1791272383235833727"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROL-COVERAGE.json",
+      "bytes": 277271,
+      "sha256": "2f47b09ecd8af02f8e910b66b179bbda08412e6046dec72034f9c1c6dd9fe2ca",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559077",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "277271",
+        "1791272383242834130",
+        "1791272383243834186"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+      "bytes": 704,
+      "sha256": "4904b585110926cbb5971fff88e04421a366a1c3c856e907b2af9a4f87956460",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559078",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "704",
+        "1791272383247834416",
+        "1791272383247834416"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+      "bytes": 46216,
+      "sha256": "af177f3efaa6b46e2d8905486e9da6afdea32e18c4b3149f24aff4ae2121e733",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559079",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46216",
+        "1791272383251834645",
+        "1791272383252834703"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+      "bytes": 29558,
+      "sha256": "76c717e38b909d5b41e2ff48582dc27e3c4dc82fd0643ac8206748e97b8c70d1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559080",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "29558",
+        "1791272383256834933",
+        "1791272383257834990"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-NATIVE.h",
+      "bytes": 4317,
+      "sha256": "5fc40d1e1417a31bdb71b46f30196d267e64898660746dd1093481af7f800e20",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559081",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4317",
+        "1791272383261835219",
+        "1791272383261835219"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-OWNED.c",
+      "bytes": 11576,
+      "sha256": "2a0574d33c4372a3edb2b87b2594bc13f8146d61d62524aa50566230ac83894f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559082",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11576",
+        "1791272383265835449",
+        "1791272383266835507"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-OWNER.py",
+      "bytes": 7369,
+      "sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559083",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7369",
+        "1791272383271835793",
+        "1791272383272835851"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+      "bytes": 12180,
+      "sha256": "dd4249a75e6cfc5124513a91ce5da9506f82ceae61dd6a3011e91a41c859db97",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559084",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12180",
+        "1791272383276836080",
+        "1791272383277836137"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-RUNTIME.c",
+      "bytes": 7457,
+      "sha256": "48a581112f4b3ec16658c2415c9e667144ed7a21a9d839831bf6c8bb6d490e76",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559085",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7457",
+        "1791272383281836367",
+        "1791272383282836425"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-SCHEMA.json",
+      "bytes": 6504,
+      "sha256": "d44887d602d654b89c909a47bbbf5debd45e755793b1830e909757e70c3dfd5c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559086",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6504",
+        "1791272383286836654",
+        "1791272383287836712"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+      "bytes": 49327,
+      "sha256": "34f4b2585fdc1a721e5c31bd702c02e2e55ee5e4526621ef39f167418ab6552e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559087",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49327",
+        "1791272383291836941",
+        "1791272383292836998"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-WORKER.py",
+      "bytes": 7957,
+      "sha256": "95da47af5986cd1549edab0c9f3b2832d453ac06032b985e9425a04375457825",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559088",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7957",
+        "1791272383296837228",
+        "1791272383296837228"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A037.md",
+      "bytes": 4529,
+      "sha256": "69a322cf08b8038d9af867f919d8639df4a932fa593ffb3d155a35d325a7b8bc",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559089",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4529",
+        "1791272383301837515",
+        "1791272383301837515"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A039.md",
+      "bytes": 4566,
+      "sha256": "8e04c3d3516e7eb361fb31d7d33e3a45eaa0d523188aa0aba3c75eed3e314da5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559090",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4566",
+        "1791272383305837745",
+        "1791272383306837801"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A042.md",
+      "bytes": 4369,
+      "sha256": "3339163945188c482239c6c757293fdc02876452630a9739a5608f45bebca8ea",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559091",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4369",
+        "1791272383310838031",
+        "1791272383310838031"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A046.md",
+      "bytes": 5141,
+      "sha256": "7b25a398d47b6ae50eccd1888f841bee0d06c795c38f05c5d418f0d03dc3341c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559092",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5141",
+        "1791272383314838260",
+        "1791272383314838260"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A051.md",
+      "bytes": 6304,
+      "sha256": "f467bb553668e48132ca0b9bac98b791f97b48c34e1cd2e9595ee4dc08f3ce26",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559093",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6304",
+        "1791272383318838490",
+        "1791272383318838490"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A066.md",
+      "bytes": 2868,
+      "sha256": "b7909d2b2f5a3b924765b4a9f13112936389729fda88d990fc0a17559d0a2f5e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559094",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2868",
+        "1791272383322838719",
+        "1791272383323838777"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-INDEX.md",
+      "bytes": 1696,
+      "sha256": "1e91a4bbed4f32dfb625de12e199cc3562dd3d6d32d7f5c8a574250eae298fa1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559095",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1696",
+        "1791272383326838949",
+        "1791272383327839007"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-MANIFEST.json",
+      "bytes": 13182,
+      "sha256": "0a519f021c0430a4d8fb08b30fe6912ca8f4f73e0fdef8ef3fb94c06e99082c7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559096",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13182",
+        "1791272383331839236",
+        "1791272383332839293"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-READ-LEDGER.tsv",
+      "bytes": 1759,
+      "sha256": "f2de95cd4dcbaa478c218068c268a7c36a6460454d2a86b120e69a704cb5679e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559097",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1759",
+        "1791272383336839523",
+        "1791272383336839523"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-RESULT.json",
+      "bytes": 9836,
+      "sha256": "9d00af0bc3b1b4273c8f23cd55b0c40f4ef9a3e888fb0ef494e2c15a7d807227",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559098",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9836",
+        "1791272383341839810",
+        "1791272383341839810"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-REVIEW-REQUEST.md",
+      "bytes": 2366,
+      "sha256": "2c3bb531db846d328f7e963fd78fbf96623fa3d7f0df102a4573cec5e07d02f7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559099",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2366",
+        "1791272383346840096",
+        "1791272383347840154"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-ABI-MAPPING.json",
+      "bytes": 2238,
+      "sha256": "aec6724c05c20882450acf0c0e14592b0225a324a8d906fb6603c51053269ff3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559100",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2238",
+        "1791272383351840384",
+        "1791272383351840384"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BILL.json",
+      "bytes": 104731,
+      "sha256": "488e8dc7e16d6aded4d082301f4a7e8ebf8575452a584eb7a9f70d897f7ce650",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559101",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "104731",
+        "1791272383356840670",
+        "1791272383360840900"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+      "bytes": 23717,
+      "sha256": "7641f18ca0e9fbe67ed0bab6d70454aace4014c2b7ce6a63dcabf411767fd03e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559102",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23717",
+        "1791272383365841187",
+        "1791272383365841187"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BUILD-RECIPE.json",
+      "bytes": 3373,
+      "sha256": "2c8d0f32fc7eeefea73f5fce4d24d6b2c91b06ad53716b0439fcc8411395c19d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559103",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3373",
+        "1791272383370841473",
+        "1791272383370841473"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-COMMON.c",
+      "bytes": 13215,
+      "sha256": "9524b0ac2461b824b9c206501911fb0aec3fb55a572acfc5fbc4cf8b2012086f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559104",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13215",
+        "1791272383374841703",
+        "1791272383376841818"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+      "bytes": 19703,
+      "sha256": "09e0f328547a3bc937c297fa9bc0dfbf4871633fe7ecd6dd3b90fb8d4526fc88",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559105",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19703",
+        "1791272383380842047",
+        "1791272383380842047"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROL-MATRIX.json",
+      "bytes": 3052,
+      "sha256": "ac63be0ab49795fe9d0d20b3ab212c567ba34b7ef2cc7a3986673a1d46418805",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559106",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3052",
+        "1791272383385842334",
+        "1791272383385842334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "bytes": 78027,
+      "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559107",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78027",
+        "1791272383390842621",
+        "1791272383390842621"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+      "bytes": 46214,
+      "sha256": "92a641025cb078b01418f7ec9e1701181c0d6d680ef5dbf1089279df688753c3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559108",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46214",
+        "1791272383395842908",
+        "1791272383396842965"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+      "bytes": 23060,
+      "sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559109",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23060",
+        "1791272383400843195",
+        "1791272383401843252"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-NATIVE.h",
+      "bytes": 4278,
+      "sha256": "5f269a4494ef7e7c1c2377242b9c407068b6af29abca85c36ff199a3899def17",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559110",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4278",
+        "1791272383405843482",
+        "1791272383405843482"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c",
+      "bytes": 10649,
+      "sha256": "638d84391b4351f06499c1ad5aaa2966e9cc42cdfaf658a2148d25bf264d9290",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559111",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10649",
+        "1791272383410843769",
+        "1791272383410843769"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNER.py",
+      "bytes": 7369,
+      "sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559112",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7369",
+        "1791272383415844055",
+        "1791272383415844055"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+      "bytes": 12182,
+      "sha256": "2e7fd79e1754588364a76975ffbf9ff1ca7dacf38dbef30659151c241b8e364e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559113",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12182",
+        "1791272383420844343",
+        "1791272383420844343"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-RUNTIME.c",
+      "bytes": 7457,
+      "sha256": "50ad41fa45923515433ca153c33199e21c8e704db4163861dd35a0e065e1f26f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559114",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7457",
+        "1791272383424844572",
+        "1791272383424844572"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SCHEMA.json",
+      "bytes": 6074,
+      "sha256": "c8e2d4a30f559c58f121ae0928564809b52c33237924f7f0a834a605c137a96c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559115",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6074",
+        "1791272383429844859",
+        "1791272383429844859"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+      "bytes": 49225,
+      "sha256": "4b6ad763b0883310445d625414fc178e76b28e36c66ca617a8f92b4a71d3d85f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559116",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49225",
+        "1791272383433845088",
+        "1791272383434845146"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py",
+      "bytes": 7958,
+      "sha256": "2da91ef0254d5b92aa82e12f2c049ce1ad3940da1a2ae54f0750658cec1b6d66",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559117",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7958",
+        "1791272383438845376",
+        "1791272383439845432"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-BENIGN-FIXTURES.json",
+      "bytes": 1573,
+      "sha256": "64e93fb9fc3f93e3420ad1fb03007416aaffeaea0195532811c4ac380074da4c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559118",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1573",
+        "1791272383443845662",
+        "1791272383444845720"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-INDEX.md",
+      "bytes": 1647,
+      "sha256": "855d5daade942ae4b1cae99ddf1479fc8e47f7f3fa6f998fb0b7a9c8db8b4239",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559119",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1647",
+        "1791272383449846006",
+        "1791272383450846064"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-MANIFEST.json",
+      "bytes": 6074,
+      "sha256": "3a91f7d1e73f140a68805cf52a6159b29e74a186856289ee67b9d96ca5defcd2",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559120",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6074",
+        "1791272383454846294",
+        "1791272383455846350"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-READ-LEDGER.tsv",
+      "bytes": 2517,
+      "sha256": "41fee460f7d563c6d882040e716153ebc4443da6d8e6f6bb1e0ac9d68edc04eb",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559121",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2517",
+        "1791272383459846580",
+        "1791272383460846638"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-RESULT.json",
+      "bytes": 5703,
+      "sha256": "439f93fe5dbb590928acbc91794ba5a84101a849e01d6066d0382c8892ae0ea9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559122",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5703",
+        "1791272383464846867",
+        "1791272383464846867"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-REVIEW-REQUEST.md",
+      "bytes": 1856,
+      "sha256": "e3c87c5e4481dd543d111565998e140b348a2437270bb0bbc749d29fe322c31a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3559123",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1856",
+        "1791272383469847154",
+        "1791272383469847154"
+      ],
+      "stable9": true
+    }
+  ],
+  "physical_count_with_manifest": 230,
+  "output_bytes_before_manifest_result": 5570042,
+  "host_seal_full_stream_read_bytes": 17584667,
+  "raw_observations": 95,
+  "raw_spans": 10,
+  "metadata_current_pin_observations": 95,
+  "historical_subtrees_equal": 58,
+  "inverse": "ALL3 complete code files / ALL6 metadata exact nominated raw substitutions reverse to A308; ALL200 other current and ALL3 aux byte-exact",
+  "qualification": "AUTHOR RAW STATIC ONLY; no Source execution or own acceptance",
+  "at_msk": "2026-10-06T10:44:53.358965+03:00",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

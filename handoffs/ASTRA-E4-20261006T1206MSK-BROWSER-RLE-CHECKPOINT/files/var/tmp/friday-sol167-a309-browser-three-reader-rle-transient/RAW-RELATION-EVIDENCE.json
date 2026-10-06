@@ -1,0 +1,582 @@
+{
+  "schema": "friday.sol167.host-raw-relations.v1",
+  "observations": [
+    {
+      "id": "R01",
+      "host_raw_assertion": true,
+      "meaning": "ALL3 complete current decoder bodies byte-identical, not a helper overlay",
+      "Source_test": false
+    },
+    {
+      "id": "R02-A079-NATIVE-PUBLIC-DRIVER.py",
+      "host_raw_assertion": true,
+      "meaning": "Every original semantic error label retained exactly once in original lexical order; allocator failure locations not claimed identical",
+      "Source_test": false
+    },
+    {
+      "id": "R03-A079-NATIVE-PUBLIC-DRIVER.py",
+      "host_raw_assertion": true,
+      "meaning": "Entire file raw inverse exact using only declared body loop span",
+      "Source_test": false
+    },
+    {
+      "id": "R04-A079-NATIVE-PUBLIC-DRIVER.py",
+      "host_raw_assertion": true,
+      "meaning": "Original frame/header setup and complete trailer/owner/node/ref/edge/root suffix exact",
+      "Source_test": false
+    },
+    {
+      "id": "R02-A071-SUPERVISOR.py",
+      "host_raw_assertion": true,
+      "meaning": "Every original semantic error label retained exactly once in original lexical order; allocator failure locations not claimed identical",
+      "Source_test": false
+    },
+    {
+      "id": "R03-A071-SUPERVISOR.py",
+      "host_raw_assertion": true,
+      "meaning": "Entire file raw inverse exact using only declared body loop span",
+      "Source_test": false
+    },
+    {
+      "id": "R04-A071-SUPERVISOR.py",
+      "host_raw_assertion": true,
+      "meaning": "Original frame/header setup and complete trailer/owner/node/ref/edge/root suffix exact",
+      "Source_test": false
+    },
+    {
+      "id": "R02-A087-PUBLIC-DRIVER.py",
+      "host_raw_assertion": true,
+      "meaning": "Every original semantic error label retained exactly once in original lexical order; allocator failure locations not claimed identical",
+      "Source_test": false
+    },
+    {
+      "id": "R03-A087-PUBLIC-DRIVER.py",
+      "host_raw_assertion": true,
+      "meaning": "Entire file raw inverse exact using only declared body loop span",
+      "Source_test": false
+    },
+    {
+      "id": "R04-A087-PUBLIC-DRIVER.py",
+      "host_raw_assertion": true,
+      "meaning": "Original frame/header setup and complete trailer/owner/node/ref/edge/root suffix exact",
+      "Source_test": false
+    },
+    {
+      "id": "R05",
+      "host_raw_assertion": true,
+      "meaning": "RLE descriptors consume original validated full raw offsets; raw codec retains original full body slice semantics",
+      "Source_test": false
+    },
+    {
+      "id": "R06",
+      "host_raw_assertion": true,
+      "meaning": "Run descriptor completeness/canonical order/full prospective row length unchanged; no new accepted-data cap",
+      "Source_test": false
+    },
+    {
+      "id": "R07",
+      "host_raw_assertion": true,
+      "meaning": "Exact repeated byte materialized in bounded Q blocks plus remainder; every accepted count still represented, extra loop cost nonzero unknown",
+      "Source_test": false
+    },
+    {
+      "id": "R08",
+      "host_raw_assertion": true,
+      "meaning": "Run scratch ends only after successful actual full run append, not on an extend failure",
+      "Source_test": false
+    },
+    {
+      "id": "R09",
+      "host_raw_assertion": true,
+      "meaning": "Full immutable output length/SHA then original blobs custody BEFORE successful private builder references end",
+      "Source_test": false
+    },
+    {
+      "id": "R10",
+      "host_raw_assertion": true,
+      "meaning": "No failure cleanup/catch/reconstruction/retry/GC added by decoder",
+      "Source_test": false
+    },
+    {
+      "id": "R11",
+      "host_raw_assertion": true,
+      "meaning": "Original SAME node table, per-node mutable copy and original reference reconstruction retained; no interning",
+      "Source_test": false
+    },
+    {
+      "id": "R12",
+      "host_raw_assertion": true,
+      "meaning": "Actual Supervisor canonical wrapper/default full root + full native checker, no node_owner/retirement API change",
+      "Source_test": false
+    },
+    {
+      "id": "R13",
+      "host_raw_assertion": true,
+      "meaning": "Actual Public wrapper/dispatch and metadata restoration retain their required full-root/native validation consumers",
+      "Source_test": false
+    },
+    {
+      "id": "R14",
+      "host_raw_assertion": true,
+      "meaning": "Actual A079 publish -> identical decoder -> full native check -> guarded SAME-table retirement; all failed prefixes skip success retirement",
+      "Source_test": false
+    },
+    {
+      "id": "R15",
+      "host_raw_assertion": true,
+      "meaning": "Exact actual original exception retained in preexisting custody path; no wrapping or traceback clearing",
+      "Source_test": false
+    },
+    {
+      "id": "R16",
+      "host_raw_assertion": true,
+      "meaning": "Mandatory later terminal/oracle/status/error/end checks remain, private decoder savings not terminal success",
+      "Source_test": false
+    },
+    {
+      "id": "R17",
+      "host_raw_assertion": true,
+      "meaning": "Full actual positive receipt stays across fresh negative; no whole overlap waiver",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-a201_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol064_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol066_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol067_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol068_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol069_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol073_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol881_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol141_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol143_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol145_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-prior_sol145_wire_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol147_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol076_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol081_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol140_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-ABI-MAPPING.json-sol149_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "R18-A071-ABI-MAPPING.json",
+      "host_raw_assertion": true,
+      "meaning": "Old exact metadata pin values explicitly historical-only; no circular current self-hash authority",
+      "Source_test": false
+    },
+    {
+      "id": "R19-A071-ABI-MAPPING.json",
+      "host_raw_assertion": true,
+      "meaning": "Inherited semantic/retirement/resource/required control clauses exact; new delta separately conditioned",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-a201_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol064_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol066_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol067_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol068_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol069_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol073_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol881_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol141_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol143_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol145_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol147_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol076_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol081_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol140_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A071-BUILD-RECIPE.json-sol149_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "R18-A071-BUILD-RECIPE.json",
+      "host_raw_assertion": true,
+      "meaning": "Old exact metadata pin values explicitly historical-only; no circular current self-hash authority",
+      "Source_test": false
+    },
+    {
+      "id": "R19-A071-BUILD-RECIPE.json",
+      "host_raw_assertion": true,
+      "meaning": "Inherited semantic/retirement/resource/required control clauses exact; new delta separately conditioned",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A079-NATIVE-ORACLES.json-sol145_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A079-NATIVE-ORACLES.json-sol147_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A079-NATIVE-ORACLES.json-sol149_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "R18-A079-NATIVE-ORACLES.json",
+      "host_raw_assertion": true,
+      "meaning": "Old exact metadata pin values explicitly historical-only; no circular current self-hash authority",
+      "Source_test": false
+    },
+    {
+      "id": "R19-A079-NATIVE-ORACLES.json",
+      "host_raw_assertion": true,
+      "meaning": "Inherited semantic/retirement/resource/required control clauses exact; new delta separately conditioned",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A087-ABI-CONTRACT.json-prior_A087_ABI_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A087-ABI-CONTRACT.json-sol145_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A087-ABI-CONTRACT.json-sol147_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A087-ABI-CONTRACT.json-sol149_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "R18-A087-ABI-CONTRACT.json",
+      "host_raw_assertion": true,
+      "meaning": "Old exact metadata pin values explicitly historical-only; no circular current self-hash authority",
+      "Source_test": false
+    },
+    {
+      "id": "R19-A087-ABI-CONTRACT.json",
+      "host_raw_assertion": true,
+      "meaning": "Inherited semantic/retirement/resource/required control clauses exact; new delta separately conditioned",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A104-ORDINARY-CONTRACTS.json-prior_fixed_ABI_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A104-ORDINARY-CONTRACTS.json-sol145_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A104-ORDINARY-CONTRACTS.json-sol147_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A104-ORDINARY-CONTRACTS.json-sol149_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "R18-A104-ORDINARY-CONTRACTS.json",
+      "host_raw_assertion": true,
+      "meaning": "Old exact metadata pin values explicitly historical-only; no circular current self-hash authority",
+      "Source_test": false
+    },
+    {
+      "id": "R19-A104-ORDINARY-CONTRACTS.json",
+      "host_raw_assertion": true,
+      "meaning": "Inherited semantic/retirement/resource/required control clauses exact; new delta separately conditioned",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-a201_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol067_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol068_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol069_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol073_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol881_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol141_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol143_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol145_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol147_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol076_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol081_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol140_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "HIST-A118-CONNECTED-CONTRACT.json-sol149_extension_historical_only",
+      "host_raw_assertion": true,
+      "meaning": "Historical metadata subtree byte-value exact, no current qualification",
+      "Source_test": false
+    },
+    {
+      "id": "R18-A118-CONNECTED-CONTRACT.json",
+      "host_raw_assertion": true,
+      "meaning": "Old exact metadata pin values explicitly historical-only; no circular current self-hash authority",
+      "Source_test": false
+    },
+    {
+      "id": "R19-A118-CONNECTED-CONTRACT.json",
+      "host_raw_assertion": true,
+      "meaning": "Inherited semantic/retirement/resource/required control clauses exact; new delta separately conditioned",
+      "Source_test": false
+    },
+    {
+      "id": "R20",
+      "host_raw_assertion": true,
+      "meaning": "ALL6 current contract delta statements identical and joined to SAME complete sealed current join",
+      "Source_test": false
+    },
+    {
+      "id": "R21",
+      "host_raw_assertion": true,
+      "meaning": "ALL209 + aux3 full physical current names and unique pins, not only changed code",
+      "Source_test": false
+    }
+  ],
+  "observation_count": 95,
+  "metadata_current_pin_checks": 95,
+  "historical_metadata_subtrees_equal": 58,
+  "read_bytes": 4616442,
+  "host_self_maxrss_KiB": 516804,
+  "Source_tests": 0,
+  "Source_execution": false
+}

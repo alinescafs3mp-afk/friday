@@ -1,0 +1,22 @@
+{
+  "schema": "friday.sol167.connected-required-checks.v1",
+  "required": true, "waiver": false, "execution": "REQUIRED_NOT_RUN",
+  "inherited": "ALL216/29/6/9 + inherited + H01-H26 + G01-G14 preserved verbatim as obligations; no execution result transferred to changed Source.",
+  "delta": [
+    ["T01", "All3 entire decoder bodies and all actual Supervisor/Public/A079 callers bind exact current bytes; no isolated helper or stale pin/interface."],
+    ["T02", "Original empty/raw/RLE/mixed complete body cases, unchanged full expanded domain, header/frame/trailer/typed/codec checks and complete per-body length+SHA before all node work."],
+    ["T03", "Canonical positive runs below/equal/above Q, exact multiples and remainder, multiple differing-byte runs; zero count/repeated byte/overrun/partial five-byte descriptor refuse via original checks. No lower workload cap."],
+    ["T04", "Absolute offsets select every original stored descriptor in mixed bodies; raw body's full immutable contents unchanged; malformed codec/header/body length/SHA/trailer preserves original semantic refusal order."],
+    ["T05", "Bytes/str/bytearray/scalars/list/dict/root, repeated references, distinct equal mutable objects, reachable/unreachable cycles retain all original values/identities. No interning/hash-only replacement."],
+    ["T06", "Every reached allocation/extend/remainder/conversion/hash/blob-append failure retains exact actual first exception/traceback/full raw/acquired prefix; no failure cleanup, retry or manufactured old exception. Allocator failure timing intentionally unqualified."],
+    ["T07", "Prior successful body scratch/builder may end only after actual consumers returned; row release after complete immutable full SHA and original blobs custody. Interruption before/between/after stores keeps actual remaining state and all full completed bytes."],
+    ["T08", "Default canonical consumers keep full returned graph; actual A079 publish/decode/nativecheck/SAME-table guarded retirement and later mandatory independent stream/oracle/status/error/final clocks + positive-first pair still mandatory."],
+    ["T09", "Changed-context A302 resolver/A306 history-once/A308 retirement credits rejoin exact bodies. Graph/native-check/retirement failures, original error/alias/custody and concurrent/external consumer qualifications remain required."],
+    ["T10", "Original selected-image256MiB/role shares/180s/work170/final10; W/H/L/S/A_old+A_new/q+r/immutable E/nodes/Unicode/positive-first/failed tracebacks and extra loop work prospectively charged. No host RAM or local allocation saving converted to whole fit/refund."],
+    ["T11", "Fresh physical212/complete Source15,current209,aux3 and95 actual metadata pin containers agree. Historical metadata dependencies explicitly noncurrent; changed metadata key consumers require independent schema/context review; outer sealed join is current authority, no circular self-pin."],
+    ["T12", "All old controls/thresholds/domain/caps remain; full mandatory admitted execution and independent acceptance on exact final bytes. Unsafe protected controls hash-only REQUIRED/no waiver; stopped scopes excluded, no reroute/salvage."]
+  ],
+  "acceptance": "Author static observations only. Astra independent whole changed relation review required, then all authorized exact-byte required execution/gates; no own acceptance.",
+  "unsafe": "Opaque hash-only REQUIRED/no waiver",
+  "SourceReady": false, "Root_admission": false, "GO": false
+}

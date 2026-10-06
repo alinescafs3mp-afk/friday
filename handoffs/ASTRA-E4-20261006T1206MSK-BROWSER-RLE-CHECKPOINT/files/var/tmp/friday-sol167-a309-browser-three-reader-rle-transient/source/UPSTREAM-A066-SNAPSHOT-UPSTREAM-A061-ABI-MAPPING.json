@@ -1,0 +1,64 @@
+{
+  "schema": "friday.a061.source-build-wire-dataflow.v1",
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "native_header": "A061-NATIVE.h",
+  "build": "A061-BUILD-RECIPE.json links COMMON+RUNTIME to BOOTSTRAP static and OWNED shared",
+  "graph": [
+    [
+      "fd100",
+      "independent root-sealed 848B capsule",
+      "native fr_cap_read exact external SHA, role/pins/time"
+    ],
+    [
+      "fd101-119,127",
+      "19 source roles excluding image111",
+      "native held seals+exact pins before any interpreter"
+    ],
+    [
+      "fd111+122",
+      "protected complete image+root",
+      "COMMON index/inode/bytes/DIR/alias; RUNTIME cache/ELF closure; exact protected interpreter fexec"
+    ],
+    [
+      "fd117",
+      "runtime input logical schema",
+      "CONTRACT crosschecks SAME fd111 entries and bridge; no named-host reopen"
+    ],
+    [
+      "fd116",
+      "208B OS values",
+      "native actual OS field stage guards"
+    ],
+    [
+      "fd120+121",
+      "outer64MiB inner192MiB cgroups",
+      "native root owns bounded registry/coordinator; runtime same canonical inner limits"
+    ],
+    [
+      "fd123",
+      "96B owned SOCK_SEQPACKET",
+      "session/type/sequence/role/PID/start/deadline plus actual SCM_CREDENTIALS UID+GID"
+    ],
+    [
+      "fd124/125/126/128/130",
+      "worker config/body/event/role2 bounded gate/interpreter",
+      "all source+output relocated before fixed dup2, barrier before effects"
+    ]
+  ],
+  "ABI": {
+    "recv": "7 arguments, packet/passfd/pid/uid/gid/deadline",
+    "spawn": "9 arguments, extra finite gate FD before deadline/child",
+    "wire_types": "1..14 including actual ABORT_ACK14",
+    "runtime": "fr_runtime_verify(root,rows,count,workdeadline)",
+    "stage": "fr_stage_set/get -> primitive_stage in preinterpreter refusal"
+  },
+  "memory": "Startup/import/runtime metadata/registry/nested overhead counts; raw RSS never reset/subtracted. Future fullgraph current feasibility NOT_PROVEN under unchanged original bounds.",
+  "safe_benign_negative_modes": [
+    "http404",
+    "certificate",
+    "protocol",
+    "truncated",
+    "short_write"
+  ],
+  "missing_authority": "No current root, compiler, runtime image, native binaries or new GET grant produced"
+}

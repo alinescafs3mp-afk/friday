@@ -1,0 +1,128 @@
+{
+  "schema": "friday.work-snapshot.omissions.v1",
+  "files": [
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/host_build.py",
+      "bytes": 11671,
+      "sha256": "f0b1ef37376042e2491ec7e025300e0e9cccf201ab79c0188d5e9441f409eb54",
+      "reason": "HOST_ONLY_RAW_METADATA_HELPER; reproduction script omitted, source and observations retained",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/host_prepare.py",
+      "bytes": 4293,
+      "sha256": "f0f7ecd8f6382f465a1b3cbbf202ad36cd1ea817dd978bacda4f2ee3e5fed6a3",
+      "reason": "HOST_ONLY_RAW_METADATA_HELPER; reproduction script omitted, source and observations retained",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/host_relations.py",
+      "bytes": 11588,
+      "sha256": "faf70cef5cef51f6dcdf15a864b3f0e44123de69c7ba744da49e70b0a6a4cef8",
+      "reason": "HOST_ONLY_RAW_METADATA_HELPER; reproduction script omitted, source and observations retained",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/host_seal.py",
+      "bytes": 7957,
+      "sha256": "6ca6d73a31d0bbb3c221229108ff649eae89255a55b7c8b9f4a46d37ce87d7fd",
+      "reason": "HOST_ONLY_RAW_METADATA_HELPER; reproduction script omitted, source and observations retained",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/received.json",
+      "bytes": 1566,
+      "sha256": "56417453c3132317481ea61db99fe826bc81a703a1596c5ac5b6da451afeefa1",
+      "reason": "PRIVATE_PEER_RECEIPT; actual public author RESULT and independent review included",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTROLS.py",
+      "bytes": 276107,
+      "sha256": "315c95540e0472c0c07240a16718d3f6dd991ef500a7096b6c9223afdc1acb5b",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; controls cannot be reproduced from this export",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-FULL-CONTROLS.py",
+      "bytes": 65233,
+      "sha256": "6efe9b3bb6a14678b2d82d1952a5fd42e80b23b2544abf396e5704cb4482a3cb",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; controls cannot be reproduced from this export",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/INPUT-A079-CURRENT-A071-CONTROLS.py",
+      "bytes": 8976,
+      "sha256": "69aab635f72a3bd8521f2812b034ca6fd4a4da09c0108cc1fbe4adc0fd28fc49",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; controls cannot be reproduced from this export",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+      "bytes": 704,
+      "sha256": "4904b585110926cbb5971fff88e04421a366a1c3c856e907b2af9a4f87956460",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; controls cannot be reproduced from this export",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+      "bytes": 29558,
+      "sha256": "76c717e38b909d5b41e2ff48582dc27e3c4dc82fd0643ac8206748e97b8c70d1",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; controls cannot be reproduced from this export",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "bytes": 78027,
+      "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; controls cannot be reproduced from this export",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+      "bytes": 23060,
+      "sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf",
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY; required, not waived; controls cannot be reproduced from this export",
+      "roles": [
+        "CURRENT_BROWSER_SOURCE_AND_AUTHOR_EVIDENCE"
+      ]
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a310-sol167-review.K2wlWY/host_verify.py",
+      "bytes": 6218,
+      "sha256": "58678578ca037ab67770a8b4c427e15642cdd938e03cb64f0d85404581bdfb20",
+      "reason": "HOST_ONLY_RAW_METADATA_HELPER; reproduction script omitted, source and observations retained",
+      "roles": [
+        "INDEPENDENT_SCOPED_REVIEW"
+      ]
+    }
+  ],
+  "global_exclusions": [
+    "Private conversations/native queue/config/secrets/keys/credentials/unrelated owner files",
+    "Active unsealed Sol170 work; current Publisher and other components not re-exported",
+    "No new test execution, compile, admission or deployment evidence"
+  ],
+  "impact": "See OMISSIONS.json. Seven required restricted control bodies hash-only; no standalone full control reproduction. Host review helpers/private protocol state not published. Older comparison sources resolve through previous snapshot manifest, not private paths alone. Not every historical input pin is re-exported."
+}

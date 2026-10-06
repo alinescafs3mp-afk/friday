@@ -1,0 +1,58 @@
+{
+  "schema": "friday.sol167.a309.connected-author-result.v1",
+  "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+  "generation": 1,
+  "decision": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+  "base_manifest": {"path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json", "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5"},
+  "prior_scoped_review": {"path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/REVIEW.json", "sha256": "704917d6b2c7bd586d09b350db126ff7d0cc96e1a2f63e3b81751eb706a84749", "reuse": "Exact unchanged A308 outside-span bytes rejoined in changed context; not independent acceptance of Sol's new code or an execution credit."},
+  "package": "ALL212 current files physically copied into fresh source/; complete current209/Source15/aux3 join. ALL3 entire decoder bodies identical. Source15 changed5/unchanged10; current209 changed9/unchanged200; aux3 unchanged3. Three code files and six current metadata contracts changed; no other content change.",
+  "connected_findings": [
+    {
+      "id": "I1",
+      "implementation": "The full frame/header/body typed/length/expanded checks are unchanged. After validating each original row, remember begin=at and advance by stored. RLE length is checked against the same original stored extent; descriptors are read directly at begin..at in complete five-byte steps from SAME full raw. Raw codec still slices and retains the exact entire body. No per-RLE stored-body slice or body reduction; header parse and complete preimage remain.",
+      "condition": "The unchanged extent checks establish at<=len(raw) and nonnegative stored; modulo5 makes every descriptor complete. Absolute indexes select exactly the same four-byte count and one-byte payload formerly selected from the stored slice. No selected-image execution has established this yet."
+    },
+    {
+      "id": "I2",
+      "implementation": "Original count>0, byte!=previous, len(value)+count<=row.bytes executes BEFORE allocation/extension for each run. Scratch repeats that same byte min(count,65536) times. The quotient loop appends entire scratch blocks; a final remaining prefix appends the remainder. Q=65536 is internal implementation granularity, NOT a smaller semantic cap, new role, quota, pool or grant.",
+      "condition": "For valid count C>0, q=min(C,Q)>0; each returned full-block extend reduces remaining by q, so nonnegative remaining<q reaches remainder. C=q*k+r gives exactly C copies of the same byte, with prior prefix/canonical order unchanged. All body counts up to original expanded allowance are still represented. New loop work/capacity/reallocation and allocation failure locations require qualification."
+    },
+    {
+      "id": "I3",
+      "implementation": "scratch=None only after all extends for that run have returned. On row completion, full bytes(value), exact length+full SHA and original blobs.append(chunk) ALL precede chunk=None;value=None. This ends only successful private references and removes the stale successful RLE builder from following raw/RLE rows and node construction. No finally, new catch, clear, traceback editing, collector or retry.",
+      "condition": "A failing scratch allocation/extend/immutable conversion/length/SHA/list append bypasses successful row release and retains actual reached builder/chunk/scratch/prefix through the original exception/traceback. A failure after successful row release retains that row's complete immutable bytes in blobs plus full raw, NOT its already-finished private builder. Async interruption between operations retains actual acquired state, not a fabricated rollback. Earlier successful-run scratch may already have ended; complete run prefix remains in builder."
+    },
+    {
+      "id": "I4",
+      "implementation": "Complete immutable blobs list, header, node table creation, str decoding, per-node bytearray copy, list/dict creation, root/scalar/reference validation and edge reconstruction are byte-exact. No interning or merging of equal mutable nodes, no digest/count replacement, no partially parsed body acceptance, no return before original full trailer/expanded/graph validation.",
+      "condition": "Original byte aliases by body index and distinct equal mutable nodes remain. Existing immutable-object implementation behavior is not replaced by a new interning scheme. Original semantic validation labels/order are exact; allocator-dependent exception location/timing is NOT claimed byte-for-byte identical to the old allocating algorithm. Every actual new allocation exception still reaches the same original first/secondary error custody without wrapping."
+    },
+    {
+      "id": "I5",
+      "implementation": "Actual Supervisor full_DATA_decode -> prior full dispatch -> changed inline decoder -> full sol143_native_check remains exact. Actual Public a067 wrapper/dispatch and a064 metadata restoration likewise use the changed inline decoder and return full original roots. Default callers do NOT receive node_owner or have returned graphs retired.",
+      "condition": "A302 resolver and A306 full history-once validators are unchanged in entire-file inverse proof, not merely compatible names. All required independent canonical, resource two-graph/identity-bijection and full validation consumers remain; their live behavior/whole costs not admitted."
+    },
+    {
+      "id": "I6",
+      "implementation": "Actual A079 publishes SAME entry before changed decoder(node_owner=entry), then requires full native check. Original A308 SAME values table is captured before first node/edge and keeps disconnected/cyclic nodes. Guarded node-edge/table/root retirement and true-LAST marker are byte-exact. Decode/check failures skip this successful retirement; exact original error/traceback enters existing consumption_error/original_error/first+secondary ledger.",
+      "condition": "Body validation failures occur before values-table creation but keep original reached locals/full raw; node/check failures retain same actual table/root. This package does not repair or qualify failed graph custody, late retirement failure prefixes, concurrency/external consumers, descriptor/writer policies or allocator reclamation."
+    },
+    {
+      "id": "I7",
+      "implementation": "Actual later full outer/inner streams/native oracle/status/complement/end/final-clock and positive-first retained positive + fresh negative remain exact. The codec row's successful private-builder release neither completes the actual run nor skips later readers. Full encoded graph, physical originals, aliases and actual errors are unchanged required material.",
+      "condition": "No old SourceReady/Root/GO/test result transfers to these changed bytes. Original protected runtime/process/wait/lifetime/stock/type/callback/controlled-worker bodies copied opaque, content exact, not inspected or qualified. Stopped scopes and equivalents excluded."
+    },
+    {
+      "id": "I8",
+      "implementation": "Six contracts bind all their actual current code/dependency pin containers to fresh current files. Original sol151 metadata dependency PIN VALUES are unchanged but key explicitly renamed metadata_dependencies_historical_only; new identical sol167 declaration in all6 resolves current metadata through the complete sealed outer-manifest current join, avoiding circular embedded metadata hashes. Inherited historical subtrees remain exact; all other clauses/caps/controls retained.",
+      "condition": "95 current metadata pin observations,58 historical subtree value-equalities, exact whole-file raw reverse for all6 known container substitutions. The declared metadata schema transition and all current consumers require Astra independent review; author literal equality is not independent interface acceptance. Complete Source15/current209/aux3 map is authoritative current binding, old historical pins not runtime/current image admission."
+    }
+  ],
+  "qualification": "95 trusted-host raw literal/equality observations,10 exact ordinary raw spans and all9 file inverse proofs; metadata/hash/admin only. Source parser/compiler/preprocess/import/AST/eval/exec/tests/helpers/live/network/install ZERO.",
+  "failure_qualification": "No host command/assertion failure in this task. One broad metadata-only summary included inherited historical narratives and was truncated; narratives NOT qualification, no protected Source implementation body disclosed or interpreted. Source allocator/runtime failures NOT_RUN, not zero or passed.",
+  "resource_delta": "See RESOURCE-ARITHMETIC.json. Exact avoided allocations/references only; NOT unconditional lower peak/RSS/CPU/time. Bytearray capacity/reallocation may change; current builder+immutable output overlap remains. F2 partially improved, remaining F2/F3/F4/F5 OPEN.",
+  "own_acceptance": false,
+  "whole_fit": false,
+  "Source_execution": false,
+  "SourceReady": false, "Root_admission": false, "GO": false
+}

@@ -1,0 +1,29 @@
+{
+  "schema": "friday.astra.a310.required-checks.v1",
+  "required": true,
+  "waiver": false,
+  "execution": "REQUIRED_NOT_RUN",
+  "T11_count_clarification": "Verify ALL actual current pin containers. Independent metadata normalization found100 changed containers (94 code/dependency paths and6 JSON paths), not the author summary95. All100 directly authenticated; original complete-current-join obligation strengthened/clarified, no case or data scope removed.",
+  "current_required_checks": {
+    "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/REQUIRED-CHECKS.json",
+    "bytes": 3497,
+    "sha256": "df843e52c5417b3be46a7f5e1c99d05226796fff26e715211ab86b74a5c014c5",
+    "identity9_decimal_strings": [
+      "2050",
+      "3559141",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3497",
+      "1791272610428868758",
+      "1791272693338625640"
+    ],
+    "stable9": true
+  },
+  "inherited": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver",
+  "review_scope": "Static semantic/data/metadata relation accepted; all actual positive/negative fault/resource/admission/runtime checks remain required on admitted exact bytes.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

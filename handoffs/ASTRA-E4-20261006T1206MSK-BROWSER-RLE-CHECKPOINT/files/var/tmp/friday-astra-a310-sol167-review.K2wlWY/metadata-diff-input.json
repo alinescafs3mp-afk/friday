@@ -1,0 +1,3666 @@
+[
+  {
+    "name": "A071-ABI-MAPPING.json",
+    "changes": [
+      {
+        "path": "/current_dependencies/G1/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7084774",
+        "after": "3559125"
+      },
+      {
+        "path": "/current_dependencies/G1/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791241118703607256",
+        "after": "1791272383480847785"
+      },
+      {
+        "path": "/current_dependencies/G1/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791241118703607256",
+        "after": "1791272383480847785"
+      },
+      {
+        "path": "/current_dependencies/G1/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A025-G1.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A025-G1.py"
+      },
+      {
+        "path": "/current_dependencies/R4/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7084773",
+        "after": "3559124"
+      },
+      {
+        "path": "/current_dependencies/R4/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791241132464424231",
+        "after": "1791272383474847441"
+      },
+      {
+        "path": "/current_dependencies/R4/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791241132464424231",
+        "after": "1791272383475847498"
+      },
+      {
+        "path": "/current_dependencies/R4/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A025-G1-R4.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A025-G1-R4.py"
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies",
+        "kind": "removed",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          },
+          "A079-NATIVE-ORACLES.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A079-NATIVE-ORACLES.json",
+            "bytes": 77455,
+            "sha256": "154ef9b55ab5cdeef74dacb64adba20a7af348d40a494ebcba33c2f899d4abe6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085853",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77455",
+              "1791257172704969881",
+              "1791257172704969881"
+            ],
+            "stable9": true
+          },
+          "A104-ORDINARY-CONTRACTS.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A104-ORDINARY-CONTRACTS.json",
+            "bytes": 166409,
+            "sha256": "4ca0d75bbe4866abf4065d61b0d5ff3653e5928e4fbb136a3816f34df70884e6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085854",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "166409",
+              "1791257172719970750",
+              "1791257172719970750"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies_historical_only",
+        "kind": "added",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          },
+          "A079-NATIVE-ORACLES.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A079-NATIVE-ORACLES.json",
+            "bytes": 77455,
+            "sha256": "154ef9b55ab5cdeef74dacb64adba20a7af348d40a494ebcba33c2f899d4abe6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085853",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77455",
+              "1791257172704969881",
+              "1791257172704969881"
+            ],
+            "stable9": true
+          },
+          "A104-ORDINARY-CONTRACTS.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A104-ORDINARY-CONTRACTS.json",
+            "bytes": 166409,
+            "sha256": "4ca0d75bbe4866abf4065d61b0d5ff3653e5928e4fbb136a3816f34df70884e6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085854",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "166409",
+              "1791257172719970750",
+              "1791257172719970750"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/sol167_rle_transient",
+        "kind": "added",
+        "value": {
+          "schema": "friday.sol167.three-reader-rle-transient.v1",
+          "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+          "generation": 1,
+          "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+          "current_join": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/CURRENT-SOURCE-JOIN.json",
+          "current_join_authority": "Resolve all15/209/aux3 actual names through the sealed outer manifest current_join; inherited metadata pins below marked historical are NOT current image or Source admission.",
+          "decoder": "ALL3 exact same full DS69 decoder. Original raw bytes retained; RLE descriptors use absolute raw offsets and the same count/canonical checks. Run scratch <=65536 is an implementation chunk size, NOT an accepted-data limit. Grow the actual prefix in bounded extends; retain every allocation failure and traceback; no catch/retry/GC.",
+          "successful_private_temporaries": "Run scratch cleared only after all its extends return. Full immutable row validates exact length and SHA and is appended to the original blobs list before chunk/value references end. Failed row does not clear its actual acquired prefix. Canonical mutable nodes/aliases and A308 SAME-table guarded actual retirement stay unchanged.",
+          "cost": "Eliminates per-RLE stored slice and full-count repeated-byte temporary; avoids a prior successful expanded builder overlapping the next row/nodes. Builder capacity plus immutable full output still overlap during conversion/validation. Full raw, all prior blobs, header/nodes, copies/Unicode/errors/tracebacks remain charged. Extra chunk loops/scratch/time/allocator costs UNKNOWN_NOT_ZERO; original256MiB/180s/work170/final10/role shares unchanged; no fit/refund credit.",
+          "required_controls": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver",
+          "F3_F4_F5": "OPEN; failed graphs/whole-workload share/whole CPU unchanged qualification, not solved by local transient reduction.",
+          "Source_execution": false,
+          "author_acceptance": false,
+          "SourceReady": false,
+          "Root_admission": false,
+          "GO": false
+        }
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085844",
+        "after": "3558920"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629893503744",
+        "after": "1791272382503791727"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629894503802",
+        "after": "1791272382504791785"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BOOTSTRAP.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085845",
+        "after": "3558921"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629899504092",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629900338973",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-COMMON.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085847",
+        "after": "3558922"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629909504672",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629910645821",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-CONTRACT.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTRACT.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085846",
+        "after": "3558927"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629904504382",
+        "after": "1791272382545794137"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629905394251",
+        "after": "1791272382546794195"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-NATIVE.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085128",
+        "after": "3558928"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791246261716118308",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085851",
+        "after": "3558930"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629935506179",
+        "after": "1791272382559794940"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629936506237",
+        "after": "1791272382560794998"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-PRODUCER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4225997",
+        "after": "3558931"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-RUNTIME.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/bytes",
+        "kind": "value",
+        "before": 141617,
+        "after": 142333
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230541",
+        "after": "3558933"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "141617",
+        "after": "142333"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382574795801"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382575795858"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SUPERVISOR.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/sha256",
+        "kind": "value",
+        "before": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+        "after": "d01b1e4e106dc9d3e21ebef69317b8826551d999afd2389a072aee6af45cf5ba"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 221603,
+        "after": 222319
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230545",
+        "after": "3558986"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "221603",
+        "after": "222319"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382827810318"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382828810375"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+        "after": "2938eb4812404bc16af83579da954043f0d96d08bcae42f1559b08e5e6e1d242"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085131",
+        "after": "3558991"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791245909368212024",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-STOCK-CALLER.h"
+      }
+    ]
+  },
+  {
+    "name": "A071-BUILD-RECIPE.json",
+    "changes": [
+      {
+        "path": "/build_staging_current/A071-BOOTSTRAP.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085844",
+        "after": "3558920"
+      },
+      {
+        "path": "/build_staging_current/A071-BOOTSTRAP.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629893503744",
+        "after": "1791272382503791727"
+      },
+      {
+        "path": "/build_staging_current/A071-BOOTSTRAP.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629894503802",
+        "after": "1791272382504791785"
+      },
+      {
+        "path": "/build_staging_current/A071-BOOTSTRAP.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BOOTSTRAP.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c"
+      },
+      {
+        "path": "/build_staging_current/A071-COMMON.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085845",
+        "after": "3558921"
+      },
+      {
+        "path": "/build_staging_current/A071-COMMON.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629899504092",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/build_staging_current/A071-COMMON.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629900338973",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/build_staging_current/A071-COMMON.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-COMMON.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c"
+      },
+      {
+        "path": "/build_staging_current/A071-NATIVE.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085846",
+        "after": "3558927"
+      },
+      {
+        "path": "/build_staging_current/A071-NATIVE.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629904504382",
+        "after": "1791272382545794137"
+      },
+      {
+        "path": "/build_staging_current/A071-NATIVE.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629905394251",
+        "after": "1791272382546794195"
+      },
+      {
+        "path": "/build_staging_current/A071-NATIVE.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-NATIVE.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h"
+      },
+      {
+        "path": "/build_staging_current/A071-OWNED.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085128",
+        "after": "3558928"
+      },
+      {
+        "path": "/build_staging_current/A071-OWNED.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791246261716118308",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/build_staging_current/A071-OWNED.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/build_staging_current/A071-OWNED.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c"
+      },
+      {
+        "path": "/build_staging_current/A071-RUNTIME.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4225997",
+        "after": "3558931"
+      },
+      {
+        "path": "/build_staging_current/A071-RUNTIME.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/build_staging_current/A071-RUNTIME.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/build_staging_current/A071-RUNTIME.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-RUNTIME.c"
+      },
+      {
+        "path": "/build_staging_current/A091-STOCK-CALLER.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085131",
+        "after": "3558991"
+      },
+      {
+        "path": "/build_staging_current/A091-STOCK-CALLER.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791245909368212024",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/build_staging_current/A091-STOCK-CALLER.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/build_staging_current/A091-STOCK-CALLER.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-STOCK-CALLER.h"
+      },
+      {
+        "path": "/current_dependencies/G1/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7084774",
+        "after": "3559125"
+      },
+      {
+        "path": "/current_dependencies/G1/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791241118703607256",
+        "after": "1791272383480847785"
+      },
+      {
+        "path": "/current_dependencies/G1/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791241118703607256",
+        "after": "1791272383480847785"
+      },
+      {
+        "path": "/current_dependencies/G1/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A025-G1.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A025-G1.py"
+      },
+      {
+        "path": "/current_dependencies/R4/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7084773",
+        "after": "3559124"
+      },
+      {
+        "path": "/current_dependencies/R4/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791241132464424231",
+        "after": "1791272383474847441"
+      },
+      {
+        "path": "/current_dependencies/R4/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791241132464424231",
+        "after": "1791272383475847498"
+      },
+      {
+        "path": "/current_dependencies/R4/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A025-G1-R4.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A025-G1-R4.py"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A071-PRODUCER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085851",
+        "after": "3558930"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A071-PRODUCER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629935506179",
+        "after": "1791272382559794940"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A071-PRODUCER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629936506237",
+        "after": "1791272382560794998"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A071-PRODUCER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-PRODUCER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A079-NATIVE-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A079-NATIVE-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol149_legacy_caller_staging/A079-NATIVE-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_actual_A079_caller/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol151_actual_A079_caller/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol151_actual_A079_caller/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol151_actual_A079_caller/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_actual_A079_caller/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_actual_A079_caller/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_actual_A079_caller/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies",
+        "kind": "removed",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          },
+          "A079-NATIVE-ORACLES.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A079-NATIVE-ORACLES.json",
+            "bytes": 77455,
+            "sha256": "154ef9b55ab5cdeef74dacb64adba20a7af348d40a494ebcba33c2f899d4abe6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085853",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77455",
+              "1791257172704969881",
+              "1791257172704969881"
+            ],
+            "stable9": true
+          },
+          "A104-ORDINARY-CONTRACTS.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A104-ORDINARY-CONTRACTS.json",
+            "bytes": 166409,
+            "sha256": "4ca0d75bbe4866abf4065d61b0d5ff3653e5928e4fbb136a3816f34df70884e6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085854",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "166409",
+              "1791257172719970750",
+              "1791257172719970750"
+            ],
+            "stable9": true
+          },
+          "A071-ABI-MAPPING.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-ABI-MAPPING.json",
+            "bytes": 159589,
+            "sha256": "ea38cca6256f6d2c649cca64490a1c48818b09136bc3222cc9937aa53d18030d",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085855",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "159589",
+              "1791257172732971504",
+              "1791257172732971504"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies_historical_only",
+        "kind": "added",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          },
+          "A079-NATIVE-ORACLES.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A079-NATIVE-ORACLES.json",
+            "bytes": 77455,
+            "sha256": "154ef9b55ab5cdeef74dacb64adba20a7af348d40a494ebcba33c2f899d4abe6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085853",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77455",
+              "1791257172704969881",
+              "1791257172704969881"
+            ],
+            "stable9": true
+          },
+          "A104-ORDINARY-CONTRACTS.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A104-ORDINARY-CONTRACTS.json",
+            "bytes": 166409,
+            "sha256": "4ca0d75bbe4866abf4065d61b0d5ff3653e5928e4fbb136a3816f34df70884e6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085854",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "166409",
+              "1791257172719970750",
+              "1791257172719970750"
+            ],
+            "stable9": true
+          },
+          "A071-ABI-MAPPING.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-ABI-MAPPING.json",
+            "bytes": 159589,
+            "sha256": "ea38cca6256f6d2c649cca64490a1c48818b09136bc3222cc9937aa53d18030d",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085855",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "159589",
+              "1791257172732971504",
+              "1791257172732971504"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/sol167_rle_transient",
+        "kind": "added",
+        "value": {
+          "schema": "friday.sol167.three-reader-rle-transient.v1",
+          "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+          "generation": 1,
+          "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+          "current_join": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/CURRENT-SOURCE-JOIN.json",
+          "current_join_authority": "Resolve all15/209/aux3 actual names through the sealed outer manifest current_join; inherited metadata pins below marked historical are NOT current image or Source admission.",
+          "decoder": "ALL3 exact same full DS69 decoder. Original raw bytes retained; RLE descriptors use absolute raw offsets and the same count/canonical checks. Run scratch <=65536 is an implementation chunk size, NOT an accepted-data limit. Grow the actual prefix in bounded extends; retain every allocation failure and traceback; no catch/retry/GC.",
+          "successful_private_temporaries": "Run scratch cleared only after all its extends return. Full immutable row validates exact length and SHA and is appended to the original blobs list before chunk/value references end. Failed row does not clear its actual acquired prefix. Canonical mutable nodes/aliases and A308 SAME-table guarded actual retirement stay unchanged.",
+          "cost": "Eliminates per-RLE stored slice and full-count repeated-byte temporary; avoids a prior successful expanded builder overlapping the next row/nodes. Builder capacity plus immutable full output still overlap during conversion/validation. Full raw, all prior blobs, header/nodes, copies/Unicode/errors/tracebacks remain charged. Extra chunk loops/scratch/time/allocator costs UNKNOWN_NOT_ZERO; original256MiB/180s/work170/final10/role shares unchanged; no fit/refund credit.",
+          "required_controls": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver",
+          "F3_F4_F5": "OPEN; failed graphs/whole-workload share/whole CPU unchanged qualification, not solved by local transient reduction.",
+          "Source_execution": false,
+          "author_acceptance": false,
+          "SourceReady": false,
+          "Root_admission": false,
+          "GO": false
+        }
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085844",
+        "after": "3558920"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629893503744",
+        "after": "1791272382503791727"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629894503802",
+        "after": "1791272382504791785"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BOOTSTRAP.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085845",
+        "after": "3558921"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629899504092",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629900338973",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-COMMON.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085847",
+        "after": "3558922"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629909504672",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629910645821",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-CONTRACT.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTRACT.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085846",
+        "after": "3558927"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629904504382",
+        "after": "1791272382545794137"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629905394251",
+        "after": "1791272382546794195"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-NATIVE.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085128",
+        "after": "3558928"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791246261716118308",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085851",
+        "after": "3558930"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629935506179",
+        "after": "1791272382559794940"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629936506237",
+        "after": "1791272382560794998"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-PRODUCER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4225997",
+        "after": "3558931"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-RUNTIME.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/bytes",
+        "kind": "value",
+        "before": 141617,
+        "after": 142333
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230541",
+        "after": "3558933"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "141617",
+        "after": "142333"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382574795801"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382575795858"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SUPERVISOR.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/sha256",
+        "kind": "value",
+        "before": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+        "after": "d01b1e4e106dc9d3e21ebef69317b8826551d999afd2389a072aee6af45cf5ba"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 221603,
+        "after": 222319
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230545",
+        "after": "3558986"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "221603",
+        "after": "222319"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382827810318"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382828810375"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+        "after": "2938eb4812404bc16af83579da954043f0d96d08bcae42f1559b08e5e6e1d242"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085131",
+        "after": "3558991"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791245909368212024",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-STOCK-CALLER.h"
+      }
+    ]
+  },
+  {
+    "name": "A079-NATIVE-ORACLES.json",
+    "changes": [
+      {
+        "path": "/sol151_extension/metadata_dependencies",
+        "kind": "removed",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies_historical_only",
+        "kind": "added",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/sol167_rle_transient",
+        "kind": "added",
+        "value": {
+          "schema": "friday.sol167.three-reader-rle-transient.v1",
+          "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+          "generation": 1,
+          "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+          "current_join": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/CURRENT-SOURCE-JOIN.json",
+          "current_join_authority": "Resolve all15/209/aux3 actual names through the sealed outer manifest current_join; inherited metadata pins below marked historical are NOT current image or Source admission.",
+          "decoder": "ALL3 exact same full DS69 decoder. Original raw bytes retained; RLE descriptors use absolute raw offsets and the same count/canonical checks. Run scratch <=65536 is an implementation chunk size, NOT an accepted-data limit. Grow the actual prefix in bounded extends; retain every allocation failure and traceback; no catch/retry/GC.",
+          "successful_private_temporaries": "Run scratch cleared only after all its extends return. Full immutable row validates exact length and SHA and is appended to the original blobs list before chunk/value references end. Failed row does not clear its actual acquired prefix. Canonical mutable nodes/aliases and A308 SAME-table guarded actual retirement stay unchanged.",
+          "cost": "Eliminates per-RLE stored slice and full-count repeated-byte temporary; avoids a prior successful expanded builder overlapping the next row/nodes. Builder capacity plus immutable full output still overlap during conversion/validation. Full raw, all prior blobs, header/nodes, copies/Unicode/errors/tracebacks remain charged. Extra chunk loops/scratch/time/allocator costs UNKNOWN_NOT_ZERO; original256MiB/180s/work170/final10/role shares unchanged; no fit/refund credit.",
+          "required_controls": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver",
+          "F3_F4_F5": "OPEN; failed graphs/whole-workload share/whole CPU unchanged qualification, not solved by local transient reduction.",
+          "Source_execution": false,
+          "author_acceptance": false,
+          "SourceReady": false,
+          "Root_admission": false,
+          "GO": false
+        }
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085844",
+        "after": "3558920"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629893503744",
+        "after": "1791272382503791727"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629894503802",
+        "after": "1791272382504791785"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BOOTSTRAP.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085845",
+        "after": "3558921"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629899504092",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629900338973",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-COMMON.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085847",
+        "after": "3558922"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629909504672",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629910645821",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-CONTRACT.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTRACT.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085846",
+        "after": "3558927"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629904504382",
+        "after": "1791272382545794137"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629905394251",
+        "after": "1791272382546794195"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-NATIVE.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085128",
+        "after": "3558928"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791246261716118308",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085851",
+        "after": "3558930"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629935506179",
+        "after": "1791272382559794940"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629936506237",
+        "after": "1791272382560794998"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-PRODUCER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4225997",
+        "after": "3558931"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-RUNTIME.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/bytes",
+        "kind": "value",
+        "before": 141617,
+        "after": 142333
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230541",
+        "after": "3558933"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "141617",
+        "after": "142333"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382574795801"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382575795858"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SUPERVISOR.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/sha256",
+        "kind": "value",
+        "before": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+        "after": "d01b1e4e106dc9d3e21ebef69317b8826551d999afd2389a072aee6af45cf5ba"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 221603,
+        "after": 222319
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230545",
+        "after": "3558986"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "221603",
+        "after": "222319"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382827810318"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382828810375"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+        "after": "2938eb4812404bc16af83579da954043f0d96d08bcae42f1559b08e5e6e1d242"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085131",
+        "after": "3558991"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791245909368212024",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-STOCK-CALLER.h"
+      }
+    ]
+  },
+  {
+    "name": "A087-ABI-CONTRACT.json",
+    "changes": [
+      {
+        "path": "/sol151_extension/metadata_dependencies",
+        "kind": "removed",
+        "value": {}
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies_historical_only",
+        "kind": "added",
+        "value": {}
+      },
+      {
+        "path": "/sol151_extension/sol167_rle_transient",
+        "kind": "added",
+        "value": {
+          "schema": "friday.sol167.three-reader-rle-transient.v1",
+          "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+          "generation": 1,
+          "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+          "current_join": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/CURRENT-SOURCE-JOIN.json",
+          "current_join_authority": "Resolve all15/209/aux3 actual names through the sealed outer manifest current_join; inherited metadata pins below marked historical are NOT current image or Source admission.",
+          "decoder": "ALL3 exact same full DS69 decoder. Original raw bytes retained; RLE descriptors use absolute raw offsets and the same count/canonical checks. Run scratch <=65536 is an implementation chunk size, NOT an accepted-data limit. Grow the actual prefix in bounded extends; retain every allocation failure and traceback; no catch/retry/GC.",
+          "successful_private_temporaries": "Run scratch cleared only after all its extends return. Full immutable row validates exact length and SHA and is appended to the original blobs list before chunk/value references end. Failed row does not clear its actual acquired prefix. Canonical mutable nodes/aliases and A308 SAME-table guarded actual retirement stay unchanged.",
+          "cost": "Eliminates per-RLE stored slice and full-count repeated-byte temporary; avoids a prior successful expanded builder overlapping the next row/nodes. Builder capacity plus immutable full output still overlap during conversion/validation. Full raw, all prior blobs, header/nodes, copies/Unicode/errors/tracebacks remain charged. Extra chunk loops/scratch/time/allocator costs UNKNOWN_NOT_ZERO; original256MiB/180s/work170/final10/role shares unchanged; no fit/refund credit.",
+          "required_controls": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver",
+          "F3_F4_F5": "OPEN; failed graphs/whole-workload share/whole CPU unchanged qualification, not solved by local transient reduction.",
+          "Source_execution": false,
+          "author_acceptance": false,
+          "SourceReady": false,
+          "Root_admission": false,
+          "GO": false
+        }
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085844",
+        "after": "3558920"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629893503744",
+        "after": "1791272382503791727"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629894503802",
+        "after": "1791272382504791785"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BOOTSTRAP.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085845",
+        "after": "3558921"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629899504092",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629900338973",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-COMMON.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085847",
+        "after": "3558922"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629909504672",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629910645821",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-CONTRACT.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTRACT.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085846",
+        "after": "3558927"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629904504382",
+        "after": "1791272382545794137"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629905394251",
+        "after": "1791272382546794195"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-NATIVE.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085128",
+        "after": "3558928"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791246261716118308",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085851",
+        "after": "3558930"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629935506179",
+        "after": "1791272382559794940"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629936506237",
+        "after": "1791272382560794998"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-PRODUCER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4225997",
+        "after": "3558931"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-RUNTIME.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/bytes",
+        "kind": "value",
+        "before": 141617,
+        "after": 142333
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230541",
+        "after": "3558933"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "141617",
+        "after": "142333"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382574795801"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382575795858"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SUPERVISOR.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/sha256",
+        "kind": "value",
+        "before": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+        "after": "d01b1e4e106dc9d3e21ebef69317b8826551d999afd2389a072aee6af45cf5ba"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 221603,
+        "after": 222319
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230545",
+        "after": "3558986"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "221603",
+        "after": "222319"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382827810318"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382828810375"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+        "after": "2938eb4812404bc16af83579da954043f0d96d08bcae42f1559b08e5e6e1d242"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085131",
+        "after": "3558991"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791245909368212024",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-STOCK-CALLER.h"
+      }
+    ]
+  },
+  {
+    "name": "A104-ORDINARY-CONTRACTS.json",
+    "changes": [
+      {
+        "path": "/oracle_pin/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4226058",
+        "after": "3558990"
+      },
+      {
+        "path": "/oracle_pin/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1790976216354336839",
+        "after": "1791272382845811351"
+      },
+      {
+        "path": "/oracle_pin/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1790976216354336839",
+        "after": "1791272382845811351"
+      },
+      {
+        "path": "/oracle_pin/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A091-EXPECTED-CONTROLS.json",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-EXPECTED-CONTROLS.json"
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies",
+        "kind": "removed",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          },
+          "A079-NATIVE-ORACLES.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A079-NATIVE-ORACLES.json",
+            "bytes": 77455,
+            "sha256": "154ef9b55ab5cdeef74dacb64adba20a7af348d40a494ebcba33c2f899d4abe6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085853",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77455",
+              "1791257172704969881",
+              "1791257172704969881"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies_historical_only",
+        "kind": "added",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          },
+          "A079-NATIVE-ORACLES.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A079-NATIVE-ORACLES.json",
+            "bytes": 77455,
+            "sha256": "154ef9b55ab5cdeef74dacb64adba20a7af348d40a494ebcba33c2f899d4abe6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085853",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77455",
+              "1791257172704969881",
+              "1791257172704969881"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/sol167_rle_transient",
+        "kind": "added",
+        "value": {
+          "schema": "friday.sol167.three-reader-rle-transient.v1",
+          "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+          "generation": 1,
+          "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+          "current_join": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/CURRENT-SOURCE-JOIN.json",
+          "current_join_authority": "Resolve all15/209/aux3 actual names through the sealed outer manifest current_join; inherited metadata pins below marked historical are NOT current image or Source admission.",
+          "decoder": "ALL3 exact same full DS69 decoder. Original raw bytes retained; RLE descriptors use absolute raw offsets and the same count/canonical checks. Run scratch <=65536 is an implementation chunk size, NOT an accepted-data limit. Grow the actual prefix in bounded extends; retain every allocation failure and traceback; no catch/retry/GC.",
+          "successful_private_temporaries": "Run scratch cleared only after all its extends return. Full immutable row validates exact length and SHA and is appended to the original blobs list before chunk/value references end. Failed row does not clear its actual acquired prefix. Canonical mutable nodes/aliases and A308 SAME-table guarded actual retirement stay unchanged.",
+          "cost": "Eliminates per-RLE stored slice and full-count repeated-byte temporary; avoids a prior successful expanded builder overlapping the next row/nodes. Builder capacity plus immutable full output still overlap during conversion/validation. Full raw, all prior blobs, header/nodes, copies/Unicode/errors/tracebacks remain charged. Extra chunk loops/scratch/time/allocator costs UNKNOWN_NOT_ZERO; original256MiB/180s/work170/final10/role shares unchanged; no fit/refund credit.",
+          "required_controls": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver",
+          "F3_F4_F5": "OPEN; failed graphs/whole-workload share/whole CPU unchanged qualification, not solved by local transient reduction.",
+          "Source_execution": false,
+          "author_acceptance": false,
+          "SourceReady": false,
+          "Root_admission": false,
+          "GO": false
+        }
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085844",
+        "after": "3558920"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629893503744",
+        "after": "1791272382503791727"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629894503802",
+        "after": "1791272382504791785"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BOOTSTRAP.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085845",
+        "after": "3558921"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629899504092",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629900338973",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-COMMON.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085847",
+        "after": "3558922"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629909504672",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629910645821",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-CONTRACT.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTRACT.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085846",
+        "after": "3558927"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629904504382",
+        "after": "1791272382545794137"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629905394251",
+        "after": "1791272382546794195"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-NATIVE.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085128",
+        "after": "3558928"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791246261716118308",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085851",
+        "after": "3558930"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629935506179",
+        "after": "1791272382559794940"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629936506237",
+        "after": "1791272382560794998"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-PRODUCER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4225997",
+        "after": "3558931"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-RUNTIME.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/bytes",
+        "kind": "value",
+        "before": 141617,
+        "after": 142333
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230541",
+        "after": "3558933"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "141617",
+        "after": "142333"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382574795801"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382575795858"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SUPERVISOR.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/sha256",
+        "kind": "value",
+        "before": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+        "after": "d01b1e4e106dc9d3e21ebef69317b8826551d999afd2389a072aee6af45cf5ba"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 221603,
+        "after": 222319
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230545",
+        "after": "3558986"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "221603",
+        "after": "222319"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382827810318"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382828810375"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+        "after": "2938eb4812404bc16af83579da954043f0d96d08bcae42f1559b08e5e6e1d242"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085131",
+        "after": "3558991"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791245909368212024",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-STOCK-CALLER.h"
+      }
+    ]
+  },
+  {
+    "name": "A118-CONNECTED-CONTRACT.json",
+    "changes": [
+      {
+        "path": "/current_dependencies/G1/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7084774",
+        "after": "3559125"
+      },
+      {
+        "path": "/current_dependencies/G1/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791241118703607256",
+        "after": "1791272383480847785"
+      },
+      {
+        "path": "/current_dependencies/G1/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791241118703607256",
+        "after": "1791272383480847785"
+      },
+      {
+        "path": "/current_dependencies/G1/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A025-G1.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A025-G1.py"
+      },
+      {
+        "path": "/current_dependencies/R4/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7084773",
+        "after": "3559124"
+      },
+      {
+        "path": "/current_dependencies/R4/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791241132464424231",
+        "after": "1791272383474847441"
+      },
+      {
+        "path": "/current_dependencies/R4/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791241132464424231",
+        "after": "1791272383475847498"
+      },
+      {
+        "path": "/current_dependencies/R4/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A025-G1-R4.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A025-G1-R4.py"
+      },
+      {
+        "path": "/performing_sources/A071-ABI-MAPPING.json/bytes",
+        "kind": "value",
+        "before": 159589,
+        "after": 162659
+      },
+      {
+        "path": "/performing_sources/A071-ABI-MAPPING.json/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085855",
+        "after": "3559127"
+      },
+      {
+        "path": "/performing_sources/A071-ABI-MAPPING.json/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "159589",
+        "after": "162659"
+      },
+      {
+        "path": "/performing_sources/A071-ABI-MAPPING.json/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791257172732971504",
+        "after": "1791272383493848530"
+      },
+      {
+        "path": "/performing_sources/A071-ABI-MAPPING.json/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791257172732971504",
+        "after": "1791272383493848530"
+      },
+      {
+        "path": "/performing_sources/A071-ABI-MAPPING.json/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-ABI-MAPPING.json",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-ABI-MAPPING.json"
+      },
+      {
+        "path": "/performing_sources/A071-ABI-MAPPING.json/sha256",
+        "kind": "value",
+        "before": "ea38cca6256f6d2c649cca64490a1c48818b09136bc3222cc9937aa53d18030d",
+        "after": "b55a05e3d963980f6ace57bfaeabc6f742f0b6ed439a0266880e1756f394434a"
+      },
+      {
+        "path": "/performing_sources/A071-BOOTSTRAP.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085844",
+        "after": "3558920"
+      },
+      {
+        "path": "/performing_sources/A071-BOOTSTRAP.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629893503744",
+        "after": "1791272382503791727"
+      },
+      {
+        "path": "/performing_sources/A071-BOOTSTRAP.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629894503802",
+        "after": "1791272382504791785"
+      },
+      {
+        "path": "/performing_sources/A071-BOOTSTRAP.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BOOTSTRAP.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c"
+      },
+      {
+        "path": "/performing_sources/A071-BUILD-RECIPE.json/bytes",
+        "kind": "value",
+        "before": 183702,
+        "after": 186757
+      },
+      {
+        "path": "/performing_sources/A071-BUILD-RECIPE.json/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085856",
+        "after": "3559128"
+      },
+      {
+        "path": "/performing_sources/A071-BUILD-RECIPE.json/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "183702",
+        "after": "186757"
+      },
+      {
+        "path": "/performing_sources/A071-BUILD-RECIPE.json/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791257172748972432",
+        "after": "1791272383501848989"
+      },
+      {
+        "path": "/performing_sources/A071-BUILD-RECIPE.json/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791257172748972432",
+        "after": "1791272383502849047"
+      },
+      {
+        "path": "/performing_sources/A071-BUILD-RECIPE.json/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BUILD-RECIPE.json",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BUILD-RECIPE.json"
+      },
+      {
+        "path": "/performing_sources/A071-BUILD-RECIPE.json/sha256",
+        "kind": "value",
+        "before": "f400c9eddfeda50a4d986157c8e5fcadf0f610039ceb1cd080ba6b55332f2c8e",
+        "after": "795617c10b3f664e07bcc72f6f78a928a363c368f3ea3a14f0a2cdef83909a7d"
+      },
+      {
+        "path": "/performing_sources/A071-COMMON.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085845",
+        "after": "3558921"
+      },
+      {
+        "path": "/performing_sources/A071-COMMON.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629899504092",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/performing_sources/A071-COMMON.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629900338973",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/performing_sources/A071-COMMON.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-COMMON.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c"
+      },
+      {
+        "path": "/performing_sources/A071-CONTRACT.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085847",
+        "after": "3558922"
+      },
+      {
+        "path": "/performing_sources/A071-CONTRACT.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629909504672",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/performing_sources/A071-CONTRACT.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629910645821",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/performing_sources/A071-CONTRACT.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-CONTRACT.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTRACT.py"
+      },
+      {
+        "path": "/performing_sources/A071-EXECUTOR.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7084778",
+        "after": "3558925"
+      },
+      {
+        "path": "/performing_sources/A071-EXECUTOR.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791241221998739835",
+        "after": "1791272382535793563"
+      },
+      {
+        "path": "/performing_sources/A071-EXECUTOR.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791241221998739835",
+        "after": "1791272382536793621"
+      },
+      {
+        "path": "/performing_sources/A071-EXECUTOR.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A071-EXECUTOR.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-EXECUTOR.py"
+      },
+      {
+        "path": "/performing_sources/A071-NATIVE.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085846",
+        "after": "3558927"
+      },
+      {
+        "path": "/performing_sources/A071-NATIVE.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629904504382",
+        "after": "1791272382545794137"
+      },
+      {
+        "path": "/performing_sources/A071-NATIVE.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629905394251",
+        "after": "1791272382546794195"
+      },
+      {
+        "path": "/performing_sources/A071-NATIVE.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-NATIVE.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h"
+      },
+      {
+        "path": "/performing_sources/A071-OWNED.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085128",
+        "after": "3558928"
+      },
+      {
+        "path": "/performing_sources/A071-OWNED.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791246261716118308",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/performing_sources/A071-OWNED.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/performing_sources/A071-OWNED.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c"
+      },
+      {
+        "path": "/performing_sources/A071-OWNER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4226865",
+        "after": "3558929"
+      },
+      {
+        "path": "/performing_sources/A071-OWNER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1790996759397725275",
+        "after": "1791272382555794711"
+      },
+      {
+        "path": "/performing_sources/A071-OWNER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1790996759397725275",
+        "after": "1791272382556934114"
+      },
+      {
+        "path": "/performing_sources/A071-OWNER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNER.py"
+      },
+      {
+        "path": "/performing_sources/A071-SUPERVISOR.py/bytes",
+        "kind": "value",
+        "before": 141617,
+        "after": 142333
+      },
+      {
+        "path": "/performing_sources/A071-SUPERVISOR.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230541",
+        "after": "3558933"
+      },
+      {
+        "path": "/performing_sources/A071-SUPERVISOR.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "141617",
+        "after": "142333"
+      },
+      {
+        "path": "/performing_sources/A071-SUPERVISOR.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382574795801"
+      },
+      {
+        "path": "/performing_sources/A071-SUPERVISOR.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382575795858"
+      },
+      {
+        "path": "/performing_sources/A071-SUPERVISOR.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SUPERVISOR.py"
+      },
+      {
+        "path": "/performing_sources/A071-SUPERVISOR.py/sha256",
+        "kind": "value",
+        "before": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+        "after": "d01b1e4e106dc9d3e21ebef69317b8826551d999afd2389a072aee6af45cf5ba"
+      },
+      {
+        "path": "/performing_sources/A071-WORKER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7084780",
+        "after": "3558934"
+      },
+      {
+        "path": "/performing_sources/A071-WORKER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791241132464424231",
+        "after": "1791272382580796146"
+      },
+      {
+        "path": "/performing_sources/A071-WORKER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791241132464424231",
+        "after": "1791272382580796146"
+      },
+      {
+        "path": "/performing_sources/A071-WORKER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A071-WORKER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-WORKER.py"
+      },
+      {
+        "path": "/performing_sources/A079-NATIVE-ORACLES.json/bytes",
+        "kind": "value",
+        "before": 77455,
+        "after": 80533
+      },
+      {
+        "path": "/performing_sources/A079-NATIVE-ORACLES.json/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085853",
+        "after": "3559129"
+      },
+      {
+        "path": "/performing_sources/A079-NATIVE-ORACLES.json/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "77455",
+        "after": "80533"
+      },
+      {
+        "path": "/performing_sources/A079-NATIVE-ORACLES.json/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791257172704969881",
+        "after": "1791272383508849392"
+      },
+      {
+        "path": "/performing_sources/A079-NATIVE-ORACLES.json/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791257172704969881",
+        "after": "1791272383508849392"
+      },
+      {
+        "path": "/performing_sources/A079-NATIVE-ORACLES.json/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A079-NATIVE-ORACLES.json",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-ORACLES.json"
+      },
+      {
+        "path": "/performing_sources/A079-NATIVE-ORACLES.json/sha256",
+        "kind": "value",
+        "before": "154ef9b55ab5cdeef74dacb64adba20a7af348d40a494ebcba33c2f899d4abe6",
+        "after": "501c18d2d60c9d6886ea2a8adbb8ba5f923a45226280e416fe268fa367c00ac6"
+      },
+      {
+        "path": "/performing_sources/A087-ABI-CONTRACT.json/bytes",
+        "kind": "value",
+        "before": 77160,
+        "after": 80238
+      },
+      {
+        "path": "/performing_sources/A087-ABI-CONTRACT.json/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085852",
+        "after": "3559130"
+      },
+      {
+        "path": "/performing_sources/A087-ABI-CONTRACT.json/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "77160",
+        "after": "80238"
+      },
+      {
+        "path": "/performing_sources/A087-ABI-CONTRACT.json/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791257172695969359",
+        "after": "1791272383514849735"
+      },
+      {
+        "path": "/performing_sources/A087-ABI-CONTRACT.json/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791257172695969359",
+        "after": "1791272383516757463"
+      },
+      {
+        "path": "/performing_sources/A087-ABI-CONTRACT.json/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-ABI-CONTRACT.json"
+      },
+      {
+        "path": "/performing_sources/A087-ABI-CONTRACT.json/sha256",
+        "kind": "value",
+        "before": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+        "after": "d48c792c1130966f130e61e1eeffbd1810899af5c8987a962cad68f3c531f093"
+      },
+      {
+        "path": "/performing_sources/A087-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 221603,
+        "after": 222319
+      },
+      {
+        "path": "/performing_sources/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230545",
+        "after": "3558986"
+      },
+      {
+        "path": "/performing_sources/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "221603",
+        "after": "222319"
+      },
+      {
+        "path": "/performing_sources/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382827810318"
+      },
+      {
+        "path": "/performing_sources/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382828810375"
+      },
+      {
+        "path": "/performing_sources/A087-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/performing_sources/A087-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+        "after": "2938eb4812404bc16af83579da954043f0d96d08bcae42f1559b08e5e6e1d242"
+      },
+      {
+        "path": "/performing_sources/A104-ORDINARY-CONTRACTS.json/bytes",
+        "kind": "value",
+        "before": 166409,
+        "after": 169446
+      },
+      {
+        "path": "/performing_sources/A104-ORDINARY-CONTRACTS.json/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085854",
+        "after": "3559131"
+      },
+      {
+        "path": "/performing_sources/A104-ORDINARY-CONTRACTS.json/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "166409",
+        "after": "169446"
+      },
+      {
+        "path": "/performing_sources/A104-ORDINARY-CONTRACTS.json/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791257172719970750",
+        "after": "1791272383522850194"
+      },
+      {
+        "path": "/performing_sources/A104-ORDINARY-CONTRACTS.json/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791257172719970750",
+        "after": "1791272383523850252"
+      },
+      {
+        "path": "/performing_sources/A104-ORDINARY-CONTRACTS.json/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A104-ORDINARY-CONTRACTS.json",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A104-ORDINARY-CONTRACTS.json"
+      },
+      {
+        "path": "/performing_sources/A104-ORDINARY-CONTRACTS.json/sha256",
+        "kind": "value",
+        "before": "4ca0d75bbe4866abf4065d61b0d5ff3653e5928e4fbb136a3816f34df70884e6",
+        "after": "1cae058d58aa9e9ffa10dd2f2423c962139c43abb0d154191faf2c21559d83ca"
+      },
+      {
+        "path": "/sol149_legacy_callers/A071-PRODUCER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085851",
+        "after": "3558930"
+      },
+      {
+        "path": "/sol149_legacy_callers/A071-PRODUCER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629935506179",
+        "after": "1791272382559794940"
+      },
+      {
+        "path": "/sol149_legacy_callers/A071-PRODUCER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629936506237",
+        "after": "1791272382560794998"
+      },
+      {
+        "path": "/sol149_legacy_callers/A071-PRODUCER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-PRODUCER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py"
+      },
+      {
+        "path": "/sol149_legacy_callers/A079-NATIVE-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol149_legacy_callers/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol149_legacy_callers/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol149_legacy_callers/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol149_legacy_callers/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol149_legacy_callers/A079-NATIVE-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol149_legacy_callers/A079-NATIVE-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_actual_caller/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol151_actual_caller/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol151_actual_caller/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol151_actual_caller/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_actual_caller/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_actual_caller/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_actual_caller/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies",
+        "kind": "removed",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          },
+          "A079-NATIVE-ORACLES.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A079-NATIVE-ORACLES.json",
+            "bytes": 77455,
+            "sha256": "154ef9b55ab5cdeef74dacb64adba20a7af348d40a494ebcba33c2f899d4abe6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085853",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77455",
+              "1791257172704969881",
+              "1791257172704969881"
+            ],
+            "stable9": true
+          },
+          "A104-ORDINARY-CONTRACTS.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A104-ORDINARY-CONTRACTS.json",
+            "bytes": 166409,
+            "sha256": "4ca0d75bbe4866abf4065d61b0d5ff3653e5928e4fbb136a3816f34df70884e6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085854",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "166409",
+              "1791257172719970750",
+              "1791257172719970750"
+            ],
+            "stable9": true
+          },
+          "A071-ABI-MAPPING.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-ABI-MAPPING.json",
+            "bytes": 159589,
+            "sha256": "ea38cca6256f6d2c649cca64490a1c48818b09136bc3222cc9937aa53d18030d",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085855",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "159589",
+              "1791257172732971504",
+              "1791257172732971504"
+            ],
+            "stable9": true
+          },
+          "A071-BUILD-RECIPE.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BUILD-RECIPE.json",
+            "bytes": 183702,
+            "sha256": "f400c9eddfeda50a4d986157c8e5fcadf0f610039ceb1cd080ba6b55332f2c8e",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085856",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "183702",
+              "1791257172748972432",
+              "1791257172748972432"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/metadata_dependencies_historical_only",
+        "kind": "added",
+        "value": {
+          "A087-ABI-CONTRACT.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A087-ABI-CONTRACT.json",
+            "bytes": 77160,
+            "sha256": "d193d92dbbe50e2d1c6e521fa7301e4f15d946b486229afdb838020b1f9ea35c",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085852",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77160",
+              "1791257172695969359",
+              "1791257172695969359"
+            ],
+            "stable9": true
+          },
+          "A079-NATIVE-ORACLES.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A079-NATIVE-ORACLES.json",
+            "bytes": 77455,
+            "sha256": "154ef9b55ab5cdeef74dacb64adba20a7af348d40a494ebcba33c2f899d4abe6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085853",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "77455",
+              "1791257172704969881",
+              "1791257172704969881"
+            ],
+            "stable9": true
+          },
+          "A104-ORDINARY-CONTRACTS.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A104-ORDINARY-CONTRACTS.json",
+            "bytes": 166409,
+            "sha256": "4ca0d75bbe4866abf4065d61b0d5ff3653e5928e4fbb136a3816f34df70884e6",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085854",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "166409",
+              "1791257172719970750",
+              "1791257172719970750"
+            ],
+            "stable9": true
+          },
+          "A071-ABI-MAPPING.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-ABI-MAPPING.json",
+            "bytes": 159589,
+            "sha256": "ea38cca6256f6d2c649cca64490a1c48818b09136bc3222cc9937aa53d18030d",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085855",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "159589",
+              "1791257172732971504",
+              "1791257172732971504"
+            ],
+            "stable9": true
+          },
+          "A071-BUILD-RECIPE.json": {
+            "path": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BUILD-RECIPE.json",
+            "bytes": 183702,
+            "sha256": "f400c9eddfeda50a4d986157c8e5fcadf0f610039ceb1cd080ba6b55332f2c8e",
+            "identity9_decimal_strings": [
+              "2050",
+              "7085856",
+              "33152",
+              "1000",
+              "1000",
+              "1",
+              "183702",
+              "1791257172748972432",
+              "1791257172748972432"
+            ],
+            "stable9": true
+          }
+        }
+      },
+      {
+        "path": "/sol151_extension/sol167_rle_transient",
+        "kind": "added",
+        "value": {
+          "schema": "friday.sol167.three-reader-rle-transient.v1",
+          "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+          "generation": 1,
+          "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+          "current_join": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/CURRENT-SOURCE-JOIN.json",
+          "current_join_authority": "Resolve all15/209/aux3 actual names through the sealed outer manifest current_join; inherited metadata pins below marked historical are NOT current image or Source admission.",
+          "decoder": "ALL3 exact same full DS69 decoder. Original raw bytes retained; RLE descriptors use absolute raw offsets and the same count/canonical checks. Run scratch <=65536 is an implementation chunk size, NOT an accepted-data limit. Grow the actual prefix in bounded extends; retain every allocation failure and traceback; no catch/retry/GC.",
+          "successful_private_temporaries": "Run scratch cleared only after all its extends return. Full immutable row validates exact length and SHA and is appended to the original blobs list before chunk/value references end. Failed row does not clear its actual acquired prefix. Canonical mutable nodes/aliases and A308 SAME-table guarded actual retirement stay unchanged.",
+          "cost": "Eliminates per-RLE stored slice and full-count repeated-byte temporary; avoids a prior successful expanded builder overlapping the next row/nodes. Builder capacity plus immutable full output still overlap during conversion/validation. Full raw, all prior blobs, header/nodes, copies/Unicode/errors/tracebacks remain charged. Extra chunk loops/scratch/time/allocator costs UNKNOWN_NOT_ZERO; original256MiB/180s/work170/final10/role shares unchanged; no fit/refund credit.",
+          "required_controls": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver",
+          "F3_F4_F5": "OPEN; failed graphs/whole-workload share/whole CPU unchanged qualification, not solved by local transient reduction.",
+          "Source_execution": false,
+          "author_acceptance": false,
+          "SourceReady": false,
+          "Root_admission": false,
+          "GO": false
+        }
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085844",
+        "after": "3558920"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629893503744",
+        "after": "1791272382503791727"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629894503802",
+        "after": "1791272382504791785"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-BOOTSTRAP.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-BOOTSTRAP.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085845",
+        "after": "3558921"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629899504092",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629900338973",
+        "after": "1791272382509792071"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-COMMON.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-COMMON.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085847",
+        "after": "3558922"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629909504672",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629910645821",
+        "after": "1791272382514792359"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-CONTRACT.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-CONTRACT.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTRACT.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085846",
+        "after": "3558927"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629904504382",
+        "after": "1791272382545794137"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629905394251",
+        "after": "1791272382546794195"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-NATIVE.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-NATIVE.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085128",
+        "after": "3558928"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791246261716118308",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382550794424"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-OWNED.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085851",
+        "after": "3558930"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791256629935506179",
+        "after": "1791272382559794940"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791256629936506237",
+        "after": "1791272382560794998"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-PRODUCER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol151-a298-browser-a079-body-provisioner/source/A071-PRODUCER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4225997",
+        "after": "3558931"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1790976216351906203",
+        "after": "1791272382564795228"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-RUNTIME.c/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-RUNTIME.c"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/bytes",
+        "kind": "value",
+        "before": 141617,
+        "after": 142333
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230541",
+        "after": "3558933"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "141617",
+        "after": "142333"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382574795801"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577105520169",
+        "after": "1791272382575795858"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SUPERVISOR.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A071-SUPERVISOR.py/sha256",
+        "kind": "value",
+        "before": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+        "after": "d01b1e4e106dc9d3e21ebef69317b8826551d999afd2389a072aee6af45cf5ba"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 79836,
+        "after": 80552
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230543",
+        "after": "3558936"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "79836",
+        "after": "80552"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269895060803273",
+        "after": "1791272382592035308"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A079-NATIVE-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+        "after": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/bytes",
+        "kind": "value",
+        "before": 221603,
+        "after": 222319
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "4230545",
+        "after": "3558986"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/6",
+        "kind": "value",
+        "before": "221603",
+        "after": "222319"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382827810318"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791269577106520227",
+        "after": "1791272382828810375"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-PUBLIC-DRIVER.py"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A087-PUBLIC-DRIVER.py/sha256",
+        "kind": "value",
+        "before": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+        "after": "2938eb4812404bc16af83579da954043f0d96d08bcae42f1559b08e5e6e1d242"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/1",
+        "kind": "value",
+        "before": "7085131",
+        "after": "3558991"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/7",
+        "kind": "value",
+        "before": "1791245909368212024",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/identity9_decimal_strings/8",
+        "kind": "value",
+        "before": "1791246782838889105",
+        "after": "1791272382850811637"
+      },
+      {
+        "path": "/sol151_extension/current_performing_dependencies/A091-STOCK-CALLER.h/path",
+        "kind": "value",
+        "before": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "after": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-STOCK-CALLER.h"
+      }
+    ]
+  }
+]

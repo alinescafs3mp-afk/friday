@@ -1,0 +1,48 @@
+{
+  "schema": "friday.sol167.rle-prospective-terms.v1",
+  "status": "EXACT_DECLARED_ALLOCATION_DELTA_WITH_WHOLE_SELECTED_IMAGE_FIT_OPEN",
+  "original_caps": {"aggregate_RAM_bytes": 268435456, "interval_seconds": 180, "work_seconds": 170, "final_seconds": 10, "role_shares": "UNCHANGED_REQUIRED_ORIGINAL", "expanded_body_sum_bound": "SOL069_EXPANDED_BYTES=16*1048576 unchanged; not a certificate of whole workload fit"},
+  "symbols": {
+    "W": "Complete resolved physical/inline raw DS69 bytes, all original custody aliases and raw receipts charged once per shared object, not substituted by reference/hash.",
+    "H": "Full header slice/parse tree, rows/nodes/edges/root, containers/integer/string/allocator overhead; unknown not zero.",
+    "L": "ALL live prior immutable decoded body blobs, list/entry/table/alias overhead. Entire body list remains before node construction; no dropped unreachable data.",
+    "S": "Current stored RLE body byte length. Old algorithm sliced all S from raw before validation; new RLE path does not allocate that full slice. Raw codec still allocates its exact complete body as before.",
+    "E": "Current row.bytes <= unchanged cumulative expanded header limit. It is not replaced by digest/count and not truncated.",
+    "C": "One admitted run count,0<C<=E; q=min(C,65536), remainder r<q.",
+    "A(x)": "Actual selected bytearray capacity/headers/allocator state at logical length x; NOT assumed equal x. Extending may allocate and copy overlapping old+new capacity.",
+    "P": "Otherwise stale prior successfully validated RLE builder capacity. Old value local could retain P through later rows and node work; changed success path ends it after full SHA/list custody.",
+    "N": "Number of canonical runs; loop count sum ceil(C_i/65536), not bounded by a reduced run/body domain. Scratch objects/int operations/checks/loop/refcount/allocator work remain charged."
+  },
+  "stage_terms": [
+    {
+      "stage": "CURRENT_RLE_EXPANSION",
+      "old": "W+H+L+S+A(prefix)+full-repeat-C plus actual realloc/copy overlap and overhead; prior value P can overlap construction of a later row until assignment returns.",
+      "new": "W+H+L+A(prefix)+q, and for remainder an additional r<=q-1 bounded slice while scratch q is held; four-byte descriptor count slice and scalars/loops overhead. Reallocation may transiently hold A_old+A_new. No S/full-repeat-C/P after earlier successful row release.",
+      "credit": "Specific stored-slice/full-count repeat allocations removed. q+r <131072 logical bytes at a remainder extend; this is NOT an allocator or whole-process peak bound. q<=65536 alone is not the total RAM cost."
+    },
+    {
+      "stage": "IMMUTABLE_CONVERSION_AND_SHA",
+      "old": "W+H+L+S+A(E)+E plus conversion/hash/allocator overhead (S can overlap until chunk assignment commits).",
+      "new": "W+H+L+A(E)+E plus conversion/hash/allocator overhead. Successful per-run scratch already None. Both mutable builder and complete immutable output remain until SHA and blobs.append return.",
+      "credit": "No claim this unavoidable full builder/output overlap is solved. SHA consumes full bytes; no streamed/hash-only replacement. Failed SHA/append keeps actual builder+immutable chunk and original traceback."
+    },
+    {
+      "stage": "NEXT_ROW_AND_NODE_CONSTRUCTION",
+      "old": "All live blobs + potentially stale final RLE builder + full header/node table/Unicode/bytearray copies/edges, canonical returned graphs and failures.",
+      "new": "All live blobs + full header/node table/Unicode/bytearray copies/edges; successfully completed builder local None. Later node-loop value alias points at original blob. No mutable identity dedup or failed graph/error/traceback release.",
+      "credit": "Successful private builder reference accumulation removed. Not measured deallocation/RSS reduction, refund, failed-prefix recovery or universal last-owner proof."
+    }
+  ],
+  "cpu_time_delta": "Bounded repeats instead of one full-count repetition/extend add quotient loops and may alter bytearray growth/copy counts. Per-run successful scratch release and per-row two None stores are nonzero. Number of new extends =sum ceil(C_i/65536); original count/byte/canonical/SHA checks retained. No total CPU/time improvement or fit claimed; actual selected interpreter/image/allocator/hash/GC/exception costs unknown.",
+  "remaining": {
+    "F1": "A308 scoped normal private graph retirement rejoined unchanged, not whole admission.",
+    "F2": "Specific transient terms improved; complete header parsing, builder+immutable peak, prior bodies, per-node mutable/Unicode copies, physical/native stacks and allocator bounds remain OPEN.",
+    "F3": "ALL actual failed partial graphs/builders/native checks/scratch/tracebacks/ledger/retirement prefixes charged and OPEN; no cleanup on failed rows.",
+    "F4": "Required complete-workload256MiB aggregate/role shares/current admitted source-body domain remain OPEN, not missing owner permission.",
+    "F5": "A302 prefix-scan delta and A306 history-once bytes rejoined; remaining full read/hash/validation/traversal/CPU and added chunk-loop work OPEN. Positive-first and multiple canonical decodes not removed."
+  },
+  "no_lower_domain_new_grant_refund": true,
+  "measured_product_RAM_CPU_IO_time": "NOT_RUN_UNKNOWN_NOT_ZERO",
+  "host_task_budget_is_product_credit": false,
+  "whole_fit": false, "SourceReady": false, "Root_admission": false, "GO": false
+}

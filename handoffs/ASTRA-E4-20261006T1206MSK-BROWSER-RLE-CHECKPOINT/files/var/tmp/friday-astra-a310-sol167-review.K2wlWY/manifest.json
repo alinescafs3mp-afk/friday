@@ -1,0 +1,151 @@
+{
+  "schema": "friday.astra.a310.scoped-review-manifest.v1",
+  "state": "SEALED_SCOPED_STATIC_NONAUTHOR_ACCEPTANCE_NOT_EXECUTION_AUTHORITY",
+  "root": "/var/tmp/friday-astra-a310-sol167-review.K2wlWY",
+  "reviewer": "Astra",
+  "snapshot": {
+    "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/manifest.json",
+    "bytes": 111460,
+    "sha256": "a561b74fca898a7031a4c97cccab223f8ae07eb0f78d70819b5d556d5c0e18e7",
+    "identity9_decimal_strings": [
+      "2050",
+      "3559146",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "111460",
+      "1791272693375627763",
+      "1791272693375627763"
+    ],
+    "stable9": true
+  },
+  "base": {
+    "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json",
+    "bytes": 10781,
+    "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5",
+    "identity9_decimal_strings": [
+      "2050",
+      "4230566",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "10781",
+      "1791270177829870695",
+      "1791270177847283442"
+    ],
+    "stable9": true
+  },
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_SOL167_CONNECTED_THREE_READER_RLE_AND_CURRENT_PIN_JOIN_DELTA_ONLY",
+  "files": [
+    {
+      "path": "/var/tmp/friday-astra-a310-sol167-review.K2wlWY/BOUNDARIES.json",
+      "bytes": 1164,
+      "sha256": "a051a1434d12a390adbcce5c532cccdf48e2a0cd0f491297f583b2154c2647b0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715128",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1164",
+        "1791273713572160957",
+        "1791273713598162449"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a310-sol167-review.K2wlWY/RAW-VERIFICATION.json",
+      "bytes": 227118,
+      "sha256": "1063f914bd05bdf3e7650d6b43fa7b53d7c8896812d5f178b6f0228b2a31f509",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715127",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "227118",
+        "1791273713572160957",
+        "1791273713598162449"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a310-sol167-review.K2wlWY/REQUIRED-CHECKS.json",
+      "bytes": 1257,
+      "sha256": "d886aeafdffc5896426818647c6ac8092a6877992768e62ce125d7c1415b0633",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715129",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1257",
+        "1791273853239174270",
+        "1791273853239174270"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a310-sol167-review.K2wlWY/REVIEW.json",
+      "bytes": 7136,
+      "sha256": "811270f667bb5cf464a71184f89ca4c32dedf7f85986a213d689b7b7f942ebf4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715126",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7136",
+        "1791273747301096146",
+        "1791273747301096146"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a310-sol167-review.K2wlWY/host_verify.py",
+      "bytes": 6218,
+      "sha256": "58678578ca037ab67770a8b4c427e15642cdd938e03cb64f0d85404581bdfb20",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715114",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6218",
+        "1791273599647624600",
+        "1791273599647624600"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a310-sol167-review.K2wlWY/metadata-diff-input.json",
+      "bytes": 153461,
+      "sha256": "9fdaaebac95baddf8217791b4feffa2977f43b92aec7d0b514a38fa76b0a67a4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715113",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "153461",
+        "1791273551300850732",
+        "1791273551329852396"
+      ],
+      "stable9": true
+    }
+  ],
+  "physical_count_with_manifest": 7,
+  "inputs_final_rechecked": 453,
+  "at_msk": "2026-10-06T11:04:13.281753+03:00",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

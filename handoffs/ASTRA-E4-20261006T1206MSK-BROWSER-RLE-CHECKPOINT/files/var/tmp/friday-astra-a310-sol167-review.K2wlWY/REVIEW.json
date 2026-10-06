@@ -1,0 +1,98 @@
+{
+  "schema": "friday.astra.a310.sol167.connected-nonauthor-review.v1",
+  "reviewer": "Astra independent of Sol167 implementation",
+  "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+  "generation": 1,
+  "snapshot": {
+    "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/manifest.json",
+    "bytes": 111460,
+    "sha256": "a561b74fca898a7031a4c97cccab223f8ae07eb0f78d70819b5d556d5c0e18e7",
+    "identity9_decimal_strings": [
+      "2050",
+      "3559146",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "111460",
+      "1791272693375627763",
+      "1791272693375627763"
+    ],
+    "stable9": true
+  },
+  "base": {
+    "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json",
+    "bytes": 10781,
+    "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5",
+    "identity9_decimal_strings": [
+      "2050",
+      "4230566",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "10781",
+      "1791270177829870695",
+      "1791270177847283442"
+    ],
+    "stable9": true
+  },
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_SOL167_CONNECTED_THREE_READER_RLE_AND_CURRENT_PIN_JOIN_DELTA_ONLY",
+  "whole_source_accepted": false,
+  "findings": [],
+  "proofs": [
+    {
+      "id": "A310-B1",
+      "invariant": "Full declared raw/RLE values and original refusal domain at all3 actual callers",
+      "evidence": "All3 full decoder bodies are identical. Independent whole-file reverse of exactly734 old bytes ->1450 new bytes recovers each entire A308 code file; all outside code, strict node/ref/body/check/retirement/terminal paths exact. Actual check is raising need in all3 callers, not a nonraising callback; count>0 gives strictly positive scratch length. No zero-length scratch loop on actual path."
+    },
+    {
+      "id": "A310-B2",
+      "invariant": "Every RLE descriptor and full immutable body preserved",
+      "evidence": "Original nonnegative stored extent and modulo5 give complete descriptors from absolute begin..at in SAME full raw. count canonical predicates run before any expansion. q=min(C,65536)>0; successful extensions consume C=kq+r,0<=r<q, with exact same byte sequence and no reduced expanded domain. Raw codec retains full original slice. Length/full SHA/all blobs/trailer/graph validations remain mandatory. No producer/wire schema or returned root representation change."
+    },
+    {
+      "id": "A310-B3",
+      "invariant": "Private successful temporary retirement, real failure-prefix custody",
+      "evidence": "Per-run scratch reference ends only after actual extensions return. Full immutable bytes are length+SHA-validated AND appended before chunk/value references end. Failed allocation/extend/conversion/SHA/append keeps actual reached prefix and original error/traceback through unchanged callers; no catch/retry/GC/traceback edits. Async failure keeps actual remaining state, not fabricated old locals. Allocation failure timing and bytearray capacity are changed implementation details, NOT old execution credit."
+    },
+    {
+      "id": "A310-B4",
+      "invariant": "Original canonical full-root APIs and A308 actual private graph retirement",
+      "evidence": "Supervisor full_DATA_decode and Public a067 wrapper still perform full sol143_native_check through actual changed inline decoder and return full graphs; default node_owner omitted. A079 publishes entry then decode(owner=entry), full native check, guarded SAME-table/all-node retirement, true marker LAST; those bodies exact inverse-preserved. Decode/check errors never enter successful graph retirement. Full raw, disconnected cycles, mutable identities, error ledgers and mandatory later stream/oracle/retirement/positive-first clauses remain required."
+    },
+    {
+      "id": "A310-B5",
+      "invariant": "Current producer/consumer source pin join, no circular metadata self-pins",
+      "evidence": "230 physical,Source15/current209/aux3 ->212 unique full current pins. Source15 5changed/10same,current209 9changed/200same,aux3same3. Six JSONs differ ONLY in100 actual current pin dictionaries, exact preserved historical metadata_dependencies renamed metadata_dependencies_historical_only, and identical sol167 declaration. Independent normalized metadata equality leaves no unexplained scalar/structural delta. Independent count is100 (94 code/dependency paths and6 JSON paths, including A104 oracle_pin and five A118 performing_sources entries). Author's95 summary is not adopted as the complete changed-container count; all100 verified directly. Old legacy-path pins separately authenticated, not assumed already current by filename."
+    },
+    {
+      "id": "A310-B6",
+      "invariant": "Metadata declaration is not runtime authority",
+      "evidence": "Actual fixed-source manifest join consumes fixed_source_bindings plus mandatory SourceReady/Root/whole counts, not renamed sol151 metadata-dependency key. All3 ordinary runtime reader bodies have neither old metadata_dependencies nor new sol167 key accesses; actual in-tree data call path unchanged. Outer sealed current join binds complete changed metadata without selfhash. This is scoped declarative current-pin compatibility, NOT proof of any missing future external admission/compiler consumer. Such qualification remains open; author-state and SourceReady/Root/GO false preserved."
+    },
+    {
+      "id": "A310-B7",
+      "invariant": "Original resource contract and complete required workload",
+      "evidence": "Removed full stored RLE slice S, full-count temporary C and stale successful builder P. q<=65536 is internal block size, not semantic cap; remaining slice r means scratch logical q+r<131072, not physical bound. Mutable builder+immutable output E, capacity reallocation overlap, headers/all blobs/nodes/Unicode/native/error roots and positive-first remain. Extra sum ceil(C_i/65536) loops/extends are charged UNKNOWN_NOT_ZERO; no guaranteed RAM/CPU/RSS saving or complete256MiB/180s fit claim."
+    }
+  ],
+  "introduced_contradictions": [],
+  "scoped_closure": "F2 avoidable stored-slice/full-count temporary/stale successful-builder retention terms addressed in connected actual three readers. Remaining F2/F3/F4/F5 and entire Browser lifetime/fit/source admission are NOT closed.",
+  "required": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver",
+  "reused_credits": "Only whole-file byte-preserved A302 resolver/A306 history-once/A308 retirement rejoined in changed actual caller context; no old runtime receipt or whole acceptance inherited.",
+  "verification_summary": {
+    "physical": 230,
+    "current_unique": 212,
+    "input_pins": 453,
+    "full_SHA_stat9": true,
+    "metadata_current_pin_containers": 100,
+    "code_files_inverse_exact": 3,
+    "metadata_files_normalized_exact": 6,
+    "Source_execution": false
+  },
+  "limits": "Necessary stock/native/image/compilerABI/authority/whole-resource/last-owner and protected process lifetime qualifications remain open. No full candidate gate newly executable.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

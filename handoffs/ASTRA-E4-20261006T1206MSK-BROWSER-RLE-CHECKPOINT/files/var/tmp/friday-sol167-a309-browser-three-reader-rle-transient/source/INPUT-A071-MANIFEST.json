@@ -1,0 +1,711 @@
+{
+  "schema": "friday.a071.owned-source-manifest.v1",
+  "assignment": "ASTRA-E4-BROWSER-FRESH-FIXTURE-AND-OWNED-CALLER-CLOSURE-A071",
+  "generation": 1,
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "sealed_MSK": "2026-10-01T16:31:09+03:00",
+  "directory": {
+    "path": "/var/tmp/friday-astra-browser-fresh-fixture-owned-caller-a071-g1",
+    "mode": "0700",
+    "uid": 1000,
+    "gid": 1000
+  },
+  "actual_member_count": 77,
+  "actual_member_bytes": 2183871,
+  "members": [
+    {
+      "name": "A071-ABI-MAPPING.json",
+      "bytes": 1223,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "dd88e108d2e75081fc5f753a95643fabb6ff2fabd1a0d69c42ff3ed3f66183b9"
+    },
+    {
+      "name": "A071-BILL.json",
+      "bytes": 106316,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "b9173a3b8eac8d0bd255081cd01fdd76f809601bcca70dccf8ba10c884e47ef5"
+    },
+    {
+      "name": "A071-BOOTSTRAP.c",
+      "bytes": 25562,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "7947d4494f120629b2431e1c2c8fd08a2e53e2bad8b2ddc566a204fc10eb00c5"
+    },
+    {
+      "name": "A071-BUILD-RECIPE.json",
+      "bytes": 3285,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "457db9d3f96f6086eaa6f160e929e762d122d8a81bb1e3680aeb635c93a6ecbf"
+    },
+    {
+      "name": "A071-COMMON.c",
+      "bytes": 13216,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "932393df67e0b77bd1b615e1f044540de5620d9838010d98ca417d925573ed63"
+    },
+    {
+      "name": "A071-CONTRACT.py",
+      "bytes": 19897,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "fd3b4e76558e6821f4829c92c69015840dc595d757aca6bc495ff80ceda8640b"
+    },
+    {
+      "name": "A071-CONTROL-COVERAGE.json",
+      "bytes": 331035,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "615c6db31e76e053bbb91972b29051595f997bfc4d653f44850b89a073418d4c"
+    },
+    {
+      "name": "A071-CONTROLS.py",
+      "bytes": 728,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "27bf4f4e0bcb8361f0ff93dc71983b1d66cf56693b7eb43b09847334d0af562c"
+    },
+    {
+      "name": "A071-EXECUTOR.py",
+      "bytes": 46227,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "a3ecceda097c997bd7e8dfa63e863257a3fe805fde70819b1efb484d9c885226"
+    },
+    {
+      "name": "A071-FULL-CONTROLS.py",
+      "bytes": 55746,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "0efe9eca8f3318b6e8ab010ef8718bd127b251e22831aed7f5498588bbeba8d1"
+    },
+    {
+      "name": "A071-NATIVE.h",
+      "bytes": 4544,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "54e40df8cf76d1ba8e6132d523ffd7299ba06c35594ff38d33e0f7cc72d899c9"
+    },
+    {
+      "name": "A071-OWNED.c",
+      "bytes": 15997,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "247ae13a50c2aa55c8de2ab5ddf1a25c8e0b58721e94f4d8a61d710113579e1a"
+    },
+    {
+      "name": "A071-OWNER.py",
+      "bytes": 7370,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "3b93947879c3c5a7a4c3c468e6698045e4bcba913f8166fb70e38956140b1193"
+    },
+    {
+      "name": "A071-PRODUCER.py",
+      "bytes": 19432,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "731dddf98ad512595809e40d1a2e4580caf130b75bed5200fa6e0064a13a241e"
+    },
+    {
+      "name": "A071-RUNTIME.c",
+      "bytes": 7458,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca"
+    },
+    {
+      "name": "A071-SCHEMA.json",
+      "bytes": 7768,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "7d756e9b7096335afc4581ba222dc6e55dc9bc6eb982b3383c57a8ee09c75c85"
+    },
+    {
+      "name": "A071-SUPERVISOR.py",
+      "bytes": 49335,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "05ecb8743769e14c5137de0381adb3ee7f66244b8fcfc79256febba73cfcf269"
+    },
+    {
+      "name": "A071-WORKER.py",
+      "bytes": 7965,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "21329594e1577649030d0095a547c71e9673a3b7c3cc70a8ba2822c194a60733"
+    },
+    {
+      "name": "DELTA-COMPLEMENT.json",
+      "bytes": 29956,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "a3955b858530d94cd5849153938952b3791ccc30ea5150e494d361c2a99b3831"
+    },
+    {
+      "name": "INDEX.md",
+      "bytes": 2382,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "de733c302bb30670fc9a9e98e2fb5541d61cbcf04860366bbfbb8023c4330916"
+    },
+    {
+      "name": "RAW-DELTA.patch",
+      "bytes": 290788,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2834aca534e74cfffb9932efc0abf867b341f9e958711774fef1e816203302e9"
+    },
+    {
+      "name": "READ-LEDGER.tsv",
+      "bytes": 1331,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "6662a02aaca647e88fcefc15d8aee5d669d8d17e815b43d94402d28be10bdaa6"
+    },
+    {
+      "name": "RESULT.json",
+      "bytes": 8422,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "02f5c6bc9e1c5fa66b06c66d12c342efcab3fb7a37d157a8f4154915cb6561f4"
+    },
+    {
+      "name": "REVIEW-REQUEST.md",
+      "bytes": 2550,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "74d646400bed20d882593b57fe7be554de01fafb8817c529716b1f3820e994ee"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-ABI-MAPPING.json",
+      "bytes": 1222,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "e395295b700f1b76d0f8555bafc2ce6fed78e0d5267c93a426e4a2b0c7af1a87"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-BILL.json",
+      "bytes": 105071,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "a5ad77e70d1a2d540ce2bf18f75da0af760383900a716563ffe1232c5bf36fa1"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+      "bytes": 23716,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "198c895663016ac2a1a6c7a5445c30e640167cd97b0595f474b5a7cd5b945bd9"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-BUILD-RECIPE.json",
+      "bytes": 3285,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "d4780f915524badaedcbb3d17a1b20820e7de80b1b660fd95e7ef0209b97cd9e"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-COMMON.c",
+      "bytes": 13215,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "31cda48199bee974c0204a4662fc9852ddf43f24c9629016fed369823d068fc2"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+      "bytes": 19885,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "93bda86a667817e5cbc06a94c7e0c0b513bfafbb3f891a8696f6b4fbaa973cde"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-CONTROL-COVERAGE.json",
+      "bytes": 277271,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2f47b09ecd8af02f8e910b66b179bbda08412e6046dec72034f9c1c6dd9fe2ca"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+      "bytes": 704,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "4904b585110926cbb5971fff88e04421a366a1c3c856e907b2af9a4f87956460"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+      "bytes": 46216,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "af177f3efaa6b46e2d8905486e9da6afdea32e18c4b3149f24aff4ae2121e733"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+      "bytes": 29558,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "76c717e38b909d5b41e2ff48582dc27e3c4dc82fd0643ac8206748e97b8c70d1"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-NATIVE.h",
+      "bytes": 4317,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "5fc40d1e1417a31bdb71b46f30196d267e64898660746dd1093481af7f800e20"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-OWNED.c",
+      "bytes": 11576,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2a0574d33c4372a3edb2b87b2594bc13f8146d61d62524aa50566230ac83894f"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-OWNER.py",
+      "bytes": 7369,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+      "bytes": 12180,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "dd4249a75e6cfc5124513a91ce5da9506f82ceae61dd6a3011e91a41c859db97"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-RUNTIME.c",
+      "bytes": 7457,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "48a581112f4b3ec16658c2415c9e667144ed7a21a9d839831bf6c8bb6d490e76"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-SCHEMA.json",
+      "bytes": 6504,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "d44887d602d654b89c909a47bbbf5debd45e755793b1830e909757e70c3dfd5c"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+      "bytes": 49327,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "34f4b2585fdc1a721e5c31bd702c02e2e55ee5e4526621ef39f167418ab6552e"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-A066-WORKER.py",
+      "bytes": 7957,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "95da47af5986cd1549edab0c9f3b2832d453ac06032b985e9425a04375457825"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A037.md",
+      "bytes": 4529,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "69a322cf08b8038d9af867f919d8639df4a932fa593ffb3d155a35d325a7b8bc"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A039.md",
+      "bytes": 4566,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "8e04c3d3516e7eb361fb31d7d33e3a45eaa0d523188aa0aba3c75eed3e314da5"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A042.md",
+      "bytes": 4369,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "3339163945188c482239c6c757293fdc02876452630a9739a5608f45bebca8ea"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A046.md",
+      "bytes": 5141,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "7b25a398d47b6ae50eccd1888f841bee0d06c795c38f05c5d418f0d03dc3341c"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A051.md",
+      "bytes": 6304,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "f467bb553668e48132ca0b9bac98b791f97b48c34e1cd2e9595ee4dc08f3ce26"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-CONTRACT-A066.md",
+      "bytes": 2868,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "b7909d2b2f5a3b924765b4a9f13112936389729fda88d990fc0a17559d0a2f5e"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-INDEX.md",
+      "bytes": 1696,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "1e91a4bbed4f32dfb625de12e199cc3562dd3d6d32d7f5c8a574250eae298fa1"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-MANIFEST.json",
+      "bytes": 13182,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "0a519f021c0430a4d8fb08b30fe6912ca8f4f73e0fdef8ef3fb94c06e99082c7"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-READ-LEDGER.tsv",
+      "bytes": 1759,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "f2de95cd4dcbaa478c218068c268a7c36a6460454d2a86b120e69a704cb5679e"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-RESULT.json",
+      "bytes": 9836,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "9d00af0bc3b1b4273c8f23cd55b0c40f4ef9a3e888fb0ef494e2c15a7d807227"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-REVIEW-REQUEST.md",
+      "bytes": 2366,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2c3bb531db846d328f7e963fd78fbf96623fa3d7f0df102a4573cec5e07d02f7"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-ABI-MAPPING.json",
+      "bytes": 2238,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "aec6724c05c20882450acf0c0e14592b0225a324a8d906fb6603c51053269ff3"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BILL.json",
+      "bytes": 104731,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "488e8dc7e16d6aded4d082301f4a7e8ebf8575452a584eb7a9f70d897f7ce650"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+      "bytes": 23717,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "7641f18ca0e9fbe67ed0bab6d70454aace4014c2b7ce6a63dcabf411767fd03e"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BUILD-RECIPE.json",
+      "bytes": 3373,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2c8d0f32fc7eeefea73f5fce4d24d6b2c91b06ad53716b0439fcc8411395c19d"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-COMMON.c",
+      "bytes": 13215,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "9524b0ac2461b824b9c206501911fb0aec3fb55a572acfc5fbc4cf8b2012086f"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+      "bytes": 19703,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "09e0f328547a3bc937c297fa9bc0dfbf4871633fe7ecd6dd3b90fb8d4526fc88"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROL-MATRIX.json",
+      "bytes": 3052,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "ac63be0ab49795fe9d0d20b3ab212c567ba34b7ef2cc7a3986673a1d46418805"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "bytes": 78027,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+      "bytes": 46214,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "92a641025cb078b01418f7ec9e1701181c0d6d680ef5dbf1089279df688753c3"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+      "bytes": 23060,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-NATIVE.h",
+      "bytes": 4278,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "5f269a4494ef7e7c1c2377242b9c407068b6af29abca85c36ff199a3899def17"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c",
+      "bytes": 10649,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "638d84391b4351f06499c1ad5aaa2966e9cc42cdfaf658a2148d25bf264d9290"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNER.py",
+      "bytes": 7369,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+      "bytes": 12182,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2e7fd79e1754588364a76975ffbf9ff1ca7dacf38dbef30659151c241b8e364e"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-RUNTIME.c",
+      "bytes": 7457,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "50ad41fa45923515433ca153c33199e21c8e704db4163861dd35a0e065e1f26f"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SCHEMA.json",
+      "bytes": 6074,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "c8e2d4a30f559c58f121ae0928564809b52c33237924f7f0a834a605c137a96c"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+      "bytes": 49225,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "4b6ad763b0883310445d625414fc178e76b28e36c66ca617a8f92b4a71d3d85f"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py",
+      "bytes": 7958,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "2da91ef0254d5b92aa82e12f2c049ce1ad3940da1a2ae54f0750658cec1b6d66"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-BENIGN-FIXTURES.json",
+      "bytes": 1573,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "64e93fb9fc3f93e3420ad1fb03007416aaffeaea0195532811c4ac380074da4c"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-INDEX.md",
+      "bytes": 1647,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "855d5daade942ae4b1cae99ddf1479fc8e47f7f3fa6f998fb0b7a9c8db8b4239"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-MANIFEST.json",
+      "bytes": 6074,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "3a91f7d1e73f140a68805cf52a6159b29e74a186856289ee67b9d96ca5defcd2"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-READ-LEDGER.tsv",
+      "bytes": 2517,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "41fee460f7d563c6d882040e716153ebc4443da6d8e6f6bb1e0ac9d68edc04eb"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-RESULT.json",
+      "bytes": 5703,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "439f93fe5dbb590928acbc91794ba5a84101a849e01d6066d0382c8892ae0ea9"
+    },
+    {
+      "name": "UPSTREAM-A066-SNAPSHOT-UPSTREAM-REVIEW-REQUEST.md",
+      "bytes": 1856,
+      "mode": "0600",
+      "nlink": 1,
+      "uid": 1000,
+      "gid": 1000,
+      "sha256": "e3c87c5e4481dd543d111565998e140b348a2437270bb0bbc749d29fe322c31a"
+    }
+  ]
+}
+

@@ -1,0 +1,4125 @@
+{
+  "schema": "friday.sol167.final-input-recheck.v1",
+  "pins": [
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL167-TASK.txt",
+      "bytes": 1534,
+      "sha256": "e480397e17ae23a2b0a216ab339584c97765d4192cbe5e2f9063eb7b0e4706da",
+      "identity9_decimal_strings": [
+        "2050",
+        "8536871",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1534",
+        "1791272169288558606",
+        "1791272169305559581"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL167-INPUT-20261006.json",
+      "bytes": 7145,
+      "sha256": "fad9161e47256e53e143390e655b6f47cf33af88370d8ab49ab3864a6909f955",
+      "identity9_decimal_strings": [
+        "2050",
+        "8536870",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7145",
+        "1791272105809916550",
+        "1791272105830917755"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/runtime/ASTRA-E4-SOL167-PRE-TASK-COMPACT-COMPLETED-20261006.json",
+      "bytes": 1902,
+      "sha256": "3e4a35a3a02fa87145b2d47c699e1cc15a40c8de909daf3663e8685590d9cfa3",
+      "identity9_decimal_strings": [
+        "2050",
+        "9069061",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1902",
+        "1791272165608347456",
+        "1791272165608347456"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/runtime/sol-link-sol.binding.json",
+      "bytes": 350,
+      "sha256": "a72763a4bfa8dfdfd1fadf871b5840b3c4f14bd184835fe086a89e62789ae844",
+      "identity9_decimal_strings": [
+        "2050",
+        "9080201",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "350",
+        "1790281611517717660",
+        "1790281611517717660"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/runtime/sol-link-astra.binding.json",
+      "bytes": 1414,
+      "sha256": "2c28e42b4a3081d5e67e1d099b53fb22a77a2adbb4f269c22e435a08babb23b9",
+      "identity9_decimal_strings": [
+        "2050",
+        "9045024",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1414",
+        "1790677650522794536",
+        "1790677650523794594"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/home/jericho/.jericho/runtime/sol-link-native-receipts/ASTRA-SOL167-T1.json",
+      "bytes": 679,
+      "sha256": "6690c49c68a4b5b1881ecb75909df35b8fa49f7baf3c1fa86d524e4c2ca96087",
+      "identity9_decimal_strings": [
+        "2050",
+        "11180397",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "679",
+        "1791272179399038493",
+        "1791272179399138699"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/manifest.json",
+      "bytes": 10781,
+      "sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230566",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10781",
+        "1791270177829870695",
+        "1791270177847283442"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/manifest.json",
+      "bytes": 10524,
+      "sha256": "e9aaacce5b79a820244889712e00319f29be6dcc42c26795d6331c01ea216f7a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849832",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10524",
+        "1791267970351818526",
+        "1791267970368819487"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/CURRENT-SOURCE-JOIN.json",
+      "bytes": 274221,
+      "sha256": "d5e47689f0a1b57230ec7800083f2b7cf28ea74ebf0e25ca682e22bc73c911aa",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230551",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "274221",
+        "1791269951012020586",
+        "1791269951012020586"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/IMPLEMENTATION.json",
+      "bytes": 7910,
+      "sha256": "18d023bddcd1bcea08a2b865316b0ed4112fa5483877028af02fce3c859b154d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230562",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7910",
+        "1791270133206497182",
+        "1791270133227498390"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/RAW-VERIFICATION.json",
+      "bytes": 5969,
+      "sha256": "23708f4541420d79d8e1d300cc67ef54907cc57ea61296e6f880aabd97173450",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230564",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5969",
+        "1791270133206497182",
+        "1791270133227498390"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/REQUIRED-CHECKS.json",
+      "bytes": 3554,
+      "sha256": "4d5f3cc7c9fcc336fe96ae0158c0db9d7b0d3ed6bfda5654cba5b358ccd4ef7d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230563",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3554",
+        "1791270133206497182",
+        "1791270133227498390"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/SOURCE-DELTA.patch",
+      "bytes": 81731,
+      "sha256": "3cca295b70ac51488e0f347b4f9461837919fd1d5d1e2b969fd7ba949a9ee636",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230565",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "81731",
+        "1791270133206497182",
+        "1791270133227498390"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-ABI-MAPPING.json",
+      "bytes": 160473,
+      "sha256": "dab798360e67425c6ca26a39ca508fc19051886a402d7f9038799a76e1dddffc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230534",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "160473",
+        "1791269895141807931",
+        "1791269895141807931"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-BOOTSTRAP.c",
+      "bytes": 78617,
+      "sha256": "af41fbbee1c04c93ac01f8f7157b10004784eac88d1df131e82a8259efd351e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230535",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78617",
+        "1791256629893503744",
+        "1791269499029517516"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-BUILD-RECIPE.json",
+      "bytes": 184596,
+      "sha256": "942f8bfdef4154a738d4fae1a2ebcf11b1ea85ba13def786a213b186e6d1b629",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230536",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "184596",
+        "1791269895143808046",
+        "1791269895143808046"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-COMMON.c",
+      "bytes": 23536,
+      "sha256": "a05d5ff816a0a905e57f03a86b39a60814158b278f3eef17ab9efefe841fe222",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230537",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23536",
+        "1791256629899504092",
+        "1791269499029644457"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-CONTRACT.py",
+      "bytes": 30209,
+      "sha256": "6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230538",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30209",
+        "1791256629909504672",
+        "1791269499029667865"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-NATIVE.h",
+      "bytes": 13204,
+      "sha256": "ec1efbf610c4b015df6e59e0275c8a2b9115b293814631b5387c93f13e10347b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230539",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13204",
+        "1791256629904504382",
+        "1791269499029692531"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-PRODUCER.py",
+      "bytes": 21229,
+      "sha256": "34715072ba19c02d40aa9571051ba41eea99f0fc68ca0a24759c5cbcd2d6b743",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230540",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21229",
+        "1791256629935506179",
+        "1791269499029722536"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A071-SUPERVISOR.py",
+      "bytes": 141617,
+      "sha256": "56ca8abe79ee5e92c23c16f3288981f79d750ae091e17d21a38745ec1c7310b6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230541",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "141617",
+        "1791269577105520169",
+        "1791269577105520169"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-ORACLES.json",
+      "bytes": 78339,
+      "sha256": "5f0ad6d1797f14fcf9a54cb407490c4d89fcdd24a32e858bbb2fae4a87a00844",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230542",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78339",
+        "1791269895143808046",
+        "1791269895143808046"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A079-NATIVE-PUBLIC-DRIVER.py",
+      "bytes": 79836,
+      "sha256": "9aa4d95d3e8b4407f05cf9a8241490729a4118c4a5c20e4ddb765ff6b9ab5ae7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230543",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "79836",
+        "1791269895060803273",
+        "1791269895060803273"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-ABI-CONTRACT.json",
+      "bytes": 78044,
+      "sha256": "a804b0f0d3cd354c7f4639e8ab013c55ebea5981b61adf73f371542ecdc276e5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230544",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78044",
+        "1791269895144808104",
+        "1791269895144808104"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 221603,
+      "sha256": "02885b25f59f6b9cdf3bc5a84ce5618c5b8e66aec87ddc9b9c2375e64fc373be",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230545",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "221603",
+        "1791269577106520227",
+        "1791269577106520227"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A104-ORDINARY-CONTRACTS.json",
+      "bytes": 167293,
+      "sha256": "3339e783980f6d93bcc6d490ceee60a28dbd5aa9074d5a58ffbc80c3227d3859",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230546",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "167293",
+        "1791269895145808162",
+        "1791269895145808162"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a308-browser-decoded-retirement.EqxLF1vF/source/A118-CONNECTED-CONTRACT.json",
+      "bytes": 170363,
+      "sha256": "495e6e1f62d64066687efc961ffb9dc01e0d48f06ce79de4cf5e37daa2d0a6fd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230547",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "170363",
+        "1791269895146808218",
+        "1791269895146808218"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/manifest.json",
+      "bytes": 7877,
+      "sha256": "c4d002a2f275f79bdeb6caa48bf7be334b6be779da5a2ca300c3bd8c6154ab27",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230683",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7877",
+        "1791270789756250295",
+        "1791270789757250353"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol165-a308-browser-success-graph-retirement-review/REVIEW.json",
+      "bytes": 11302,
+      "sha256": "704917d6b2c7bd586d09b350db126ff7d0cc96e1a2f63e3b81751eb706a84749",
+      "identity9_decimal_strings": [
+        "2050",
+        "4230676",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11302",
+        "1791270753089141858",
+        "1791270789720248226"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/CURRENT-SOURCE-JOIN.json",
+      "bytes": 213413,
+      "sha256": "e09fc9179383ec1b0e0384754b6d946845abade6bb5404cc3ab87e05bd9fc134",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849827",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "213413",
+        "1791267857699454675",
+        "1791267857721883264"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A025-G1-R4.py",
+      "bytes": 57456,
+      "sha256": "3d9b65557f37657ec1f620e9faf03bd12adc9a1208a425edadf0751a0363d10a",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084773",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57456",
+        "1791241132464424231",
+        "1791241132464424231"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A025-G1.py",
+      "bytes": 104446,
+      "sha256": "8c8382979b1047777f0141d21e6d76c22032aef7d59d83739e7bebc0d69ec40a",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084774",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "104446",
+        "1791241118703607256",
+        "1791241118703607256"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A069-DATA-CODEC.py",
+      "bytes": 32698,
+      "sha256": "2ba463599fed44a675c411cd78bfe6220165cd4289ddc815c9bd6885dbe09874",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084775",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32698",
+        "1791241118703607256",
+        "1791241118703607256"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-ABI-MAPPING.json",
+      "bytes": 159580,
+      "sha256": "25227eaeb91db1d25980b96bc2564e5e7cf7ef18bdfb927cec5edb99da16c340",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229660",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "159580",
+        "1791267795464939005",
+        "1791267795464939005"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A071-BOOTSTRAP.c",
+      "bytes": 78617,
+      "sha256": "af41fbbee1c04c93ac01f8f7157b10004784eac88d1df131e82a8259efd351e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086420",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78617",
+        "1791256629893503744",
+        "1791260668433791346"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-BUILD-RECIPE.json",
+      "bytes": 183687,
+      "sha256": "c20d66e0020c92fcd685aa1e6dd74acbcfa5c79a654cb1eb929cca42a3e09038",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229661",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "183687",
+        "1791267795467939174",
+        "1791267795467939174"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A071-COMMON.c",
+      "bytes": 23536,
+      "sha256": "a05d5ff816a0a905e57f03a86b39a60814158b278f3eef17ab9efefe841fe222",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086421",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23536",
+        "1791256629899504092",
+        "1791260668433842997"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A071-EXECUTOR.py",
+      "bytes": 75365,
+      "sha256": "528eae1f6cdec9819eb901584d882dda012f17702411c4a5b4db223f7055d768",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084778",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "75365",
+        "1791241221998739835",
+        "1791241221998739835"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A071-NATIVE.h",
+      "bytes": 13204,
+      "sha256": "ec1efbf610c4b015df6e59e0275c8a2b9115b293814631b5387c93f13e10347b",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086422",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13204",
+        "1791256629904504382",
+        "1791260668433869984"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+      "bytes": 43977,
+      "sha256": "e27bd01f01c2cdf6dd881e07c3c3e90148ab1b1e62e0c007903a651d68f5aa54",
+      "identity9_decimal_strings": [
+        "2050",
+        "7085128",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "43977",
+        "1791246261716118308",
+        "1791246782838889105"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol081-sol080-browser-actual-caller-stream-route-deadline-connected-source-closure/source/A071-OWNER.py",
+      "bytes": 9774,
+      "sha256": "b814cedbc2200fc6cb3f61861c1d8d2d42f2730f9fe2592db789159f80321440",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226865",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9774",
+        "1790996759397725275",
+        "1790996759397725275"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A071-SUPERVISOR.py",
+      "bytes": 141121,
+      "sha256": "26b37518fbce5f211a7c65fa5487c1b23fa88c1eb20a7ac94236f0a43661c489",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229653",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "141121",
+        "1791267716925502248",
+        "1791267716925502248"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol140-a291-browser-ordinary-caller-body-both-ends/source/A071-WORKER.py",
+      "bytes": 9557,
+      "sha256": "5131a4191ca4c02a7d2c8705270d04040a89b048a793fb310678d507f20ccdac",
+      "identity9_decimal_strings": [
+        "2050",
+        "7084780",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9557",
+        "1791241132464424231",
+        "1791241132464424231"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 221107,
+      "sha256": "966ccfca8db8da3b9ac30dadfec48a2a6842aa1b44480e328616c6fa9ab8131f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229654",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "221107",
+        "1791267716927502361",
+        "1791267716927502361"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A118-CONNECTED-CONTRACT.json",
+      "bytes": 169438,
+      "sha256": "8c7dc4960faf5467473f7e674af0ecea7fe6414b269b50d98d1bc65a81de54f1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229662",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "169438",
+        "1791267795473602893",
+        "1791267795473602893"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-BILL.json",
+      "bytes": 149014,
+      "sha256": "eb9cc38144f33e25a6a5dc5630fd8b38565d0c75a87a31d69a0a44d1587157cc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225985",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "149014",
+        "1790976216351906203",
+        "1790976216351906203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A071-CONTRACT.py",
+      "bytes": 30209,
+      "sha256": "6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086423",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30209",
+        "1791256629909504672",
+        "1791260668433891284"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTROL-COVERAGE.json",
+      "bytes": 331035,
+      "sha256": "615c6db31e76e053bbb91972b29051595f997bfc4d653f44850b89a073418d4c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225989",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "331035",
+        "1790976216351906203",
+        "1790976216351906203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-CONTROLS.py",
+      "bytes": 276107,
+      "sha256": "315c95540e0472c0c07240a16718d3f6dd991ef500a7096b6c9223afdc1acb5b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225990",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "276107",
+        "1790976216351906203",
+        "1790976216351906203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-FULL-CONTROLS.py",
+      "bytes": 65233,
+      "sha256": "6efe9b3bb6a14678b2d82d1952a5fd42e80b23b2544abf396e5704cb4482a3cb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225992",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "65233",
+        "1790976216351906203",
+        "1790976216351906203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/source/A071-PRODUCER.py",
+      "bytes": 21229,
+      "sha256": "34715072ba19c02d40aa9571051ba41eea99f0fc68ca0a24759c5cbcd2d6b743",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086427",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21229",
+        "1791256629935506179",
+        "1791260668434064348"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+      "bytes": 7458,
+      "sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225997",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7458",
+        "1790976216351906203",
+        "1790976216351906203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-SCHEMA.json",
+      "bytes": 18931,
+      "sha256": "a1ace93c26eca44eaf2f6b623d010bb2da70fc3a74fb086f746721840a636639",
+      "identity9_decimal_strings": [
+        "2050",
+        "4225998",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18931",
+        "1790976216351906203",
+        "1790976216351906203"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A079-CALLER-STATUS-DATA.json",
+      "bytes": 280,
+      "sha256": "f24801464aea2fae3a81ea77d25627986f5a717c639631c348a9ea441720cde7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226001",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "280",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-ORACLES.json",
+      "bytes": 77446,
+      "sha256": "d323995eaf876bd02ea25e0d218c1fcbaa92a187a3d2df327cfc9c0294d39ed6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229658",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "77446",
+        "1791267795467939174",
+        "1791267795467939174"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A079-NATIVE-PUBLIC-DRIVER.py",
+      "bytes": 78170,
+      "sha256": "cdcffcf7dbeb4f3bafe45191ac9e5b56aa1f60e434c9d8c2aaa3f5c7a7e13a48",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229655",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78170",
+        "1791267716924502191",
+        "1791267716924502191"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A079-ORDINARY-POSITIVE-DATA.json",
+      "bytes": 270,
+      "sha256": "4536ca15335392725103545e1ef1027745dfbc6fb2834d0eeab0406cbe0ed2aa",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226004",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "270",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A079-REGISTRY-COVERAGE.json",
+      "bytes": 4539,
+      "sha256": "450e69a264549ac5d3badbe23ad1ee8623bca103cf29a382ba0e4bd9f846be20",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226005",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4539",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A079-WAIT-FLAGS-DATA.json",
+      "bytes": 277,
+      "sha256": "1f94b36280021e99031901576157ab889cf471af6ba32082b394261e85eb5691",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226006",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "277",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A087-ABI-CONTRACT.json",
+      "bytes": 77151,
+      "sha256": "e755d074b06ba58ab3fea731b7a63fec341c8e0c4a108a94bd1be3b00f99b014",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229657",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "77151",
+        "1791267795468939231",
+        "1791267795468939231"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-CALLER-MAP.json",
+      "bytes": 2715,
+      "sha256": "a922823c93577a6433d7abd8a9d7ae78fae42920ccd0fcc79765da37b7a483e9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226008",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2715",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-EXPECTED-CONTROLS.json",
+      "bytes": 35381,
+      "sha256": "0032135e44769f0993f0c4d2389db41485c9dec0de2cc4645fbb207804daebb4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226009",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "35381",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-abort_invalid_ACK.json",
+      "bytes": 231,
+      "sha256": "dfcd096fde7e4fc61c78d7d2cb6d39a6c2806a6ce02079678234e75f06946396",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226010",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "231",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-abort_lost_ACK.json",
+      "bytes": 228,
+      "sha256": "903d0052b3179951bc2a4e0501949e9ce590bde62751ba0ebc6d560b349646ea",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226011",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-abort_positive.json",
+      "bytes": 228,
+      "sha256": "0ebc7de92dd8bd3c18cc27cd0b01d0f9ac5cf7284f4165f23fbf6cbf7ea3a1d4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226012",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_deadline.json",
+      "bytes": 226,
+      "sha256": "26fe311dd2ebca5780d63223d87b85ab1a8aac95a1208ddf8771979ff2ff2636",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226013",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_many_rights.json",
+      "bytes": 229,
+      "sha256": "dd657a4efd8ccb582c7d29355550bb34eda53fca206b8e4b58e5d088bf61f597",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226014",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_origin_gid.json",
+      "bytes": 228,
+      "sha256": "cedca23fe4811e4af9366ac16846fd477a49529f84053dabf1e7e4f6a62c3765",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226015",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_origin_pid.json",
+      "bytes": 228,
+      "sha256": "824d291985107233048dfd7e08204d067af0c40989714bfca0d0ab994e7e22d9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226016",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_origin_uid.json",
+      "bytes": 228,
+      "sha256": "404bd558726cbb599186d1874f3c0aa48cb5ab68d8a398c9830d49152496ad69",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226017",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_owner.json",
+      "bytes": 223,
+      "sha256": "28f84252bdb72a392d887e56203a70d91ba3e2623f252f60278665166e33ad8c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226018",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "223",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_owner_birth.json",
+      "bytes": 229,
+      "sha256": "3da975b7fedadf79efb783b5169928301efede0b91395426abf287bfecf4d113",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226019",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_rights.json",
+      "bytes": 224,
+      "sha256": "163ccdc3fe5fc0ec32eb572d496af8be068fbcd2236f2946d6a483c0220a7acd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226020",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "224",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_role.json",
+      "bytes": 222,
+      "sha256": "7e05656c8c895dcd1172864cf1f99c87ad546246a0bcd5be07e447f6312ab609",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226021",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "222",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_sequence_future.json",
+      "bytes": 233,
+      "sha256": "d937b0eaf77132da0b9cb6c9855ac91b657fac3eaa07143e08dccf6529212dbc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226022",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "233",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_sequence_replay.json",
+      "bytes": 233,
+      "sha256": "70d2b79e35288d6a3da72405333408dbc8f757028e6f9a90ec88198bd28dfd2e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226023",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "233",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-ack_session.json",
+      "bytes": 225,
+      "sha256": "051478a6a02c830c65875f29f5449ce52503cff3028f4d41645c9eac867e4cd2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226024",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "225",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-caller_status_DATA.json",
+      "bytes": 232,
+      "sha256": "20d1b08485c83a15653bff99ccc3b734d4afb46b69380dd9778d8f6556e2c51e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226025",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "232",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-close_denied.json",
+      "bytes": 226,
+      "sha256": "81ebcb569e376fe3eb1f03eb9ff1c757968f5c5d20cd71e26974bd31c63cbf8e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226026",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1790976216352336725",
+        "1790976216352336725"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-copy_birth.json",
+      "bytes": 224,
+      "sha256": "f73abe4c9c6a7f16b41853eab8b8e0ce5fce6447844c823a5482c3ca2019b4d1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226027",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "224",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-copy_pid.json",
+      "bytes": 222,
+      "sha256": "2c586b0f0d3861697d257eee77a9c69c2fae99fec6aea0b5c9f9d16dff0ac02e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226028",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "222",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-copy_pidfd.json",
+      "bytes": 224,
+      "sha256": "cc5ad8e47bc9ee5440a141b14cb6cb4938e001c0a266a9d0891f5872e944530b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226029",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "224",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-copy_role.json",
+      "bytes": 223,
+      "sha256": "242f13c7f4cf666b31b01aa42bd921ee8852f81250bae9ec9a3a6fb43161e9fa",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226030",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "223",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-deadline_expired.json",
+      "bytes": 230,
+      "sha256": "8ac5e45dcb39712a6b1de9823444a452f1f03a07958ad5acb05807c295b36c8f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226031",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-pidfd_closed.json",
+      "bytes": 226,
+      "sha256": "bdd0b4d4b5ab3a6585458214c2c4bb5e89e1a9dc56900ed5b0a41eef7c92d144",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226032",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-pidfd_plaintext.json",
+      "bytes": 229,
+      "sha256": "1ba7ce5e0fbf2e1b5832eef398cbfd379c40606775f5a2b50b308b9b439e3472",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226033",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-positive.json",
+      "bytes": 222,
+      "sha256": "8fe48f7495a8f8f77d65efe3e0781fc32c7e8befe65cc72b825b7390fe02d4e0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226034",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "222",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-reap_invalid_ACK.json",
+      "bytes": 230,
+      "sha256": "d636e8cbc6a4235dc606802952627654c0a8ccdf4f325a7ade028d9820bc47b5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226035",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-reap_lost_ACK.json",
+      "bytes": 227,
+      "sha256": "913914051ced6f9a7ccea1681402823a910e516823976ce867fd38a37db8558d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226036",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "227",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-register_delayed_ACK.json",
+      "bytes": 234,
+      "sha256": "511c2f01a0cd4505517326cde1b909632cb42e0c5d2fefb6c43d1311230e9a32",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226037",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "234",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-register_invalid_ACK.json",
+      "bytes": 234,
+      "sha256": "da4ed7f2cd9a8e3a7d20660c04f4269a78b13c37d64b1a2caad187fefdbb4c3e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226038",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "234",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-register_lost_ACK.json",
+      "bytes": 231,
+      "sha256": "ce96cd82aca5e97852f42fbfe39e4f95df368057f939b6175030484cbe7fb499",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226039",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "231",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-role_invalid.json",
+      "bytes": 226,
+      "sha256": "327f57d3e63fc9758ae36e13917de110aac3803d23c09c3fd9685e4a19847cbe",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226040",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-session_restart.json",
+      "bytes": 229,
+      "sha256": "e3f58ff31e2fcf10c1fccdbe7a8b8c7caab857cdb1b7dcb2a37a9667a81050fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226041",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-signal_denied.json",
+      "bytes": 227,
+      "sha256": "2842e698b1ea34438a87aa298c18168650242dfb62dc63206db33650281e0312",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226042",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "227",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_deadline.json",
+      "bytes": 228,
+      "sha256": "8d2a1aca159d3cea98d0ac1614e1b17847c55ff40d45accda805ad3b75da12ed",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226043",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_origin_gid.json",
+      "bytes": 230,
+      "sha256": "4228475b0b06646a394f849e0222e6c630ddd4db1e14f8e093d1cc2ab2019468",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226044",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_origin_pid.json",
+      "bytes": 230,
+      "sha256": "10f1ab3af95cddf5f59c5d5923148f1305c7b04b0c4e21622bb023c350c4b5f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226045",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_origin_uid.json",
+      "bytes": 230,
+      "sha256": "8b3495afb5547e66ec2c855d716d356b496ff39a00bd6cc20bac0e982d9f658f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226046",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_owner.json",
+      "bytes": 225,
+      "sha256": "6d0be6d6e71b3db57b7323d125e57b26e2ae2eeef45fcb4135b45a1d4e160d6e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226047",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "225",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_owner_birth.json",
+      "bytes": 231,
+      "sha256": "967dace9bc566855b5a77b3635ee2565d0bef4d736dc46bf3e41e5b327014343",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226048",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "231",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_rights.json",
+      "bytes": 226,
+      "sha256": "72fba0e277218d8f13d585d3abbae20a4fa3b4927db6437e17a15aa0de392f9a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226049",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "226",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_role.json",
+      "bytes": 224,
+      "sha256": "c49e92cae56c27e0f4f73c7f691f80f5c44e45a1f957877e4ed3aba388949d7a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226050",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "224",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-start_sequence.json",
+      "bytes": 228,
+      "sha256": "6b351c03e24613e2be3ca79ee45fe0489ec4f44720828c5c81b638ee618d7aac",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226051",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "228",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-transport_closed.json",
+      "bytes": 230,
+      "sha256": "c360df2ef38d395e1c7d2630748bbdc6a154011b9760a8e408922c06c5fd3fb6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226052",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "230",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-INPUT-wait_flags_DATA.json",
+      "bytes": 229,
+      "sha256": "a7d4932df9035a838d5278e1a68af07f91d556cd8602a28a3f397e78165b840e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226053",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "229",
+        "1790976216353336782",
+        "1790976216353336782"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-RESOURCES.json",
+      "bytes": 1820,
+      "sha256": "d8a74df0ede67c2ff1edc8a56cd5ce13dd7f0e3e8695e848e955d37a7581e425",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226055",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1820",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A087-SCOPE-PRESERVATION.json",
+      "bytes": 2065,
+      "sha256": "21a7540ec4afef2c5ba15bfd4fe6e945d1fecd45c21a243043b91dc0a387ef16",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226056",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2065",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A091-ABI-MAPPING.json",
+      "bytes": 9853,
+      "sha256": "a647b86779ad7dc84fa1ff50a5b0d8b9e831f77b2974e8668b1e0bf6c8e812de",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226057",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9853",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A091-EXPECTED-CONTROLS.json",
+      "bytes": 9798,
+      "sha256": "6565cda0ff2a58ada0d543520c58da77aa569b7566baae5ff76236c4c8a6402c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226058",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9798",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+      "bytes": 33691,
+      "sha256": "9e2b4631b6c6346f29b2a8d5bb810063ef236f012fa077a06806747e533df5f3",
+      "identity9_decimal_strings": [
+        "2050",
+        "7085131",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "33691",
+        "1791245909368212024",
+        "1791246782838889105"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-Root_signal_denied.json",
+      "bytes": 134,
+      "sha256": "af7fe96ffa798b9f08dfb9443d856e69a61b2b96c307375c6fd29f1f2ee9499d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226060",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "134",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-Root_signal_positive.json",
+      "bytes": 136,
+      "sha256": "bf988b578eea566c544a41dbe92f31dbf11edf12fb93dac7ffc365404211bb6b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226061",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-Root_transport_close_denied.json",
+      "bytes": 143,
+      "sha256": "0493732e850c41b12a2391720a409b3cd8d26c5a609e2e89ab25bcfa0022c753",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226062",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "143",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-abort_detail.json",
+      "bytes": 128,
+      "sha256": "14fc6e9448b4eb02463e55d4d6528fb8ecc2bab9774d69ea7bd4f5df7f7dce02",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226063",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "128",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-abort_positive.json",
+      "bytes": 130,
+      "sha256": "cdc6ebc45c8cb64b4ae3b92b7d394f288e61d0e455c097e797576be87d52aad6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226064",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "130",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-abort_right.json",
+      "bytes": 127,
+      "sha256": "dee8fc515eff42f7bb851c83441c4185bf586f826c31bdb7ad221fa5876e1819",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226065",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "127",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-abort_without_intent.json",
+      "bytes": 136,
+      "sha256": "569f8d984b54c3ce93bbb207396f27d422ac13b04f7f39feaef05344c656f654",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226066",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-deadline.json",
+      "bytes": 124,
+      "sha256": "19419be7a70c8e164d58664e90a9a498bfdad6d170d07cfa1b7fc988f38044ff",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226067",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-drain_live.json",
+      "bytes": 126,
+      "sha256": "7b06c9a725ff65948286bf40d72a1ccc19853bc7653ee25cacff12f34dc203a1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226068",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "126",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-drain_pending.json",
+      "bytes": 129,
+      "sha256": "1763e6c261af84f38f6461830ef0d3ea03c434a4ad252a6a5c8106795e884595",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226069",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-finish_without_drain.json",
+      "bytes": 136,
+      "sha256": "646292cba47784a5e65178ae68e84da4dd58ea9810fa8e4be286ab262e57a329",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226070",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-frame_session.json",
+      "bytes": 129,
+      "sha256": "79d97be72a875011e83edd29c07d5e12aed82cf180e26594a5ae016dfa09d1fc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226071",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-inherited_start_owner.json",
+      "bytes": 137,
+      "sha256": "e7fbe90bcce384a1e84711f35d5d6d2910a7b466fd097be70842ee9c0ddd07a0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226072",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "137",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-intent_right.json",
+      "bytes": 128,
+      "sha256": "9ac8f47bcab9ab6ba112f5fc23f6996e8c7553f5faebe7b947c302ad374af5af",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226073",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "128",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-origin_birth_argument.json",
+      "bytes": 137,
+      "sha256": "ef9145c2b4c0f17aef38631a78e4619db29808f9efa05c2a6ecb4a4c1a2104cc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226074",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "137",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-origin_parent_argument.json",
+      "bytes": 138,
+      "sha256": "4eb341c563f704e82af4d5c6ba3247120c32e229e55043cbfc740f7023eafa7d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226075",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "138",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-owner.json",
+      "bytes": 121,
+      "sha256": "f7e0f339f399bf2410cc4f6646e139c4acf798ce2b0ad4bf1894f30ca2a3a1c0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226076",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "121",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-owner_birth.json",
+      "bytes": 127,
+      "sha256": "f07b3743b2e814f7dcfcbfafcf87711dadef50137320a269e7d3995a44171c8c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226077",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "127",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-peer_gid.json",
+      "bytes": 124,
+      "sha256": "08f33b1d91414cb83b7d65386504de83e46240483555cca4bc4d7d5861fae5fc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226078",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-peer_pid.json",
+      "bytes": 124,
+      "sha256": "b6b4011c5008536b886cf2fd7679ab9ed5793137ffb96748bb51d8d7855da1bf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226079",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-peer_uid.json",
+      "bytes": 124,
+      "sha256": "bd848e5c3088a64b17c2db1d24cd2fd774f0565a20bb91262e657269d2a47160",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226080",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-pending_timeout.json",
+      "bytes": 131,
+      "sha256": "51be837cf55a8ccbcf1ca56f9f47f649d493bcf918215c834baa6aa6783107ac",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226081",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "131",
+        "1790976216354336839",
+        "1790976216354336839"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-positive.json",
+      "bytes": 124,
+      "sha256": "b8a4cfeacd76d23aa6af44722bd5f10bb5a5826afd3076997786c0598c2d5710",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226082",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-reap_birth.json",
+      "bytes": 126,
+      "sha256": "3caf6b00dc8f4d21135773cf8fe227a814fe5f3169d6750689ea5e10dcb80cda",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226083",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "126",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-reap_invalid_ACK.json",
+      "bytes": 132,
+      "sha256": "4a9592c190fb7fa4ef8ec8fa2050bf37812dba1e17f465b49ce7cc44aa64e2dd",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226084",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "132",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-reap_live.json",
+      "bytes": 125,
+      "sha256": "8a9c273430a3520e9597599763c82adbcf9da90d2f204487635dcca63b5affb9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226085",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "125",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-reap_lost_ACK.json",
+      "bytes": 129,
+      "sha256": "e0d40b4ea72f94b4c7cf14787fad1e0cd0174af96272f11acdc8771a43d8aff5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226086",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-reap_pid.json",
+      "bytes": 124,
+      "sha256": "106e59eae19c4a90463cb236eedb3046d5f8269b367e4174d4f228118d233064",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226087",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "124",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-reap_right.json",
+      "bytes": 126,
+      "sha256": "20268d57bf7d04120b00f06856f8fb0bf7f47b84ef328575e3f9b66fa136d73a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226088",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "126",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-reap_status.json",
+      "bytes": 127,
+      "sha256": "474cdca6dd64fe5a1240d5164c99df62787676f53556d18fe2ebddf5f6d001f6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226089",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "127",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-register_birth.json",
+      "bytes": 130,
+      "sha256": "e72f50ec21f41d3623add628094f5323f962014a6d23d8a1b01d384effe6e071",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226090",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "130",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-register_late.json",
+      "bytes": 129,
+      "sha256": "864a0ba20038195e9af2c1be301fde73a9ff1b3ee18338f858a0b733eca924e9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226091",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "129",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-register_many_rights.json",
+      "bytes": 136,
+      "sha256": "5834c0387334126bcfe1f37c91f011a2c50c371ec2a0c4aaf026403f62f574e6",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226092",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-register_other_owned_pidfd.json",
+      "bytes": 142,
+      "sha256": "90b440ec5019724caeecde8702d6621b66e7c7469b7a63d6c7dc8be53668af05",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226093",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "142",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-register_parent.json",
+      "bytes": 131,
+      "sha256": "cb12a184b81037209857a5a4e787140cb9f7f70bac024931b5177184acb4ca9f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226094",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "131",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-register_plaintext.json",
+      "bytes": 134,
+      "sha256": "1dfbe162c47a13184508643dd08de4cab99cc17bdf157c8f8f3d05201c525be7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226095",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "134",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-register_stale_pidfd.json",
+      "bytes": 136,
+      "sha256": "59f48c56b214f9f88050a95265ab15cf8fc08a84953343a192593d0d8f9d27b8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226096",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-register_without_intent.json",
+      "bytes": 139,
+      "sha256": "7565e5d9a3030e826c7fef0db6dd8ead55f4f071743015d65ea67c466549082c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226097",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "139",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-register_zero_rights.json",
+      "bytes": 136,
+      "sha256": "a3e8d5db7efbc376469f1c527d7744b75a463a27e15ed136816acd8f6de25a2a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226098",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "136",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-role.json",
+      "bytes": 120,
+      "sha256": "0f6d050155414bc9f74299a73122f075f6cbef979d11838b335584755291a9a2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226099",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "120",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-sequence_future.json",
+      "bytes": 131,
+      "sha256": "6ed7900bc1de9d458ab9f9b3932e6bdf04f0c809b87cd2d2795c72e3a48c7adc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226100",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "131",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-sequence_replay.json",
+      "bytes": 131,
+      "sha256": "21e909505d1620a3ef4f5612ba74a390063eb1021b94a56ef1fe6507146d6464",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226101",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "131",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-transport_closed.json",
+      "bytes": 132,
+      "sha256": "294b6bbddffe562b9bd20d970c513e99f9073bc575c715c45980bbf8f8032b37",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226102",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "132",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-type.json",
+      "bytes": 120,
+      "sha256": "1aadc7bfd68b2ec33e87da575a8dde674fae9595eccaaad72c840ba95d010176",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226103",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "120",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-INPUT-version.json",
+      "bytes": 123,
+      "sha256": "313e742e16bd6c0260d78399de085621ff5c7d66dab2a096e301009cd8bc60e1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226104",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "123",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A104-NESTED216-RESIDUALS.json",
+      "bytes": 280122,
+      "sha256": "39a5a7145a14602f258c119fc937f9fb0d35585ae83c8665c0f18d2d704168c8",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226105",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "280122",
+        "1790976216355336897",
+        "1790976216355336897"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a306-browser-history-once.ssA3HE/source/A104-ORDINARY-CONTRACTS.json",
+      "bytes": 166400,
+      "sha256": "408bb3c8ebab4a7f4c1a7a3fdb9c62c982bcd9079a89ea7a570bfbf69111c26b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4229659",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "166400",
+        "1791267795471455068",
+        "1791267795471455068"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/CONTRACT-A071.md",
+      "bytes": 3929,
+      "sha256": "eb46835cea1d30a2f8465b67bf0629529456054b36b80712e8dc255f42356b76",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226107",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3929",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/CONTRACT-A079.md",
+      "bytes": 3798,
+      "sha256": "ac98979759c33f8ddd5207627ff829138e2681efd5be0f1c4ea846420aea3bbb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226108",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3798",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/CONTRACT-A087.md",
+      "bytes": 4685,
+      "sha256": "70575fdf6233697215e5add3e673cd0d6e08a759f44cbbc912a8550899c0c955",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226109",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4685",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/DELTA-COMPLEMENT.json",
+      "bytes": 41604,
+      "sha256": "f7cbe7844d92faeb5a90a168560a837009c1543757b23df42ca7e64f63a981d9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226110",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "41604",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INDEX.md",
+      "bytes": 2151,
+      "sha256": "fd6529b551b069d7678717fc1760586fa8715f1147cc7fa01a760e252216b7d5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226111",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2151",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A071-MANIFEST.json",
+      "bytes": 19586,
+      "sha256": "5e4e8f95c1b6ccd4b13ca8fc1dd1e12dbb807caa5da682b26dfd42098e9c6aaa",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226112",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19586",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-ABI-MAPPING.json",
+      "bytes": 2173,
+      "sha256": "1cbd33a0f2999dde9886e7509d26fa2c056c92ce664925dd2fb59275599fc8e4",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226113",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2173",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-BOOTSTRAP.c",
+      "bytes": 27697,
+      "sha256": "fb4dc6a35d460d5fa9c41b4d5083a2b7ad0a4a0f997c66ba789367065180a01a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226114",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27697",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-BUILD-RECIPE.json",
+      "bytes": 3340,
+      "sha256": "5c62653f9bb767067ca3bcba87d396fb0812b1d7f0fef030855b4e8d7723fee0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226115",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3340",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-COMMON.c",
+      "bytes": 13216,
+      "sha256": "932393df67e0b77bd1b615e1f044540de5620d9838010d98ca417d925573ed63",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226116",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13216",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTRACT.py",
+      "bytes": 21170,
+      "sha256": "8ecd1009c613b21b119f5b393256eb239b17ad8515b06b057552d566cab01aa2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226117",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21170",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-CONTROLS.py",
+      "bytes": 8976,
+      "sha256": "69aab635f72a3bd8521f2812b034ca6fd4a4da09c0108cc1fbe4adc0fd28fc49",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226118",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8976",
+        "1790976216356336954",
+        "1790976216356336954"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-EXECUTOR.py",
+      "bytes": 46228,
+      "sha256": "a06660c9c8abbb3562083ab020e02c7097cdab52ee661f86dd018174508133f5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226119",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46228",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-NATIVE.h",
+      "bytes": 5310,
+      "sha256": "71ec4f8edf1d460f140c2da7737a9fac1e5c4fdce2b1347b62c2388793d53be0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226120",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5310",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-OWNED.c",
+      "bytes": 24872,
+      "sha256": "a508fdb07cd41fd4995aee597269838b5002acafb1986ecf54f1fcfcf7bb0ecc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226121",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24872",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-OWNER.py",
+      "bytes": 7757,
+      "sha256": "5b7711388865e464f9b3f30a2c1d250fdc33645d742a7776d457805e4557a6cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226122",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7757",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-PRODUCER.py",
+      "bytes": 19436,
+      "sha256": "0d09bbe45fd6eb839672532412c7234eaa46ff2d84ea131efa006ef925cc4b3c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226123",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19436",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-SUPERVISOR.py",
+      "bytes": 50384,
+      "sha256": "b13434128b413ebe730110d9cba0fb559a45c4cc5e9de0f38439b3681498cb53",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226124",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "50384",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-CURRENT-A071-WORKER.py",
+      "bytes": 7966,
+      "sha256": "64fe2967b220aa5fe17872913fcf5d03c5f0818e7d2f81491cec607eaa7dc534",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226125",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7966",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-DELTA-COMPLEMENT.json",
+      "bytes": 31995,
+      "sha256": "23d573b421f88938a33682e35fef9ebf897fbd1fa589094f2b1222a3d2460d4d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226126",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31995",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-INDEX.md",
+      "bytes": 2674,
+      "sha256": "c27d60165426fc52ea9991a8842d1728c149a5fbd54404ec1697015e261f662d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226127",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2674",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-MANIFEST.json",
+      "bytes": 25268,
+      "sha256": "395c6e3e0ba12324e158730d5918a1bf77e61fea95a23ba3d2b62f6bdd1dd674",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226128",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25268",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-RAW-DELTA.patch",
+      "bytes": 98050,
+      "sha256": "ec50e5c5102bdc75acb92772da036ceb2f8a04b7693b9dae5b76745067d46e4c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226129",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "98050",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-READ-LEDGER.tsv",
+      "bytes": 1340,
+      "sha256": "8b0b7b06c551c958525ef2961f3c4f20223de9b029414dd789f32bc56c1d5aa0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226130",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1340",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-RESULT.json",
+      "bytes": 8429,
+      "sha256": "93d53a0ef85de6f095ab92b20cab01fe2a577f707c99e3b48a0c153772d2612f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226131",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8429",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/INPUT-A079-REVIEW-REQUEST.md",
+      "bytes": 2316,
+      "sha256": "1fd82a04c37061613fc39d3245584f3eb8d4567edcc9dc663cec9c7dae853f34",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226132",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2316",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/RAW-DELTA.patch",
+      "bytes": 171773,
+      "sha256": "2666aa7313acbe5f5a9dff0263796529afaaf1863d171b0cf5e496c4c8e81e06",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226133",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "171773",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/READ-LEDGER.tsv",
+      "bytes": 1871,
+      "sha256": "1b3c29b046d98169610b95ea0ff9e0978663f5678d5aa8f9ef4a1e69b1be3256",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226134",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1871",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/RESULT.json",
+      "bytes": 7212,
+      "sha256": "80cddfa04065d1a10dead34cd3911fa11b141d1d52a228b11232f87abef5d46b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226135",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7212",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/REVIEW-A087.md",
+      "bytes": 2809,
+      "sha256": "c84e9fbbba05c5462ed01d440e802207026f092087d3c7d3d70a51109d8aa90b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226136",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2809",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/REVIEW-REQUEST.md",
+      "bytes": 402,
+      "sha256": "fcec6bb7124c15c50235850ac60ca78bd2fd98073222a1cd044671036739ab88",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226137",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "402",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-ABI-MAPPING.json",
+      "bytes": 1222,
+      "sha256": "e395295b700f1b76d0f8555bafc2ce6fed78e0d5267c93a426e4a2b0c7af1a87",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226138",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1222",
+        "1790976216357337012",
+        "1790976216357337012"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-BILL.json",
+      "bytes": 105071,
+      "sha256": "a5ad77e70d1a2d540ce2bf18f75da0af760383900a716563ffe1232c5bf36fa1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226139",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "105071",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-BOOTSTRAP.c",
+      "bytes": 23716,
+      "sha256": "198c895663016ac2a1a6c7a5445c30e640167cd97b0595f474b5a7cd5b945bd9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226140",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23716",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-BUILD-RECIPE.json",
+      "bytes": 3285,
+      "sha256": "d4780f915524badaedcbb3d17a1b20820e7de80b1b660fd95e7ef0209b97cd9e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226141",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3285",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-COMMON.c",
+      "bytes": 13215,
+      "sha256": "31cda48199bee974c0204a4662fc9852ddf43f24c9629016fed369823d068fc2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226142",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13215",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTRACT.py",
+      "bytes": 19885,
+      "sha256": "93bda86a667817e5cbc06a94c7e0c0b513bfafbb3f891a8696f6b4fbaa973cde",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226143",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19885",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROL-COVERAGE.json",
+      "bytes": 277271,
+      "sha256": "2f47b09ecd8af02f8e910b66b179bbda08412e6046dec72034f9c1c6dd9fe2ca",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226144",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "277271",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-CONTROLS.py",
+      "bytes": 704,
+      "sha256": "4904b585110926cbb5971fff88e04421a366a1c3c856e907b2af9a4f87956460",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226145",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "704",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-EXECUTOR.py",
+      "bytes": 46216,
+      "sha256": "af177f3efaa6b46e2d8905486e9da6afdea32e18c4b3149f24aff4ae2121e733",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226146",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46216",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-FULL-CONTROLS.py",
+      "bytes": 29558,
+      "sha256": "76c717e38b909d5b41e2ff48582dc27e3c4dc82fd0643ac8206748e97b8c70d1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226147",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "29558",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-NATIVE.h",
+      "bytes": 4317,
+      "sha256": "5fc40d1e1417a31bdb71b46f30196d267e64898660746dd1093481af7f800e20",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226148",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4317",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-OWNED.c",
+      "bytes": 11576,
+      "sha256": "2a0574d33c4372a3edb2b87b2594bc13f8146d61d62524aa50566230ac83894f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226149",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11576",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-OWNER.py",
+      "bytes": 7369,
+      "sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226150",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7369",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-PRODUCER.py",
+      "bytes": 12180,
+      "sha256": "dd4249a75e6cfc5124513a91ce5da9506f82ceae61dd6a3011e91a41c859db97",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226151",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12180",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-RUNTIME.c",
+      "bytes": 7457,
+      "sha256": "48a581112f4b3ec16658c2415c9e667144ed7a21a9d839831bf6c8bb6d490e76",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226152",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7457",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SCHEMA.json",
+      "bytes": 6504,
+      "sha256": "d44887d602d654b89c909a47bbbf5debd45e755793b1830e909757e70c3dfd5c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226153",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6504",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-SUPERVISOR.py",
+      "bytes": 49327,
+      "sha256": "34f4b2585fdc1a721e5c31bd702c02e2e55ee5e4526621ef39f167418ab6552e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226154",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49327",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-A066-WORKER.py",
+      "bytes": 7957,
+      "sha256": "95da47af5986cd1549edab0c9f3b2832d453ac06032b985e9425a04375457825",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226155",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7957",
+        "1790976216358337069",
+        "1790976216358337069"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A037.md",
+      "bytes": 4529,
+      "sha256": "69a322cf08b8038d9af867f919d8639df4a932fa593ffb3d155a35d325a7b8bc",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226156",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4529",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A039.md",
+      "bytes": 4566,
+      "sha256": "8e04c3d3516e7eb361fb31d7d33e3a45eaa0d523188aa0aba3c75eed3e314da5",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226157",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4566",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A042.md",
+      "bytes": 4369,
+      "sha256": "3339163945188c482239c6c757293fdc02876452630a9739a5608f45bebca8ea",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226158",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4369",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A046.md",
+      "bytes": 5141,
+      "sha256": "7b25a398d47b6ae50eccd1888f841bee0d06c795c38f05c5d418f0d03dc3341c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226159",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5141",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A051.md",
+      "bytes": 6304,
+      "sha256": "f467bb553668e48132ca0b9bac98b791f97b48c34e1cd2e9595ee4dc08f3ce26",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226160",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6304",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-CONTRACT-A066.md",
+      "bytes": 2868,
+      "sha256": "b7909d2b2f5a3b924765b4a9f13112936389729fda88d990fc0a17559d0a2f5e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226161",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2868",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-INDEX.md",
+      "bytes": 1696,
+      "sha256": "1e91a4bbed4f32dfb625de12e199cc3562dd3d6d32d7f5c8a574250eae298fa1",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226162",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1696",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-MANIFEST.json",
+      "bytes": 13182,
+      "sha256": "0a519f021c0430a4d8fb08b30fe6912ca8f4f73e0fdef8ef3fb94c06e99082c7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226163",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13182",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-READ-LEDGER.tsv",
+      "bytes": 1759,
+      "sha256": "f2de95cd4dcbaa478c218068c268a7c36a6460454d2a86b120e69a704cb5679e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226164",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1759",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-RESULT.json",
+      "bytes": 9836,
+      "sha256": "9d00af0bc3b1b4273c8f23cd55b0c40f4ef9a3e888fb0ef494e2c15a7d807227",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226165",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9836",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-REVIEW-REQUEST.md",
+      "bytes": 2366,
+      "sha256": "2c3bb531db846d328f7e963fd78fbf96623fa3d7f0df102a4573cec5e07d02f7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226166",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2366",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-ABI-MAPPING.json",
+      "bytes": 2238,
+      "sha256": "aec6724c05c20882450acf0c0e14592b0225a324a8d906fb6603c51053269ff3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226167",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2238",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BILL.json",
+      "bytes": 104731,
+      "sha256": "488e8dc7e16d6aded4d082301f4a7e8ebf8575452a584eb7a9f70d897f7ce650",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226168",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "104731",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BOOTSTRAP.c",
+      "bytes": 23717,
+      "sha256": "7641f18ca0e9fbe67ed0bab6d70454aace4014c2b7ce6a63dcabf411767fd03e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226169",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23717",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-BUILD-RECIPE.json",
+      "bytes": 3373,
+      "sha256": "2c8d0f32fc7eeefea73f5fce4d24d6b2c91b06ad53716b0439fcc8411395c19d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226170",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3373",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-COMMON.c",
+      "bytes": 13215,
+      "sha256": "9524b0ac2461b824b9c206501911fb0aec3fb55a572acfc5fbc4cf8b2012086f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226171",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13215",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTRACT.py",
+      "bytes": 19703,
+      "sha256": "09e0f328547a3bc937c297fa9bc0dfbf4871633fe7ecd6dd3b90fb8d4526fc88",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226172",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19703",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROL-MATRIX.json",
+      "bytes": 3052,
+      "sha256": "ac63be0ab49795fe9d0d20b3ab212c567ba34b7ef2cc7a3986673a1d46418805",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226173",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3052",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-CONTROLS.py",
+      "bytes": 78027,
+      "sha256": "c2adf32f37a7c5e0c2fb6d12da262b9653812403106e2d99ee92e520a36b4feb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226174",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "78027",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-EXECUTOR.py",
+      "bytes": 46214,
+      "sha256": "92a641025cb078b01418f7ec9e1701181c0d6d680ef5dbf1089279df688753c3",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226175",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46214",
+        "1790976216359337127",
+        "1790976216359337127"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-FULL-CONTROLS.py",
+      "bytes": 23060,
+      "sha256": "4cf31b28fadc06b261353d5a6cab7404709ba50c2b72054e707b90c82c9facbf",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226176",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23060",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-NATIVE.h",
+      "bytes": 4278,
+      "sha256": "5f269a4494ef7e7c1c2377242b9c407068b6af29abca85c36ff199a3899def17",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226177",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4278",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNED.c",
+      "bytes": 10649,
+      "sha256": "638d84391b4351f06499c1ad5aaa2966e9cc42cdfaf658a2148d25bf264d9290",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226178",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "10649",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-OWNER.py",
+      "bytes": 7369,
+      "sha256": "cb30b8b615e0bdceda5ee933945d3ab603ee747bbb5b30970cb8b54627e54155",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226179",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7369",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-PRODUCER.py",
+      "bytes": 12182,
+      "sha256": "2e7fd79e1754588364a76975ffbf9ff1ca7dacf38dbef30659151c241b8e364e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226180",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12182",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-RUNTIME.c",
+      "bytes": 7457,
+      "sha256": "50ad41fa45923515433ca153c33199e21c8e704db4163861dd35a0e065e1f26f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226181",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7457",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SCHEMA.json",
+      "bytes": 6074,
+      "sha256": "c8e2d4a30f559c58f121ae0928564809b52c33237924f7f0a834a605c137a96c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226182",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6074",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-SUPERVISOR.py",
+      "bytes": 49225,
+      "sha256": "4b6ad763b0883310445d625414fc178e76b28e36c66ca617a8f92b4a71d3d85f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226183",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49225",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-A061-WORKER.py",
+      "bytes": 7958,
+      "sha256": "2da91ef0254d5b92aa82e12f2c049ce1ad3940da1a2ae54f0750658cec1b6d66",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226184",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7958",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-BENIGN-FIXTURES.json",
+      "bytes": 1573,
+      "sha256": "64e93fb9fc3f93e3420ad1fb03007416aaffeaea0195532811c4ac380074da4c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226185",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1573",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-INDEX.md",
+      "bytes": 1647,
+      "sha256": "855d5daade942ae4b1cae99ddf1479fc8e47f7f3fa6f998fb0b7a9c8db8b4239",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226186",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1647",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-MANIFEST.json",
+      "bytes": 6074,
+      "sha256": "3a91f7d1e73f140a68805cf52a6159b29e74a186856289ee67b9d96ca5defcd2",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226187",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6074",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-READ-LEDGER.tsv",
+      "bytes": 2517,
+      "sha256": "41fee460f7d563c6d882040e716153ebc4443da6d8e6f6bb1e0ac9d68edc04eb",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226188",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2517",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-RESULT.json",
+      "bytes": 5703,
+      "sha256": "439f93fe5dbb590928acbc91794ba5a84101a849e01d6066d0382c8892ae0ea9",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226189",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5703",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/UPSTREAM-A066-SNAPSHOT-UPSTREAM-REVIEW-REQUEST.md",
+      "bytes": 1856,
+      "sha256": "e3c87c5e4481dd543d111565998e140b348a2437270bb0bbc749d29fe322c31a",
+      "identity9_decimal_strings": [
+        "2050",
+        "4226190",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1856",
+        "1790976216360337184",
+        "1790976216360337184"
+      ],
+      "stable9": true
+    }
+  ],
+  "all_full_sha_stable9": true,
+  "all_original_inputs_unchanged": true,
+  "current212_full_sha_stable9": "EXACT",
+  "fresh_source_physical_membership": "EXACT_212",
+  "native_checkpoint_count": 0,
+  "Source_execution": false
+}

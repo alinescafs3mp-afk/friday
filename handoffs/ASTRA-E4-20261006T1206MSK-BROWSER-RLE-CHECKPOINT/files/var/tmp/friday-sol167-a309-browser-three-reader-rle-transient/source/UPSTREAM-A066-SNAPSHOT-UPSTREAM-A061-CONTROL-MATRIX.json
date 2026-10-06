@@ -1,0 +1,74 @@
+{
+  "schema": "friday.a061.whole-control-obligation-map.v1",
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "inherited": {
+    "old": 157,
+    "new_A046": 59,
+    "total": 216,
+    "exact_membership": "A061-BILL.json.control_map",
+    "body": "A061-CONTROLS.py",
+    "execution": "NOT_RUN",
+    "mapping_credit": "Preserved source, not accepted whole registry integration"
+  },
+  "A051_full": {
+    "total": 8,
+    "exact_membership": "A061-BILL.json.full_consumer_control_map",
+    "written_five_exact_negative_oracles": true,
+    "independent_positive_before_each_negative": true,
+    "execution": "NOT_RUN"
+  },
+  "new_guards": {
+    "count": 63,
+    "source_pin": 19,
+    "source_seal": 18,
+    "OS": 9,
+    "image": 17,
+    "source": "A061-FULL-CONTROLS.py.GUARDS, guard_primitive and guard_oracle",
+    "same_public_entry": "native --held-a061",
+    "expected": "exact primitive stage/errno, REFUSED, zero effects/body/hash/material, owned exit77",
+    "corpus": "SOURCE_INCOMPLETE: independently specified complete per-delta inert DATA constructors and sealed future bundle handoff absent. Caller enum/expected-stage alone is NOT a complete consumer control."
+  },
+  "required_registry_controls": {
+    "status": "SOURCE_INCOMPLETE",
+    "required": [
+      "session",
+      "SCM_CREDENTIALS PID UID GID",
+      "sequence and role",
+      "deadline",
+      "SCM_RIGHTS count/type",
+      "actual direct PID/pidfd",
+      "start-generation and owner-generation",
+      "barrier before effects",
+      "INTENT/REGISTER/ABORT ACK",
+      "STOP/reap ACK",
+      "lost/incomplete/unknown cleanup stickySTOP_UNCONFIRMED",
+      "all216 owned-fork producer fixed coordinator compatibility"
+    ],
+    "already_written": "Actual production native guards and owned-only registry storage; these are implementation guards, not the missing independent consumer fixture/oracle callers.",
+    "safe_alternative": "Inert typed data and actual admitted OWNED benign handles in isolated positive+negative same graph, no foreign process signal or guessed handle; unsafe operational controls remain NOT_PROVEN without waiver."
+  },
+  "positive": {
+    "mode": 4,
+    "source_fixture": "prepare_fixture creates inert DATA only",
+    "entry": "run_held positive then run_pair",
+    "connection": "static native -> protected same-index interpreter/runtime -> supervisor.main -> execute_core -> NativeOwner.wave -> C registry+spawn -> same G1.worker with bounded benign HTTP fixture",
+    "authority": "NOT_GRANTED"
+  },
+  "remaining": [
+    "Complete registry consumer source controls",
+    "Complete new guard DATA corpus and independent handoff",
+    "Every216 nested producer authoritative fixed-coordinator mapping review, no structural/count-only acceptance"
+  ],
+  "observations": {
+    "compile": "NOT_RUN",
+    "import": "NOT_RUN",
+    "AST_compile": "NOT_RUN",
+    "controls": "NOT_RUN",
+    "kernel": "NOT_PROVEN",
+    "root": "NOT_PROVEN",
+    "image": "NOT_PROVEN",
+    "runtime": "NOT_PROVEN",
+    "GET": 0,
+    "archive_bodies_read": 0
+  }
+}

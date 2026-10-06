@@ -1,0 +1,32 @@
+{
+  "schema": "friday.sol167.result.v1",
+  "event": "SOL-SOL167-R1",
+  "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+  "generation": 1,
+  "decision": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+  "manifest": {
+    "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/manifest.json",
+    "bytes": 111460,
+    "sha256": "a561b74fca898a7031a4c97cccab223f8ae07eb0f78d70819b5d556d5c0e18e7",
+    "identity9_decimal_strings": [
+      "2050",
+      "3559146",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "111460",
+      "1791272693375627763",
+      "1791272693375627763"
+    ],
+    "stable9": true
+  },
+  "summary": "ALL3 identical complete DS69 decoders: direct SAME raw RLE descriptor offsets, bounded 64KiB run scratch, full count/value/SHA/graph/identity checks; successful private builder ends only after immutable full body validated and appended. Default canonical roots and actual A079 native-check/A308 guarded SAME-table retirement unchanged. No failure cleanup/retry/GC.",
+  "inventory": "Source15 5changed/10same; current209 9changed/200same; aux3 unchanged; fresh physical212 + complete current join. All9 raw inverses exact. ALL6 contracts/95 current pins coherent; inherited metadata pins explicitly historical, no circular current self-hash.",
+  "qualification": "95 host raw observations/10 safe spans; NOT Source tests. No own acceptance. Astra changed source/schema/context review REQUIRED.",
+  "resources": "Specific S/full-count-repeat/stale-success-builder terms removed; builder+immutable E/reallocation/all blobs/errors remain. Extra loops UNKNOWN_NOT_ZERO; remaining F2/F3/F4/F5/whole256MiB180s fit OPEN.",
+  "controls": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver. Source execution0/local1/children0/heavy0. Protected/stopped scope excluded.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

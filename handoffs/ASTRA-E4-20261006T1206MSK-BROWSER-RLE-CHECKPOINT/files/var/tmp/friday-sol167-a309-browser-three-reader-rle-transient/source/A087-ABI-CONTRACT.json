@@ -1,0 +1,1423 @@
+{
+  "schema": "friday.a087.native-public-ABI.v1",
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "architecture": "Linux x86_64; fixed packed little-endian wire; native x86_64 C/ctypes public copies",
+  "unchanged_wire": {
+    "capsule": 848,
+    "OS": 208,
+    "image_header": 56,
+    "image_member": 1088,
+    "packet": 96,
+    "packet_types": "1..14 unchanged",
+    "source_roles": 19
+  },
+  "unchanged_public": {
+    "fr_child": 32,
+    "fr_observation": 96,
+    "fr_fixture_wait": "int(int,int,int,int*)"
+  },
+  "new_public": {
+    "fr_receive_receipt": 440,
+    "fr_evidence": 13032,
+    "fr_own_fork": "int(int,unsigned,uint64_t,fr_child*)",
+    "fr_own_observe": "int(fr_child*,fr_observation*)",
+    "fr_own_evidence": "int(fr_child*,fr_evidence*)",
+    "fr_session_evidence": "int(fr_evidence*)",
+    "fr_session_close": "int(void)",
+    "fr_local_restrict": "int(unsigned,int)",
+    "fr_evidence_bytes": "int(void)->13032",
+    "fr_root_row_bytes": "int(void)->636",
+    "fr_root_row_codec_version": "int(void)->2"
+  },
+  "evidence_layout": {
+    "prefix": "version,phase,stage:u32;primitive_errno:i32; observed_pid/uid/gid,expected_pid/uid/gid:i32; rights,rights_closed:u32;rights_close_errno:i32; ready_released,signal_attempts,close_attempts,transport_close_attempts,status_redacted:u32",
+    "timestamps": "10*u64: intent_ack,clone,register_send,register_ack,release,wait4,reap_ack,signal,close,transport_close",
+    "suffix": "expected and observed packed96-byte packets",
+    "privacy": "Unacknowledged kernel wait status is zeroed in both packet projections and status_redacted=1; no public status/ownership authority is conferred.",
+    "legacy_projection_bytes": 344,
+    "actual_full_buffer_bytes": 13032,
+    "history_header_offset": 344,
+    "history_row_bytes": 792,
+    "history_rows": 16,
+    "pair_row_bytes": 72,
+    "pair_rows": 512,
+    "root_row_bytes": 636,
+    "root_receipt_offset": 100,
+    "root_frame_or_local_offset": 540,
+    "root_codec": "sparse159-uleb32-or-raw636-base64.v2",
+    "root_wire_version": 2
+  },
+  "stages": {
+    "1": "INPUT",
+    "2": "CAPSULE",
+    "3": "OWNER_PROC",
+    "4": "SOCKET",
+    "5": "RECEIVE",
+    "6": "ORIGIN_PID",
+    "7": "ORIGIN_UID",
+    "8": "ORIGIN_GID",
+    "9": "FRAME",
+    "10": "TYPE",
+    "11": "SEQUENCE",
+    "12": "ROLE",
+    "13": "PID",
+    "14": "OWNER",
+    "15": "BIRTH",
+    "16": "OWNER_BIRTH",
+    "17": "DEADLINE",
+    "18": "STATUS",
+    "19": "RIGHTS",
+    "20": "RIGHT_CLOSE",
+    "21": "COPY",
+    "22": "HANDLE",
+    "23": "SIGNAL",
+    "24": "WAIT4",
+    "25": "HANDLE_CLOSE",
+    "26": "TRANSPORT_CLOSE",
+    "27": "CREATE_PIPE",
+    "28": "CREATE_CLONE",
+    "29": "BARRIER"
+  },
+  "authority": "Actual original FR_START, fixed SO_PEERCRED plus SCM_CREDENTIALS full PID/UID/GID, capsule SHA/full bytes, proc parent/birth and socket inode remain exact. Public fr_child copies and read-only evidence cannot adopt a PID, pidfd, wait status or generation.",
+  "fork": "Ordinary public API uses real CLONE_PIDFD and PyOS fork hooks; children return only after exact REGISTER_ACK and real barrier release. Legacy fixture route delegates to it while retaining its original controls-only guard.",
+  "close": "Only successful close sets handle_closed and publishes pidfd=-1. On close failure durable native storage retains the exact handle and UNKNOWN; NativeOwner retains truthful projection and makes no second release attempt.",
+  "Root_controller": "Existing held110 --held-a061 only; strict held119 canonical own benign DATA selectors in mode1. No new Root service, privileged image, LSM, grant writer or reset seam.",
+  "restriction": "Local kernel seccomp only reduces the calling owner's own pidfd_send_signal or exact-fd close permission. No userspace errno injection or permission restoration.",
+  "residual": "SOL147 specific body/history/legacy CODE_OPEN and unknown costs; all original216/29/6/9 REQUIRED_NOT_RUN. No admission.",
+  "SourceReady": false,
+  "current_GO": false,
+  "performed_now": false,
+  "independent_final_byte_review": "REQUIRED_NOT_PERFORMED",
+  "prior_A087_ABI_historical_only": {
+    "new_public": {
+      "fr_receive_receipt": 24,
+      "fr_evidence": 344,
+      "fr_own_fork": "int(int,unsigned,uint64_t,fr_child*)",
+      "fr_own_observe": "int(fr_child*,fr_observation*)",
+      "fr_own_evidence": "int(fr_child*,fr_evidence*)",
+      "fr_session_evidence": "int(fr_evidence*)",
+      "fr_session_close": "int(void)",
+      "fr_local_restrict": "int(unsigned,int)"
+    },
+    "evidence_layout": {
+      "prefix": "version,phase,stage:u32;primitive_errno:i32; observed_pid/uid/gid,expected_pid/uid/gid:i32; rights,rights_closed:u32;rights_close_errno:i32; ready_released,signal_attempts,close_attempts,transport_close_attempts,status_redacted:u32",
+      "timestamps": "10*u64: intent_ack,clone,register_send,register_ack,release,wait4,reap_ack,signal,close,transport_close",
+      "suffix": "expected and observed packed96-byte packets",
+      "privacy": "Unacknowledged kernel wait status is zeroed in both packet projections and status_redacted=1; no public status/ownership authority is conferred."
+    },
+    "residual": "Receiving-side Root registry full controls remain absent; A087 start/ACK receiving-side controls cannot replace them. ALL216 integration remains separately unresolved."
+  },
+  "sol145_extension_historical_only": {
+    "schema": "friday.sol145.ordinary-root-connected-source.v1",
+    "assignment": "ASTRA-E4-A294-BROWSER-ORDINARY-NONRECEIVING-ERROR-ROUTES-CONNECTED-SOL145",
+    "generation": 1,
+    "decision": "PARTIAL_CONNECTED_ORDINARY_ROOT_STORAGE_ABI_BOTH_READERS_OPEN_FINITE_ENDS",
+    "implementation": [
+      "The actual Root reg_event now reserves a persistent nonreceiving row BEFORE fr_recv_receipt. The full original frame96, receipt440, control64, each reached right/one close, observed/expected generation and primitive result survive in the same Root storage. Receiving's original64 table remains separate; no restriction from64 is imposed on the original512-child ordinary domain.",
+      "One packed Root DATA row636 (header100, receipt440, frame_or_local96) is defined in the actual shared header. Explicit static offsets/width, Common width function and the actual CONTRACT ctypes binding all agree manually. Existing packet96/capsule848/child32/evidence13032/history792/pair72 ABIs and authority stay unchanged.",
+      "Current actual Root normal final output and pre_refused output call ordinary_terminal, not an unused exporter. It writes ALL stored original rows and the Root calling-thread COMMON first/read/close pair ledger on existing fd1 under the original end. This is raw complete DATA, not a latest flag/hash/process exit substitute.",
+      "Each636 row is losslessly serialized as159 little-endian uint32 cells with canonical ULEB128 then base64. Common serializer reserves fixed795+1060 byte arrays. BOTH actual Supervisor/Public JSON and full_DATA wrappers reconstruct each original cell, require exact width/count/no overlong or trailing cells, check the receipt/frame phase join and primitive result/cleanup relation, and retain the original encoded object/aliases.",
+      "Actual ordinary pre-clone pipe2/socketpair/setsockopt/clone3 parent calls reserve kind10 DATA before acquisition. All reached return values, original errno, own fd operands and acquired time are stored. On early failure, each reached own pair fd receives at most one recorded close; every cleanup error stays separate from the original initial/clone error. An uncertain close does not clear the original pair slot or claim retirement.",
+      "All four parent-side post-clone endpoint closes are called independently even if the first fails. Their original outcomes persist and force the existing sticky failure path, not false success. Actual final own pidfd/registry close events now carry the numeric original operand and one result/errno in their local DATA union.",
+      "Ordinary poll HUP/error before FINISH now enters the existing Root refusal with a stored event rather than being limited to receiving mode. Pre-refused emits a final kind9 primary record matching the actual prefix errno. Ordinary setup return before any terminal starts gets one prefix output; a partially started final writer never triggers a second output/retry.",
+      "After a verified capsule, early output's existing one-second cleanup bound is capped by the original hard-minus-one-second end. No original clock, topology, Source role, issuer, service, resource pool or resource cap is renewed or raised.",
+      "Fresh current209/aux3 and Source15 joins include exact changed performing bytes, required actual CONTRACT caller and unchanged Stock header as opaque dependency. Active build staging/oracle ABI references are rebound coherently; old snapshots, controls and observed results remain immutable historical inputs, not runtime credit."
+    ],
+    "current_native_ABI": {
+      "wire": "4*u32 +11*i32 +5*u64 +440 bytes +96 bytes =100+440+96=636",
+      "local_union": "2*u32+6*i32+2*u64+48 zero reserved =96; operation1..4 pipe/socket pairs,5 setsockopt,7 clone3 parent,8 one close; flags1 reached,2 acquired,4 cleanup reached",
+      "frame_phase": "Root received packet.type at byte44; both readers compare raw row.phase against raw row offset540+44=584",
+      "prefix_primary": "kind9 error offset16 must equal the original pre_refused primitive_errno; cleanup rows do not rewrite it",
+      "Root_count_domain": "requests1568=3*512+32; persistent rows3136=6*512+64. Successful/once-per-owned signal/wait/close and fixed early endpoints fit this SOURCE slot arithmetic; repeated failure work and complete original negative occupancy are not silently proved.",
+      "ABI_status": "MANUAL_SOURCE_DECLARATION_ONLY; selected compiler/kernel/image/ABI execution NOT_RUN"
+    },
+    "resource_arithmetic": {
+      "schema": "friday.sol145.source-resource-arithmetic.v1",
+      "method": "Manual finite Source integer arithmetic, not executed ABI/workload/fit observations",
+      "root_row_bytes": 636,
+      "header_bytes": 100,
+      "original_receipt_bytes": 440,
+      "frame_or_local_bytes": 96,
+      "request_source_slots": 1568,
+      "ordinary_source_slots": 3136,
+      "ordinary_source_static_bytes": 1994496,
+      "receiving_source_slots_unchanged": 64,
+      "receiving_source_static_bytes": 40704,
+      "old_receiving_source_static_bytes": 40960,
+      "Root_static_delta_bytes": 1994240,
+      "source_max_once_rows": "1568 request +513 signal +513 successful direct wait +513 own close +1 transport close +11 setup/parent closes +2 pending/HUP =3121;3136 is storage not a grant. Repeated failing waits/aborts and all actual required-case occupancy remain open.",
+      "per_row_cells": 159,
+      "per_cell_uleb_max_bytes": 5,
+      "per_row_coded_max_bytes": 795,
+      "per_row_base64_max_bytes": 1060,
+      "serializer_stack_arrays_bytes": 1855,
+      "decoder_raw_row_bytes": 636,
+      "max_reconstructed_rows_raw_bytes": 1994496,
+      "Root_pairs_source_bytes_unchanged": 36880,
+      "source_density_worst_root_rows_with_quotes_commas": 3333568,
+      "original_terminal_cap_bytes_unchanged": 1048576,
+      "case_positive_domain_analysis": "Canonical positive512 request rows have small validated integers, one credential/right max and zero unused right cells: a conservative per-row335 ULEB/448 base64 bound under the enforced original512 FD limit yields<=451 JSON bytes per receive,<=271 per own handle-close;1538 receives+513 closes+fixed setup/one Root wait are below the original cap for this NEW fragment. This is conditional Source fragment arithmetic, NOT complete original packet/case admission. Original raw/inner DATA, duplicates, provider costs and exact selected ABI still require full qualification. No positive case is removed to fit.",
+      "whole_source_RAM_AS_RSS_CPU_IO_FD_copy_formatter_and_lifetime_fit": "UNKNOWN_NOT_ZERO",
+      "CODE_OPEN": "Dense full negative history and actual total original packet can exceed unchanged1MiB; no cap increase or fake fit. Scenario-specific preservation and actual finite-end consume remain required.",
+      "observed": "NOT_RUN",
+      "new_budget_pools_grants_or_caps": 0,
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false
+    },
+    "required_controls": {
+      "schema": "friday.sol145.required-controls.v1",
+      "status": "REQUIRED_NOT_RUN_TASK_FORBIDDEN",
+      "original": "ALL216/all29/all6/all9, all required SOL143 history/receipt/pair controls and original oracles/order/full values unchanged. Old observed runtime results are not transferable to current bytes.",
+      "ordinary_positive": [
+        "NONRECEIVING_ORIGINAL512_REQUEST_STORAGE_AND_REAL_REACHED_DATA",
+        "RECEIVING_ORIGINAL64_DOMAIN_AND_ALL_ORIGINAL_SCENARIOS_UNCHANGED",
+        "ROOT_PREFIX_COMMON_PRIMARY_AND_REACHED_SECONDARY_CLOSE_ALL_RETAINED",
+        "CANONICAL636_LE_ULEB32_BASE64_BOTH_JSON_AND_FULL_DATA_PERFORMING_READERS",
+        "EARLY_SUCCESSFUL_PAIRS_CLONE_PARENT_ALL_FOUR_OWN_CLOSES",
+        "PERSISTENT_SOL143_START_ACK_HISTORY_AND_RAW_RECEIPTS_UNCHANGED"
+      ],
+      "meaningful_negative": [
+        "EACH_PRECLONE_OUT_ERR_SOCKETPAIR_BARRIER_FAILURE_REACHED_ACQUISITIONS_ONLY",
+        "EACH_SETSOCKOPT_FAILURE_AND_EXACT_ORIGINAL_PEER_FD",
+        "CLONE_FAILURE_NO_CHILD_PRIMARY_UNCHANGED_EACH_REACHED_OWN_PAIR_CLEANUP",
+        "PRIMARY_SYSCALL_AND_DISTINCT_SECONDARY_CLOSE_ERROR_NO_RETRY_NO_FALSE_RETIREMENT",
+        "FIRST_POSTCLONE_CLOSE_FAILURE_DOES_NOT_SKIP_OTHER_THREE_CLOSES",
+        "NONRECEIVING_BAD_RECEIVE_PREFIX_FLAGS_RAW_CONTROL_AND_RIGHT_CLOSES_PERSIST",
+        "ORDINARY_HUP_PRE_FINISH_REFUSAL_NOT_EMPTY_SUCCESS",
+        "REJECT_OLD_OR_MISMATCHED636_640_ROOT_BUFFER_OR_SELECTED_IMAGE_ABI",
+        "REJECT_OLD344_GETTER_IMAGE_BEFORE_ANY_NATIVE_EVIDENCE_WRITE",
+        "REJECT_NONCANONICAL_OR_BAD_BASE64_AND_INVALID_PADDING",
+        "REJECT_SHORT_OVERLONG_OVERFLOW_UNTERMINATED_OR_TRAILING_ULEB_CELLS",
+        "REJECT_WRONG_ROOT_COUNT_CAPACITY_REQUEST_CAPACITY_CODEC_OR_MISSING_ROWS",
+        "REJECT_MISSING_OR_OVERFLOWED_ROOT_NATIVE_PAIR_LEDGER",
+        "REJECT_RAW_RECEIPT_OR_PACKET_PHASE_ALIAS_MISMATCH",
+        "REJECT_LOCAL_RESULT_ERRNO_OR_ONE_CLOSE_CLEANUP_MISMATCH_AND_NONZERO_RESERVED",
+        "REJECT_PREFIX_KIND9_PRIMARY_DIFFERENT_FROM_ACTUAL_ORIGINAL_PREFIX_ERRNO",
+        "EXACT_ORIGINAL_POSITIVE_AND_NEGATIVE_TOTAL_OUTPUT_FIT_NO_CASE_REDUCTION",
+        "ORIGINAL_OUTPUT_BOUNDARY_OVERFLOW_INCOMPLETE_WRITE_NO_COMPLETE_HANDOFF",
+        "REQUEST_AND_TAIL_OCCUPANCY_NO_OVERWRITE_NO_SILENT64_NARROWING",
+        "ORIGINAL_CLOCK_EXPIRED_NO_FRESH_OUTPUT_OR_PROCESS_AUTHORITY",
+        "ACTUAL_BOTH_OUTSIDE_CONSUMERS_FULL_ORIGINAL_FD_RAW_RETIREMENT"
+      ],
+      "case_specific_total_cost_and_live": "REQUIRED_NOT_RUN; retain every original full gate/meaningful negative and independent final-artifact acceptance. A known output-fit or endpoint gap prevents SourceReady/GO, not a waiver.",
+      "unsafe_operational_controls": {
+        "required": true,
+        "waiver": false,
+        "handling": "OPAQUE_HASH_ONLY"
+      },
+      "observations": "NONE_NEW",
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false
+    },
+    "CODE_OPEN": [
+      "The existing final writer still has no surviving route for its own last original write/close errors after fd1 failure. No second writer/output/retry or complete handoff is fabricated.",
+      "Ordinary child pre-START/barrier/credential/dup/fexecve _exit paths retain process-local data only. Complete same-process child COMMON errors to an actual final outside receiver are not closed by this parent-side package; no new service/packet authority is added.",
+      "The generic fr_recv adapter and excluded operational controlled Stock receive branches still use temporary storage. Those bodies were not inspected/modified/accepted.",
+      "Root wait4 failures and some earlier own proc/image/read/cleanup validation paths still lack complete raw original primitive/body transport. This package preserves the reached numeric first+close COMMON relation; it is not full original read-buffer/error-object/body/type qualification.",
+      "Request/tail storage guarantees the declared once-per-child SOURCE relation, not arbitrary repeated abort/poll/wait failure history. Exact whole original required negative-workload occupancy and finite collection must be established without case removal or shrinking512 to64.",
+      "Worst-case dense3136-row encoding alone is3333568 bytes including per-row JSON punctuation, exceeding the unchanged1048576 terminal cap. Required scenario-specific total wire fit, including old inner terminal/failure DATA/pair ledgers/receiving duplicates, remains OPEN. No required positive is waived or cap raised; broad512 source slot coverage is not full-envelope admission.",
+      "Actual outer caller full consume/retire invocation and full final original FD/raw/body aliases across BOTH finite ends remain open. Merely reconstructing all rows, a successful syscall or a class/flag is not acceptance."
+    ],
+    "UNKNOWN_NOT_ZERO": [
+      "Authenticated selected image/compiler/C layout/CMSG ABI/CPython factories and cost provider are prerequisite external inputs; Source declarations and ctypes class names do not authenticate them.",
+      "Prospective whole required workload FD/CPU/IO/RAM/AS/RSS/thread/lifetime cost, page/COW overlap, live buffer/copy/formatter/base64/ULEB/raw-reader allocations and error paths are unqualified. Original64MiB Root/48MiB coordinator/worker/192MiB inner/256MiB aggregate and output caps stay intact.",
+      "Actual source/image/case-specific budget fit and independent final-byte/finite-end acceptance are Astra-owned; no author acceptance or transferred old observations."
+    ],
+    "current_performing_dependencies": {
+      "A071-BOOTSTRAP.c": {
+        "path": "/var/tmp/friday-sol145-a294-browser-ordinary-error-routes/source/A071-BOOTSTRAP.c",
+        "bytes": 78599,
+        "sha256": "3465fbe9f5d4deb4693c0707020cc021c608bf3db6c362e84651b8e369d40455",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085371",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "78599",
+          "1791249056707548965",
+          "1791249056707548965"
+        ],
+        "stable9": true
+      },
+      "A071-COMMON.c": {
+        "path": "/var/tmp/friday-sol145-a294-browser-ordinary-error-routes/source/A071-COMMON.c",
+        "bytes": 23063,
+        "sha256": "3a9f13362136f92c7ba71aab960d5cb1b163de4ad8ab78871742522dae2c05fc",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085372",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "23063",
+          "1791248740142557994",
+          "1791248740142557994"
+        ],
+        "stable9": true
+      },
+      "A071-NATIVE.h": {
+        "path": "/var/tmp/friday-sol145-a294-browser-ordinary-error-routes/source/A071-NATIVE.h",
+        "bytes": 13089,
+        "sha256": "64b8da2a289a3ffd9aff51a6e087b438ad322187b5bc7549ee32e5c8ba3bad0b",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085373",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13089",
+          "1791248740141343784",
+          "1791248740141343784"
+        ],
+        "stable9": true
+      },
+      "A071-CONTRACT.py": {
+        "path": "/var/tmp/friday-sol145-a294-browser-ordinary-error-routes/source/A071-CONTRACT.py",
+        "bytes": 30047,
+        "sha256": "8f7ff32849239015e4a6e881f77027812f808d1e23bdf0270176e16525a2a900",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085374",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30047",
+          "1791248861268095030",
+          "1791248861268095030"
+        ],
+        "stable9": true
+      },
+      "A071-SUPERVISOR.py": {
+        "path": "/var/tmp/friday-sol145-a294-browser-ordinary-error-routes/source/A071-SUPERVISOR.py",
+        "bytes": 140134,
+        "sha256": "13470d1c2dbf0efe53a067136d1ba3786cc57ee382ad059ef1b2aae056a28100",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085375",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "140134",
+          "1791249322455123394",
+          "1791249322455123394"
+        ],
+        "stable9": true
+      },
+      "A087-PUBLIC-DRIVER.py": {
+        "path": "/var/tmp/friday-sol145-a294-browser-ordinary-error-routes/source/A087-PUBLIC-DRIVER.py",
+        "bytes": 220120,
+        "sha256": "4b8a44eb32f990b5b38539b0adf21e7b2289f5ae93519f5c3cb932c65b4d4354",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085376",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "220120",
+          "1791249322466124039",
+          "1791249322466124039"
+        ],
+        "stable9": true
+      },
+      "A071-OWNED.c": {
+        "path": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "bytes": 43977,
+        "sha256": "e27bd01f01c2cdf6dd881e07c3c3e90148ab1b1e62e0c007903a651d68f5aa54",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085128",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "43977",
+          "1791246261716118308",
+          "1791246782838889105"
+        ],
+        "stable9": true
+      },
+      "A071-RUNTIME.c": {
+        "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "bytes": 7458,
+        "sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225997",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7458",
+          "1790976216351906203",
+          "1790976216351906203"
+        ],
+        "stable9": true
+      },
+      "A091-STOCK-CALLER.h": {
+        "path": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "bytes": 33691,
+        "sha256": "9e2b4631b6c6346f29b2a8d5bb810063ef236f012fa077a06806747e533df5f3",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085131",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "33691",
+          "1791245909368212024",
+          "1791246782838889105"
+        ],
+        "stable9": true
+      }
+    },
+    "metadata_dependencies": {},
+    "current_metadata_binding": "All selected metadata final SHA/id9 are in CURRENT-SOURCE-JOIN.json and manifest. No own/forward metadata hash cycles.",
+    "historical_context": "Old scope/results/metadata retained immutable or explicitly historical; no runtime/author/whole acceptance credit transferred.",
+    "Source_execution": "NOT_RUN",
+    "author_acceptance": false,
+    "requested_whole_implementation_complete": false,
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false
+  },
+  "current_extension": "sol151_extension",
+  "sol147_extension_historical_only": {
+    "schema": "friday.sol147.ordinary-whole-output-fit.connected-source.v1",
+    "assignment": "ASTRA-E4-A296-BROWSER-ORDINARY-WHOLE-OUTPUT-FIT-CONNECTED-SOL147",
+    "generation": 1,
+    "decision": "PARTIAL_CONNECTED_V2_RETAINED_ROOT_WHOLE_WIRE_SOURCE_BOUND_REQUIRED_BODY_HISTORY_FIT_OPEN",
+    "implementation": [
+      "Actual Common fr_root_row_json now chooses canonical exact zero-cell sparse159 ULEB32 or full raw636, tagged and base64. It never drops a reached nonzero cell; absent mask bits restore literal zero. Dense input uses full raw, so per-row coded<=637/base64<=852 instead of prior1060. Original internal636 layout/storage and original caps unchanged.",
+      "Actual Root normal and pre_refused writers declare current ordinary schema/v2/codec; all stored rows are still written, as are the complete existing Root pair ledger, receiving projections and duplicated pair ledger. No new exporter/service/second writer or altered process/packet authority.",
+      "Both actual Supervisor and Public JSON/full_DATA entry wrappers reconstruct all636 original bytes. Exact raw length, mandatory nonzero sparse values, mask unused bit159, canonical shorter-vs-raw choice, ULEB width/no overlong/trailing and canonical full base64 are checked. Semantic row/first/secondary/receive/phase/local-close checks remain unchanged.",
+      "Actual CONTRACT checks native row636/offsets AND queried Common wire version2 before native use. Static/shared Common/Header/Root declarations and performing readers are joined; ABI not executed or authenticated.",
+      "All active actual ABI/oracle/build metadata current pins are rebound to exact current bytes without self/forward cycles; original positive intent mapped to current wirev2, v1 remains rejection negative, all required cases/control intentions kept."
+    ],
+    "wire_schema": "friday.sol147.actual-root-ordinary.v2",
+    "wire_version": 2,
+    "codec": "sparse159-uleb32-or-raw636-base64.v2",
+    "row_ABI_bytes": 636,
+    "receipt_offset": 100,
+    "frame_offset": 540,
+    "Common_version_query": "int fr_root_row_codec_version(void)->2; actual CONTRACT validates before native use",
+    "current_performing_dependencies": {
+      "A071-BOOTSTRAP.c": {
+        "path": "/var/tmp/friday-sol147-a296-browser-whole-output-fit/source/A071-BOOTSTRAP.c",
+        "bytes": 78617,
+        "sha256": "af41fbbee1c04c93ac01f8f7157b10004784eac88d1df131e82a8259efd351e6",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085530",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "78617",
+          "1791251859118010776",
+          "1791251859118010776"
+        ],
+        "stable9": true
+      },
+      "A071-COMMON.c": {
+        "path": "/var/tmp/friday-sol147-a296-browser-whole-output-fit/source/A071-COMMON.c",
+        "bytes": 23536,
+        "sha256": "a05d5ff816a0a905e57f03a86b39a60814158b278f3eef17ab9efefe841fe222",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085531",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "23536",
+          "1791251949907236833",
+          "1791251949907236833"
+        ],
+        "stable9": true
+      },
+      "A071-NATIVE.h": {
+        "path": "/var/tmp/friday-sol147-a296-browser-whole-output-fit/source/A071-NATIVE.h",
+        "bytes": 13204,
+        "sha256": "ec1efbf610c4b015df6e59e0275c8a2b9115b293814631b5387c93f13e10347b",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085532",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13204",
+          "1791251949906236776",
+          "1791251949906236776"
+        ],
+        "stable9": true
+      },
+      "A071-CONTRACT.py": {
+        "path": "/var/tmp/friday-sol147-a296-browser-whole-output-fit/source/A071-CONTRACT.py",
+        "bytes": 30209,
+        "sha256": "6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085533",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30209",
+          "1791251949907236833",
+          "1791251949907236833"
+        ],
+        "stable9": true
+      },
+      "A071-SUPERVISOR.py": {
+        "path": "/var/tmp/friday-sol147-a296-browser-whole-output-fit/source/A071-SUPERVISOR.py",
+        "bytes": 140834,
+        "sha256": "4c4c38a5922679314ab853c9458fb5156e8e470d12ebc1f160262d3a1b14e811",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085534",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "140834",
+          "1791251859168013654",
+          "1791251859168013654"
+        ],
+        "stable9": true
+      },
+      "A087-PUBLIC-DRIVER.py": {
+        "path": "/var/tmp/friday-sol147-a296-browser-whole-output-fit/source/A087-PUBLIC-DRIVER.py",
+        "bytes": 220820,
+        "sha256": "f9739f0a6f9420717ab0fb9eb7500b7ebdb1b0ae99b6653f565a7d281251d5e1",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085535",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "220820",
+          "1791251859182014460",
+          "1791251859182014460"
+        ],
+        "stable9": true
+      },
+      "A071-OWNED.c": {
+        "path": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "bytes": 43977,
+        "sha256": "e27bd01f01c2cdf6dd881e07c3c3e90148ab1b1e62e0c007903a651d68f5aa54",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085128",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "43977",
+          "1791246261716118308",
+          "1791246782838889105"
+        ],
+        "stable9": true
+      },
+      "A071-RUNTIME.c": {
+        "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "bytes": 7458,
+        "sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225997",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7458",
+          "1790976216351906203",
+          "1790976216351906203"
+        ],
+        "stable9": true
+      },
+      "A091-STOCK-CALLER.h": {
+        "path": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "bytes": 33691,
+        "sha256": "9e2b4631b6c6346f29b2a8d5bb810063ef236f012fa077a06806747e533df5f3",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085131",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "33691",
+          "1791245909368212024",
+          "1791246782838889105"
+        ],
+        "stable9": true
+      }
+    },
+    "metadata_dependencies": {},
+    "resource_arithmetic": {
+      "schema": "friday.sol147.ordinary-causal-wire-arithmetic.v1",
+      "method": "Host integer arithmetic of manually inspected actual Source paths; not Source evaluation or execution",
+      "original_terminal_cap_bytes": 1048576,
+      "row_ABI_bytes": 636,
+      "wire_version": 2,
+      "codec": "sparse159-uleb32-or-raw636-base64.v2",
+      "raw_tag_bytes": 1,
+      "raw_coded_max_bytes": 637,
+      "base64_max_bytes": 852,
+      "row_JSON_max_including_quotes_comma": 855,
+      "sparse_mask_bytes": 20,
+      "sparse_tag_and_mask_bytes": 21,
+      "sparse_max_before_raw_choice_bytes": 816,
+      "native_serializer_stack_arrays_bytes": 1668,
+      "raw_decoder_row_bytes": 636,
+      "unchanged_storage": {
+        "ordinary_slots": 3136,
+        "requests": 1568,
+        "ordinary_bytes": 1994496,
+        "receiving_slots": 64,
+        "receiving_bytes": 40704,
+        "Root_pair_slots": 512,
+        "Root_pair_bytes": 36880
+      },
+      "normal_successful_request": {
+        "header_ULEB_max": 90,
+        "receipt_ULEB_max": 99,
+        "frame_ULEB_max": 104,
+        "tag_mask": 21,
+        "coded_max": 314,
+        "base64_max": 420,
+        "JSON_max": 423,
+        "header_breakdown": "kind/type2 + ten peer/expected/parent/handle/pending signed fields <=38 + five full uint64 <=50; stage/status_invalid/error zero. PID31-bit bound5, exact uid/gid1000 bound2; unknown pending=-1 bound5.",
+        "receipt_breakdown": "14 primitive header cells <=15 INCLUDING arbitrary32-bit msg_flags<=5; all64 actual ancillary bytes <=80; one right outcome <=4 with original fd<512 and no successful close errno. Total99; raw padding/credentials are NOT reconstructed from a projection.",
+        "frame_breakdown": "all8 magic bytes<=10 + all32 actual session bytes<=40 + version/type/sequence/role<=6 + four signed cells<=18 (REAP status<=65535, ABORT detail<=INT_MAX) + all three full uint64<=30. Total104; no session/time substitution.",
+        "domain": "Source bound uses original request1568 and Source NOFILE512, never receiving64 as ordinary limit; conditional selected ABI/compiler/platform interpretation remains REQUIRED_NOT_RUN."
+      },
+      "causal_rejected_request_max": 1,
+      "ordinary": {
+        "request_rows": 663696,
+        "once_signal_rows": 63099,
+        "once_direct_wait_rows": 46683,
+        "once_close_rows": 75411,
+        "once_tail_total": 185193,
+        "fixed_miscellaneous_rows": 27360,
+        "complete_Root_native_pair_ledger": 76033,
+        "all_remaining_top_level_fields": 16384,
+        "total": 968666,
+        "headroom": 79910,
+        "causal_bound": "REG error sets sticky; registry is disabled after first such error. WORK retirement permits only original retirement requests while !sticky; the first bad retirement poisons it too. reg_event(8) actual selected START is valid small Source data, shares request cap;32 full arbitrary misc rows conservatively covers fixed local setup/close/pending/HUP/prefix. stop_seen, reaped, final single close loop limit each owned signal/wait/close row to513. This bounds serialized CURRENT RETAINED rows even on storage-overflow refusal; it is NOT proof no other reached body/history is missing."
+      },
+      "receiving": {
+        "events64": 196608,
+        "owned_entries65": 133120,
+        "Root_pair_ledger_twice": 152066,
+        "ordinary_local_misc": 27360,
+        "all3_live_fields": 12288,
+        "top_level_and_raw_transport_metadata": 16384,
+        "optional_bounded_legacy_inner_hex": 32770,
+        "total": 570596,
+        "headroom": 477980,
+        "causal_bound": "reg_event routes kind<=8 to receiving64, not ordinary3136. Each accepted REGISTER needs a retained receive row; used<=1+64=65 independently of smaller scenario counts. receiving event fragment snprintf<2048 + complete440 receipt hex<1024 gives<3072; owned fragment snprintf<2048. all3 has at most five<2048 fragments. BOTH full duplicated Root pair ledgers counted, not dropped/deduplicated. This is a superset wire bound, not new65-process authority."
+      },
+      "common_fixed_fields_proof": "normal head<2048, observation<256, raw metadata head +two<1536 fragments, public control<1536, ordinary header<512, delimiters/field names; together <16384. Formatter failure retains an incomplete prefix, NOT whole DATA acceptance. This number is arithmetic slack, NOT a new cap/pool.",
+      "actual_existing_raw_route": {
+        "caller": "A087-PUBLIC-DRIVER.run_public existing four pairs",
+        "mapping": "fd1/2 outer stdout/stderr; existing128/129 carry FULL retained inner stdout/stderr, not a pointer/hash substitute",
+        "inner_each_original_cap": 1048576,
+        "outer_each_original_cap": 1048576,
+        "Root_outer_body_bytes": "inner_terminal=null and native_inner_DATA_hex=null when existing raw route selected; raw_metadata joins complete independent streams",
+        "total_declared_raw_wire_superset": 3065818,
+        "meaning": "Four EXISTING separate1MiB streams are not a new aggregate packet cap. Full incoming DATA retained before decode; original producer/receiver EOF/close joins unchanged. Actual cost/finite ends/workload qualification NOT_RUN."
+      },
+      "conclusions": {
+        "current_retained_Root_terminal_SOURCE_wire_bound": true,
+        "original_required_whole_body_history_workload_fit": false,
+        "measured_fit": false,
+        "SourceReady": false,
+        "Root_admission": false,
+        "GO": false
+      },
+      "CODE_OPEN": [
+        "Actual repeated failing waits/proc/pair operations: Source writes at most512 pair rows and may latch overflow while more failures are reached. Storage-count arithmetic is not a complete reached-history bound. No row is removed to obtain the wire estimate.",
+        "Full existing inner full_DATA/ordinary error/resource/object bodies: current Source cap check or RLE/physical reference does not prove exact every-required-case original body/alias representation fits1MiB. No unsafe fixture bodies inspected, no original case waived.",
+        "Legacy Root entry without existing128/129 route still nests up tocounts[0]-1 raw JSON bytes PLUS new Root/paired DATA on success. Exact coexistence bound counts[0]-1 + fixed + rows/pairs can exceed1MiB. Canonical run_public has the existing route; this is a specific remaining legacy Source path, not a claim a required pinned case actually produced that maximum.",
+        "Last original writer failure, failed formatter/decoder allocation, clock loss/expiry and full outside consume/retire remain not complete custody; size bound is not an acknowledgment or full finite-end acceptance."
+      ],
+      "UNKNOWN_NOT_ZERO": [
+        "Selected image/compiler/ABI/kernel CMSG and CPython primitives/provider admission; no declarations are actual ABI observations.",
+        "Whole original RAM/AS/RSS/FD/CPU/IO/pages/COW/stack/TLS/thread/implicit formatter/base64/ULEB/object/buffer-copy/error/lifetime and original required workload costs. Each subtotal is not measured whole fit."
+      ],
+      "Source_execution": "NOT_RUN",
+      "new_caps_pools_roles_issuers_grants_services": 0
+    },
+    "required_controls": {
+      "schema": "friday.sol147.required-controls.v1",
+      "status": "REQUIRED_NOT_RUN_TASK_FORBIDDEN",
+      "all_original": "Original216/all29/all6/all9 and all inherited SOL143/SOL145 required controls remain required, no changed case/order/count/clock/resource threshold.",
+      "positive": [
+        "ALL636_ZERO_CELL_RECONSTRUCTION_AND_EXACT_SIGNED_BIT_PATTERNS_BOTH_RECEIVERS",
+        "RAW_DENSE_AND_SPARSE_SHORTER_CANONICAL_CHOICE_ALL_ORIGINAL_BODY_BYTES",
+        "FULL_ORDINARY512_AND_SEPARATE_RECEIVING64_CAUSAL_PARTITION_WITH_ALL_NATIVE_PAIRS_INNER_STREAMS",
+        "NORMAL_AND_PRE_REFUSED_ACTUAL_WRITERS_SAME_FIRST_SECONDARY_ERRORS",
+        "ACTUAL_EXISTING_FOUR_STREAM_ROUTE_FULL_RAW_BOTH_RECEIVERS_CURRENT_VERSION_AND_ABI"
+      ],
+      "negative": [
+        "BAD_TAG_MASK_BIT159_SHORT_RAW_OR_RAW_TRAILING_CELL",
+        "SPARSE_ZERO_MARKED_PRESENT_SHORT_OVERLONG_UINT32_OVERFLOW_OR_EXTRA_VARINT",
+        "WRONG_CANONICAL_CHOICE_RAW_WHEN_SPARSE_SHORTER_OR_SPARSE_NOT_SHORTER",
+        "BAD_BASE64_PADDING_OR_CANONICAL_REENCODING_OR_ROW_OVER852",
+        "OLD_V1_OR_WRONG_SCHEMA_CODEC_WIDTH_VERSION_COUNT_OR_MISSING_ROW",
+        "OLD_NATIVE_COMMON_CODEC_VERSION_OR_MISMATCHED_CONTRACT_IMAGE",
+        "NATIVE_RIGHTS_RAW_CONTROL_PADDING_PACKET_PHASE_LOCAL_PRIMITIVE_ALIAS_MISMATCH",
+        "ORIGINAL512_REQUEST_BOUND_NOT64_NARROWED_WITH_LAST_ONE_BAD_REQUEST_AND_RETIREMENT_POISON",
+        "REPEATED_ABORT_WAIT_PROC_PAIR_ERRORS_NO_DROP_NO_FALSE_WHOLE_HISTORY_ON_OVERFLOW",
+        "FULL_ORIGINAL_INNER_RESOURCE_ERROR_GRAPH_BODY_ALIAS_WITHIN_ORIGINAL1M_NOT_REFERENCE_ONLY",
+        "LEGACY_NO128_129_FULL_INLINE_JSON_PLUS_ALL_ROOT_PAIR_DATA_NO_PARTIAL_FIT",
+        "ORIGINAL_CLOCK_LAST_WRITER_PARTIAL_FRAME_FD_CLOSE_FAILURE_RETAINS_ORIGINAL_WITH_NO_FAKE_HANDOFF",
+        "WHOLE_ORIGINAL_COST_AND_ALL_REQUIRED_FINAL_GATES_INDEPENDENT_EXACT_BYTE_ACCEPTANCE"
+      ],
+      "original_positive_mapping": "SOL145 canonical636/ULEB32/base64 intent -> full636/currentv2 sparse-or-raw both performing readers. Prior wirev1 remains specific wrong-version negative; original control not deleted.",
+      "unsafe_operational_controls": {
+        "required": true,
+        "waiver": false,
+        "handling": "OPAQUE_HASH_ONLY"
+      },
+      "observations": "NONE_NEW",
+      "author_acceptance": false,
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false
+    },
+    "CODE_OPEN": [
+      "Actual repeated failing waits/proc/pair operations: Source writes at most512 pair rows and may latch overflow while more failures are reached. Storage-count arithmetic is not a complete reached-history bound. No row is removed to obtain the wire estimate.",
+      "Full existing inner full_DATA/ordinary error/resource/object bodies: current Source cap check or RLE/physical reference does not prove exact every-required-case original body/alias representation fits1MiB. No unsafe fixture bodies inspected, no original case waived.",
+      "Legacy Root entry without existing128/129 route still nests up tocounts[0]-1 raw JSON bytes PLUS new Root/paired DATA on success. Exact coexistence bound counts[0]-1 + fixed + rows/pairs can exceed1MiB. Canonical run_public has the existing route; this is a specific remaining legacy Source path, not a claim a required pinned case actually produced that maximum.",
+      "Last original writer failure, failed formatter/decoder allocation, clock loss/expiry and full outside consume/retire remain not complete custody; size bound is not an acknowledgment or full finite-end acceptance."
+    ],
+    "UNKNOWN_NOT_ZERO": [
+      "Selected image/compiler/ABI/kernel CMSG and CPython primitives/provider admission; no declarations are actual ABI observations.",
+      "Whole original RAM/AS/RSS/FD/CPU/IO/pages/COW/stack/TLS/thread/implicit formatter/base64/ULEB/object/buffer-copy/error/lifetime and original required workload costs. Each subtotal is not measured whole fit."
+    ],
+    "historical_context": "Old scoped review exact-key only. All old runtime/ABI/admission results historical, not current acceptance. Current final metadata source pins are in manifest/CURRENT-SOURCE-JOIN, no own/forward cycles.",
+    "Source_execution": "NOT_RUN",
+    "author_acceptance": false,
+    "requested_whole_implementation_complete": false,
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false
+  },
+  "sol149_extension_historical_only": {
+    "schema": "friday.sol149.ordinary-history-wire.connected-source.v1",
+    "assignment": "ASTRA-E4-A297-BROWSER-ORDINARY-FAILURE-HISTORY-WHOLE-WIRE-CONNECTED-SOL149",
+    "generation": 1,
+    "decision": "PARTIAL_EXISTING_FOUR_STREAM_LEGACY_CALLER_JOIN_ENTERED_ROOT_FAILURE_HISTORY_CODE_OPEN",
+    "implemented": [
+      "A079 actual run_public selects the already-existing four-stream fd1/2 plus128/129 route. All four original per-stream1MiB raw bodies, digests, reached read/retention/EOF/close facts and original error objects are retained before decoding. No inline route disabled and no stream/body threshold reduced.",
+      "A079 actual clone mapping, barriers, parent endpoint closure, polling/draining, final raw retention and returned receipt are joined for all four streams. Same private owned PID/pidfd/generation/wait/signal policy and original work/hard/reserves remain; existing18-slot auxiliary ledger is unchanged, metadata starts11 instead of7 for four streams.",
+      "A079 complete actual raw transport is bound to BOTH original native stream EOF/overflow/read/close/identity9/size/SHA facts before success semantics. Current full636/root v2 and full440/792/72 history decoders are copied exactly from the unchanged performing Public dependency, then used by actual outer and inner consumers. Raw values stay retained on semantic refusal.",
+      "PreparedView.finish preserves the exact original signature/fallback and optionally maps an already-created root-owned output-only128/129 pair. The current native Root still independently validates endpoints; no producer creates a new transport/service/role/authority.",
+      "A079 run_public/run_positive_first/held_capture and PreparedView.finish have explicit OPTIONAL same-existing131..134 fd pass-through for independently preowned original body objects. No body allocation, header validation replacement, Root grant or full-body acceptance is inferred from the supplied numbers. Original capsule/header/role validation remains solely in unchanged Root/Common."
+    ],
+    "wire_schema": "friday.sol147.actual-root-ordinary.v2",
+    "wire_version": 2,
+    "codec": "sparse159-uleb32-or-raw636-base64.v2",
+    "current_performing_dependencies": {
+      "A071-BOOTSTRAP.c": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/source/A071-BOOTSTRAP.c",
+        "bytes": 78617,
+        "sha256": "af41fbbee1c04c93ac01f8f7157b10004784eac88d1df131e82a8259efd351e6",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085562",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "78617",
+          "1791253756545599006",
+          "1791253756549599238"
+        ],
+        "stable9": true
+      },
+      "A071-COMMON.c": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/source/A071-COMMON.c",
+        "bytes": 23536,
+        "sha256": "a05d5ff816a0a905e57f03a86b39a60814158b278f3eef17ab9efefe841fe222",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085563",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "23536",
+          "1791253756554599527",
+          "1791253756555599585"
+        ],
+        "stable9": true
+      },
+      "A071-NATIVE.h": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/source/A071-NATIVE.h",
+        "bytes": 13204,
+        "sha256": "ec1efbf610c4b015df6e59e0275c8a2b9115b293814631b5387c93f13e10347b",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085564",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13204",
+          "1791253756560599874",
+          "1791253756561433543"
+        ],
+        "stable9": true
+      },
+      "A071-CONTRACT.py": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/source/A071-CONTRACT.py",
+        "bytes": 30209,
+        "sha256": "6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085565",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30209",
+          "1791253756565600164",
+          "1791253756566641697"
+        ],
+        "stable9": true
+      },
+      "A071-SUPERVISOR.py": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/source/A071-SUPERVISOR.py",
+        "bytes": 140834,
+        "sha256": "4c4c38a5922679314ab853c9458fb5156e8e470d12ebc1f160262d3a1b14e811",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085566",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "140834",
+          "1791253756571916836",
+          "1791253756572600570"
+        ],
+        "stable9": true
+      },
+      "A087-PUBLIC-DRIVER.py": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/source/A087-PUBLIC-DRIVER.py",
+        "bytes": 220820,
+        "sha256": "f9739f0a6f9420717ab0fb9eb7500b7ebdb1b0ae99b6653f565a7d281251d5e1",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085567",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "220820",
+          "1791253756579836913",
+          "1791253756580601032"
+        ],
+        "stable9": true
+      },
+      "A079-NATIVE-PUBLIC-DRIVER.py": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "bytes": 44897,
+        "sha256": "e2104a36841fbecef96d8fbfc7a4efa52fa3073ecbb5f9f890b9343f3511b9d8",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085577",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "44897",
+          "1791254233553217051",
+          "1791254233553217051"
+        ],
+        "stable9": true
+      },
+      "A071-PRODUCER.py": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/source/A071-PRODUCER.py",
+        "bytes": 21229,
+        "sha256": "34715072ba19c02d40aa9571051ba41eea99f0fc68ca0a24759c5cbcd2d6b743",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085578",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21229",
+          "1791254162551106144",
+          "1791254162551106144"
+        ],
+        "stable9": true
+      },
+      "A071-OWNED.c": {
+        "path": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A071-OWNED.c",
+        "bytes": 43977,
+        "sha256": "e27bd01f01c2cdf6dd881e07c3c3e90148ab1b1e62e0c007903a651d68f5aa54",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085128",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "43977",
+          "1791246261716118308",
+          "1791246782838889105"
+        ],
+        "stable9": true
+      },
+      "A071-RUNTIME.c": {
+        "path": "/var/tmp/friday-lab881-sol069-browser-preowned-body-custody-both-receivers-finite-end-connected-closure/source/A071-RUNTIME.c",
+        "bytes": 7458,
+        "sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca",
+        "identity9_decimal_strings": [
+          "2050",
+          "4225997",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7458",
+          "1790976216351906203",
+          "1790976216351906203"
+        ],
+        "stable9": true
+      },
+      "A091-STOCK-CALLER.h": {
+        "path": "/var/tmp/friday-sol143-a292-browser-native-history-paired-errors/source/A091-STOCK-CALLER.h",
+        "bytes": 33691,
+        "sha256": "9e2b4631b6c6346f29b2a8d5bb810063ef236f012fa077a06806747e533df5f3",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085131",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "33691",
+          "1791245909368212024",
+          "1791246782838889105"
+        ],
+        "stable9": true
+      }
+    },
+    "metadata_dependencies": {},
+    "resource_arithmetic": {
+      "schema": "friday.sol149.conditional-wire-and-storage-arithmetic.v1",
+      "method": "Host integer arithmetic/literal Source relation only; not Target execution",
+      "original_per_stream_cap": 1048576,
+      "ordinary_roles": 512,
+      "receiving_roles": 64,
+      "Root_slots": 3136,
+      "Root_requests": 1568,
+      "pair_slots": 512,
+      "Root_row_bytes": 636,
+      "ordinary_TLS_bytes": 1994496,
+      "receiving_TLS_bytes": 40704,
+      "pair_TLS_bytes": 36880,
+      "exact_unchanged_native_codec": {
+        "schema": "friday.sol147.actual-root-ordinary.v2",
+        "coded_max": 637,
+        "base64_max": 852,
+        "JSON_row_max": 855
+      },
+      "unchanged_conditional_retained_Root_wire": {
+        "ordinary": 968666,
+        "receiving": 570596,
+        "scope": "ONLY current retained data, NOT all reached original failures/full history/full case body fit"
+      },
+      "existing_four_stream_raw_sum_upper_for_same_retained_Root": 3065818,
+      "not_a_new_aggregate_cap": true,
+      "A079_delta": {
+        "raw_streams_before": 2,
+        "raw_streams_after": 4,
+        "raw_capacity_each_unchanged": 1048576,
+        "original_aux_slots": 18,
+        "current_aux_slots": 18,
+        "pipe_pairs_including_barrier_before": 3,
+        "pipe_pairs_including_barrier_after": 5,
+        "pidfd_slot_before": 6,
+        "pidfd_slot_after": 10,
+        "metadata_start_before": 7,
+        "metadata_start_after": 11,
+        "metadata_slots_remaining": 7,
+        "actual_explicit_parent_metadata_calls_upper": 5,
+        "detail": "Initial generation,pidfd,generation=3; optional once signal check pidfd,generation=2. No extra metadata probe in waitpid/drain. Original same-owner no-fallback signal/wait policy unchanged. Counts are source arithmetic, selected costs UNKNOWN."
+      },
+      "body_planes": "No objects allocated; current original4 preowned131..134 can be explicitly passed. Outside alias/storage/retirement/actual provider qualification CODE_OPEN.",
+      "complete_entered_failure_workload_source_bound": false,
+      "measured_fit": false,
+      "whole_cost": "UNKNOWN_NOT_ZERO",
+      "Source_execution": "NOT_RUN",
+      "new_caps_pools_roles_grants_services": 0,
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false
+    },
+    "required_controls": {
+      "schema": "friday.sol149.required-controls.v1",
+      "status": "REQUIRED_NOT_RUN_TASK_FORBIDDEN",
+      "all_original": {
+        "whole": 216,
+        "connected": 29,
+        "inner": 6,
+        "ordinary": 9
+      },
+      "all_required": true,
+      "waiver": false,
+      "inherited": {
+        "path": "/var/tmp/friday-sol147-a296-browser-whole-output-fit/REQUIRED-CONTROLS.json",
+        "bytes": 2254,
+        "sha256": "855170bab44993904ecd695119eb00ae4e6a2ab7ac0e3b8ca11f1d0f375cff78",
+        "identity9_decimal_strings": [
+          "2050",
+          "3980725",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2254",
+          "1791252092463442754",
+          "1791252092464442811"
+        ],
+        "stable9": true
+      },
+      "unsafe_operational_controls": {
+        "required": true,
+        "waiver": false,
+        "handling": "OPAQUE_HASH_ONLY"
+      },
+      "positive": [
+        "EXISTING_FOUR_STREAM_ROUTE_A079_FULL_INNER_STDOUT_STDERR_AND_ALL_ROOT636_VALUES",
+        "ORIGINAL_THREE_A079_CASES_FULL_COUNT_PHASE_ERRNO_GENERATION_KERNEL_EXIT_AND_COMPLEMENT",
+        "LEGACY_DEFAULT_HELD_CAPTURE_AND_FINISH_SIGNATURE_REMAIN_SUPPORTED_WITHOUT_ROUTE_DELETION",
+        "EXISTING_BODY_PLANES_FROM_REAL_OUTSIDE_OWNER_PASS_THROUGH_ORIGINAL_NATIVE_VALIDATION",
+        "ALL_ORIGINAL216_29_6_9_AND_FULL512_SEPARATE64_WITHOUT_CHANGED_CASE_OR_THRESHOLD"
+      ],
+      "negative": [
+        "ROOT_ENTERED_WAIT_FAILURES_AND_UNEXPECTED_PROC_CLOSE_PRIMARY_SECONDARY_HISTORY_NO_FALSE_FULL_CREDIT",
+        "FAILED_WAIT_STORAGE_EXHAUSTION_MAY_NOT_SKIP_PROMISED_CLEANUP_TO_MAKE_FIT",
+        "MISSING_PARTIAL_WRONG_KIND_COLLIDING_PIPE_ORIGINAL_WRITER_IDENTITY_OR_RAW_SIZE_SHA_EOF_CLOSE",
+        "TRANSFER_EOF_WITH_ORIGINAL_INCOMPLETE_OVERFLOW_READ_CLOSE_ERROR_MUST_NOT_ACCEPT",
+        "MISSING_UNQUALIFIED_OR_WRONG_SLOT_EXISTING131_134_PLANES_NO_ALLOCATION_OR_ROOT_BYPASS",
+        "FOUR_STREAM_PARENT_CHILD_DESCRIPTOR_SWEEP_AND_18_SLOT_METADATA_FAILURE_PREFIX",
+        "OLD_INLINE_N_MINUS1_PLUS_ALL_ROOT_DATA_EXACT1M_CONFLICT_STAYS_REQUIRED",
+        "LAST_WRITER_CLOCK_FORMAT_FREEZE_DECODE_ERROR_FULL_RAW_AND_ORIGINAL_EXCEPTION_CUSTODY",
+        "EXACT_FINAL_BYTES_AUTHENTICATED_SELECTED_ABI_INDEPENDENT_REVIEW_ALL_FULL_GATES"
+      ],
+      "observations": "NONE_NEW",
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false
+    },
+    "CODE_OPEN": [
+      "Actual Root reap_owned/stop_known wait4 error histories are not recorded completely: successful terminal waits produce one reg_event(5), other reached negative returns may repeat while the same original clock runs. No wait retry/stop/lifetime semantics changed in SOL149.",
+      "Root proc/fdinfo pairs reserve before the primitive and refuse BEFORE entry at512; do not describe later -EOVERFLOW wrapper returns as newly entered open/read/close errors. Full raw metadata scratch, exact refusal operands/order and all first/secondary/error bodies still lack a complete lossless reached-history representation.",
+      "No Source-derived finite bound on required failing wait/proc invocation count or whole entered-error body bytes has been joined to an existing prepaid complete recorder and BOTH consumers. Existing3136/1568/512/64 storage ceilings are not a bound on every entered failure.",
+      "Legacy A079 inputs require exactly the old fd set, while current Root run requires four already-preowned body planes131..134. New explicit optional pass-through maps those existing objects, but the pinned outer provisioner still must supply/retain the complete original outside views; no plane allocated/admitted by this package. Default calls remain an explicit current Source compatibility gap, not a working required positive.",
+      "PreparedView.finish now preserves an explicitly supplied existing128/129 pair and existing131..134 planes, but no current pinned caller of finish supplies that pair. The old inline signature remains supported. Without a joined external caller or complete within-cap whole encoding its N-1 plus Root overhead conflict remains.",
+      "Full original inner DATA/physical body/error/resource/object/alias/cost fit for every216/29/6/9 case and finite last-writer/clock/format/decoder/outside-retirement ends remain unclosed. A pointer or a SHA is not credited as any missing full body."
+    ],
+    "UNKNOWN_NOT_ZERO": [
+      "Selected authenticated image/compiler/native/kernel/CMSG ABI, CPython/runtime/provider and canonical admission are UNKNOWN_NOT_ZERO, not qualified by declarations.",
+      "All original full-body/history/custody RAM/AS/RSS/FD/COW/pages/TLS/stack/thread/temporary/mutable-immutable overlap/base64/hash/copy/read/write/CPU/IO/time/exception traceback/list costs remain UNKNOWN_NOT_ZERO. Host authoring figures are not Target resource observations."
+    ],
+    "original_obligations": "All216/all29/all6/all9 required and inherited meaning unchanged; unsafe controls opaque required/no waiver; NO new observations or own acceptance.",
+    "legacy": "Actual A079 run_public now selects existing128/129 four streams. Direct held_capture and PreparedView.finish legacy default still supported; complete current caller/body/history fit not yet established.",
+    "requested_whole_implementation_complete": false,
+    "author_acceptance": false,
+    "Source_execution": "NOT_RUN",
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false
+  },
+  "sol151_extension": {
+    "schema": "friday.sol151.actual-a079-body-caller.connected-source.v1",
+    "assignment": "ASTRA-E4-A298-BROWSER-A079-ACTUAL-BODY-PROVISIONER-BOTH-ENDS-SOL151",
+    "generation": 1,
+    "decision": "PARTIAL_ACTUAL_A079_CANONICAL_BODY_CALLER_JOIN_WHOLE_HISTORY_COST_AND_FINAL_QUALIFICATION_OPEN",
+    "implemented": [
+      "Actual A079 run_public default now invokes existing canonical A087 a201_create_body logic for four original16MiB Source-only planes before held_capture/fork, not optional-FD routing alone. Independent capsule848/session32/SHA/Source UID-GID/slot/generation/fixed extent/header/seals plus strong readonly outside views are bound to the actual caller. No Root/image/grant/role/pool is created.",
+      "The actual same outside process publishes plane/launch/buffer/error custody before native acquisition. Returned memfd/readonly fd/actual outer fork PID are saved before the next operation. Caller-owned original initialization header, short-write count, acquired states, original Python exception aliases and per-close/mmap primary-secondary errors remain retained. No unknown close retry or prior-unconfirmed reentry.",
+      "held_capture actual mapping routes exactly these original plane FDs to required131..134 together with original four streams1/2/128/129. The child descriptor sweep keeps those mapped writers, but the real caller never execs away and retains its readonly originals. Same native Root/Common validation, strict source/capsule checks, clocks, work/cleanup policy and original three case/count/status predicates remain.",
+      "After actual external kernel reap, the caller reads BOTH capsule-bound hierarchical cgroup.events through the original descriptors120/121 using the existing18-slot metadata ledger. No Root exit/typed flag/hash alone is treated as last-writer proof. Raw group evidence and errors remain held. This is CONDITIONAL on the existing qualified Root containment/FD-transfer contract, not independent admission.",
+      "Only on confirmed no-writers: consume every committed original48-byte record header, full frame, hash and exact reference from each original backing. Stable original credential/mode/seals/slot/capsule/version/generation/sequence/end/poison/retired/header and full final header agree. Incomplete suffix remains full raw plus original FD/view; poison, drift, mapping close or snapshot failure cannot retire or complete it.",
+      "Actual outside full-body consumer calls the SAME canonical DS69 graph decoder for each committed codec frame. A308 optional node_owner retains that decoder's existing values table before edges are populated, including nodes unreachable from the root; default canonical callers keep their original root interface. References resolve to the SAME complete raw object already held in this caller, not another map/read/copy or a pointer-only substitute. Other records remain full raw without invented native/error acceptance.",
+      "Actual original third native/root decoder, full inner transfer binding and strict A079 oracle remain mandatory after raw/body retention. Only after a successful DS69 decode AND native check does A079 clear its private decoder-created container edges, then drop its root/node-table references and set decoded_retired last; full encoded values/aliases remain in original bytes. Decode/check failures do not enter retirement; retirement failures retain complete encoded data, the remaining table and original exception with decoded_retired false. Canonical consumers still receive intact graphs. Descriptor retirement, all-outcome error custody and final original hard-clock predicates are unchanged.",
+      "Original mandatory F_SEAL_SEAL makes adding F_SEAL_WRITE impossible; no such seal or freeze is invented. Writer-end plus original readonly views/stable full headers underpin only the bounded conditional physical-frame transfer, not full native/error ownership or global lifetime acceptance.",
+      "Default run_positive_first invokes the new actual provisioner automatically for independently pinned positive, then negative only after positive accepted. Bare supplied FD tuples without an actual outside owner contract are explicitly refused, while direct legacy held_capture optional routing and original PreparedView.finish implementation remain unchanged."
+    ],
+    "current_performing_dependencies": {
+      "A071-BOOTSTRAP.c": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-BOOTSTRAP.c",
+        "bytes": 78617,
+        "sha256": "af41fbbee1c04c93ac01f8f7157b10004784eac88d1df131e82a8259efd351e6",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558920",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "78617",
+          "1791272382503791727",
+          "1791272382504791785"
+        ],
+        "stable9": true
+      },
+      "A071-COMMON.c": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-COMMON.c",
+        "bytes": 23536,
+        "sha256": "a05d5ff816a0a905e57f03a86b39a60814158b278f3eef17ab9efefe841fe222",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558921",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "23536",
+          "1791272382509792071",
+          "1791272382509792071"
+        ],
+        "stable9": true
+      },
+      "A071-NATIVE.h": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-NATIVE.h",
+        "bytes": 13204,
+        "sha256": "ec1efbf610c4b015df6e59e0275c8a2b9115b293814631b5387c93f13e10347b",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558927",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13204",
+          "1791272382545794137",
+          "1791272382546794195"
+        ],
+        "stable9": true
+      },
+      "A071-CONTRACT.py": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-CONTRACT.py",
+        "bytes": 30209,
+        "sha256": "6ae4d7a700841615909f3b8637e0104eeabc95a0b9ec6e8bbea0916487b4c777",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558922",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30209",
+          "1791272382514792359",
+          "1791272382514792359"
+        ],
+        "stable9": true
+      },
+      "A071-SUPERVISOR.py": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-SUPERVISOR.py",
+        "bytes": 142333,
+        "sha256": "d01b1e4e106dc9d3e21ebef69317b8826551d999afd2389a072aee6af45cf5ba",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558933",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "142333",
+          "1791272382574795801",
+          "1791272382575795858"
+        ],
+        "stable9": true
+      },
+      "A087-PUBLIC-DRIVER.py": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A087-PUBLIC-DRIVER.py",
+        "bytes": 222319,
+        "sha256": "2938eb4812404bc16af83579da954043f0d96d08bcae42f1559b08e5e6e1d242",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558986",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "222319",
+          "1791272382827810318",
+          "1791272382828810375"
+        ],
+        "stable9": true
+      },
+      "A079-NATIVE-PUBLIC-DRIVER.py": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A079-NATIVE-PUBLIC-DRIVER.py",
+        "bytes": 80552,
+        "sha256": "a03c50b4c3df715e1a6376d9b14263247b9a7d8e95ee4b11bd2156bbd0f5fc66",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558936",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "80552",
+          "1791272382592035308",
+          "1791272382592035308"
+        ],
+        "stable9": true
+      },
+      "A071-PRODUCER.py": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-PRODUCER.py",
+        "bytes": 21229,
+        "sha256": "34715072ba19c02d40aa9571051ba41eea99f0fc68ca0a24759c5cbcd2d6b743",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558930",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21229",
+          "1791272382559794940",
+          "1791272382560794998"
+        ],
+        "stable9": true
+      },
+      "A071-OWNED.c": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-OWNED.c",
+        "bytes": 43977,
+        "sha256": "e27bd01f01c2cdf6dd881e07c3c3e90148ab1b1e62e0c007903a651d68f5aa54",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558928",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "43977",
+          "1791272382550794424",
+          "1791272382550794424"
+        ],
+        "stable9": true
+      },
+      "A071-RUNTIME.c": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A071-RUNTIME.c",
+        "bytes": 7458,
+        "sha256": "415d1072c5a61e342bee2c59eb44218a576fce2f3c287f2db09b5c4d095e53ca",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558931",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7458",
+          "1791272382564795228",
+          "1791272382564795228"
+        ],
+        "stable9": true
+      },
+      "A091-STOCK-CALLER.h": {
+        "path": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/source/A091-STOCK-CALLER.h",
+        "bytes": 33691,
+        "sha256": "9e2b4631b6c6346f29b2a8d5bb810063ef236f012fa077a06806747e533df5f3",
+        "identity9_decimal_strings": [
+          "2050",
+          "3558991",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "33691",
+          "1791272382850811637",
+          "1791272382850811637"
+        ],
+        "stable9": true
+      }
+    },
+    "metadata_dependencies_historical_only": {},
+    "resource_arithmetic": {
+      "schema": "friday.sol151.body-caller-resource-arithmetic.v1",
+      "method": "Host integer arithmetic and manual raw Source relation only; no runtime fit credit",
+      "original_caps": {
+        "stream_each": 1048576,
+        "streams": 4,
+        "Source_plane_each": 16777216,
+        "Source_planes": 4,
+        "Root_RSS_bytes": 268435456,
+        "outer_memory_bytes": 67108864,
+        "inner_memory_bytes": 201326592,
+        "original_seconds": 180,
+        "final_reserve_seconds": 10,
+        "main_reserve_ns": 1000000000,
+        "cleanup_reserve_ns": 100000000
+      },
+      "exact_named": {
+        "body_header_bytes": 128,
+        "record_header_bytes": 48,
+        "reference_bytes": 72,
+        "plane_extent_bytes": 16777344,
+        "four_plane_extent_bytes": 67109376,
+        "caller_rw_fds": 4,
+        "caller_ro_fds": 4,
+        "max_one_record_readonly_map_span": 16781311,
+        "total_stream_raw_capacity": 4194304,
+        "stream_mutable_plus_immutable_upper": 8388608,
+        "auxiliary_slots": 18,
+        "four_stream_pipe_pairs_with_barrier": 5,
+        "pidfd_slot": 10,
+        "metadata_begin": 11,
+        "metadata_slots": 7,
+        "unchanged_initial_metadata_opens": 3,
+        "unchanged_optional_signal_metadata_opens": 2,
+        "new_final_group_metadata_opens": 2,
+        "max_total_metadata_opens": 7,
+        "new_group_metadata_read_request_upper": 8194,
+        "new_normal_capsule_read_request": 849,
+        "maximum_records_per_plane_only_from_minimum_record_extent": 342392
+      },
+      "per_record": "One full physical bytes object from readonly mmap slice, original48-byte header and reference72, view-entry dict, caller snapshot pair and codec entry; raw object reused on resolve. A308 aliases the existing decoder values table without copying it. After the successful local reader, complete raw DS69 bytes retain values/alias topology while private decoded nodes are retired; failure prefixes and canonical consumer graphs remain charged. Two additional entry fields, keyword/owner checks and all retirement work have nonzero unqualified costs; no body-to-hash/reference substitution.",
+      "retained_overlap": "All four full plane raw frame prefixes, record/reference/dict/list/tuple intentions, full original four streams and their buffers, canonical decoded objects/aliases, exception graphs, temporary slices/hash/base64/header/raw bodies and mappings; UNKNOWN_NOT_ZERO. A sparse64MiB extent is not64MiB observed RAM.",
+      "cost_warning": "Original per-frame DS69 expanded<=16MiB and each plane16MiB do NOT bound aggregate expanded graphs/implicit overhead under256MiB. Exact original finite case/record/alias/workload bounds and prepaid outside role budget remain REQUIRED. No caps/pool enlargement, early cleanup cut or new availability assumed.",
+      "write_seal": "Original GROW|SHRINK|SEAL=7, mandatory SEAL_SEAL prevents later F_SEAL_WRITE; no write-seal credit or mutation of Source writer sequence/poison/end/retired by outside reader.",
+      "measured_fit": false,
+      "whole_cost": "UNKNOWN_NOT_ZERO",
+      "Source_execution": "NOT_RUN",
+      "new_caps_roles_services_grants_pools": 0,
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false
+    },
+    "required_controls": {
+      "schema": "friday.sol151.required-controls.v1",
+      "status": "REQUIRED_NOT_RUN_TASK_FORBIDDEN",
+      "all_original": {
+        "whole": 216,
+        "connected": 29,
+        "inner": 6,
+        "ordinary": 9
+      },
+      "required": true,
+      "waiver": false,
+      "inherited": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/REQUIRED-CONTROLS.json",
+        "bytes": 2191,
+        "sha256": "27f0c60e6eedd2642cf9f94d2d723d0a5cfb1900742495fe346ca0fc445f5aaf",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085582",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2191",
+          "1791254337516236371",
+          "1791254337517236429"
+        ],
+        "stable9": true
+      },
+      "inherited_map": {
+        "path": "/var/tmp/friday-sol149-a297-browser-ordinary-history-wire/CURRENT-OBLIGATION-MAP.json",
+        "bytes": 5948,
+        "sha256": "aec90418f445304bd70800b44f177c95de58820707fcd81da8e0fdaf577ea153",
+        "identity9_decimal_strings": [
+          "2050",
+          "7085813",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5948",
+          "1791254498123535310",
+          "1791254498124475309"
+        ],
+        "stable9": true
+      },
+      "unsafe": {
+        "required": true,
+        "waiver": false,
+        "handling": "OPAQUE_HASH_ONLY_NOT_RUN"
+      },
+      "new_required": [
+        "ACTUAL_DEFAULT_A079_POSITIVE_THEN_BOTH_INDEPENDENT_NEGATIVES_CANONICAL_PROVISIONER_AND_FULL_PARENT_BODY_END",
+        "ORIGINAL_CAPSULE_SESSION_SHA_CREDENTIALS_FOUR_SLOTS_16M_GENERATION_SEQUENCE_END_POISON_RETIRED_HEADER_SEALS_DIRECTION",
+        "FAILED_INTENTION_MEMFD_FCHOWN_MODE_FTRUNCATE_HEADER_SHORT_SEAL_READONLY_VIEW_WITH_ACQUIRED_PREFIX_ORIGINAL_ERRORS",
+        "FORK_MAPPING_SWEEP_ATTACH_EXEC_FIRST_SECONDARY_ERRORS_EXACT_NO_SOURCE_PLANES_AS_ROOT_ERROR_STORAGE",
+        "TWO_ORIGINAL_CGROUP_EVENTS_SAME_KERNEL_ROOT_END_NO_WRITERS_AND_CONTAINMENT_NOT_EXIT_OR_HASH_CREDIT",
+        "MISSING_WRONG_SLOT_CAPSULE_CREDENTIAL_SEAL_FRESHNESS_DRIFT_ODD_SEQUENCE_POISON_RETIRED_REFERENCE_RANGE_PREFIX_SUFFIX",
+        "FULL_PHYSICAL_FRAME_REFERENCE_ALIAS_DS69_GRAPH_THIRD_DECODER_AND_BOTH_CANONICAL_READERS",
+        "HASH_FORMAT_GRAPH_ALLOCATION_MMAP_CLOSE_SNAPSHOT_FREEZE_AND_SECONDARY_CLOSE_FAILURE_COMPLETE_RAW_RETAINED",
+        "UNBORN_AND_BOTH_NORMAL_FAILED_BODY_CLOSE_ONCE_UNKNOWN_DESCRIPTOR_NO_RETRY_NO_REENTRY",
+        "ORIGINAL_WORK_HARD_180_10_1S_100MS_AND_FINAL_CLOCK_FAILURE_NO_COMPLETION_GRACE_OR_NEW_GRANT",
+        "EXACT_ACTUAL_RECORD_GRAPH_COUNT_WHOLE_RAM_RSS_AS_FD_COPY_READ_HASH_CPU_AND_FINITE_TIME_FIT",
+        "ORIGINAL_ROOT_WAIT_PROC_FAILURE_HISTORY_AND_PREPAREDVIEW_OUTSIDE_CALLER_REMAIN_REQUIRED_NOT_WAIVED",
+        "ALL_ORIGINAL216_29_6_9_FULL_FINAL_GATES_AUTHENTICATED_SELECTED_ABI_AND_INDEPENDENT_CHANGED_SOURCE_REVIEW"
+      ],
+      "observations": "NONE_NEW",
+      "Source_execution": "NOT_RUN",
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false
+    },
+    "CODE_OPEN": [
+      "Unchanged Root repeated failing wait4/proc/fdinfo paths still lack complete persistent reached history. Original3136/1568/512/64 record/storage ceilings are not a proof of every entered failing-call bound; no protected wait/lifetime/cleanup policy change or early cleanup truncation is made.",
+      "PreparedView.finish has NO pinned actual outside caller supplying original strong body/stream custody. It remains byte-identical to Sol149; this package does not create the only holder in a process which execs away or invent a private source/provisioner for that unrelated path. Its exact legacy inline N-1 plus Root framing/custody conflict remains.",
+      "Original child-side launch dup2/FD sweep/attach/exec failures still exit125 without full cross-process original Python error/alias transfer. Parent retains exact acquired originals, actual kernel end and all existing raw streams, but this is not complete child setup error-object history. No Root error-history storage is added to Source planes.",
+      "Existing held_capture repeated retention/select/cleanup histories and allocation/freezing of the receipt can still be incomplete or fail. New caller publishes original acquired buffers/launch objects/planes beforehand and retains fixed field/error prefixes, but no universal complete entered-error graph/history or allocation-failure guarantee is asserted.",
+      "Generic A201 snapshot poison/refused record/undecodable suffix retains original fd/readonly view/mapping and complete acquired prefix; it does not certify full native/error objects or a new expiry-time transfer authority. Original Source objects stay owned/charged on uncertain end/clock/close; no unqualified reentry/close retry/new holder.",
+      "The two original cgroup emptiness reads establish kernel no-members only under the independently qualified original Root namespace/containment/FD-transfer contract; no external writer/descriptor escape or authenticated selected runtime qualification is inferred from zero text alone.",
+      "Original whole workload physical memory/AS/RSS/FD/pages/COW/TLS/read/copy/hash/CPU/time/format/decoder/last-writer/final-retirement relation remains open. A308 authors normal local successful-graph retirement only; whole fit still includes all retained raw/header/reference/entry objects, current transient graph with per-node mutable/Unicode copies, failed partial tables/tracebacks, canonical graphs and positive-first overlap. Runtime reclamation/allocator/time is not measured. Exact finite actual workload bounds under original caps remain REQUIRED; no new pool/cap or full-cost credit."
+    ],
+    "UNKNOWN_NOT_ZERO": [
+      "Selected authenticated image/compiler/native/kernel/CMSG/CPython ABI, native actor qualification, full directional FD/containment contract and current exact capsule admission: UNKNOWN_NOT_ZERO / REQUIRED_NOT_RUN.",
+      "All allocation intentions/state/list/traceback/exception aliases, implicit reads/copies/hash, VMA/page/allocator/Python-object overhead, sparse memfd accounting, readonly reopen costs, mutable/immutable overlaps, full expanded graph/node/cycle count, CPU/IO and timing: UNKNOWN_NOT_ZERO. No host metric is promoted to Target fit."
+    ],
+    "actual_default": "Real A079 default now creates/retains the existing canonical four Source-only body planes before outer fork; complete physical prefix/body consumption plus actual outside writer-end/retirement. Not optional-argument-only.",
+    "original_obligations": "All216/all29/all6/all9 and inherited/new controls remain REQUIRED_NOT_RUN. Unsafe operational bodies opaque/hash-only required/no waiver. No new observations/whole author acceptance.",
+    "requested_whole_implementation_complete": false,
+    "author_acceptance": false,
+    "Source_execution": "NOT_RUN",
+    "SourceReady": false,
+    "Root_admission": false,
+    "GO": false,
+    "sol167_rle_transient": {
+      "schema": "friday.sol167.three-reader-rle-transient.v1",
+      "assignment": "ASTRA-E4-A309-BROWSER-THREE-READER-RLE-TRANSIENT-CONNECTED-SOL167",
+      "generation": 1,
+      "state": "AUTHOR_CONNECTED_INERT_PENDING_ASTRA_REVIEW",
+      "current_join": "/var/tmp/friday-sol167-a309-browser-three-reader-rle-transient/CURRENT-SOURCE-JOIN.json",
+      "current_join_authority": "Resolve all15/209/aux3 actual names through the sealed outer manifest current_join; inherited metadata pins below marked historical are NOT current image or Source admission.",
+      "decoder": "ALL3 exact same full DS69 decoder. Original raw bytes retained; RLE descriptors use absolute raw offsets and the same count/canonical checks. Run scratch <=65536 is an implementation chunk size, NOT an accepted-data limit. Grow the actual prefix in bounded extends; retain every allocation failure and traceback; no catch/retry/GC.",
+      "successful_private_temporaries": "Run scratch cleared only after all its extends return. Full immutable row validates exact length and SHA and is appended to the original blobs list before chunk/value references end. Failed row does not clear its actual acquired prefix. Canonical mutable nodes/aliases and A308 SAME-table guarded actual retirement stay unchanged.",
+      "cost": "Eliminates per-RLE stored slice and full-count repeated-byte temporary; avoids a prior successful expanded builder overlapping the next row/nodes. Builder capacity plus immutable full output still overlap during conversion/validation. Full raw, all prior blobs, header/nodes, copies/Unicode/errors/tracebacks remain charged. Extra chunk loops/scratch/time/allocator costs UNKNOWN_NOT_ZERO; original256MiB/180s/work170/final10/role shares unchanged; no fit/refund credit.",
+      "required_controls": "ALL216/29/6/9+inherited+H01-H26+G01-G14+T01-T12 REQUIRED_NOT_RUN/no waiver",
+      "F3_F4_F5": "OPEN; failed graphs/whole-workload share/whole CPU unchanged qualification, not solved by local transient reduction.",
+      "Source_execution": false,
+      "author_acceptance": false,
+      "SourceReady": false,
+      "Root_admission": false,
+      "GO": false
+    }
+  }
+}

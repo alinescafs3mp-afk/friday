@@ -1,0 +1,21 @@
+{
+  "schema": "friday.work-snapshot.review-bindings.v1",
+  "bindings": [
+    {
+      "result_original_path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL167-RESULT.json",
+      "result_sha256": "30308ee783da9c2f7822edfde722c7eb0c1ce9cb37abb83faa55b88307189eac",
+      "package_manifest_sha256": "a561b74fca898a7031a4c97cccab223f8ae07eb0f78d70819b5d556d5c0e18e7",
+      "authority": "AUTHOR_RESULT_NOT_INDEPENDENT_ACCEPTANCE"
+    },
+    {
+      "review_original_path": "/var/tmp/friday-astra-a310-sol167-review.K2wlWY/REVIEW.json",
+      "review_sha256": "811270f667bb5cf464a71184f89ca4c32dedf7f85986a213d689b7b7f942ebf4",
+      "package_manifest_sha256": "a561b74fca898a7031a4c97cccab223f8ae07eb0f78d70819b5d556d5c0e18e7",
+      "decision": "SCOPED_STATIC_ACCEPT_EXACT_SOL167_CONNECTED_THREE_READER_RLE_AND_CURRENT_PIN_JOIN_DELTA_ONLY",
+      "base_manifest_sha256": "177894c18a180190581a7cfddaf4d857ee9526a1e3389774c2838d1c2aa438a5",
+      "base_snapshot": "handoffs/ASTRA-E4-20261006T1038MSK-BROWSER-PUBLISHER-CHECKPOINT",
+      "executed_tests": 0,
+      "old_runtime_credit": false
+    }
+  ]
+}
