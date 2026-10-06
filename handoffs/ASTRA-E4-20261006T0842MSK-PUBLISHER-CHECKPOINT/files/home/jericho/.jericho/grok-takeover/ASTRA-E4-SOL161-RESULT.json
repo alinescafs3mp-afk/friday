@@ -1,0 +1,37 @@
+{
+  "schema": "friday.sol161.result.v1",
+  "assignment": "ASTRA-E4-A305-PUBLISHER-INITIAL-MIN-CELL-CONNECTED-REVIEW-SOL161",
+  "generation": 1,
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A305_INITIAL_RP31_ZERO_GUARD_CONNECTED_CONTEXT_ONLY",
+  "manifest": {
+    "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/manifest.json",
+    "bytes": 9583,
+    "sha256": "9db5d118b7add0fcb902dd48ba58410e0def38701c8dcf8dd3a0e41d7ed80ccc",
+    "identity9_decimal_strings": [
+      "2050",
+      "3849825",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "9583",
+      "1791266412209137980",
+      "1791266412209137980"
+    ],
+    "stable9": true
+  },
+  "review": {
+    "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/REVIEW.json",
+    "sha256": "3e22f1ca31b4fc228695405dfee965f53c37949aa78e1fa578ff2043d97fe7b6"
+  },
+  "delta": "A305 six-line initial RP31 all-byte zero guard before accepted RB_OP_HEADER. Authenticated full61/current88: changed1/same60, candidate same87; exact v6/v2 producer/0/70/78/79 and actual parent rejoined. Own SOL160 whole baseline NOT independently accepted.",
+  "F1": "Required guard present statically; no runtime bypass observation or executed negative credit.",
+  "M15": "Seconddecode error after firstscalar can remain RESTRICTED; actual caller raw_bodyfalse prevents full intake/close/finalization, no universal phase invariant.",
+  "required": "All inherited original69/20/140/v2 and clock/prelaunch, M01-M37+A305+I01-I14 REQUIRED/no waiver/NOT_RUN. Unsafe bodies opaque.",
+  "open": "Earlier min authority/identity/generation/prelaunch/full-span, whole native/error/body/alias/history/final custody, compiler/image/ABI/admission/runtime/whole cost OPEN/UNKNOWN_NOT_ZERO.",
+  "elapsed_at_seal_seconds": 349.2,
+  "Source_execution_tests": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

@@ -1,0 +1,47 @@
+{
+  "schema": "friday.incremental-publisher.omissions.v1",
+  "complete_review_coverage": false,
+  "per_file": [
+    {
+      "original_path": "/var/tmp/friday-astra-a303-publisher-work-seal.QvP70b/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "archived_path": null,
+      "omitted": true,
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY"
+    },
+    {
+      "original_path": "/var/tmp/friday-sol159-a304-publisher-actual-prelaunch-clock/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "archived_path": null,
+      "omitted": true,
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY"
+    },
+    {
+      "original_path": "/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "archived_path": null,
+      "omitted": true,
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY"
+    },
+    {
+      "original_path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "archived_path": null,
+      "omitted": true,
+      "reason": "RESTRICTED_CONTROL_BODY_HASH_ONLY"
+    }
+  ],
+  "categories": [
+    "Restricted operational declared_controls.py bodies withheld across versions; exact hashes retained, required/no waiver/NOT_RUN.",
+    "Private conversations/session/lifecycle/compact/TASK/credential/key/enrollment/runtime and unrelated owner files excluded; none of those bodies copied.",
+    "Actual selected implementation source supplied except declared_controls.py. Host libraries/native headers/compiler/binaries/image/provider and independent admission are not supplied or qualified.",
+    "Historical/copied provenance and host helper metadata not selected; local refs in original manifests are not claimed wholly/transitively exported. REFERENCES.json resolves only the four actual Source61 review/candidate inventories.",
+    "Browser/Scanner/Sender/Node are outside this incremental Publisher checkpoint. Earlier published five-component snapshot remains accessible in the repository; no current coverage for their newer deltas is claimed here.",
+    "Sol161 exact scoped review/result included before final seal. No tests/build/install/live rerun or complete runtime qualification; source remains inert."
+  ],
+  "impact": "Three Publisher versions each60/61 source bodies plus original A303 parent and byte-identical archived A303 contexts. Omitted controls, runtime dependencies and earlier transitive evidence prevent complete independent release reproduction; obligations unchanged."
+}

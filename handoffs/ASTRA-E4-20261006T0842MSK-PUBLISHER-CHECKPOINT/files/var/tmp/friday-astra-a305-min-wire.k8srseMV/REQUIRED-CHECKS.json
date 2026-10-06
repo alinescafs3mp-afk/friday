@@ -1,0 +1,21 @@
+{
+  "schema": "friday.astra.a305.publisher.initial-min-required.v1",
+  "required": true,
+  "waiver": false,
+  "status": "REQUIRED_NOT_RUN",
+  "inherited": {
+    "path": "/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/REQUIRED-CONTROLS.json",
+    "sha256": "239f81748a041362b93ad3d3cf3f7b2874c9455e9fd4cfde0bdd20df90215d82"
+  },
+  "cases": [
+    "Healthy zero-initial B65/RP31 actual v6 caller -> bind -> ordinary0/70 and valid79 producers -> tighter parent clocks retain positive paths.",
+    "Any nonzero byte in the fixed initial RP31 output cell refuses actual bind before its accepted event/Root entry; no claimed stale preimage success.",
+    "Existing B65/other original PID/FD/layout/reservation/zero checks unchanged; no primitive retry or later input normalization.",
+    "Same producer/read field offset from PUBLICATION_AT and RP_FINAL_DEADLINE*sizeof(uint64_t); full fixed header width/layout verified during later ABI admission, no guessed private offsets.",
+    "All37 inherited min-wire and original69/mandatory20/full140/v2 plus inherited clock/prelaunch cases remain required/no waiver; unsafe controls opaque/hash-only."
+  ],
+  "source_execution": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

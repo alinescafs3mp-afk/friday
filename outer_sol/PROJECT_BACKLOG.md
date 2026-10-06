@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-10-04 (A260 verified inert work snapshot; Source A259 unchanged, SOL111 scoped graph/budget credits and two exact residuals received; LAB950 latest mapping correction unintegrated, Sol112 reviewing and Grok951 correcting error-phase/nested-scan. Whole acceptance/execution OPEN; SOL107#2 security-paused. Production `0.208.58` unchanged; order1.0 → N6 TinyFish → first N8.)
+Updated: 2026-10-06 (A305: Publisher retained-min wire/parent join and initial-field correction independently scoped accepted; initial-constructor work/full closure active SOL162. Incremental inert Publisher source checkpoint prepared for main. Full custody/qualification remain open; no new executable release gate.)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -16,80 +16,144 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Current release frontier — 2026-10-04, post-power-loss checkpoint
-Current A260 frontier, 04 October 20:52 MSK (current source remains sealed A259). Class: harness/implementation.
-Product `cecd28a92ac4fd4e34c4d3813d0c598debe09436`, 0.208.64/schema50;
-installed production 0.208.58 unchanged. Current INERT Publisher Source57:
-`/var/tmp/friday-astra-a259-publisher-error-graph.Gl6Src`,
-manifest `5315a671f170e7be3bdea4395ffac62c7db01ee0955dffe38b1952e957f615c3`.
+## Current release frontier — 2026-10-06, A305
 
-Implemented/integrated: append-only primary/secondary native value graph,
-explicit encodings and retained failed-prefix DATA dependencies; both actual
-readers join the whole owner/error graph before the SAME retirement and cold/
-final-caller endpoint. No mutation of an exposed tuple. LAB949 actual retained
-Source consumer-pass and native registry/support-probe budgets joined exactly.
-Locally checked: full SHA9, 4 changed/53 exact A258, 30 forward/inverse LF
-hunks; reversing7 LAB949 hunks returns exact prejoin A259. These are literal
-checks, NOT syntax/compiler/behavior/runtime. Whole independently accepted:NO;
-target verified:NO; Source/Root admission:NO. SOL111 reviewed exact joined bytes:
-full retained Source-pass budget independently credited; historical/current
-error traceback relation and nested class registry scan rejected (existing roots).
+Astra active Lead Architect epoch4; Kimi continuity deputy; goal ACTIVE.
+Existing native Sol only; Grok unavailable. Models/settings/guards unchanged.
+Stopped SOL107#2, ScannerSOL075 and SOL139 excluded: no retry/reroute/salvage.
+No new model/TUI/role/service/issuer/grant/pool/cap.
+Previous checkpoint: /home/jericho/.jericho/runtime/ASTRA-E4-CHECKPOINT-20261006T0831MSK-ACTIVE.json
+sha25680f9310d405581640d140b0b75cd748f29a20d8a14269e57f81e5fc2b181425d.
 
-Received completed work (failed evidence immutable):
-- SOL109: accepted actual carrier/role/phase/hash-rejoin scopes; rejected two
-  existing C2-R1D scan-debit paths. LAB949 implements them; author claim only
-  until SOL111 independent rejoin. No new grouped root.
-- SOL110: LAB948 normal retained return, still-owned keeper, confirmed
-  historical bytes and unknown-close safe retention credited. Rejected actual
-  return-recovery error misclassification and phase3-only full-DATA/end credit.
-  LAB948 is NOT integrated. Both exact residuals assigned to LAB950.
-- SOL109/SOL110 authenticated, received, exact queue items consumed; review
-  assignments CLOSED in both profiles. LAB948/LAB949 authenticated and ACKed.
-  Prior SOL108 full hash-history source credit preserved at exact reviewed pins.
+Publisher — harness/code with evidence/environment dependencies; Astra integration.
+Current connected A305 full61/current88/93physical:
+ /var/tmp/friday-astra-a305-min-wire.k8srseMV/manifest.json
+ sha2567b73d830d31e69ab52e997a4f9d33baa33d5e15ba74e32c6d779dc0f3834a175.
+Implemented/integrated/raw-checked; Astra initial-cell delta independently
+SCOPED_STATIC_ACCEPT by Sol161; NOT whole-source/ABI/image/target acceptance. One native-bank file changed
+versus Sol160;60 Source/87 candidate unchanged.
 
-Remaining invariant -> actual path -> closure:
-- C1-R1D: whole required owner/value/error DATA before final end -> native
-  secondary encoder/both readers/retirement -> SOL111 acceptance of A259,
-  then remaining cursor/buffer/required factory kinds and actual registration/
-  later cleanup failures. Current conditional codec-error path is NOT whole
-  error completion. Unknown originals remain retained; no flag-only shortcut.
-- C2-R1D: all repeated actual reads/allocations paid before effect -> Source
-  consume_secondary_own_cut and native namespace/reuse -> SOL111 independently
-  validates joined LAB949 code; original widths/caps and physical ABI/workload
-  fit still require qualification. New inline segment storage is not free.
-- C1-R1B: real constructor outcome and phase-correct required body/end ->
-  Source creation/Birth/native refs6 and both mmap readers -> LAB950 connects
-  both SOL110 fixes, then non-author review/rejoin. Unknown close cannot stand
-  in for confirmed end or full current body; no retry/reopen/dead-FD proof.
-- C1-R1A stopped SOL107#2 remains PAUSED and excluded: no retry/reword/reroute.
-  Existing R1 journal unchanged. C1-R1C class-factory provenance remains OPEN.
-- Environment/evidence: exact Source/Root/image/compiler ABI/provider/grants/
-  resource fit/finite clocks not established. Root invocation/final target
-  bindings and mandatory execution layers remain NOT_RUN/incomplete.
+Existing invariant: SAME retained native full min must reach actual outside
+receiver without widening original S/D0, on normal and failure paths.
+SOL160 implemented v6 header B65 and v2 failure RP31, actual post-ColdPerform
+latch/Commit/clock/publication -> early parent extraction -> later reads/once-close/
+freeze/final timestamps and FOUR NEW immutable records. D0 reservation separate.
+No scalar grants admission, resets a clock or retroactively authorizes launch.
+Exact author package:
+ /var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/manifest.json
+ sha2566e2e06418fd01dfa452bddcc189a01c4b6ea79e185ca914035eea699e3c3917e.
+Astra nonauthor review:
+ /home/jericho/.jericho/grok-takeover/ASTRA-E4-A305-SOL160-MIN-WIRE-REVIEW-20261006.json
+ sha256bf597f8e72381294c72bd73d381c0234743e75964739836caeb34861b87f3713.
+Connected numeric transfer/normal0/70/valid79/verified78/data-failure scopes retain
+static credits; one source-contract F1: initial RP31 at4088 was outside native
+word128/bind-region zero checks despite required M08. Current A305 checks that
+fixed output-only cell before accepted bind, preserving all actual downstream
+consumers/positive paths. No runtime bypass claimed. Extra fixed-byte/local/branch
+costs UNKNOWN_NOT_ZERO; current compiler ABI and whole physical/time fit unproved.
+M15 reconciliation: second decoder failure may leave first restriction retained;
+actual caller cannot proceed to raw/final retirement without raw_body_retained.
+Do not invent a stronger universal helper-phase requirement.
 
-Owners: Astra connected integration and remaining actual finite endpoints;
-Sol112 non-author review of latest completed LAB950 mmap outcome/end correction,
-after one same-TUI compact. Grok LAB951 corrects both exact SOL111 error-phase/
-nested-scan findings on A259, without LAB950 overlay. Both use original roles,
-limits and source boundary; neither active output read or interrupted.
-SOL111 received/exact queue consumed/lifecycle CLOSED in both profiles; LAB950
-complete57+65 physical authenticated/ACKed, unintegrated author-only. Its old
-SOL109-open wording is superseded by actual SOL111 scoped budget credit.
+SOL160107physical/117final inputs authenticated stable9/fullSHA; received,
+exact queue01a10fb9-65dc-7813-b3d7-42a4056f45c3 consumed, BOTH lifecycle CLOSED.
+Original failed/reviewed source is immutable; correction is a fresh derivative.
 
-Whole roots independently closed this turn:0; new grouped roots:0;
-newly completed mandatory execution stages:0. Exact scoped credits above do
-not imply release progress through execution. No gate newly executable.
-Next: independent connected source acceptance, qualified stable bindings,
-collect-all diagnostics; then original exact-release/160 live/A+B/B09/R10/
-all30/F0-F11/build-install/restore-rollback/target/independent acceptance.
-r5 immutable RED/no reuse; r6 absent. Other component roots/accepted evidence
-unchanged via prior checkpoint. Full required scope/caps/oracles preserved.
-Publication checkpoint A260: fresh inert snapshot prepared in isolated checkout,
-with current5 component sources, required safe local dependencies/tests and
-actual author/non-author evidence, including SOL111 and latest separate LAB950.
-Exact restricted/private/host-image omissions and coverage limits are listed;
-no tests rerun or product fixes made for export. Publication commit is bound by
-the Git checkpoint and subsequent private receipt, not a self-referential SHA.
+Preserved accepted exact scopes:
+- Sol158 accepted Astra A303 work-stop kinds6/7, first raw refusal/no further work,
+  separately prepaid completion/getter/latch/Commit/publication. True primitive/
+  domain/unreturned/full-expired clocks remain terminal; no Sol155 self-acceptance.
+  Review6084aa1b8db2beca1dcfccf2f72c79fd25a8af47c41c5ae10733d552443b06d0.
+- Astra accepted Sol159 actual prelaunch check/post-start elapsed and all-outcome
+  caller: original prelaunch first error survives context exit; conservative
+  attempted state; normal/native/semantic/once-close/new immutable results.
+  Review0d4a1e54dd454024dcff57e51f32417c4b67fe5338db2f81ed5dd92079838cbb;
+  manifestef68bdffb351ae56578b937f7db1c90277dc6df127ed79b42428f196dbd379c4.
+  Actual run body byte-exact in Sol160/A305; original D0 only before min intake.
+- A301 original parent clock, A300 initial F1/F2/symbolic layout, A298 operand/raw,
+  A296 retirement remain exact scoped credits, not current whole acceptance.
+
+Remaining connected roots: earlier authoritative applicable-cutoff identity/
+generation/pre-acquisition/prelaunch/full-span witness; actual image/PID-start/
+signed admission/compiler ABI/provider and complete workload costs; full native/
+value/alias/history/error/last-writer transfer and final owners. Private working
+bank -> late copy still loses required surviving custody on forbidden-clock path;
+return79/HELD is not handoff. Root PID/start-bound admission is not automatically
+outside-parent authority; absent installed enrollment is later qualification,
+not permission absence or reason to omit concrete same-role source readers.
+C02 actual five-argument caller already has receiver and conditional completed
+owner/history/empty-PID-domain removal. Remaining ACCEPTED_SAME_PID_CALLS retained
+root lifetime/end is unproved; do not reapply old missing-receiver finding or
+invent mandatory noncold RootPerform. No stopped TYPE/callback/child repair.
+Canonical diagnostic-only keeps the same source admission, wheel/inventory,
+topology/deadline/cleanup prerequisites; no alternative execution credit.
+
+SOL161 independent closure:
+ /var/tmp/friday-sol161-a305-publisher-initial-min-review/REVIEW.json
+ sha2563e22f1ca31b4fc228695405dfee965f53c37949aa78e1fa578ff2043d97fe7b6.
+Exact A305 initial RP31 guard plus actual normal0/70/78/79/parent context
+SCOPED_STATIC_ACCEPT; introduced contradictions none. Own Sol160 whole source
+not self-accepted. 18 physical/211 exact inputs verified, received, exact
+queue01a10fcc-881d-7840-b336-90961df70a56 consumed, BOTH lifecycle CLOSED.
+Completed09:00:31MSK, actual374.055s; all required controls remain NOT_RUN.
+
+Active native SOL162:
+ ASTRA-E4-A305-PUBLISHER-INITIAL-WORK-FULL-CLOCK-CONNECTED-SOL162#1.
+TASK /home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL162-TASK.txt
+sha256d76208d0ac655dee5d36aec06b0ee186ae60bef83681cbb8816c2d54c40b8506.
+One same-TUI compact91.388s completed after closed161/error-null/idle-empty.
+Actual turn01a10fd6-b7d3-79a3-8c61-076f6fe0fb08 started09:11:32MSK,
+first TASK/hash and actual executor read verified09:11:40 inProgress/error-null.
+30min/final3seal cap09:41:32MSK is NOT ETA. Preserve assignment/pins.
+Existing initial constructor gap: valid W0<T<=D0 is currently clock failure
+before original reservation adoption; close initial work refusal/eligible prepaid
+completion/getter/Commit/wire/parent as ONE package. No new work/grant/clock,
+no failed-clock revival or fake successful initialized pool. Astra independent
+review required. Do not enter stopped/opaque scopes. No wait loop.
+
+Browser — harness/code + evidence/environment, unchanged A302:
+ /var/tmp/friday-astra-a302-browser-sequence-resolver.i1ctH8/manifest.json
+ sha2560799ec9e30ac7f1d5278933527d001101a5d55719f5f49aa2427e96e2bb539c1.
+Astra resolver/10 bindings independently scoped-accepted by Sol156 review
+7da4d8b9bf916fcfa43d29ed1933421fec563e367137ff1f76755fc8dbda0759.
+Actual sequence->rank->FULL equality->SAME object: M resolutions <=M comparisons;
+fullN once replaces N(N+1)/2 with <=N, source reasoning only/not measured fit.
+F1-F4 aggregate raw/decoded multiplicity/cycles/error/positive-negative custody,
+other F5 parse/hash/read/CPU and original256MiB/180/10 fit OPEN. Root wait/proc
+history, child setup, PreparedView outside caller, whole writer-end/image remain.
+Next owner Astra/Sol: connected workload/pre-effect reader costs and full graph/
+error custody; no body/cap reduction, target NOT_RUN.
+
+Other roots unchanged: harness/code plus evidence/environment; scoped credits
+only, whole independent acceptance and target verification FALSE:
+- Scanner LAB887 manifest3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee:
+  existing-parent/factory/Source-main endpoints OPEN; stopped075 excluded.
+- Node A237 manifest8e9f2f157ea87785761578fd4ab3795b327c45016be8d29c43a55fe7d184f35f:
+  native pool/full graph-prefix/both ends/Q1Q2 OPEN.
+- Sender SOL089 manifest2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133:
+  native/raw/error/both ends OPEN. Original Python scoped credits retained.
+
+Product frozen cecd28a92ac4fd4e34c4d3813d0c598debe09436,0.208.64/schema50;
+index unchanged29ddfd4a. Installed0.208.58 last recorded/not reprobed; no new wheel.
+r5 immutable RED/no reuse; r6 absent; SourceReady/Root_admission/GO FALSE.
+Next newly executable release gate NONE. Independently accepted connected source
+then image/compiler ABI/grants/provider/resource/finite-clock qualification,
+stable collect-all diagnostics, exact change+exact union,160live,A+B(noBafterredA),
+B09,R10/all30/F0-F11,build/install,restore/rollback,target/independent acceptance
+remain required. Original69/mandatory20/full140/v2 and inherited clock/prelaunch
+controls REQUIRED_NOT_RUN/no waiver; unsafe bodies opaque/hash-only REQUIRED.
+External web ONLY OWNER_DEFERRED_POST_1_0, never PASS. No Source parser/compiler/
+import/native/runtime/tests/live/install or exclusive heavy run this turn.
+Movement A305: connected retained-min producer/receiver implemented with scoped
+nonauthor credits; initial-field mismatch fixed and independently scoped accepted. Remaining initial
+constructor work/full distinction assigned as connected SOL162, not a new root.
+Whole roots closed0/new product roots0/execution layers0. No unsupported ETA.
+Publication target: handoffs/ASTRA-E4-20261006T0842MSK-PUBLISHER-CHECKPOINT,
+incremental inert Publisher actual source/three versions/exact scoped reviews,
+NOT a new full five-component snapshot. Restricted control body and private/runtime
+materials omitted explicitly, no tests or source changes for export. Previous
+public main9b4ece8139669d1f6851d5e3989d427323519fb9 verified at isolated clone;
+publication success/full commit is recorded in the exact publication receipt.
 
 Superseded A242 sealed connected baseline, 04 October13:35MSK:
 product baseline `cecd28a92ac4fd4e34c4d3813d0c598debe09436` unchanged.

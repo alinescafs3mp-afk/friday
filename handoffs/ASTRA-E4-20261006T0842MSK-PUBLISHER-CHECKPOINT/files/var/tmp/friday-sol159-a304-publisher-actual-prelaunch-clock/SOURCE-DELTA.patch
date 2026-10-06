@@ -1,0 +1,92 @@
+--- A303/candidate/parent/publisher_root_command.py
++++ SOL159/candidate/parent/publisher_root_command.py
+@@ -1106,6 +1106,7 @@
+         raise BankUnconfirmed("bank_actual_command_inputs")
+     bank = PublisherBank(layout, image_sha256)
+     retained_evidence.append(bank)  # Before memfd/acquisition/launch; errors retain it.
++    prelaunch_clock_error = None
+     try:
+         bank.reserve_original_bank()  # Fixed original charge BEFORE the first fd.
+         bank.create()
+@@ -1114,6 +1115,16 @@
+         scope = OwnedCommandScope()
+         bank.scope = scope
+         with scope:
++            # Check the SAME original interval after scope entry, immediately
++            # before launch intent. This is not an admission/minimum witness.
++            # Register the exact failure BEFORE context exit can itself fail;
++            # no start was attempted and no process end is inferred from exit.
++            try:
++                bank._clock("launch")
++            except BaseException as clock_error:
++                prelaunch_clock_error = clock_error
++                bank._remember_fault(clock_error)
++                raise
+             # Conservative intent precedes the fallible actual start. Even a
+             # failed Popen is NOT reclassified as never launched by this helper.
+             bank.launch_attempted = True
+@@ -1123,27 +1134,38 @@
+                 child_umask=0o077, inherited_fds=(bank.fd,),
+             )
+             bank.process_id = process.pid
++            # Never reuse the prelaunch sample as a wait allowance: scope.start
++            # itself consumed the original interval. A failed/expired post-start
++            # check stays attempted and never reaches wait with a nonpositive
++            # duration or a newly started clock.
+             remaining = (bank.deadline - bank._clock("launch")) / 1_000_000_000
+             returncode = scope.wait(remaining)
++        if prelaunch_clock_error is not None:
++            # Even if context exit suppressed the exception, it cannot turn a
++            # refused launch into receive/finalization or a later clock retry.
++            raise prelaunch_clock_error
+         bank.cleanup = scope.proof
+         if scope.proof is None:
+             raise BankUnconfirmed("bank_missing_actual_cleanup")
+         bank.receive(scope.proof, returncode)
+         return bank.finish_received()
+-    except (BankNativeFailure, BankPublicationFailure) as exc:
+-        # Full native failure is the first outcome, not operation success.
+-        # Finish its actual received bank as well; a secondary finalization
+-        # failure is retained without replacing or retrying the original.
+-        bank._remember_fault(exc)
+-        try:
+-            bank.finish_received()
+-        except BaseException as finish_error:
+-            if bank.close_fault is not finish_error:
+-                bank._remember_fault(finish_error)
+-        raise
+     except BaseException as exc:
++        if (prelaunch_clock_error is None
++                and isinstance(exc, (BankNativeFailure, BankPublicationFailure))):
++            # Full native failure is the first outcome, not operation success.
++            # Finish its actual received bank as well; a secondary finalization
++            # failure is retained without replacing or retrying the original.
++            bank._remember_fault(exc)
++            try:
++                bank.finish_received()
++            except BaseException as finish_error:
++                if bank.close_fault is not finish_error:
++                    bank._remember_fault(finish_error)
++            raise
+         # The existing controller retains this exact registered owner even on
+         # partial create/launch/cleanup/intake. No duplicate process or retry.
++        if prelaunch_clock_error is not None:
++            bank._remember_fault(prelaunch_clock_error)
+         bank._remember_fault(exc)
+         if bank.scope is not None:
+             bank.cleanup = bank.scope.proof
+@@ -1159,6 +1181,14 @@
+                 bank.finish_receive_failure()
+             except BaseException as finish_error:
+                 bank._remember_fault(finish_error)
++        if prelaunch_clock_error is not None:
++            # This SAME first exception, including a native-failure-shaped
++            # exception from the clock/exit path, is a never-attempted launch
++            # failure, not a received native outcome. Keep any exit/finalization
++            # exception in the registered bank; never replace the first error.
++            if exc is not prelaunch_clock_error:
++                raise prelaunch_clock_error from exc
++            raise
+         if bank.publication_fault is not None and exc is not bank.publication_fault:
+             # Preserve native FIRST; the reached parent intake error is a
+             # separately retained secondary, never a replacement or close retry.

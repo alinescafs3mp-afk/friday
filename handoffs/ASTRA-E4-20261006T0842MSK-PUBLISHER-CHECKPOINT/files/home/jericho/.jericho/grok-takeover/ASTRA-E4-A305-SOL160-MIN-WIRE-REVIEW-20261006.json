@@ -1,0 +1,74 @@
+{
+  "schema": "friday.astra.a305.sol160.connected-review.v1",
+  "assignment": "ASTRA-E4-A304-PUBLISHER-RETAINED-MIN-WIRE-PARENT-CONNECTED-SOL160",
+  "generation": 1,
+  "reviewer": "Astra nonauthor of Sol160 delta",
+  "decision": "RETAIN_CONNECTED_STATIC_CREDITS_REQUIRE_INITIAL_RP31_ZERO_CHECK",
+  "manifest": {
+    "path": "/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/manifest.json",
+    "bytes": 81450,
+    "sha256": "6e2e06418fd01dfa452bddcc189a01c4b6ea79e185ca914035eea699e3c3917e",
+    "identity9_decimal_strings": [
+      "2050",
+      "7086806",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "81450",
+      "1791265155979619319",
+      "1791265155979619319"
+    ],
+    "stable9": true
+  },
+  "verification": {
+    "physical": 107,
+    "initial_input_pins": 114,
+    "final_input_pins": 117,
+    "stable9_full_sha": true,
+    "current88": 88,
+    "source61": 61,
+    "changed4": [
+      "native/publisher_root_bank.c",
+      "native/publisher_root_bank.h",
+      "native/publisher_root_entry.c",
+      "parent/publisher_root_command.py"
+    ],
+    "actual_run_prelaunch_byte_equal": true,
+    "protected_scope_unchanged_opaque": true,
+    "method": "Raw safe literal text/hash/equality; no Source parsing/compiler/import/execution/tests."
+  },
+  "credits": [
+    "One native post-ColdPerform retained scalar -> privateB65/RP31 -> Commit same-getter equality -> bank_clock consistency -> early destinationB65 and normal header or valid79 record.",
+    "v6B65 at520 and v2RP31 at4088 reuse original4096/256 storage; producer and actual parent version/remaining-reserved/field consumers joined; no immutable original S/D0 change.",
+    "Actual initial received header retained, normal0/70 and79 numeric extraction restricts before semantic prep/full allocation; no final success from zero/missing/mismatched scalar, no larger fallback.",
+    "Separate retained_deadline reaches actual later clocks/read/recheck/close/freeze/final timestamp; four NEW immutable outcome records carry it. Original reservation/initialprelaunch/actualpost-start body unchanged.",
+    "78 only retains D0 after original verified pristine bind/error/seal/clock prefix; exit code alone not authority. Failed/min-unknown clock keeps ownership held.",
+    "All native first/secondary/body and semantic raw-custody paths retain prior predicates. Known restrictive raw scalar is DATA only, not image/signature/authority; full earlier applicability and whole custody remain open."
+  ],
+  "findings": [
+    {
+      "id": "A305-MIN-WIRE-F1",
+      "class": "harness",
+      "invariant": "New output scalar is initially unused zero, and actual bind validation must reject its replay/nonzero preimage consistently with required M08 and implementation I03.",
+      "actual_path": "native/publisher_root_bank.c bank_bind validates words B_BINDING_WORDS..127, bind bytes640..2047 and image2048..2111. RP31 is at4088; no initial zero test there. Current parent creates it zero, but claimed actual prebind negative is not implemented. B65 IS covered.",
+      "required_fix": "At actual native header-valid predicate before RB_OP_HEADER/bind admission, require the existing fixed RP_FINAL_DEADLINE cell at PUBLICATION_AT+31*8 to be zero. Keep format, fixed storage, original initialization, all prior checks and actual positive paths. Not a new grant or hostile-kernel theorem.",
+      "required_validation": "Raw connected producer/validator/receiver rejoin then independent nonauthor review; M08 future required execution/no waiver. No Source execution in this fix.",
+      "severity": "SOURCE_CONTRACT_MISMATCH_NOT_OBSERVED_RUNTIME_BYPASS"
+    }
+  ],
+  "wording_reconciliation": [
+    {
+      "case": "M15",
+      "fact": "If first scalar was retained and second bounded decode raises, min_wire_phase can remain RESTRICTED, not necessarily ENTERED/FAILED. Actual caller still exits with raw_body_retained false and receive_attempted true; no follow-up full-read/retirement/result path is available. Do not claim a universal helper-phase invariant or add one as a new requirement. Required actual containment/no wider continuation remains."
+    }
+  ],
+  "open": [
+    "Earlier exact applicable-min authority/identity/generation/prelaunch/full-span witness; initial wait/header/no-writer preparation remain D0 prefix, not retroactively authorized by child DATA.",
+    "Whole native/error/value/alias/history/last-writer transfer and final owners remain unaccepted; return79/held storage not complete handoff.",
+    "Compiler/native ABI/selected image/admission/provider/runtime and full workload/added implicit costs UNKNOWN_NOT_ZERO; original controls and M01-M37 required/no waiver/NOT_RUN."
+  ],
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

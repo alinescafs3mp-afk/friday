@@ -1,0 +1,124 @@
+{
+  "schema": "friday.astra.a304.sol159.connected-scoped-review.v1",
+  "assignment": "ASTRA-E4-A304-PUBLISHER-ACTUAL-PRELAUNCH-CLOCK-FAILURE-CONNECTED-SOL159",
+  "generation": 1,
+  "reviewer": "Astra Lead Architect epoch4; nonauthor of Sol159 parent delta",
+  "decision": "ACCEPT_SCOPED_STATIC_ACTUAL_PRELAUNCH_AND_ALL_OUTCOME_DELTA",
+  "input": {
+    "path": "/var/tmp/friday-sol159-a304-publisher-actual-prelaunch-clock/manifest.json",
+    "bytes": 79722,
+    "sha256": "ef68bdffb351ae56578b937f7db1c90277dc6df127ed79b42428f196dbd379c4",
+    "identity9_decimal_strings": [
+      "2050",
+      "7086686",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "79722",
+      "1791264210629047896",
+      "1791264210629047896"
+    ],
+    "stable9": true
+  },
+  "source": {
+    "path": "/var/tmp/friday-sol159-a304-publisher-actual-prelaunch-clock/candidate/parent/publisher_root_command.py",
+    "bytes": 58996,
+    "sha256": "8f7f45d4a48ed25786bfd55447e318a4b2c0ff97348c6eb8cf5f56537c2853b4",
+    "identity9_decimal_strings": [
+      "2050",
+      "7086629",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "58996",
+      "1791263999511053813",
+      "1791263999511053813"
+    ],
+    "stable9": true
+  },
+  "verification": {
+    "physical_files": 105,
+    "input_pins": 103,
+    "stable9_full_sha": true,
+    "current_candidate": 88,
+    "source": 61,
+    "changed": [
+      "parent/publisher_root_command.py"
+    ],
+    "source_same": 60,
+    "candidate_same": 87,
+    "native10_unchanged": true,
+    "all_pre_run_declarations_byte_equal": true,
+    "method": "Host raw text/hash/equality only; no Source parser/compiler/import/AST/eval/execution/tests."
+  },
+  "accepted": [
+    {
+      "id": "C1",
+      "path": "run_preowned_root:1107-1135",
+      "finding": "Same bank registered before acquisition. Actual guarded launch clock occurs after context entry and before conservative launch intent/start/argument formation. Unchanged strict S<=T<D0 predicate and int/uint64/latched failure checks apply; no fresh reservation or deadline."
+    },
+    {
+      "id": "C2",
+      "path": "run_preowned_root:1122-1127,1143-1146,1167-1191",
+      "finding": "Prelaunch exception object retained locally and in bank before context exit. Normal, suppressing or separately failing exit cannot reach intake as success. First is re-raised; reached secondary/proof kept. No process end inferred."
+    },
+    {
+      "id": "C3",
+      "path": "run_preowned_root:1130-1142",
+      "finding": "Conservative intent remains before fallible start. Partial/failed start does not become never-launched. Actual post-start clock still computes remaining against SAME D0, not stale precheck allowance. Invalid/expired post-start clock cannot call wait with zero/negative duration."
+    },
+    {
+      "id": "C4",
+      "path": "run_preowned_root:1152-1200",
+      "finding": "With no prelaunch error, existing received-native exception handler retains its original body and normal/native/semantic routes. Captured prelaunch failures, including native-shaped exceptions, cannot enter received-native finalization. Original deferred/publication/prebank precedence remains for launched outcomes."
+    },
+    {
+      "id": "C5",
+      "path": "PublisherBank._clock/_remember_fault/finish_setup_failure",
+      "finding": "Actual shared consumers are unchanged. Failed prelaunch clock latches original, false intent selects setup endpoint, whose first clock guard refuses before another primitive/read/close/freeze/result. This preserves held ownership, NOT completed handoff. Error collection preowned first slots precede list append; list error retained."
+    },
+    {
+      "id": "C6",
+      "path": "PublisherBank.receive/finish_received/finish_receive_failure/close_consumed",
+      "finding": "Methods and all declarations before actual run are byte-exact A303. Existing full raw retention, no-writer/end proof, once close, historical post-close validation and NEW immutable result relations are not replaced by preflight success."
+    },
+    {
+      "id": "C7",
+      "path": "full61/current88 join",
+      "finding": "Only parent actual caller changed. Native A303 work-stop, bank/command and protected scope bytes unchanged. Native call arguments, same original FD/identity/reservation, returned outcome and actual intake remain joined. Scoped Sol158 delta credits survive this caller context only; no whole/ABI/image acceptance."
+    }
+  ],
+  "introduced_connected_defects": [],
+  "retained_open": [
+    "Outside earlier applicable-min exact authority/identity/generation/semantic producer/helper/native/receiver join is NOT established by this D0 precheck.",
+    "Whole final owner/body/value/alias/error/history custody and finite ends still open. Held original error/bank on clock failure is not completed retirement or lawful transfer.",
+    "Current image/compiler/native ABI/admission/provider/full physical and timing fit not established. Additional clock/frame/error costs UNKNOWN_NOT_ZERO; precheck endpoint is not complete effect-span proof.",
+    "Protected scope internals and unsafe operational controls remain opaque/unqualified; stopped107#2/Scanner075/SOL139 excluded, no retry/salvage/reroute."
+  ],
+  "required": {
+    "inherited": "Original69/mandatory20/full140/v2 plus inherited A303/Sol157/Sol158 and Sol159 prelaunch23; all required/no waiver/NOT_RUN",
+    "reference": {
+      "path": "/var/tmp/friday-sol159-a304-publisher-actual-prelaunch-clock/REQUIRED-CONTROLS.json",
+      "bytes": 5200,
+      "sha256": "2a1387fcbdb36e48abc70063a16e8fd96242097297ed4500941a85312636572e",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086681",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5200",
+        "1791264146319969474",
+        "1791264210595045965"
+      ],
+      "stable9": true
+    },
+    "whole_tests": "NOT_RUN"
+  },
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

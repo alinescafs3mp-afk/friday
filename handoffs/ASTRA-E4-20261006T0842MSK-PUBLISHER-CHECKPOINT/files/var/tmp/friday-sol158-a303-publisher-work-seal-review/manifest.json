@@ -1,0 +1,237 @@
+{
+  "schema": "friday.sol158.sealed-review-manifest.v1",
+  "root": "/var/tmp/friday-sol158-a303-publisher-work-seal-review",
+  "assignment": "ASTRA-E4-A303-PUBLISHER-WORK-SEAL-FIRST-REFUSAL-CONNECTED-REVIEW-SOL158",
+  "generation": 1,
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A303_TWO_FILE_CONNECTED_WORK_STOP_DELTA_ONLY",
+  "sealed_at": "2026-10-06T08:09:06.552970+03:00",
+  "files": [
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/BOUNDARIES.json",
+      "bytes": 1072,
+      "sha256": "6853fff75c2f2e53e779038513ce554ba87affa75f4bd58e2960854b01175399",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086559",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1072",
+        "1791263314605687553",
+        "1791263314623688591"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/DELTA-PINS.json",
+      "bytes": 2343,
+      "sha256": "65fcf28936600bb94dddeac2f7e248b5694879f0ed8976fb3b981dda4b32c5ac",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086553",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2343",
+        "1791263131077098497",
+        "1791263131078098554"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/FINAL-INPUT-RECHECK.json",
+      "bytes": 101050,
+      "sha256": "c8bd0e60e95ba15f31d18655483e80f2925b02707f8e54417c6dcb6803992a7a",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086561",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101050",
+        "1791263346552233549",
+        "1791263346552886407"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/INPUT-PINS.json",
+      "bytes": 100480,
+      "sha256": "1c487df3c60cf9e3f35d7f52a8555287cfe397627dca8ca52c5da1408f80e160",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086552",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "100480",
+        "1791263131072098208",
+        "1791263131072098208"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/LITERAL-RELATION-EVIDENCE.json",
+      "bytes": 4325,
+      "sha256": "bc5fa60a30209e4c0454cc2588dde6cab91216ae696e1ef4b61cdfc64b460571",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086555",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4325",
+        "1791263241394463475",
+        "1791263241394463475"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/NUMERIC-SLICE-EVIDENCE.json",
+      "bytes": 81440,
+      "sha256": "4d279544b665018a4b1ff3bdceb11d5e510e241d1063923fb5eac40ed74048a5",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086556",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "81440",
+        "1791263241400463821",
+        "1791263241401463879"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/REQUIRED-CONTROLS.json",
+      "bytes": 2933,
+      "sha256": "dac28892863131c7a5d3d17d6640779be11677f92b94c7697854bb807ded353b",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086558",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2933",
+        "1791263314604687495",
+        "1791263314623688591"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/REVIEW.json",
+      "bytes": 13481,
+      "sha256": "6084aa1b8db2beca1dcfccf2f72c79fd25a8af47c41c5ae10733d552443b06d0",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086557",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13481",
+        "1791263314604687495",
+        "1791263314623688591"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/TIMING-RESOURCE.json",
+      "bytes": 1121,
+      "sha256": "d2865bff3c539c046fca0cb53a8c3f3f85398525ffee90e28b46a39c66ea7234",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086562",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1121",
+        "1791263346557776225",
+        "1791263346558276265"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/host_relations.py",
+      "bytes": 7102,
+      "sha256": "3b01f1b038eab3528cff2526ff58b1338b5bdf92600a9cd6019d7af5fc1fc009",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086554",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7102",
+        "1791263241352461052",
+        "1791263241352461052"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/host_seal.py",
+      "bytes": 6067,
+      "sha256": "8c0d5ba65877a434b89f35bf9bea0eecb31208af6cce9ed5c6965760e740081a",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086560",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6067",
+        "1791263346501790031",
+        "1791263346519856359"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/host_verify.py",
+      "bytes": 4288,
+      "sha256": "ebc2523a2529536b62d24870d8c0ddec3b52f64a71f30c2c45e1cb15c530b1c5",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086551",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4288",
+        "1791263131025095496",
+        "1791263131041096419"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/received.json",
+      "bytes": 1113,
+      "sha256": "5b9b6d59b745981c3e7c2e70ecc250cfd69aa43857af6488fb4f45beeb1e9313",
+      "identity9_decimal_strings": [
+        "2050",
+        "7086550",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1113",
+        "1791263131024095438",
+        "1791263131041096419"
+      ],
+      "stable9": true
+    }
+  ],
+  "input_count": 213,
+  "input_stable9_fullsha": true,
+  "required_controls": "original69/mandatory20/full140/v2/inherited+A30318+Sol15720+reviewer20 REQUIRED_NOT_RUN, required=true waiver=false",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

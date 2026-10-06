@@ -1,0 +1,26 @@
+{
+  "schema": "friday.sol158.result.v1",
+  "assignment": "ASTRA-E4-A303-PUBLISHER-WORK-SEAL-FIRST-REFUSAL-CONNECTED-REVIEW-SOL158",
+  "generation": 1,
+  "status": "SCOPED_STATIC_ACCEPT_EXACT_A303_TWO_FILE_DELTA_ONLY",
+  "manifest": {
+    "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/manifest.json",
+    "bytes": 6532,
+    "sha256": "4d436ff136b3dec2a3d9483f348e708a21f479f95e02db52a3f9b42c3b229501"
+  },
+  "review": {
+    "path": "/var/tmp/friday-sol158-a303-publisher-work-seal-review/REVIEW.json",
+    "sha256": "6084aa1b8db2beca1dcfccf2f72c79fd25a8af47c41c5ae10733d552443b06d0"
+  },
+  "decision": "Actual kind6 exhaustion/kind7 future-issued refusal preserve first raw work record; no further work sample. Restricted same-pool full retained before refusal -> three separate eligible completion records -> getter/actual latch/Commit/publication. FAILED/ENTERED/full-expired remain terminal. Normal boundaries preserved.",
+  "scope": "Current61 changed2/same59; candidate88 changed2/same86. NOT independent acceptance of my Sol155 baseline, Source/image authority or whole runtime. Parent/command/bank/initial constructor/generic opaque branch and completion helpers unchanged.",
+  "remaining": "Sol157 outside applicable-min/prelaunch authority witness OPEN; initial startup/custody/selected native ABI/image/full physical and implicit cost/whole controls OPEN. Restrictive parsed min is DATA only, never admission grant.",
+  "controls": "original69/mandatory20/full140/v2/inherited+A30318+Sol15720+reviewer20 REQUIRED_NOT_RUN; required=true waiver=false; stopped/unsafe scopes excluded/opaque.",
+  "inputs": "213 stable9/fullSHA unchanged; host literal observations not Source tests; no Source writes/parser/compiler/exec/live, children0/heavy0.",
+  "accepted_at": "2026-10-06T08:05:00+03:00",
+  "sealed_at": "2026-10-06T08:09:06.552970+03:00",
+  "elapsed_seconds_at_seal": 246.553,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

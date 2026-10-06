@@ -1,0 +1,19 @@
+{
+  "schema": "friday.sol160.publisher.restrictive-min-wire.v1",
+  "authority": "RESTRICTIVE_NUMERIC_DATA_ONLY_NOT_ADMISSION",
+  "header": {"version": 6, "bytes": 4096, "encoding": "existing little-endian uint64", "final_deadline_word": 65, "final_deadline_byte_offset": 520, "initial_value": 0, "zero_is_final_deadline": false, "remaining_zero_reserved_words": "66..79 before original bind record"},
+  "publication_failure": {"version": 2, "bytes": 256, "absolute_offset": 3840, "final_deadline_word": 31, "final_deadline_absolute_byte_offset": 4088, "original_started_word": 16, "original_D0_word": 17, "ready_and_clock_flags_words": "29..30", "other_original_fields": "unchanged; words24..28 remain actual compare-body variant"},
+  "original_reservation": {"S": "immutable parent B_STARTED and original_reservation.started_ns", "D0": "immutable B_DEADLINE/original_reservation.deadline_ns = S+4200 seconds", "final600": "inside original full interval; unchanged native policy", "never_mutate_original_words": true},
+  "producer": "Actual ColdPerform -> one bank_final_deadline=existing FinalDeadline getter -> private header B65 and original fixed publication record RP31 -> actual Commit checks same getter==B65 -> publication clocks check same latched B65/RP31 -> early destination B65 before first body chunk -> full completion header LAST. Valid79 instead transfers same RP31 through existing original failure-record copy; no new copy after lost clock.",
+  "receivers": [
+    {"returncode": "0/70", "required": "in-domain header B65 is retained bound; RP31 must be zero in unused normal failure area; original full header/native semantic and timestamps still validated"},
+    {"returncode": 79, "required": "in-domain RP31 equals retained bound; B65 may be zero if no full header publication yet, otherwise must equal it; original v2 magic/size/PID/parent/S/D0/progress/error/bind/clock/body checks still required"},
+    {"returncode": 78, "required": "distinct pristine prebind prefix, full original v6 input except original bind area, valid native bind failure/clock/seal/no-writer relation; no later Root min asserted; only this verified context keeps D0"},
+    {"returncode": "semantic failure", "required": "if independently sealed raw intake has any in-domain scalar, retain conservative smallest DATA bound before semantic decoding, deny semantic completion and consume/finalize only within it; absent/lost bound remains HELD"}
+  ],
+  "consumption": "Existing bounded initial header read is retained before interpretation. ENTERED/FAILED prevents later wider clock/effects. Each in-domain scalar immediately min-restricts separate retained_deadline. Normal/79 clock check immediately follows extraction before bounded semantic preparation, then again before body allocation and each actual read/recheck/once-close/freeze/final timestamp. All four newly immutable native/semantic result schemas explicitly expose retained_deadline_ns separately from unchanged original reservation. Setup-only result schema remains unchanged.",
+  "not_provided": "No exact external applicable-min authority/generation/prelaunch/full-span witness; no issuer/signature/grant/renewal/enrollment/ABI or full custody qualification. The numeric restriction is never retrospective launch authority.",
+  "copied_candidate_metadata": "PROVENANCE_ONLY; CURRENT-SOURCE-JOIN.json and this exact wire contract are current. Legacy image/version/pins/acceptance not transferred.",
+  "required_validation": "REQUIRED-CONTROLS.json; NOT_RUN",
+  "SourceReady": false, "Root_admission": false, "GO": false
+}

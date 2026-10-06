@@ -1,0 +1,62 @@
+{
+  "schema": "friday.sol159.a304.publisher.actual-prelaunch-clock.connected-author.v1",
+  "assignment": "ASTRA-E4-A304-PUBLISHER-ACTUAL-PRELAUNCH-CLOCK-FAILURE-CONNECTED-SOL159",
+  "generation": 1,
+  "state": "AUTHOR_INERT_CONNECTED_DRAFT_REQUIRES_ASTRA_INDEPENDENT_REVIEW",
+  "base": {"path": "/var/tmp/friday-astra-a303-publisher-work-seal.QvP70b/manifest.json", "bytes": 73216, "sha256": "5fc3ecaaf7c137ee34f0be7ee2de65e28e50900ff6c5390f41fdd8a696ed16ac"},
+  "changed": ["parent/publisher_root_command.py"],
+  "source61": {"changed": 1, "same": 60},
+  "candidate88": {"changed": 1, "same": 87},
+  "native": {"files": 10, "all_bytes_unchanged": true, "new_acceptance": false},
+  "method": "INERT raw safe ordinary parent authoring only. Metadata JSON decoded by trusted host tooling; Source never parsed, imported, compiled, preprocessed, evaluated or run. Host22 equality/literal observations are NOT Source tests or independent review.",
+  "exact_implementation": [
+    {
+      "id": "I1_ACTUAL_PRELAUNCH",
+      "location": "run_preowned_root:1116-1127",
+      "change": "Inside the EXISTING scope context AFTER its successful entry, before original launch_attempted=True and before original start/argument construction, call SAME bank._clock('launch'). No unused helper, new clock mode, reservation, absolute start, bound, grant or pool.",
+      "predicate": "Unchanged first clock/error latch refuses ENTERED or FAILED before another primitive. Actual time.monotonic_ns result retained before exact int/uint64 check. Existing launch domain is 0<S<=T<D0, strictly rejecting equality, afterD0, zero, negative, bool/nonint, overflow or beforeS. Primitive failure/domain refusal raises the SAME original exception and terminal FAILED. A nonreturned primitive never reaches intent/start. This is static source ordering, not an executed prevention observation.",
+      "authority": "Original D0 only. This precheck is NOT image/Source/Root admission or an earlier applicable-min/generation/semantic witness. Successful endpoint sampling is not proof of entire launch/argument/cleanup operation span fit. Earlier qualified tighter bound remains OPEN."
+    },
+    {
+      "id": "I2_PRELAUNCH_FIRST_EXCEPTION_AND_CONTEXT_EXIT",
+      "location": "run_preowned_root:1109,1122-1126,1144-1148,1170-1173,1184-1191",
+      "change": "One caller-local prelaunch_clock_error starts None AFTER bank registration. On exact precheck failure retain original object in this local and SAME bank._remember_fault BEFORE existing context exit. Scope exit is performed only by the existing context policy, not replaced/retried or inspected. On a different exit error, SAME first error is re-raised with reached secondary as explicit cause; original and secondary remain in the registered bank. On suppressed exit, explicit marker check restores the SAME failure before receive/final success.",
+      "phase": "launch_attempted stays false, process_id remains None, no start/wait/receive call falls through from precheck failure. Actual scope.proof is retained by original generic catch but no cleanup_clear/process-end/confirmed-close is manufactured merely because context exit returned or raised. Protected scope internals remain opaque and independently unqualified.",
+      "setup_endpoint": "Original finish_setup_failure remains unchanged and may be attempted once by original false launch-intent branch. It marks its attempt, then SAME _clock rejects latched FAILED before another primitive, read, seal, close, frozen copy or result. Thus expired/unavailable prelaunch failures remain HELD with same still-owned descriptor/data/error, no successful setup result or fake retirement. No retry-to-good timestamp or cleanup retry.",
+      "cost": "Additional local reference, guard/exception frames, optional traceback/cause relations and existing error-list append paths have UNKNOWN_NOT_ZERO physical/read/RAM/time costs within original budget. A failure of error-list growth remains in existing fault_collection_error slot; original exception was stored beforehand. No new accumulating error history or independent resource grant."
+    },
+    {
+      "id": "I3_ATTEMPTED_START_AND_CHARGED_REAL_ELAPSED",
+      "location": "run_preowned_root:1130-1143",
+      "change": "Original launch_attempted=True remains BEFORE actual scope.start and fallible argument construction. A failed/partially attempted Popen is still attempted even without a returned PID; never routed to never-launched setup completion. Same actual returned process.pid joins SAME bank.",
+      "remaining": "Unchanged post-start bank._clock('launch') obtains fresh actual sample against SAME original D0, then remaining=(D0-Tpost)/1e9. A successful prelaunch sample is never reused as a stale full wait duration. Scope entry, new check, operand formation and start elapsed remain inside original interval. Tpost==D0 or later/unavailable/nonreturned/invalid gives no scope.wait call, no zero/negative allowance and no new clock origin. Existing automatic context exit/cleanup policy is unchanged and not requalified.",
+      "sample_count": "One additional primitive on a healthy path. Failed precheck has no follow-up primitive; existing finish guard invocation merely re-raises latched error. Old healthy later parent samples can overwrite successful clock_result exactly as before; no new full successful-clock history or isolated immutable preflight receipt is claimed."
+    },
+    {
+      "id": "I4_ACTUAL_ALL_OUTCOME_DISPATCH",
+      "location": "run_preowned_root:1153-1204",
+      "change": "One outer BaseException catch now selects original BankNativeFailure/BankPublicationFailure branch only when no captured prelaunch failure exists. This is original exception-type dispatch for all ordinary launched native outcomes; the original branch body is byte-equal modulo four spaces of indentation. A native-shaped exception from prelaunch clock or its exit cannot falsely enter a received native endpoint.",
+      "generic": "Original generic catch is byte-equal after removing two prelaunch-specific additions: remember captured first before exit secondary; re-raise captured first before other native/deferred priority. Original false launch-intent setup endpoint, true intent with complete raw semantic-failure endpoint, cleanup proof retention, first/secondary/retirement errors, publication/prebank/deferred original error precedence and no retry remain.",
+      "normal_native_and_semantic": "Actual normal proof -> receive -> finish_received unchanged. Full bind failure and partial publication failure still call finish_received once, keep failure/first error and secondary finish failure, and re-raise; not operation success. Full retained raw semantic refusal still calls finish_receive_failure only under original predicates and preserves original error. Original no-writer/full raw/last consumer/once-close/freeze/new immutable result methods and ALL pre-run declarations are byte-equal.",
+      "immutability": "No old tuple, reservation or exposed BankCompletion/final/failure record edited. No BankFinalResult or BankSetupFailureResult synthesized on prelaunch failure. No successful cleanup/process-end inferred from launch_attempted/PID/context status alone."
+    },
+    {
+      "id": "I5_COMPLETE_CURRENT_JOIN_AND_INHERITED_LIMITS",
+      "change": "Fresh full88 file candidate, full61 current source inventory; only safe ordinary parent body changes. Native A303 work-stop entry/command/bank bytes and protected quality_gate_process.py exact hashes unchanged. CURRENT-SOURCE-JOIN and manifest pin every current file with identity9/full SHA. SOURCE-DELTA is raw unified text. Copied legacy metadata/image/acceptance remains PROVENANCE_ONLY, not current authority.",
+      "credits": "Existing Sol158 SCOPED_STATIC_ACCEPT exact A303 two-file work-stop delta only is retained as provenance. This is not own independent acceptance of Sol155, parent implementation or whole61/current88, and not ABI/image/admission/runtime qualification. Astra independently reviews actual changed caller and all original outcome consumers."
+    }
+  ],
+  "unchanged_formulas_and_caps": "Original4200 full and600 INSIDE full, same S/D0, 2*T+SCRATCH allocation, 7*T+4*SCRATCH read reserve, header output and original compiled caps unchanged. No new model/TUI/role/service/issuer/grant/pool/storage/cap. No protected wait/cleanup policy edits.",
+  "required_checks": "All original69/mandatory20/full140/v2/inherited, A30318, Sol15720, Sol15820 and new prelaunch/exit/post-start/normal/native/semantic controls REQUIRED_NOT_RUN, required=true waiver=false. Unsafe operational controls stay opaque/hash-only required/no waiver; no stopped scope salvage/retry/reroute.",
+  "remaining": [
+    "Earlier applicable tighter-min identity/generation/domain/semantic full-span witness and producer->helper->native->actual receiver binding OPEN; Astra reconciles separately. OriginalD0 check does not solve it, fabricate missing owner authority or waive it.",
+    "Independent actual changed-source/all-outcome review, compiler/parser/selected image/layout/native ABI/runtime/body/value/alias/history/last-writer transfer/admission and complete workload physical/implicit resource/time qualification remain REQUIRED_NOT_RUN/OPEN.",
+    "Original monotonic primitive semantic qualification remains required. Unchanged _clock validates against original start and deadline, not a new per-success monotonic history. Endpoint time checks do not prove whole finite effect span fits. New overhead UNKNOWN_NOT_ZERO, not claimed free.",
+    "Protected scope __enter__/__exit__/wait/cleanup implementation remains copied opaque and unqualified. Only caller-visible invocation/returned proof/error retention considered; unknown cleanup does not retire resources.",
+    "r5 immutable red/no reuse, r6 absent as inherited; no old target observation transferred to current bytes or claim of universal impossibility."
+  ],
+  "target_actions": {"parser":0,"compiler":0,"preprocess":0,"import":0,"AST":0,"eval":0,"exec":0,"tests":0,"helpers":0,"live":0,"network":0,"install":0},
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

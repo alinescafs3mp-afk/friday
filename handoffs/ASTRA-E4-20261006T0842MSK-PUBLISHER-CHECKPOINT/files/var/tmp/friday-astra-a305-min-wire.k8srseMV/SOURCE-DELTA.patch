@@ -1,0 +1,15 @@
+--- SOL160/candidate/native/publisher_root_bank.c
++++ A305/candidate/native/publisher_root_bank.c
+@@ -210,6 +210,12 @@
+     /* The newly assigned bind area is also required to be initially zero. */
+     for(uint64_t i=FRIDAY_ROOT_BANK_BIND_AT;i<2048;i++)
+         if(((const unsigned char *)h)[i])valid=0;
++    /* v2's final-min cell is outside word[128] and the bind region.
++     * It is output-only: reject a nonzero/replayed preimage at THIS bind,
++     * before any Root result can supply a restrictive value. */
++    const unsigned char *initial_final_min=(const unsigned char *)h+
++        FRIDAY_ROOT_BANK_PUBLICATION_AT+(uint64_t)RP_FINAL_DEADLINE*sizeof(uint64_t);
++    for(size_t i=0;i<sizeof(uint64_t);i++)if(initial_final_min[i])valid=0;
+     bind_event(RB_OP_HEADER,valid?0:-1,0,(uint64_t)(uintptr_t)h,FRIDAY_ROOT_BANK_HEADER,0);
+     if(!valid)return bind_failure(fd,h,NULL,v[6]);
+     bind_record.word[RB_HEADER_VALID]=1;

@@ -1,0 +1,86 @@
+{
+  "schema": "friday.incremental-publisher.work-checkpoint.v1",
+  "snapshot_directory": "handoffs/ASTRA-E4-20261006T0842MSK-PUBLISHER-CHECKPOINT",
+  "capture_started_msk": "2026-10-06T08:44:22.952249+03:00",
+  "capture_finished_msk": "2026-10-06T09:05:51.152990+03:00",
+  "scope": "INCREMENTAL_PUBLISHER_ONLY_NOT_NEW_FIVE_COMPONENT_SNAPSHOT",
+  "archive_inert": true,
+  "execution_authority": false,
+  "release_approval": false,
+  "product_baseline": {
+    "sha": "cecd28a92ac4fd4e34c4d3813d0c598debe09436",
+    "version": "0.208.64/schema50",
+    "frozen": true
+  },
+  "installed_runtime": "0.208.58 last recorded/not reprobed; no new wheel",
+  "lead": {
+    "role": "Astra active Lead Architect epoch4",
+    "deputy": "Kimi",
+    "model": "Not re-probed for incremental export; no model/settings/role change"
+  },
+  "previous_published": {
+    "sha": "9b4ece8139669d1f6851d5e3989d427323519fb9",
+    "directory": "handoffs/ASTRA-E4-20261004T2037MSK-WORK-SNAPSHOT"
+  },
+  "packages": [
+    {
+      "id": "Publisher-A305",
+      "state": "CURRENT_IMPLEMENTED_INTEGRATED_RAW_CHECKED_EXACT_DELTA_NONAUTHOR_ACCEPTED_NOT_WHOLE_OR_TARGET",
+      "manifest": "files/var/tmp/friday-astra-a305-min-wire.k8srseMV/manifest.json",
+      "sha256": "7b73d830d31e69ab52e997a4f9d33baa33d5e15ba74e32c6d779dc0f3834a175",
+      "source_bodies": 60,
+      "source_inventory": 61
+    },
+    {
+      "id": "Publisher-SOL160",
+      "state": "SUPERSEDED_SCOPED_CREDITS_INITIAL_FIELD_REJECTION",
+      "manifest": "files/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/manifest.json",
+      "sha256": "6e2e06418fd01dfa452bddcc189a01c4b6ea79e185ca914035eea699e3c3917e",
+      "source_bodies": 60,
+      "source_inventory": 61
+    },
+    {
+      "id": "Publisher-SOL159",
+      "state": "PRIOR_PRELAUNCH_DELTA_SCOPED_ACCEPTED_NOT_WHOLE",
+      "manifest": "files/var/tmp/friday-sol159-a304-publisher-actual-prelaunch-clock/manifest.json",
+      "sha256": "ef68bdffb351ae56578b937f7db1c90277dc6df127ed79b42428f196dbd379c4",
+      "source_bodies": 60,
+      "source_inventory": 61
+    }
+  ],
+  "changes_since_previous": [
+    "Publisher A259 Source57 -> coherent current Source61/current88; actual same-role native bank and outside parent/error/retirement/min wire implementation. Whole custody still OPEN.",
+    "A303 work-stop/completion and Sol159 prelaunch/all-outcome independent scoped closures included as actual bytes/reviews.",
+    "Sol160 retained-min implementation supplied with exact initial-field rejection/scoped credits; fresh A305 fix independently scoped accepted by Sol161 before final publication seal.",
+    "No new product feature/baseline/runtime, Source execution, gate, or project-wide audit for export."
+  ],
+  "accepted_closures": [
+    "Exact A303 work-stop/eligible separate completion path via Sol158",
+    "Exact Sol159 actual prelaunch/post-start and connected outcomes via nonauthor Astra",
+    "Exact A305 initial RP31 all-byte zero guard and actual connected positive/failure contexts via nonauthor Sol161; own Sol160 baseline not self-accepted."
+  ],
+  "remaining_blockers": [
+    "Earlier external applicable-min authority/identity/generation/prelaunch/full-span witness.",
+    "Complete native/value/alias/history/error/last-owner custody; whole physical/time fit and image/compiler ABI/provider/admission qualification.",
+    "Original mandatory execution conjunction incomplete; restricted controls still required/no waiver."
+  ],
+  "next_required_stage": "Independently accepted connected source -> existing lawful qualification -> stable collect-all diagnostics. No newly executable release gate.",
+  "capture": {
+    "existing_files": 211,
+    "existing_bytes": 7426815,
+    "stable_before_after": true,
+    "tests_rerun": 0,
+    "source_execution": 0,
+    "source_rewritten_for_export": 0,
+    "frozen_checkout_modified": false,
+    "active_work_interrupted": false
+  },
+  "manifest_file": "MANIFEST.json",
+  "references": "REFERENCES.json",
+  "reviews": "REVIEW-BINDINGS.json",
+  "omissions": "OMISSIONS.json",
+  "canonical_status": "outer_sol/PROJECT_BACKLOG.md",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

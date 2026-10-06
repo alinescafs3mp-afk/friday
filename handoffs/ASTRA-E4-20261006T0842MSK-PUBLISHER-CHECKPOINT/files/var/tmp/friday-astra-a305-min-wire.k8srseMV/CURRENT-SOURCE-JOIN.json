@@ -1,0 +1,2569 @@
+{
+  "schema": "friday.astra.a305.publisher.current-source-join.v1",
+  "root": "/var/tmp/friday-astra-a305-min-wire.k8srseMV",
+  "base": {
+    "path": "/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/manifest.json",
+    "bytes": 81450,
+    "sha256": "6e2e06418fd01dfa452bddcc189a01c4b6ea79e185ca914035eea699e3c3917e",
+    "identity9_decimal_strings": [
+      "2050",
+      "7086806",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "81450",
+      "1791265155979619319",
+      "1791265155979619319"
+    ],
+    "stable9": true
+  },
+  "files": [
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/A285-INTEGRATION.json",
+      "bytes": 9933,
+      "sha256": "97d6d8dc08489c152b02f5f5fd7023d55331b07d19d22779f1dc294fd8a30aef",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558294",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9933",
+        "1791264651617101364",
+        "1791265907672528690"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/A285-NATIVE-ERROR-OBLIGATIONS.json",
+      "bytes": 9004,
+      "sha256": "70a8c38bbc7834449afa4c6cf14f53c412a811df467b63be25c3c94d13bb9f01",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558611",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9004",
+        "1791264651623101705",
+        "1791265907672580602"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/A285-NATIVE-ERROR-PROOF.json",
+      "bytes": 15534,
+      "sha256": "df5df291c22c461fd06ce1020f46c429497d91f9e636a3ee59c18f0c2720b91b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558613",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15534",
+        "1791264651628101989",
+        "1791265907672603404"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/ASTRA-SOL135-SCOPED-REVIEW.json",
+      "bytes": 44998,
+      "sha256": "299c216b6ac30a79d880eaad10c5626b103faa650ebc59d6c8ae9fdde758214d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558620",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44998",
+        "1791264651634102330",
+        "1791265907672626064"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/BASE-MANIFEST-A285.json",
+      "bytes": 40537,
+      "sha256": "bf36b5cd603775fdc8903a6fe8788e16301b42b425e579aa3531fae79b7a969b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558621",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "40537",
+        "1791264651639102614",
+        "1791265907672656721"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/BASE-MANIFEST-SOL136.json",
+      "bytes": 66708,
+      "sha256": "ce20854ab94e9474c8a475c3acfd8ea9eb3c79e6b470802f4a1abb796d1290c4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558630",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "66708",
+        "1791264651644102898",
+        "1791265907672688290"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/CONTROL-HASHES.json",
+      "bytes": 66361,
+      "sha256": "87edc4f376ed71c1c37427fc4fa9c9bf865797a6a3835461d3585fe4582f836c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558633",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "66361",
+        "1791264651650103239",
+        "1791265907672741966"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/FINAL-INPUT-RECHECK.json",
+      "bytes": 45532,
+      "sha256": "f4591d7a2d59ab6fcace9aa271c8e42777e6c17cba71c77f6bfc6a27671a3234",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558636",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "45532",
+        "1791264651655103523",
+        "1791265907672778165"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/INPUT-PINS.json",
+      "bytes": 47598,
+      "sha256": "d03bed86c6bd5a7afe6855a7070871b85e7b95200bda3ebc03ca0766c6aa833a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558643",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47598",
+        "1791264651661103864",
+        "1791265907672810790"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/LITERAL-DELTA.json",
+      "bytes": 27114,
+      "sha256": "69493c13dcec6b6c43ab7be6979cc3f20306a81d258bd7d8a59b792d1216dd4f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558830",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27114",
+        "1791264651666104148",
+        "1791265907672841790"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/NEW-OBLIGATIONS.json",
+      "bytes": 8707,
+      "sha256": "478513a39b52ff52ad57b6b532094cda75fe47ffd2b86f6f6d1274754de343a4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558831",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8707",
+        "1791264651671104432",
+        "1791265907672866329"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/PROOF.json",
+      "bytes": 13914,
+      "sha256": "38b470d244214e2bf9613c45fc0554f954bfa0b029f75c49e7f6595f469811fb",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558832",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13914",
+        "1791264651676104716",
+        "1791265907672886184"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/READER-RESOURCE.json",
+      "bytes": 122,
+      "sha256": "09d9387967692744ccf10dd9f2e65e5354e8e013a54766765e33fa504b5de761",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558833",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "122",
+        "1791264651681105000",
+        "1791265907672907821"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/RESOURCE.json",
+      "bytes": 945,
+      "sha256": "c01793ba1d19df91fd13790bac4fd24c57b83f89cef74e209188bea66aff3629",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558838",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "945",
+        "1791264651686105284",
+        "1791265907672923078"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/authority.py",
+      "bytes": 16580,
+      "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558847",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16580",
+        "1791264651692105625",
+        "1791265907673004381"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/bill.py",
+      "bytes": 24098,
+      "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558864",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24098",
+        "1791264651697105909",
+        "1791265907673032335"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/body_scope.py",
+      "bytes": 7655,
+      "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558869",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7655",
+        "1791264651703106250",
+        "1791265907673132688"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/canonical.py",
+      "bytes": 3825,
+      "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558871",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3825",
+        "1791264651708106534",
+        "1791265907673164224"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/capability.py",
+      "bytes": 11981,
+      "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558872",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11981",
+        "1791264651713774649",
+        "1791265907673183058"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/contract.py",
+      "bytes": 2099,
+      "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558873",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2099",
+        "1791264651718330819",
+        "1791265907673227650"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558875",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "39603",
+        "1791264651723260107",
+        "1791265907673245253"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/document_vector.py",
+      "bytes": 17709,
+      "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558876",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17709",
+        "1791264651728107670",
+        "1791265907673275720"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/document_windows.py",
+      "bytes": 7707,
+      "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558877",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7707",
+        "1791264651734108012",
+        "1791265907673298548"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/effects.py",
+      "bytes": 690,
+      "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558878",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "690",
+        "1791264651739108296",
+        "1791265907673318058"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/formats.py",
+      "bytes": 13628,
+      "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558886",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13628",
+        "1791264651744108580",
+        "1791265907673337248"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/ingress.py",
+      "bytes": 3025,
+      "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558889",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3025",
+        "1791264651749108864",
+        "1791265907673357622"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/material_literals.py",
+      "bytes": 5689,
+      "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558891",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5689",
+        "1791264651754109148",
+        "1791265907673376308"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/performing_contracts.py",
+      "bytes": 18209,
+      "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558893",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18209",
+        "1791264651760109488",
+        "1791265907673394886"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/pins.py",
+      "bytes": 9147,
+      "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558895",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9147",
+        "1791264651764109716",
+        "1791265907673416653"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/producer_consumer.py",
+      "bytes": 3243,
+      "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558897",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3243",
+        "1791264651769110000",
+        "1791265907673437979"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/receipt_chain.py",
+      "bytes": 16263,
+      "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558898",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16263",
+        "1791264651774110284",
+        "1791265907673455427"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/recipe_planner.py",
+      "bytes": 102799,
+      "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558899",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "102799",
+        "1791264651780110625",
+        "1791265907673474966"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/resource_meter.py",
+      "bytes": 30206,
+      "sha256": "50b7c70a35f6a1f960555071bca3aef9defe57c4ff7f506fe6a586b51eace3ce",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558900",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30206",
+        "1791264651784110852",
+        "1791265907673522218"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/runtime_consumer.py",
+      "bytes": 13297,
+      "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558901",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13297",
+        "1791264651789111136",
+        "1791265907673548097"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/schema_validate.py",
+      "bytes": 6776,
+      "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558902",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6776",
+        "1791264651793111364",
+        "1791265907673568142"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/semantics.py",
+      "bytes": 2578,
+      "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558903",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2578",
+        "1791264651798111648",
+        "1791265907673586075"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/whole_join.py",
+      "bytes": 18213,
+      "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558904",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18213",
+        "1791264651803111932",
+        "1791265907673602490"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_original_caller.c",
+      "bytes": 15007,
+      "sha256": "18fd8caeadb26b1daec81753b76dcb011b55ce66f7b385d622293d2bb0b7415e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715059",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15007",
+        "1791264651808112216",
+        "1791265907673668747"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_original_caller.h",
+      "bytes": 6596,
+      "sha256": "94ef97754d8789c3fdd0810c1379147c73d191c3f01d66ff127dea8c20096c10",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715060",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6596",
+        "1791264651813112499",
+        "1791265907673691822"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_owned_custody.c",
+      "bytes": 70396,
+      "sha256": "974ab116b0672c17a8adbbd9a349394238d284e0719428a0f5db99ec11808b2f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715061",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "70396",
+        "1791264651818112783",
+        "1791265907673716395"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_owned_custody.h",
+      "bytes": 6522,
+      "sha256": "e1905df1072950b8b92ca7b6bf0fc42e0dc6fc7d35cf9c24f1ebd5e075a75bb0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715062",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6522",
+        "1791264651823113068",
+        "1791265907673753130"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_bank.c",
+      "bytes": 24368,
+      "sha256": "7328ce4d5a0711a1b3475403386896bb809acfd221191b37ba453812211abf3f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715063",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24368",
+        "1791265907702967796",
+        "1791265907702967796"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_bank.h",
+      "bytes": 8537,
+      "sha256": "56326dc5fefe887164e660a9acb905d12200f6d9341bc23b719918a56eaa8871",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715064",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8537",
+        "1791264777943278199",
+        "1791265907673792750"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_command.c",
+      "bytes": 27870,
+      "sha256": "34f82ea562ae7e18e5b8c54d948ca52329c88543cd90682210b328c1c538a37a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715065",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27870",
+        "1791264651838113920",
+        "1791265907673811707"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_command.h",
+      "bytes": 5786,
+      "sha256": "a275274f6c985210a4327c6d5c007f9519e7276c6c3b3a9eb5a79ff2e0db196c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715066",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5786",
+        "1791264651843114204",
+        "1791265907673837015"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_entry.c",
+      "bytes": 664983,
+      "sha256": "6496d3cf3b8a7e5228c841ce292633193e63459fe16cbe1779712365279efa1e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715067",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "664983",
+        "1791264777946278370",
+        "1791265907673856486"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_entry.h",
+      "bytes": 24694,
+      "sha256": "960a4121b5f7631b87292436e1841bfc5579d7d47d9a6ecc6d7dc3e1aa08641e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715068",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24694",
+        "1791264651861115227",
+        "1791265907674640924"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/parent/publisher_root_command.py",
+      "bytes": 64215,
+      "sha256": "928d9edf0526101ed3c12e3a0cd96a8dda2166cccef411898c8799367cf33227",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715070",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "64215",
+        "1791264879223025258",
+        "1791265907674699847"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/parent/quality_gate_process.py",
+      "bytes": 13293,
+      "sha256": "1ed9b256b24efa7b7b449c464d62e22378280a8a4929d3a19056ba56c112a22a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715071",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13293",
+        "1791264651872115852",
+        "1791265907674754483"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/parent-evidence/ORIGINAL-CONTROL-DEFINITIONS.json",
+      "bytes": 95869,
+      "sha256": "1d3be7fc93ab0b1dd140603fd1d26a709020a00c5150c9938ad495a4c3b6f88d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715073",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "95869",
+        "1791264651878116193",
+        "1791265907674812548"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/parent-evidence/SOL135-CONTROL-HASHES.json",
+      "bytes": 49628,
+      "sha256": "2b12d945c2de8e879340839da627295bd3ac74951053d12d2c1ca45f2131ab32",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715074",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "49628",
+        "1791264651883116477",
+        "1791265907674864933"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/parent-evidence/SOL135-PROOF.json",
+      "bytes": 15889,
+      "sha256": "8e8182a41f2281367d7b891c62ad7aabb50bd522da5b045b64cab5b54dc3530c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715075",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15889",
+        "1791264651888116761",
+        "1791265907674897613"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/parent-evidence/SOL135-manifest.json",
+      "bytes": 44876,
+      "sha256": "7ff6788fd62b8222b1d18b6ee8beba86840624b5a5e488acd74bcb20e35fec0a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715076",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44876",
+        "1791264651894117102",
+        "1791265907674917422"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/read_data.py",
+      "bytes": 6206,
+      "sha256": "3d17cc78397c789b1fd1cfd7e1871f12518d4a3c7d57a631510a5df244c04011",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558905",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6206",
+        "1791264651899117386",
+        "1791265907674954758"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/received.json",
+      "bytes": 2616,
+      "sha256": "625c09dae98687c774a28d0a639273e762a932ced11f6837d9ab4b643e00eb68",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558906",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2616",
+        "1791264651904117670",
+        "1791265907674973271"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/seal_data.py",
+      "bytes": 13489,
+      "sha256": "22bfcc883d481c1a63b35d7f298643c55941c6461122ca5ab0b8535c8895699b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558907",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13489",
+        "1791264651908117898",
+        "1791265907674990150"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/actor_bootstrap.py",
+      "bytes": 61339,
+      "sha256": "f47505b651e88b60d19b6a2fcef555d1709f4607433043e79229cf9c9af751df",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715078",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "61339",
+        "1791264651914118238",
+        "1791265907675046386"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/actor_context.py",
+      "bytes": 25298,
+      "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715079",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25298",
+        "1791264651919118522",
+        "1791265907675089484"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/admission.py",
+      "bytes": 14621,
+      "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715080",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14621",
+        "1791264651924118806",
+        "1791265907675114370"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/alljob_cohort.py",
+      "bytes": 24686,
+      "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715081",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24686",
+        "1791264651930119147",
+        "1791265907675137638"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/capacity.py",
+      "bytes": 20946,
+      "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715082",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20946",
+        "1791264651935119431",
+        "1791265907675161180"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/class_semantics.py",
+      "bytes": 19516,
+      "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715083",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19516",
+        "1791264651940119716",
+        "1791265907675183851"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/common.py",
+      "bytes": 38326,
+      "sha256": "d02a5488dd6cba3d1255aa4cbf13ecec9437e386f04e17a07c324c4bd56a3f51",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715084",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "38326",
+        "1791264651945120000",
+        "1791265907675204546"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/consumer_bridge.py",
+      "bytes": 21315,
+      "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715085",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21315",
+        "1791264651951120340",
+        "1791265907675231284"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/custody.py",
+      "bytes": 31225,
+      "sha256": "a9b19529d1410188e916f11c6ae38f7834a1c8818afd42dd2b541f6d236ad4af",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715086",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31225",
+        "1791264651956120624",
+        "1791265907675254753"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/existing_root_caller.py",
+      "bytes": 47382,
+      "sha256": "6e8c932a4b214eb8696ed7a8c2efd18a84ccba8587e2b29376fe546eefa7991c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715087",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47382",
+        "1791264651961120909",
+        "1791265907675279585"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/extraction.py",
+      "bytes": 27923,
+      "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715088",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27923",
+        "1791264651966121193",
+        "1791265907675324331"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/fact_bridge.py",
+      "bytes": 14689,
+      "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715089",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14689",
+        "1791264651971121477",
+        "1791265907675357267"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/independent_selector.py",
+      "bytes": 7718,
+      "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715090",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7718",
+        "1791264651977121818",
+        "1791265907675378358"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/launcher.py",
+      "bytes": 11634,
+      "sha256": "3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715091",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11634",
+        "1791264651982122101",
+        "1791265907675396154"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/lifetime.py",
+      "bytes": 53987,
+      "sha256": "84affe919b12dca8871134991fda68ec5d7bccf66553e15cb2dfc5406f7ec482",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715092",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "53987",
+        "1791264651987122385",
+        "1791265907675416270"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/master_pool.py",
+      "bytes": 2315,
+      "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715093",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2315",
+        "1791264651992122670",
+        "1791265907675447221"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/native.py",
+      "bytes": 44470,
+      "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715094",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44470",
+        "1791264651998123011",
+        "1791265907675480112"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/normalization.py",
+      "bytes": 12779,
+      "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715095",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12779",
+        "1791264652003123295",
+        "1791265907675509753"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/observer.py",
+      "bytes": 155367,
+      "sha256": "f47369f03041a26d77cfc9ea17fefd1b562e820b3e2e5f1be9b47f1300593e34",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715096",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "155367",
+        "1791264652009123635",
+        "1791265907675531604"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/operations.py",
+      "bytes": 24309,
+      "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715097",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24309",
+        "1791264652014123920",
+        "1791265907675600579"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/owned_prefix_bank.py",
+      "bytes": 44237,
+      "sha256": "89a1b8f0c86f426510ee45f0829e7d64dcb2a715d9b8eacc9ef2eb93b347a829",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715098",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44237",
+        "1791264652019124204",
+        "1791265907675623449"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/retention.py",
+      "bytes": 8465,
+      "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715099",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8465",
+        "1791264652024124488",
+        "1791265907675652892"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/roles.py",
+      "bytes": 5018,
+      "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715100",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5018",
+        "1791264652029124772",
+        "1791265907675687706"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/root_tool_adapter.py",
+      "bytes": 152270,
+      "sha256": "63fcdb47a76b4e31bd5215431f8c14565d603b58f91510e7d190d01045aee4fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715101",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "152270",
+        "1791264652035125113",
+        "1791265907675721489"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/selected_owned_values.py",
+      "bytes": 60827,
+      "sha256": "c7f2c5929bba7ab3cdceafc6e8d0bb9693bf5bb5785583bef92f727428ae6b31",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715102",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "60827",
+        "1791264652041125454",
+        "1791265907675789107"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/snapshot_producer.py",
+      "bytes": 4130,
+      "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715103",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4130",
+        "1791264652046125738",
+        "1791265907675825532"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/stock-data/Include/cpython/listobject.h",
+      "bytes": 1801,
+      "sha256": "01db083043a33e64b99e8d8ac7da1862042a0e56e2899b5856662e2080faffe9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849799",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1801",
+        "1791264652051126022",
+        "1791265907675909521"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/stock-data/Include/cpython/setobject.h",
+      "bytes": 2046,
+      "sha256": "de9eeb690b95abe93a56100de500aabfb0c26f47ec5aef1c405aac7e969f5ed4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849800",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2046",
+        "1791264652055126249",
+        "1791265907675929111"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/stock-data/Objects/abstract.c",
+      "bytes": 81268,
+      "sha256": "5eeff9306d90cfd1cc817c7db4dda29b06932d0ef09ce664323e66bcf829b2a3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849802",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "81268",
+        "1791264652061126590",
+        "1791265907675967591"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/stock-data/Objects/listobject.c",
+      "bytes": 128723,
+      "sha256": "ae99faca56ecd038b314e847255fc548b6b7e6dd8060d2f5aaed94792d50298c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849803",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "128723",
+        "1791264652068126988",
+        "1791265907676013060"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/stock-data/Objects/setobject.c",
+      "bytes": 82002,
+      "sha256": "d2130bf7c89f301349025e26379041d4e6878b422be11d7eaa4e60c26b10f72d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849804",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "82002",
+        "1791264652074127329",
+        "1791265907676076335"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/stock-data/Python/errors.c",
+      "bytes": 57848,
+      "sha256": "5ef37b5d6fdcd7a6c55002eba9fe31ed70a5a7a76fa606a468ba3c4894384af0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849806",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "57848",
+        "1791264652079127613",
+        "1791265907676145495"
+      ],
+      "stable9": true
+    }
+  ],
+  "source61": [
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/authority.py",
+      "bytes": 16580,
+      "sha256": "1fd99d16952fe6e55250695fb5e40c6b0342604ff9cb3708858ef4689bd85d84",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558847",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16580",
+        "1791264651692105625",
+        "1791265907673004381"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/bill.py",
+      "bytes": 24098,
+      "sha256": "0cf479e248ac41a299ba993ef83fcf3a37dc7d970f0477383de90763eef6cf11",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558864",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24098",
+        "1791264651697105909",
+        "1791265907673032335"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/body_scope.py",
+      "bytes": 7655,
+      "sha256": "e44d0f4df19aa79ef6de27a01c0fa15480ad7aad0029f71d4d331933936b73de",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558869",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7655",
+        "1791264651703106250",
+        "1791265907673132688"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/canonical.py",
+      "bytes": 3825,
+      "sha256": "be2693f832f16341b8d4ecc1d1a0053efcef224e89a45c0ca7a7e4355a54ffc8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558871",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3825",
+        "1791264651708106534",
+        "1791265907673164224"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/capability.py",
+      "bytes": 11981,
+      "sha256": "446b3d9b5278ef7e0606a0e4ba111539243f798a1468d771d010f21ff2c5731a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558872",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11981",
+        "1791264651713774649",
+        "1791265907673183058"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/contract.py",
+      "bytes": 2099,
+      "sha256": "65b56f0d1cb716614189a3c7925a9135cc1d65a2730fffb7527cbe8d8818c8bd",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558873",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2099",
+        "1791264651718330819",
+        "1791265907673227650"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/declared_controls.py",
+      "bytes": 39603,
+      "sha256": "64b14f477e2c63b3ea113fa3bfc0adcae57797d4f0d55b08d5023338a2139084",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558875",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "39603",
+        "1791264651723260107",
+        "1791265907673245253"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/document_vector.py",
+      "bytes": 17709,
+      "sha256": "6dda6b5562d57b6f10c050c7bb95a43fed56c3dc0af88a00a07dc26d402530f4",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558876",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17709",
+        "1791264651728107670",
+        "1791265907673275720"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/document_windows.py",
+      "bytes": 7707,
+      "sha256": "6ac5e0dd6035b5b75645d5e4bc207358d147147026dab69ffcf523718f818f58",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558877",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7707",
+        "1791264651734108012",
+        "1791265907673298548"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/effects.py",
+      "bytes": 690,
+      "sha256": "8867fc9a0d4a5628942222ff9a114e4ab8c7c0ca527e7bef2a8cf431b4d9cc47",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558878",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "690",
+        "1791264651739108296",
+        "1791265907673318058"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/formats.py",
+      "bytes": 13628,
+      "sha256": "fdf263ad32b749ab7e4b164a6cd5112d802853ec4b50d051f475fb4141336853",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558886",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13628",
+        "1791264651744108580",
+        "1791265907673337248"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/ingress.py",
+      "bytes": 3025,
+      "sha256": "f64a72fc29408f80a86a1f4f70c703d7d34b86b82c0b1b7ba89a7824704a7b77",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558889",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3025",
+        "1791264651749108864",
+        "1791265907673357622"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/material_literals.py",
+      "bytes": 5689,
+      "sha256": "4369e2895e74487dc10fb972ca21c61bd6edddde976ed2328e43761e54219a48",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558891",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5689",
+        "1791264651754109148",
+        "1791265907673376308"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/performing_contracts.py",
+      "bytes": 18209,
+      "sha256": "255ad0738e13df15e42921f83b9a3393c078c541fc5d54719e0c2dc2b0184615",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558893",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18209",
+        "1791264651760109488",
+        "1791265907673394886"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/pins.py",
+      "bytes": 9147,
+      "sha256": "9923eaf9254e66ea10808f0fe29bc8695fe9c1d81b4aa5dc9428af9b9696447f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558895",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9147",
+        "1791264651764109716",
+        "1791265907673416653"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/producer_consumer.py",
+      "bytes": 3243,
+      "sha256": "f824fddb22c556b5235137662e1a578cb5999e380e100a88be6b7540b9901a15",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558897",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3243",
+        "1791264651769110000",
+        "1791265907673437979"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/receipt_chain.py",
+      "bytes": 16263,
+      "sha256": "efb4b7645c7fec083e84b407854ceeefde523410616d0b3db2c0da94b54e240d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558898",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "16263",
+        "1791264651774110284",
+        "1791265907673455427"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/recipe_planner.py",
+      "bytes": 102799,
+      "sha256": "7b333aa70e93f59aec6bd69ff30470eb0c2fe7840f94954e026a42a0bcab4e35",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558899",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "102799",
+        "1791264651780110625",
+        "1791265907673474966"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/resource_meter.py",
+      "bytes": 30206,
+      "sha256": "50b7c70a35f6a1f960555071bca3aef9defe57c4ff7f506fe6a586b51eace3ce",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558900",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "30206",
+        "1791264651784110852",
+        "1791265907673522218"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/runtime_consumer.py",
+      "bytes": 13297,
+      "sha256": "d13b0439b365b4f8bde432b0f90a59549a18756fca8f806da0d5acb9ad3b43fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558901",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13297",
+        "1791264651789111136",
+        "1791265907673548097"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/schema_validate.py",
+      "bytes": 6776,
+      "sha256": "9a13a2cf5e904fc094ffb112c5d5e22d460e15594054ca4253c1bb17f441d0cf",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558902",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6776",
+        "1791264651793111364",
+        "1791265907673568142"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/semantics.py",
+      "bytes": 2578,
+      "sha256": "b29dccd860dbe151aeac032e076876b9ad77b8936b0aa588f4095d732f5a5e45",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558903",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2578",
+        "1791264651798111648",
+        "1791265907673586075"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/consumer/source/whole_join.py",
+      "bytes": 18213,
+      "sha256": "b88ee6b159e797ab17d6042231396354e55cbe7171f12ea3c2d2d0f5fcc01c8b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558904",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18213",
+        "1791264651803111932",
+        "1791265907673602490"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_original_caller.c",
+      "bytes": 15007,
+      "sha256": "18fd8caeadb26b1daec81753b76dcb011b55ce66f7b385d622293d2bb0b7415e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715059",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15007",
+        "1791264651808112216",
+        "1791265907673668747"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_original_caller.h",
+      "bytes": 6596,
+      "sha256": "94ef97754d8789c3fdd0810c1379147c73d191c3f01d66ff127dea8c20096c10",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715060",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6596",
+        "1791264651813112499",
+        "1791265907673691822"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_owned_custody.c",
+      "bytes": 70396,
+      "sha256": "974ab116b0672c17a8adbbd9a349394238d284e0719428a0f5db99ec11808b2f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715061",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "70396",
+        "1791264651818112783",
+        "1791265907673716395"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_owned_custody.h",
+      "bytes": 6522,
+      "sha256": "e1905df1072950b8b92ca7b6bf0fc42e0dc6fc7d35cf9c24f1ebd5e075a75bb0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715062",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6522",
+        "1791264651823113068",
+        "1791265907673753130"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_bank.c",
+      "bytes": 24368,
+      "sha256": "7328ce4d5a0711a1b3475403386896bb809acfd221191b37ba453812211abf3f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715063",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24368",
+        "1791265907702967796",
+        "1791265907702967796"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_bank.h",
+      "bytes": 8537,
+      "sha256": "56326dc5fefe887164e660a9acb905d12200f6d9341bc23b719918a56eaa8871",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715064",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8537",
+        "1791264777943278199",
+        "1791265907673792750"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_command.c",
+      "bytes": 27870,
+      "sha256": "34f82ea562ae7e18e5b8c54d948ca52329c88543cd90682210b328c1c538a37a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715065",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27870",
+        "1791264651838113920",
+        "1791265907673811707"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_command.h",
+      "bytes": 5786,
+      "sha256": "a275274f6c985210a4327c6d5c007f9519e7276c6c3b3a9eb5a79ff2e0db196c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715066",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5786",
+        "1791264651843114204",
+        "1791265907673837015"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_entry.c",
+      "bytes": 664983,
+      "sha256": "6496d3cf3b8a7e5228c841ce292633193e63459fe16cbe1779712365279efa1e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715067",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "664983",
+        "1791264777946278370",
+        "1791265907673856486"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/native/publisher_root_entry.h",
+      "bytes": 24694,
+      "sha256": "960a4121b5f7631b87292436e1841bfc5579d7d47d9a6ecc6d7dc3e1aa08641e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715068",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24694",
+        "1791264651861115227",
+        "1791265907674640924"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/parent/publisher_root_command.py",
+      "bytes": 64215,
+      "sha256": "928d9edf0526101ed3c12e3a0cd96a8dda2166cccef411898c8799367cf33227",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715070",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "64215",
+        "1791264879223025258",
+        "1791265907674699847"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/parent/quality_gate_process.py",
+      "bytes": 13293,
+      "sha256": "1ed9b256b24efa7b7b449c464d62e22378280a8a4929d3a19056ba56c112a22a",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715071",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "13293",
+        "1791264651872115852",
+        "1791265907674754483"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/actor_bootstrap.py",
+      "bytes": 61339,
+      "sha256": "f47505b651e88b60d19b6a2fcef555d1709f4607433043e79229cf9c9af751df",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715078",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "61339",
+        "1791264651914118238",
+        "1791265907675046386"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/actor_context.py",
+      "bytes": 25298,
+      "sha256": "d97ec465eb814bbfab6fca33cf4648962334a116b8cc43796588c3cbc304d380",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715079",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25298",
+        "1791264651919118522",
+        "1791265907675089484"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/admission.py",
+      "bytes": 14621,
+      "sha256": "54cf94f4a956ef8f50a1a05567497077e70a1fe48abe012a09b778d58c1cc8aa",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715080",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14621",
+        "1791264651924118806",
+        "1791265907675114370"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/alljob_cohort.py",
+      "bytes": 24686,
+      "sha256": "cb1022fd11c724935083adbc2f9c4d1231acc8686d574e4170d517a7ec752e3d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715081",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24686",
+        "1791264651930119147",
+        "1791265907675137638"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/capacity.py",
+      "bytes": 20946,
+      "sha256": "523ca2b4a708a700de36db8412be1f18222f538cb0e4147458db83d75a1107f1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715082",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "20946",
+        "1791264651935119431",
+        "1791265907675161180"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/class_semantics.py",
+      "bytes": 19516,
+      "sha256": "1ed12bb287414d98dfb1d950899bf10e9f7047150ebbdb048b37875129657da7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715083",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19516",
+        "1791264651940119716",
+        "1791265907675183851"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/common.py",
+      "bytes": 38326,
+      "sha256": "d02a5488dd6cba3d1255aa4cbf13ecec9437e386f04e17a07c324c4bd56a3f51",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715084",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "38326",
+        "1791264651945120000",
+        "1791265907675204546"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/consumer_bridge.py",
+      "bytes": 21315,
+      "sha256": "10b74e5d17a94b7e0ba0c1c810aaba5e59fbb9a807c4e6e23c4c61f5c34ecd7c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715085",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21315",
+        "1791264651951120340",
+        "1791265907675231284"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/custody.py",
+      "bytes": 31225,
+      "sha256": "a9b19529d1410188e916f11c6ae38f7834a1c8818afd42dd2b541f6d236ad4af",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715086",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31225",
+        "1791264651956120624",
+        "1791265907675254753"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/existing_root_caller.py",
+      "bytes": 47382,
+      "sha256": "6e8c932a4b214eb8696ed7a8c2efd18a84ccba8587e2b29376fe546eefa7991c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715087",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "47382",
+        "1791264651961120909",
+        "1791265907675279585"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/extraction.py",
+      "bytes": 27923,
+      "sha256": "e67a201c03d3ecc0db4ed85bb3fc35f1a1f67aee5994532ae85dd2eb8f317d52",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715088",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "27923",
+        "1791264651966121193",
+        "1791265907675324331"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/fact_bridge.py",
+      "bytes": 14689,
+      "sha256": "e8e8b98b4b16e171ae3f8faf1392df74100ec668ee4fc939f32115c048e9cc44",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715089",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14689",
+        "1791264651971121477",
+        "1791265907675357267"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/independent_selector.py",
+      "bytes": 7718,
+      "sha256": "2aec112375b455e02dbbe00af679a083872441e4a64e58a4f02092fa394c659b",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715090",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7718",
+        "1791264651977121818",
+        "1791265907675378358"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/launcher.py",
+      "bytes": 11634,
+      "sha256": "3cce00ccccc8f409d0d2a400bccc84b41a9359aa1524d9a53c1c61fb37c53000",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715091",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11634",
+        "1791264651982122101",
+        "1791265907675396154"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/lifetime.py",
+      "bytes": 53987,
+      "sha256": "84affe919b12dca8871134991fda68ec5d7bccf66553e15cb2dfc5406f7ec482",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715092",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "53987",
+        "1791264651987122385",
+        "1791265907675416270"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/master_pool.py",
+      "bytes": 2315,
+      "sha256": "8594f508e94898ab94a40aa5661d159b5d18133f0b54977c889af18a54ac5cd1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715093",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2315",
+        "1791264651992122670",
+        "1791265907675447221"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/native.py",
+      "bytes": 44470,
+      "sha256": "3925f353db0c4a6658b6c9923fe202788c3058cbbc7e98eb5a3d787494e9ed76",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715094",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44470",
+        "1791264651998123011",
+        "1791265907675480112"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/normalization.py",
+      "bytes": 12779,
+      "sha256": "ccbea784907199b63fa06d3debc2077361569c10a18803edc56416b07e73bd99",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715095",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12779",
+        "1791264652003123295",
+        "1791265907675509753"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/observer.py",
+      "bytes": 155367,
+      "sha256": "f47369f03041a26d77cfc9ea17fefd1b562e820b3e2e5f1be9b47f1300593e34",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715096",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "155367",
+        "1791264652009123635",
+        "1791265907675531604"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/operations.py",
+      "bytes": 24309,
+      "sha256": "dce06fb128a82a98909b67ec1912eea2342bd8647ca156d9e7f0075827eb3eb3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715097",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "24309",
+        "1791264652014123920",
+        "1791265907675600579"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/owned_prefix_bank.py",
+      "bytes": 44237,
+      "sha256": "89a1b8f0c86f426510ee45f0829e7d64dcb2a715d9b8eacc9ef2eb93b347a829",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715098",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "44237",
+        "1791264652019124204",
+        "1791265907675623449"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/retention.py",
+      "bytes": 8465,
+      "sha256": "560186a63f735e36897093a135bc5d9ab09c09dca325a2365b33ed1bc4ac586d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715099",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8465",
+        "1791264652024124488",
+        "1791265907675652892"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/roles.py",
+      "bytes": 5018,
+      "sha256": "38ef2c86bbe6160193f7f03807904797ae264f59cc8ddefbcde19ba11c52cda5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715100",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5018",
+        "1791264652029124772",
+        "1791265907675687706"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/root_tool_adapter.py",
+      "bytes": 152270,
+      "sha256": "63fcdb47a76b4e31bd5215431f8c14565d603b58f91510e7d190d01045aee4fe",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715101",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "152270",
+        "1791264652035125113",
+        "1791265907675721489"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/selected_owned_values.py",
+      "bytes": 60827,
+      "sha256": "c7f2c5929bba7ab3cdceafc6e8d0bb9693bf5bb5785583bef92f727428ae6b31",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715102",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "60827",
+        "1791264652041125454",
+        "1791265907675789107"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/candidate/source/snapshot_producer.py",
+      "bytes": 4130,
+      "sha256": "9b5b56b0650200129c795543018442249b2223aad93a7b79f1f89d1555f2755c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3715103",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4130",
+        "1791264652046125738",
+        "1791265907675825532"
+      ],
+      "stable9": true
+    }
+  ],
+  "candidate_count": 88,
+  "source_count": 61,
+  "changed": [
+    "native/publisher_root_bank.c"
+  ],
+  "source_same": 60,
+  "candidate_same": 87,
+  "copied_metadata": "PROVENANCE_ONLY_NOT_CURRENT_ACCEPTANCE",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

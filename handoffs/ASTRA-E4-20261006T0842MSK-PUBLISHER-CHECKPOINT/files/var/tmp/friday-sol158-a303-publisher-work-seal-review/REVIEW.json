@@ -1,0 +1,81 @@
+{
+  "schema": "friday.sol158.a303.connected-nonauthor-review.v1",
+  "assignment": "ASTRA-E4-A303-PUBLISHER-WORK-SEAL-FIRST-REFUSAL-CONNECTED-REVIEW-SOL158",
+  "generation": 1,
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A303_TWO_FILE_CONNECTED_WORK_STOP_DELTA_ONLY",
+  "snapshot": {"path":"/var/tmp/friday-astra-a303-publisher-work-seal.QvP70b/manifest.json","sha256":"5fc3ecaaf7c137ee34f0be7ee2de65e28e50900ff6c5390f41fdd8a696ed16ac"},
+  "scope": "Independent nonauthor static decision on Astra two-file change, joined to actual unchanged command, completion, bank publication and parent. Current Source61 changed2/same59, candidate88 changed2/same86. This does NOT independently accept my Sol155 baseline, authorize execution or accept the whole current61.",
+  "method": "Raw Source/delta reading and pinned metadata/full-file byte/hash comparisons only. No Source parser/compiler/preprocess/import/AST/eval/exec/tests/helper/live/network/install; no Source/input modification. Host26 literal/equality observations are NOT Target tests. Detailed exact pins and40 safe raw spans in accompanying evidence.",
+  "notation": {
+    "S": "Original outside valid start; same native pool start after successful constructor.",
+    "D0": "Original checked S+4200 seconds, never renewed.",
+    "R": "600 seconds WITHIN full, not additional grace.",
+    "D": "Existing numeric native full: min(previous full, parsed expires), restrictive DATA only. Semantic applicability/independent authority not proved by this assignment or scalar parse.",
+    "W": "D-R when subtraction valid; zero otherwise. No positive work interval or subtraction underflow never creates new600 guarantee or larger fallback.",
+    "T": "Exact returned original monotonic sample in recorded raw timespec/observed_ns. Valid full domain S<=T<=D, without proving an entire operation fits."
+  },
+  "connected_findings": [
+    {
+      "id":"C1","decision":"ACCEPT_EXACT_DELTA_STATIC",
+      "location":"entry.c657-724; entry.h41-65",
+      "fact":"WORK_STOPPED is appended after UNUSED0/ENTERED1/RETURNED2/FAILED3; earlier phase/site values and all raw struct members remain byte-equal. Common primitive refuses an unconfirmed or STOPPED record BEFORE changing that record or sampling. It still clears caller out=0, which is not replacement of the first work record. ENTERED precedes actual primitive. rc/errno/raw/overflow/domain are captured/checked first against FULL; only a valid returned sample can become work denial.",
+      "range":"CONFIG/RESERVE/COLD_ENTRY preserve inclusive T<=W; ADMISSION is strict T<W. Valid S<=T<=D with T>W, or ADMISSION T==W, produces kind6/WORK_STOPPED with original raw sample/rc/errno/site/lower/limit. T>D or zero/before-S/invalid raw/overflow/nonzero rc is FAILED, not kind6. Malformed caller limit>D or full<S fails before primitive. A full-valid but already exhausted narrow work interval can now be classified by the one original work sample; this is a changed refusal-prefix sample, not new work authorization.",
+      "producer":"Actual before_config command55-67; MasterChange reserve/preowner/native-reserve entry1104-1123; actual cold Root entry5874-5880; current admission entry2322-2336. All keep their original refusal return and do not proceed with new work. Existing generic/master callers use their original requested FULL limit, not a new work cap. Their opaque broader policy is not accepted here."
+    },
+    {
+      "id":"C2","decision":"ACCEPT_EXACT_DELTA_STATIC_CONDITIONAL",
+      "location":"entry.c450-482,702-724",
+      "fact":"Special family predicate recognizes only SAME pool STOPPED original: rc/error0, exact lower=S, unchanged600 difference D-W, valid nonoverflowing timespec with observed equality and S<=T<=D. Kind6 additionally requires original W limit and one of four real work sites plus correct strict/inclusive exhaustion. Kind7 requires ADMISSION/W or GENERIC/D and T<=recorded limit. Unknown/malformed phases or records remain blocked. Once STOPPED, family completion may be eligible but the ordinary sample guard still rejects every next work sample without record writes. There is no reset/resample/retry-to-valid.",
+      "conditional":"Kind7 producer provenance and retained original admission are established by actual code paths below, not inferred from a fault number. The predicate is not an independent signature/authority verifier or a repair for arbitrary externally forged state. No new whole value/alias/error custody acceptance."
+    },
+    {
+      "id":"C3","decision":"ACCEPT_RESTRICTIVE_DATA_FLOW_ONLY",
+      "location":"entry.c2296-2350",
+      "fact":"Existing exact-key/schema/role/current PID/start/image/manifest joins and scalar issued/expires ordering/range precede this delta. SAME pool D=min(expires,oldD) and W are retained BEFORE fallible admission work check. Subsequent failure cannot fall back to former largerD. Existing effects/all15/launch-mode/retention/canonical schema checks remain afterward; numeric tightening does not bypass them or retrospectively qualify prior effects. Proper admission T==W is already kind6; returned T<W with issued>T becomes actual kind7 terminal refusal with original valid sample and separately held original admission. MasterFault still records refusal/original error.",
+      "authority":"This is restrictive numeric DATA. Its exact semantic applicability boundary/independent original caller witness remains OPEN as Sol157. Neither parse nor native range check grants Source/image/Root admission. Unknown prior authority is not assumed absent, waived or fabricated."
+    },
+    {
+      "id":"C4","decision":"ACCEPT_INITIAL_AND_RECHECK_FIRST_REFUSAL",
+      "location":"entry.c2325-2336,2352-2373; now_ns726-738 unchanged",
+      "fact":"Initial future-issued path modifies only fault_kind/phase AFTER real returned ADMISSION sample. Actual signed/snapshot/current-identity gated recheck obtains its original GENERIC sample; a zero/failed sample returns before kind7. Real now<issued sets kind7/STOPPED and original admission_not_yet_current MasterFault. Both paths therefore stop subsequent work samples, including generic now_ns. Real expiry remains FAILED/kind4 if reached; now beyond retained full is already FAILED/kind3 in primitive. No waiting until issuance, new admission, replacement clock, or converted successful admission.",
+      "scope":"Real recheck guarded owned-Root route only. Foreign/unattached now_ns raw bytes unchanged and explicitly opaque/unqualified. Selected monotonic implementation/custody is not accepted by seeing its symbol."
+    },
+    {
+      "id":"C5","decision":"ACCEPT_CONNECTED_THREE_ORIGINAL_COMPLETION_RECORDS_CONDITIONAL_ON_BASE",
+      "location":"command.c92-103,283-301,320-384,509-519; entry.c1580-1593,1633-1659,10815-10827,11128-11233",
+      "fact":"Actual normal and early/error ColdPerform returns converge once to cold_complete then actual FinalReceive before returning immutable original result. Cold completion uses its separate completion_clock_original and LIVE pool S,D, not copied ColdResult.deadline. Utility/end and final/caller use their own separate preowned clock_original and same LIVE S,D. All first check family, so one true FAILED/ENTERED/unavailable/full-expired completion blocks other family clocks, getter and bank publication. Valid STOPPED can release only this block; all original reserved read/tail credit, attempted-once, actual owner/PID/thread, config/runtime eligibility, Source/last-consumer/FD end, full data and final credit predicates remain unchanged. Missing credit/owner/custody still holds original objects; a clock stop alone never grants cleanup or successful final result.",
+      "history":"Utility full SAME-pool snapshot/cause bodies and memcmp still include the complete first stopped raw record. Final caller full Root/cold byte reads and exact entire pool equality against utility snapshot remain; final settlement reread/post-clock is separate. No exemption of phase4 from raw bodies, no frozen pool mutation by completion sampling, no count/hash-only transfer. Existing historical receipts/result remain immutable.",
+      "conditional":"This verifies propagation of the changed decision to actual consumers; it is NOT independent acceptance of my unchanged Sol155 three-record implementation or all prior runtime/support/alias/last-user policy."
+    },
+    {
+      "id":"C6","decision":"ACCEPT_GETTER_ACTUAL_LATCH_COMMIT_PUBLICATION_CONDITIONAL_ON_BASE",
+      "location":"entry.c484-526,558-648; bank.c111-137,249-286,348-377",
+      "fact":"Getter changes only work-record classifier. It still checks original header S/D0 exact4200, all separate failed/unconfirmed records, original valid initial raw clock/domain/work-prefix, owner PID and retained pool S<=D<=D0. Valid STOPPED cannot use NONE/PRECLOCK fallback, which requires UNUSED work and genuine no-clock prefix. Returned cutoff is retainedD; no admission reparsing/new clock/larger reset. Actual RootBankCommand after ColdPerform both outcomes latches getter ONCE; Commit independently gets SAME cutoff and its existing finite check usesD. Every ordinary bank publication/full body chunk/header check uses latchedD. Zero/uncertain cutoff refuses before bank sampling; postD refuses. Failure publication does not become success.",
+      "initial_residual":"Exact A300 constructor and initial getter range Tinitial<=D0-R are unchanged. Sol157 late initial constructor/startup residual is preexisting, NOT a new blocker introduced by this delta and NOT repaired/whole-accepted here. Likewise genuine preclock fallback authority stays conditional on original prefix; no later legitimate tighter bound can be discarded as a new no-clock state."
+    },
+    {
+      "id":"C7","decision":"UNCHANGED_PARENT_ORIGINAL_SCOPE_RETAINED_NOT_WHOLE_ACCEPTED",
+      "location":"parent.py364-391,425-467,662-687,831-859,904-932,1090-1132; bank.h90-115/bank.c355-356",
+      "fact":"Parent full hash matches Sol155/A301; original4200 reservation, parent read/hash/full raw bodies/both ordinary failure receivers/once close/freeze/first original exception/new final receipt and same layout relations unchanged. Parent clock and decoder still use original D0; RP_DEADLINE remains immutable B_DEADLINE D0. Native D tightening is not transported as a qualified outside applicable cutoff in this pinned interface. Existing invocation helper has no qualified earlier-min input; launch clock at actual site is after returned scope.start. External qualified caller proof outside this snapshot remains unknown, not globally disproved.",
+      "residual":"Sol157 outside minimum/prelaunch producer->helper->native->receiver authority/generation/domain/semantic coverage witness remains OPEN. Prior A301 scoped original-clock credit only; not outside tighter interval/whole startup/Root admission. Protected wait/cleanup policies untouched; no new issuer/grant/service/pool/cap/scheduler."
+    },
+    {
+      "id":"C8","decision":"UNCHANGED_DECLARATIONS_NOT_COMPILED_IMAGE_ACCEPTANCE",
+      "fact":"Raw initial declarations and native attempt struct/all subsequent entry.h declarations byte-equal; command/bank headers and full source hashes unchanged. Same complete copied native struct/storage/reservation syntax and 2*T+scratch RAM,7*T+4*scratch reads/header output remain. No appended storage/list/history/table/body introduced. Enum appending preserves earlier source numeric values; it does NOT prove selected compiled offsets/padding/sizeof/binary/code/image identity or decoder compatibility. Current new native image needs independent exact qualification; no old ABI/image/cost transfer.",
+      "resource":"Added fixed helper/work/full arguments, scalar/range branches and increased code image have CPU/text/stack/implicit read costs UNKNOWN_NOT_ZERO. Healthy original call sites still one primitive per original call; validators/getter add none. Existing repeated successful sites and separate completion attempts are not changed into new work retry. Refusal-prefix narrow-valid work case may now make the original sample where Sol155 rejected the work interval before sampling. Whole physical/implicit costs and operation-span fit NOT measured."
+    }
+  ],
+  "introduced_connected_contradictions": [],
+  "qualification_limits": [
+    "Scoped exact changed-family producer-to-consumer/static ordering/range credit only; no self-acceptance of Sol155 baseline.",
+    "Existing actual full authority/image/PID-start/Source+Root admission, outside tighter minimum/prelaunch proof remain OPEN.",
+    "Whole startup/late initial constructor, native ABI/padding/code image and complete native/value/alias/error/history/owner transfer still require independent final qualification.",
+    "Complete workload/read/RAM/output/slots/whole implicit CPU/time fit and mandatory live/negative controls remain REQUIRED_NOT_RUN. Point checks at exactD do not prove an operation's full duration finishes byD.",
+    "Stopped107#2/Scanner075/SOL139 excluded, no reuse/salvage/reroute. Unsafe stock/set/TYPE/callback/controlled-worker/operational body qualification opaque/hash-only; no acceptance by fixed clock relations.",
+    "r5 immutable red/no reuse; r6 absent as author states; not reclassified here."
+  ],
+  "required_controls": "Original69/mandatory20/full140/v2/inherited; all A30318; Sol15720; reviewer ordinary cases. required=true,waiver=false,REQUIRED_NOT_RUN_SOURCE_INERT.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

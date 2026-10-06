@@ -1,0 +1,25 @@
+{
+  "schema": "friday.sol160.result.v1",
+  "event": "SOL-SOL160-R1",
+  "assignment": "ASTRA-E4-A304-PUBLISHER-RETAINED-MIN-WIRE-PARENT-CONNECTED-SOL160",
+  "generation": 1,
+  "state": "AUTHOR_CONNECTED_INERT_DRAFT_REQUIRES_ASTRA_INDEPENDENT_REVIEW",
+  "manifest": {
+    "path": "/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/manifest.json",
+    "bytes": 81450,
+    "sha256": "6e2e06418fd01dfa452bddcc189a01c4b6ea79e185ca914035eea699e3c3917e"
+  },
+  "delta": "Current61 changed4/same57, candidate88 changed4/same84. Actual native latch -> v6B65/valid79v2RP31 -> same restrictive parent bound before full intake -> reads/once-close/freeze/final timestamps/new immutable records. Original S/D0 preserved.",
+  "outcomes": "Normal0/70 and valid79 joined; pristine78 distinct verified D0 prefix. Bad/missing/unequal scalars never wider acceptance: known smaller permits independent sealed raw only; lost/expired min or clock HELD. Original error/body/custody and no-retry preserved.",
+  "preserved": "Sol159 actual prelaunch/run byte-exact; A303 work-stop/getter unchanged except Commit scalar equality, protected scope opaque unchanged. Same4200/final600/caps, no grants.",
+  "evidence": "Input117/current88 fullSHA/id9 stable. 36 host raw observations NOT Source tests. No Source parser/compiler/import/AST/exec/tests/live/network/install. All original69/mandatory20/full140/v2/inherited+A303/Sol157/Sol158/Sol159+minwire37 required/no waiver/NOT_RUN.",
+  "open": "Earlier exact applicable-min authority/generation/prelaunch/full-span witness, whole custody/ABI/image/admission/full costs OPEN. Numeric DATA restriction only; author requires Astra independent review.",
+  "timing": {
+    "first_intake_msk": "2026-10-06T08:30:14+03:00",
+    "sealed_msk": "2026-10-06T08:39:15.966367+03:00",
+    "elapsed_seconds": 541.966
+  },
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

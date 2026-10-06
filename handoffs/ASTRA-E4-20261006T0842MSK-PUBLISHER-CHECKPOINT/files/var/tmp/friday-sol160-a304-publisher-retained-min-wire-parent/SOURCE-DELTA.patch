@@ -1,0 +1,407 @@
+--- SOL159/candidate/native/publisher_root_bank.c
++++ SOL160/candidate/native/publisher_root_bank.c
+@@ -18,7 +18,7 @@
+ _Static_assert(sizeof(FridayPublisherRootBindRecord)==FRIDAY_ROOT_BANK_BIND_BYTES,"bind record");
+ _Static_assert(sizeof(FridayPublisherRootPublicationRecord)==FRIDAY_ROOT_BANK_PUBLICATION_BYTES,"publication primitive");
+ _Static_assert(FRIDAY_ROOT_BANK_PUBLICATION_AT+FRIDAY_ROOT_BANK_PUBLICATION_BYTES==FRIDAY_ROOT_BANK_HEADER,"publication tail");
+-_Static_assert(FRIDAY_ROOT_BANK_BIND_AT>=65ULL*8ULL&&
++_Static_assert(FRIDAY_ROOT_BANK_BIND_AT>=66ULL*8ULL&&
+     FRIDAY_ROOT_BANK_BIND_AT+FRIDAY_ROOT_BANK_BIND_BYTES==2048ULL,"bind region");
+ static _Thread_local FridayPublisherRootBankHeader *bank_working,*bank_destination;
+ static _Thread_local uint64_t bank_extent,bank_final_deadline;
+@@ -110,7 +110,11 @@
+ }
+ static int bank_clock(uint64_t *out,uint64_t operation) {
+     uint64_t final_deadline=bank_final_deadline;
+-    if(!final_deadline) {
++    if(!final_deadline||!bank_working||
++       final_deadline<bank_working->word[B_STARTED]||
++       final_deadline>bank_working->word[B_DEADLINE]||
++       bank_working->word[B_FINAL_DEADLINE]!=final_deadline||
++       publication_record.word[RP_FINAL_DEADLINE]!=final_deadline) {
+         FridayPublisherRootBankFault(operation+1,-1,0,0,0,
+             publication_record.word[RP_STARTED],0);
+         return -1;
+@@ -260,6 +264,12 @@
+             bank_extent,bank_working->word[B_PUBLISHED]);
+         return -1;
+     }
++    /* Publish the SAME retained numeric restriction before the first body
++     * chunk, within the original header. It is not a completion/admission
++     * witness. The outside parent waits for actual end/no writers before its
++     * bounded initial header read. An interrupted later header copy cannot
++     * lawfully make a known restriction wider. */
++    bank_destination->word[B_FINAL_DEADLINE]=bank_final_deadline;
+     /* Actual complete source is consumed into its preowned outside destination
+      * BEFORE Root owner loss. Both banks and copy/compare/read work were charged
+      * at the original pool birth; no output-wire cap or replacement grant.
+@@ -350,7 +360,8 @@
+     bank_command_attempted=1;
+     if(bank_bind(fd,expected)<0)return 78;
+     uint64_t *pw=publication_record.word;
+-    pw[RP_MAGIC]=FRIDAY_ROOT_BANK_PUBLICATION_MAGIC;pw[RP_VERSION]=1;
++    pw[RP_MAGIC]=FRIDAY_ROOT_BANK_PUBLICATION_MAGIC;
++    pw[RP_VERSION]=FRIDAY_ROOT_BANK_PUBLICATION_VERSION;
+     pw[RP_BYTES]=sizeof(publication_record);pw[RP_PID]=(uint64_t)getpid();
+     pw[RP_PARENT]=(uint64_t)getppid();pw[RP_STARTED]=bank_working->word[B_STARTED];
+     pw[RP_DEADLINE]=bank_working->word[B_DEADLINE];
+@@ -363,6 +374,11 @@
+      * Commit independently reads the SAME retained final pool bound once.
+      * Do not repeat pool/body traversal for every 64KiB publication chunk. */
+     bank_final_deadline=FridayPublisherRootBankFinalDeadline();
++    /* One latch after ColdPerform, carried by BOTH actual transports. The
++     * failure record can supply it even before a completion header copy.
++     * Zero/unavailable is deliberately not replaced by the original D0. */
++    bank_working->word[B_FINAL_DEADLINE]=bank_final_deadline;
++    pw[RP_FINAL_DEADLINE]=bank_final_deadline;
+     int committed=FridayPublisherRootBankCommit(rc,result);
+     pw[RP_COMMIT_RC]=(uint64_t)(int64_t)committed;
+     if(committed<0)return bank_failed_publication();
+--- SOL159/candidate/native/publisher_root_bank.h
++++ SOL160/candidate/native/publisher_root_bank.h
+@@ -10,7 +10,7 @@
+ #include <stddef.h>
+ #define FRIDAY_ROOT_BANK_HEADER 4096ULL
+ #define FRIDAY_ROOT_BANK_MAGIC UINT64_C(0x314b4e4142445246)
+-#define FRIDAY_ROOT_BANK_VERSION 5ULL
++#define FRIDAY_ROOT_BANK_VERSION 6ULL
+ #define FRIDAY_ROOT_BANK_RESERVATION_MAGIC UINT64_C(0x3156534552445246)
+ #define FRIDAY_ROOT_BANK_RAM_CAP UINT64_C(8589934592)
+ #define FRIDAY_ROOT_BANK_READ_CAP UINT64_C(40960000000)
+@@ -25,6 +25,7 @@
+ #define FRIDAY_ROOT_BANK_PUBLICATION_AT 3840ULL
+ #define FRIDAY_ROOT_BANK_PUBLICATION_BYTES 256ULL
+ #define FRIDAY_ROOT_BANK_PUBLICATION_MAGIC UINT64_C(0x3155425042445246)
++#define FRIDAY_ROOT_BANK_PUBLICATION_VERSION 2ULL
+ #define FRIDAY_ROOT_BANK_PUBLICATION_OPERAND_BYTES 65536ULL
+ #define FRIDAY_ROOT_BANK_PUBLICATION_OPERAND_STORAGE (2ULL*FRIDAY_ROOT_BANK_PUBLICATION_OPERAND_BYTES)
+ /* A bounded ORIGINAL primitive failure record in existing verified storage.
+@@ -40,7 +41,7 @@
+     RP_COMMIT_RC,RP_PERFORM_RC,RP_BODY_COPIED,RP_BODY_COMPARED,
+     RP_HEADER_COPIED,RP_REQUIRED_BODIES_COMPLETE,
+     RP_SECONDARY_OP,RP_SECONDARY_RC,RP_SECONDARY_ERRNO,
+-    RP_SECONDARY_OPERAND,RP_SECONDARY_EXTENT,RP_CLOCK_VALID,RP_READY,RP_RESERVED
++    RP_SECONDARY_OPERAND,RP_SECONDARY_EXTENT,RP_CLOCK_VALID,RP_READY,RP_FINAL_DEADLINE
+ };
+ /* Published PARTIAL_ERROR variant uses words24..28 for actual retained compare
+  * bodies. Local failed-clock secondary facts use the same preowned cells but
+@@ -109,6 +110,9 @@
+     B_PARENT_READ_RESERVED, B_COLD_ADDRESS, B_ROOT_ADDRESS, B_CALLER_ADDRESS,
+     B_PARTIAL_PREFIX, B_STATUS_SAVED, B_STATUS_COMPLETE, B_BUILTIN_COMPLETE,
+     B_FINAL_COPY_COMPLETE, B_FINAL_COPY_BYTES, B_FINAL_COPY_NS,
++    /* Word65 was zero-reserved in v5. Restrictive final DATA, never admission.
++     * Original B_DEADLINE/reservation remain immutable. Zero is not D0. */
++    B_FINAL_DEADLINE,
+     B_WORDS
+ };
+ enum { BANK_HELD=0, BANK_LOCAL_END=1, BANK_EARLY_PREFIX=2 };
+--- SOL159/candidate/native/publisher_root_entry.c
++++ SOL160/candidate/native/publisher_root_entry.c
+@@ -565,7 +565,7 @@
+     const FridayPublisherRootFinalHandoff *h=&c->final_handoff;
+     uint64_t *w=bank_header->word;
+     uint64_t final_deadline=FridayPublisherRootBankFinalDeadline();
+-    if(!final_deadline) {
++    if(!final_deadline||final_deadline!=w[B_FINAL_DEADLINE]) {
+         FridayPublisherRootBankFault(RP_OP_COMMIT_CLOCK_DOMAIN,-1,0,
+             0,0,w[B_STARTED],0);
+         return -1;
+--- SOL159/candidate/parent/publisher_root_command.py
++++ SOL160/candidate/parent/publisher_root_command.py
+@@ -20,6 +20,7 @@
+ from .quality_gate_process import OwnedCommandScope, CleanupProof
+ 
+ MAGIC = 0x314B4E4142445246
++BANK_VERSION = 6
+ HEADER = 4096
+ READ_CAP = 40_960_000_000
+ RAM_CAP = 8_589_934_592
+@@ -35,6 +36,8 @@
+ PUBLICATION_AT = 3840
+ PUBLICATION_BYTES = 256
+ PUBLICATION_MAGIC = 0x3155425042445246
++PUBLICATION_VERSION = 2
++FINAL_DEADLINE_WORD = 65
+ PUBLICATION_OPERAND_BYTES = 65536
+ PUBLICATION_OPERAND_STORAGE = 2*PUBLICATION_OPERAND_BYTES
+ 
+@@ -148,6 +151,7 @@
+     header: bytes
+     cleanup: CleanupProof
+     bank: PublisherBank
++    retained_deadline_ns: int
+     SourceReady: bool = False
+     Root_admission: bool = False
+     GO: bool = False
+@@ -190,6 +194,7 @@
+     descriptor_closed: bool
+     finalized_ns: int
+     original_reservation: OriginalBankReservation
++    retained_deadline_ns: int
+     SourceReady: bool = False
+     Root_admission: bool = False
+     GO: bool = False
+@@ -235,6 +240,7 @@
+     finalized_ns: int
+     original_reservation: OriginalBankReservation
+     comparison_operands: tuple[bytes, bytes] | None
++    retained_deadline_ns: int
+     required_native_bodies_complete: bool = False
+     SourceReady: bool = False
+     Root_admission: bool = False
+@@ -261,6 +267,7 @@
+     descriptor_closed: bool
+     finalized_ns: int
+     original_reservation: OriginalBankReservation
++    retained_deadline_ns: int
+     SourceReady: bool = False
+     Root_admission: bool = False
+     GO: bool = False
+@@ -281,6 +288,14 @@
+         self.owner_pid = os.getpid()
+         self.fd = -1
+         self.started = self.deadline = 0
++        # D0 is immutable; this separate DATA bound can only restrict it.
++        # UNREAD permits only the existing original-prefix/prelaunch interval.
++        # Once output intake begins, an absent/unreturned bound is HELD.
++        self.retained_deadline = 0
++        self.min_wire_phase = "UNREAD"
++        self.min_wire_error = None
++        self.min_header_value = None
++        self.min_publication_value = None
+         self.input_header = b""
+         self.birth = None
+         self.final_identity = None
+@@ -376,6 +391,7 @@
+             raise BankUnconfirmed("bank_original_reservation_caps")
+         self.started = started
+         self.deadline = started + 4_200_000_000_000
++        self.retained_deadline = self.deadline
+         self.original_reservation = OriginalBankReservation(
+             self.owner_pid, self.started, self.deadline,
+             self.layout.read_reserve, self.layout.allocation, HEADER)
+@@ -404,7 +420,7 @@
+         os.ftruncate(self.fd, self.layout.total)
+         words = [0] * 128
+         v = self.layout
+-        words[:15] = [MAGIC, 5, v.total, v.root_at, v.root_bytes, v.cold_at,
++        words[:15] = [MAGIC, BANK_VERSION, v.total, v.root_at, v.root_bytes, v.cold_at,
+                       v.cold_bytes, v.caller_at, v.caller_bytes, self.owner_pid,
+                       self.started, self.deadline, v.read_reserve, 2048, 64]
+         words[16:25] = [RESERVATION_MAGIC, 1, reservation.parent_pid,
+@@ -443,6 +459,13 @@
+                     raise BankUnconfirmed("bank_unreserved_failure_clock_prefix")
+             elif mode not in ("operation", "launch"):
+                 raise BankUnconfirmed("bank_clock_mode")
++            if mode in ("operation", "launch") and self.min_wire_phase != "UNREAD":
++                if self.min_wire_phase not in ("RESTRICTED", "VERIFIED_PREBIND"):
++                    if self.min_wire_error is None:
++                        self.min_wire_error = BankUnconfirmed("bank_final_min_unreturned_or_missing")
++                    raise self.min_wire_error
++                if not 0 < self.started <= self.retained_deadline <= self.deadline:
++                    raise BankUnconfirmed("bank_retained_min_domain_changed")
+             self.clock_phase = "ENTERED"
+             self.clock_result = None
+             now = time.monotonic_ns()
+@@ -455,9 +478,11 @@
+             elif mode == "setup_no_reservation":
+                 pass  # No reservation or new interval is manufactured here.
+             elif mode == "launch":
+-                if not 0 < self.started <= now < self.deadline:
++                # Before output intake retained_deadline is exactly D0, so
++                # the accepted prelaunch/post-start predicate is unchanged.
++                if not 0 < self.started <= now < self.retained_deadline:
+                     raise BankUnconfirmed("bank_original_launch_clock_expired")
+-            elif not 0 < self.started <= now <= self.deadline:
++            elif not 0 < self.started <= now <= self.retained_deadline:
+                 raise BankUnconfirmed("bank_original_clock_expired")
+         except BaseException as exc:
+             self.clock_error = exc  # Same first exception and traceback, not text.
+@@ -465,6 +490,43 @@
+             raise
+         self.clock_phase = "RETURNED"
+         return now
++
++    def _retain_final_min(self, header: bytes, returncode: int) -> BankUnconfirmed | None:
++        """Bounded scalar DATA before body allocation/semantic decoding.
++
++        Any in-domain scalar may only RESTRICT independently sealed raw intake.
++        Schema/identity/full semantic acceptance still happens separately. A
++        bad/absent field is never interpreted as a successful wider D0. Both
++        candidate scalars are retained before fallible interpretation; mismatch
++        keeps the smaller restriction and denies semantic completion.
++        """
++        if self.min_wire_phase != "ENTERED" or len(header) != HEADER:
++            self.min_wire_phase = "FAILED"
++            self.min_wire_error = BankUnconfirmed("bank_final_min_header_missing")
++            raise self.min_wire_error
++        self.min_header_value = struct.unpack_from("<Q", header, FINAL_DEADLINE_WORD*8)[0]
++        if self.started <= self.min_header_value <= self.deadline:
++            self.retained_deadline = min(self.retained_deadline, self.min_header_value)
++            self.min_wire_phase = "RESTRICTED"
++        self.min_publication_value = struct.unpack_from("<Q", header, PUBLICATION_AT+31*8)[0]
++        if self.started <= self.min_publication_value <= self.deadline:
++            self.retained_deadline = min(self.retained_deadline, self.min_publication_value)
++            self.min_wire_phase = "RESTRICTED"
++        if self.min_wire_phase != "RESTRICTED":
++            self.min_wire_phase = "FAILED"
++            self.min_wire_error = BankUnconfirmed("bank_final_min_no_valid_restrictive_data")
++            raise self.min_wire_error
++        if returncode in (0, 70):
++            valid = (self.min_header_value == self.retained_deadline
++                     and self.min_publication_value == 0)
++        elif returncode == 79:
++            valid = (self.min_publication_value == self.retained_deadline
++                     and self.min_header_value in (0, self.retained_deadline))
++        else:
++            valid = False
++        if not valid:
++            self.min_wire_error = BankUnconfirmed("bank_final_min_transport_missing_or_inconsistent")
++        return self.min_wire_error
+ 
+     def _bind_record(self, header: bytes, failed: bool) -> NativeBindRecord:
+         raw = header[BIND_AT:BIND_AT+BIND_BYTES]
+@@ -583,10 +645,22 @@
+         self.raw_identity_before = before
+         if self.birth is None or before[:7] != self.birth[:7] or before[6] != self.layout.total:
+             raise BankUnconfirmed("bank_raw_intake_original_storage")
++        # Exactly the existing bounded initial read, not an earlier authority
++        # witness. From ENTERED onward no uncertainty may use a wider D0.
++        self.min_wire_phase = "ENTERED"
+         header = os.pread(self.fd, HEADER, 0)
+         self.received_header = header
+         if len(header) != HEADER:
+-            raise BankUnconfirmed("bank_complete_header_missing")
++            self.min_wire_phase = "FAILED"
++            self.min_wire_error = BankUnconfirmed("bank_complete_header_missing")
++            raise self.min_wire_error
++        min_error = None
++        if returncode != 78:
++            min_error = self._retain_final_min(header, returncode)
++            # Refuse an already expired restriction BEFORE bounded semantic
++            # preparation, not only before the full buffer allocation. The
++            # original native/error DATA remain in received_header if HELD.
++            self._clock()
+         if returncode in (78, 79):
+             # Identify a valid native FIRST before fallible body allocation.
+             # A semantic refusal is retained but does not discard our own
+@@ -600,6 +674,18 @@
+             except BankUnconfirmed as decode_error:
+                 self.deferred_decode_fault = decode_error
+                 self._remember_fault(decode_error)
++                if returncode == 78:
++                    # Only a fully verified pristine bind prefix can retain
++                    # D0 without a later Root min. Exit78 alone proves nothing.
++                    self.min_wire_phase = "FAILED"
++                    self.min_wire_error = decode_error
++            else:
++                if returncode == 78:
++                    self.min_wire_phase = "VERIFIED_PREBIND"
++        if min_error is not None:
++            if self.deferred_decode_fault is None:
++                self.deferred_decode_fault = min_error
++            self._remember_fault(min_error)
+         self._clock()  # No full allocation after an expired preparation phase.
+         # After actual child end, receiving memfd + mutable buffer use the
+         # original TWO-bank reservation. Pread/copy/digest plus later freezing
+@@ -670,7 +756,7 @@
+         copied, compared, header_copied = w[20:23]
+         v = self.layout
+         if not (
+-            w[:3] == (PUBLICATION_MAGIC, 1, PUBLICATION_BYTES)
++            w[:3] == (PUBLICATION_MAGIC, PUBLICATION_VERSION, PUBLICATION_BYTES)
+             and w[3:6] == (self.process_id, self.owner_pid, 1)
+             and op in (1, 2, 5, 8, 9, 10) and error == 0
+             and (rc != 0 if op in (8, 9) else rc == -1)
+@@ -678,11 +764,13 @@
+             and w[13] <= (2**64-1-w[14]) // 1_000_000_000
+             and w[15] == w[13]*1_000_000_000+w[14]
+             and w[16:18] == (self.started, self.deadline)
+-            and self.started <= w[15] <= self.deadline
++            and self.started <= w[15] <= self.retained_deadline
++            and w[31] == self.min_publication_value == self.retained_deadline
++            and self.started <= w[31] <= self.deadline
+             and (signed(w[18]) < 0 if op in (1, 2) else w[18] == 0)
+             and 0 <= compared <= copied <= v.total-HEADER
+             and header_copied in (0, HEADER) and w[23] == 0
+-            and w[24] in (0, 1) and w[29:32] == (1, 1, 0)
++            and w[24] in (0, 1) and w[29:31] == (1, 1)
+         ):
+             raise BankUnconfirmed("bank_publication_original_primitive_relation")
+         bind = self.native_bind
+@@ -732,7 +820,7 @@
+         if self.received_seals_after != FINAL_SEALS:
+             raise BankUnconfirmed("bank_publication_no_writer_unconfirmed")
+         if (len(header) != HEADER or header[:256] != self.input_header[:256]
+-                or header[65*8:BIND_AT] != self.input_header[65*8:BIND_AT]
++                or header[66*8:BIND_AT] != self.input_header[66*8:BIND_AT]
+                 or header[2048:2304] != self.input_header[2048:2304]):
+             raise BankUnconfirmed("bank_publication_original_input_binding_changed")
+         self._bind_record(header, False)
+@@ -801,10 +889,12 @@
+             raise BankUnconfirmed("bank_prebank_never_success")
+         if self.received_seals_after != FINAL_SEALS:
+             raise BankUnconfirmed("bank_final_no_writer_seal")
++        if self.deferred_decode_fault is not None:
++            raise self.deferred_decode_fault
+         w = struct.unpack_from("<128Q", header)
+         # Immutable input and unused bytes are never a status publication area.
+         if (header[:256] != self.input_header[:256]
+-                or header[65*8:BIND_AT] != self.input_header[65*8:BIND_AT]
++                or header[66*8:BIND_AT] != self.input_header[66*8:BIND_AT]
+                 or header[2048:2304] != self.input_header[2048:2304]
+                 or header[3840:] != self.input_header[3840:]):
+             raise BankUnconfirmed("bank_parent_binding_or_reserved_bytes_changed")
+@@ -830,7 +920,8 @@
+             strings.append((original, length, body))
+         if not (
+             w[32] == self.process_id and w[33] == 1 and w[36] == 0
+-            and self.started <= w[35] <= self.deadline
++            and w[65] == self.min_header_value == self.retained_deadline
++            and self.started <= w[35] <= self.retained_deadline
+             and w[41] == w[42] == w[43] == 1 and w[47] == w[48] == 0
+             and w[54] == self.layout.read_reserve <= w[49] <= READ_CAP
+             and reservation.output_bytes <= w[50] <= OUTPUT_CAP
+@@ -841,7 +932,7 @@
+             and w[57] - w[56] == self.layout.caller_at - self.layout.root_at
+             and w[60] == w[61] == 1
+             and w[62] == 1 and w[63] == self.layout.total-HEADER
+-            and w[35] <= w[64] <= self.deadline
++            and w[35] <= w[64] <= self.retained_deadline
+         ):
+             raise BankUnconfirmed("bank_full_actual_cold_data_or_original_resources")
+         if w[34] == 1:
+@@ -860,7 +951,7 @@
+ 
+         completion = BankCompletion(outcome, self.process_id, returncode,
+                                     self.body_bytes_written, self.raw_data_sha256,
+-                                    header, proof, self)
++                                    header, proof, self, self.retained_deadline)
+         self.completion = completion
+         return completion
+ 
+@@ -922,13 +1013,13 @@
+                 self.native_publication, self.native_bind, self.cleanup,
+                 historical_identity, True, now, self._reservation(),
+                 ((self.comparison_source_body, self.comparison_destination_body)
+-                 if self.native_publication.words[24] else None))
++                 if self.native_publication.words[24] else None), self.retained_deadline)
+             self.publication_failure_result = result
+             return result  # No old tuple edit and no BankCompletion/final_result.
+         result = BankFinalResult(outcome, self.process_id, returncode, header,
+                                  self.final_body, digest, self.native_bind,
+                                  self.cleanup, historical_identity, True, now,
+-                                 self._reservation())
++                                 self._reservation(), self.retained_deadline)
+         self.final_result = result  # Distinct publication, not an old-tuple edit.
+         return result
+ 
+@@ -957,7 +1048,7 @@
+             self.process_id, self.cleanup.leader_returncode,
+             self.received_header, self.final_body, self.raw_data_sha256,
+             self.fault, self.native_bind, self.cleanup, historical_identity,
+-            True, now, self._reservation())
++            True, now, self._reservation(), self.retained_deadline)
+         self.receive_failure_result = result
+         return result
+ 

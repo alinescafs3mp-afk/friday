@@ -1,0 +1,30 @@
+{
+  "schema": "friday.incremental-publisher.review-bindings.v1",
+  "bindings": [
+    {
+      "review_path": "files/var/tmp/friday-sol158-a303-publisher-work-seal-review/REVIEW.json",
+      "review_sha256": "6084aa1b8db2beca1dcfccf2f72c79fd25a8af47c41c5ae10733d552443b06d0",
+      "evaluated_manifest_sha256": "5fc3ecaaf7c137ee34f0be7ee2de65e28e50900ff6c5390f41fdd8a696ed16ac",
+      "scope": "Astra A303 exact native work-stop delta independently accepted by Sol158; not Sol155 own baseline or whole acceptance."
+    },
+    {
+      "review_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-A304-SOL159-PRELAUNCH-REVIEW-20261006.json",
+      "review_sha256": "0d4a1e54dd454024dcff57e51f32417c4b67fe5338db2f81ed5dd92079838cbb",
+      "evaluated_manifest_sha256": "ef68bdffb351ae56578b937f7db1c90277dc6df127ed79b42428f196dbd379c4",
+      "scope": "Sol159 actual prelaunch/post-start/all-outcome delta nonauthor Astra accepted, not whole acceptance."
+    },
+    {
+      "review_path": "files/home/jericho/.jericho/grok-takeover/ASTRA-E4-A305-SOL160-MIN-WIRE-REVIEW-20261006.json",
+      "review_sha256": "bf597f8e72381294c72bd73d381c0234743e75964739836caeb34861b87f3713",
+      "evaluated_manifest_sha256": "6e2e06418fd01dfa452bddcc189a01c4b6ea79e185ca914035eea699e3c3917e",
+      "scope": "Sol160 numeric producer/receiver scoped credits; initial RP31 zero check missing. A305 fresh correction, no original evidence rewrite."
+    },
+    {
+      "review_path": "files/var/tmp/friday-sol161-a305-publisher-initial-min-review/REVIEW.json",
+      "review_sha256": "3e22f1ca31b4fc228695405dfee965f53c37949aa78e1fa578ff2043d97fe7b6",
+      "evaluated_manifest_sha256": "7b73d830d31e69ab52e997a4f9d33baa33d5e15ba74e32c6d779dc0f3834a175",
+      "scope": "Astra A305 initial RP31 zero guard independently scoped accepted by Sol161; exact actual producer/receiver/error contexts rejoined. NOT own Sol160 whole-baseline acceptance or release GO."
+    }
+  ],
+  "reference_resolution": "REFERENCES.json exact copied bytes/current byte-identical prior context, omissions explicit. Equal single file alone does not convey context-wide acceptance."
+}

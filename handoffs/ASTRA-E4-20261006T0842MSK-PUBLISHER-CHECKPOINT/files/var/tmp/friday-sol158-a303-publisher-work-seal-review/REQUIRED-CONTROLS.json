@@ -1,0 +1,30 @@
+{
+  "schema":"friday.sol158.required-ordinary-cases.v1",
+  "required":true,"waiver":false,"status":"REQUIRED_NOT_RUN_SOURCE_INERT",
+  "inherited":"All original69/mandatory20/full140/v2/inherited obligations retained; unsafe operational controls opaque/hash-only required/no waiver. No Source test/parser/runtime here.",
+  "author18":{"path":"/var/tmp/friday-astra-a303-publisher-work-seal.QvP70b/REQUIRED-CHECKS.json","sha256":"d0f0f8e71eb46b367b7f7c0e2c883e82103e96353ca1bb47f71224a469cfdb60","all_required":true},
+  "sol157_20":{"path":"/var/tmp/friday-sol157-a303-publisher-applicable-deadline-decision/REQUIRED-CONTROLS.json","sha256":"9196762318d3373967d68fded7c454053f1812c5e0595b932208f312d40bce4f","all_required":true},
+  "review_cases":[
+    ["R01","healthy original work and separate completion; original samples/caps unchanged"],
+    ["R02","CONFIG/RESERVE/COLD_ENTRY T==W remains allowed; admission T==W denied kind6"],
+    ["R03","S<=T<=D with T>W records original first kind6, denies actual work"],
+    ["R04","second work sample/changed requested limit cannot replace STOPPED record or retry-to-valid"],
+    ["R05","T>D is FAILED before kind6; subsequent completion/getter/publication block"],
+    ["R06","rc error, entered/nonreturn, raw invalid/overflow/zero/beforeS: original uncertainty terminal"],
+    ["R07","unknown phase or malformed STOP raw/observed/site/lower/600 difference blocks"],
+    ["R08","narrow retainedD before first work refusal; no largerD0 fallback"],
+    ["R09","invalid full<S or caller limit>full refuses before primitive; short/no-positive-work has no new600 grace"],
+    ["R10","initial futureI>T after returned ADMISSION/W uses kind7 plus original admission/error; no admission"],
+    ["R11","actual recheck futureI>T after returned GENERIC/D kind7; later now_ns cannot wait into validity"],
+    ["R12","recheck sample0/failure/full-expired never converted to kind7 or success"],
+    ["R13","separate completion/utility/final record failures propagate to every later family/getter/publication"],
+    ["R14","all normal/early/error converge once actual coldcomplete+FinalReceive; no failure->success"],
+    ["R15","STOP without original read/tail/owner/lastconsumer conditions is not blanket completion"],
+    ["R16","full raw pool snapshot/whole equality/full final reads retain original STOP/error bodies"],
+    ["R17","getter/narrow full latch/Commit and every native publication use retainedD; exactfull endpoint inclusive but no span proof"],
+    ["R18","STOP cannot masquerade NONE/PRECLOCK; true startup/late first sample residual remains"],
+    ["R19","parent both failure/raw/close/freeze/original exception unchanged; outside qualified tighterMin still required"],
+    ["R20","current image/native ABI/full cost/actual earlier authority independently qualified; no oldcompiled acceptance transfer"]
+  ],
+  "executed":false,"SourceReady":false,"Root_admission":false,"GO":false
+}

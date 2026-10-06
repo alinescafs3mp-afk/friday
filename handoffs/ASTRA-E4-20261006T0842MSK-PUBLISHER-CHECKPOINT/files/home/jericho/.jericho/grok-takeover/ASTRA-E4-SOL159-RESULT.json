@@ -1,0 +1,24 @@
+{
+  "schema": "friday.sol159.result.v1",
+  "event": "SOL-SOL159-R1",
+  "assignment": "ASTRA-E4-A304-PUBLISHER-ACTUAL-PRELAUNCH-CLOCK-FAILURE-CONNECTED-SOL159",
+  "generation": 1,
+  "state": "AUTHOR_CONNECTED_INERT_DRAFT_REQUIRES_ASTRA_INDEPENDENT_REVIEW",
+  "manifest": {
+    "path": "/var/tmp/friday-sol159-a304-publisher-actual-prelaunch-clock/manifest.json",
+    "bytes": 79722,
+    "sha256": "ef68bdffb351ae56578b937f7db1c90277dc6df127ed79b42428f196dbd379c4"
+  },
+  "delta": "ONE actual parent caller; current61 changed1/same60, candidate88 changed1/same87, native10 bytes exact A303. Actual guarded original clock after scope entry BEFORE launch intent/start; no stale wait allowance: original post-start SAME deadline retained.",
+  "failures": "Captured first prelaunch clock error retained before scope exit; exact first re-raised if exit errors/suppresses, actual secondary/proof kept. Never-attempted stays false; partial start stays attempted. Original setup/native/semantic/close/freeze/new immutable results preserved; no failed clock/launch/cleanup retry or fake retirement.",
+  "evidence": "22 host literal/equality observations NOT Source tests; independent author review required. Full SHA/id9 input103 and current88 stable at seal. No Source parser/compiler/import/AST/eval/exec/tests/helpers/live/network/install.",
+  "open": "Earlier applicable tighterMin identity/generation/semantic producer->caller->native->receiver witness OPEN, Astra separately reconciles. Complete ABI/image/admission/body/whole implicit cost and all original69/mandatory20/full140/v2/inherited+A303/Sol157/Sol158+prelaunch23 controls required/no waiver/NOT_RUN; no own acceptance.",
+  "timing": {
+    "first_intake_msk": "2026-10-06T08:17:27+03:00",
+    "sealed_msk": "2026-10-06T08:23:30.608728+03:00",
+    "elapsed_seconds": 363.609
+  },
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

@@ -1,0 +1,330 @@
+{
+  "schema": "friday.sol161.initial-min.scoped-static-review-manifest.v1",
+  "package": "SOL161_A305_INITIAL_RP31_ZERO_GUARD_REVIEW",
+  "state": "SCOPED_STATIC_ACCEPT_EXACT_A305_INITIAL_RP31_ZERO_GUARD_CONNECTED_CONTEXT_ONLY",
+  "root": "/var/tmp/friday-sol161-a305-publisher-initial-min-review",
+  "assignment": "ASTRA-E4-A305-PUBLISHER-INITIAL-MIN-CELL-CONNECTED-REVIEW-SOL161",
+  "generation": 1,
+  "snapshot": {
+    "path": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/manifest.json",
+    "bytes": 71440,
+    "sha256": "7b73d830d31e69ab52e997a4f9d33baa33d5e15ba74e32c6d779dc0f3834a175",
+    "identity9_decimal_strings": [
+      "2050",
+      "3558912",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "71440",
+      "1791265986348359131",
+      "1791265986367360192"
+    ],
+    "stable9": true
+  },
+  "current_scope": "Exact Astra A305 ONE six-line bank.c guard; Source61/current88 authenticated, unchanged60/87; own SOL160 whole baseline NOT independently accepted",
+  "files": [
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/BOUNDARIES.json",
+      "bytes": 1447,
+      "sha256": "ed216a02aee3d12d739a8f2e669e46ea0f13dbafb9b608c07c94d9a6289f9ba8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849818",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1447",
+        "1791266412151134741",
+        "1791266412151134741"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/EXACT-SOURCE-DELTA.patch",
+      "bytes": 938,
+      "sha256": "60b922adc8b7dab80f6fab5031e54c82f17a9ec2ca3fba837792800b473c78c3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849815",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "938",
+        "1791266323049159542",
+        "1791266323049159542"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/FINAL-INPUT-RECHECK-SEAL2.json",
+      "bytes": 98935,
+      "sha256": "943b3e48f3076804106c11c2293b8a912fa41efcfb001e188639296320fe99c2",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849823",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "98935",
+        "1791266412198137365",
+        "1791266412199137421"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/FINAL-INPUT-RECHECK.json",
+      "bytes": 98935,
+      "sha256": "943b3e48f3076804106c11c2293b8a912fa41efcfb001e188639296320fe99c2",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849820",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "98935",
+        "1791266371180847079",
+        "1791266371181847135"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/INPUT-PINS.json",
+      "bytes": 98836,
+      "sha256": "270e1a4f308fedf8a3198be476ac5df22e0f6909391ea5b9b4b47a69ed8d90d7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849810",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "98836",
+        "1791266162602200640",
+        "1791266162603200696"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/PROVISIONAL-MANIFEST-SIZE-REFUSAL.json",
+      "bytes": 7941,
+      "sha256": "d22d11b8954643e18d4eb0b97189f386fcf944853fd291fe92481f0818b85e3f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849822",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7941",
+        "1791266371191847693",
+        "1791266412167135635"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/RAW-RELATION-EVIDENCE.json",
+      "bytes": 6401,
+      "sha256": "8566e5a2dae5416671856c885797a7a7e7c30bc056d575c415f4ea843e0f2691",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849813",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6401",
+        "1791266323035158761",
+        "1791266323036158816"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/RAW-SPANS.json",
+      "bytes": 56001,
+      "sha256": "2fc0715a5ae09a10b74ffd7bd5db96d97ca7049ff5fcb28b27a0c8d862d51e6d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849814",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "56001",
+        "1791266323042159151",
+        "1791266323042159151"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/REQUIRED-CONTROLS.json",
+      "bytes": 3768,
+      "sha256": "604dad1f135061d961a8c62fbfb22d74681c8ad4ee207899d038c73673cacb91",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849817",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3768",
+        "1791266323085161552",
+        "1791266323101162446"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/REVIEW.json",
+      "bytes": 12852,
+      "sha256": "3e22f1ca31b4fc228695405dfee965f53c37949aa78e1fa578ff2043d97fe7b6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849816",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12852",
+        "1791266323084161497",
+        "1791266323101162446"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/SOURCE-JOIN-VERIFICATION.json",
+      "bytes": 2213,
+      "sha256": "9b493921b56abe57e5a484ae5aa58c448bbb71ded7a22a097a66d0e5327d2bf0",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849811",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2213",
+        "1791266162607200919",
+        "1791266162608200975"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/TIMING-RESOURCE-SEAL2.json",
+      "bytes": 1493,
+      "sha256": "c28485aea758181d60e414b18f4615c8b88318eae1ff59857c480a41515abd35",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849824",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1493",
+        "1791266412203137645",
+        "1791266412204137701"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/TIMING-RESOURCE.json",
+      "bytes": 1246,
+      "sha256": "bdc669d396272ca82059378c532f09291df3d923acea3b33fcaa3e2001a94700",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849821",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1246",
+        "1791266371185847358",
+        "1791266371186847414"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/host_evidence.py",
+      "bytes": 11817,
+      "sha256": "f925cd2c8593fcb178e3579fb77b2d30f8910ce0bf822f0fb5b55400d2536f10",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849812",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11817",
+        "1791266322996156583",
+        "1791266322996156583"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/host_seal.py",
+      "bytes": 8090,
+      "sha256": "449cfdedab4f6b393388e512d42579444612c78b743a11c1069b6421accd6dab",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849819",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8090",
+        "1791266412151134741",
+        "1791266412151134741"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/host_verify.py",
+      "bytes": 6822,
+      "sha256": "8fdbc992ede1926761445186257e01721aa5ef463f20384ef1118db0393050d8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849809",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6822",
+        "1791266162549648334",
+        "1791266162549648334"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-sol161-a305-publisher-initial-min-review/received.json",
+      "bytes": 814,
+      "sha256": "c79a8353630204a0bd7ab3643e008f6fb343451f623c644e14f9b784e35d3665",
+      "identity9_decimal_strings": [
+        "2050",
+        "3849808",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "814",
+        "1791266084332830299",
+        "1791266084352831416"
+      ],
+      "stable9": true
+    }
+  ],
+  "physical_count_with_manifest": 18,
+  "physical_bytes_without_manifest": 418549,
+  "input_pin_count": 211,
+  "introduced_code_contradictions": 0,
+  "A305_F1": "REQUIRED_SOURCE_GUARD_PRESENT_SCOPED_STATIC_ONLY; runtime controls NOT_RUN",
+  "M15": "Actual caller containment, helper phase may remain RESTRICTED; no universal ENTERED/FAILED claim",
+  "new_required_controls": 14,
+  "all_original_and_M01_M37_controls": "REQUIRED_NOT_RUN_NO_WAIVER; unsafe bodies hash-only",
+  "authoritative_seal": "FINAL-INPUT-RECHECK-SEAL2.json and TIMING-RESOURCE-SEAL2.json; PROVISIONAL-MANIFEST-SIZE-REFUSAL.json and first timing/recheck are historical failed RESULT size check, NOT current pins/authority. No prior enqueue.",
+  "Source_parser_compiler_execution_tests": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

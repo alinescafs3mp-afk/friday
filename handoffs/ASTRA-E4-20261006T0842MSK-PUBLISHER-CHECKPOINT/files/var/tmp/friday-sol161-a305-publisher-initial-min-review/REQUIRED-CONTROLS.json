@@ -1,0 +1,27 @@
+{
+  "schema": "friday.sol161.initial-min-guard.required-controls.v1",
+  "required": true,
+  "waiver": false,
+  "status": "REQUIRED_NOT_RUN_SOURCE_INERT",
+  "inherited_exact": "INPUT-PINS.json pins all A305 REQUIRED-CHECKS, SOL160 M01-M37, SOL160 INHERITED-CONTROL-PINS and four referenced control files. All original69/mandatory20/full140/v2 and inherited definitions retained REQUIRED/no waiver. Unsafe operational bodies opaque/hash-only; excluded stopped107#2/Scanner075/SOL139 never retried/salvaged/rerouted.",
+  "additional_cases": [
+    ["I01", "Actual healthy full zero B65/RP31 v6 original caller -> accepted bind -> normal0, genuineearly70 and eligible79 paths; unchanged original resources/S/D0/positive workload required."],
+    ["I02", "Each of the selected eight initial RP31 bytes individually nonzero (representative1/128/255 and combined full replay) -> actual RB_OP_HEADER refusal before RB_HEADER_VALID, ColdPerform and Commit; every initial nonzero byte, not just numerical low byte."],
+    ["I03", "Exact publication3840/word31/sizeofuint64 geometry inside actual admitted4096 mapping; little-endian selected8 and fixedrecord256 qualifications; wrong ABI/image/width must not get inherited credit."],
+    ["I04", "Initial nonzero RP31 rejected header preserves original reached local RB_OP_HEADER first/reached close/unverified-unmap facts without false trustedbind transport or full custody; actual parent missing/invalid78 remains HELD."],
+    ["I05", "Healthy allzero tail followed by each existing later verifiedbind failure keeps ordinary pristine78 prefix/schema/onceclose/clock/seals/fullraw/finiteendpoint conditions; exit78 alone never sufficient."],
+    ["I06", "Existing initial nonzero B65, other completion words, bind bytes, PID/FD/image/layout/generation/reservation checks still refuse; combinedinvalid fields cannot be normalized by newzero guard."],
+    ["I07", "Actual late normal0/70 B65 nonzero permitted after initial zero; fullheaderLAST leaves RP31zero and parent actual min clocks/timestamps/read/close/freeze/result correspond; newguard never re-run on final output."],
+    ["I08", "Eligible79 before normalpublication: destinationB65zero/actualv2RP31nonzero same latch; afterearlyB65/header/copy paths: equality; actual originalfirst/body/compare/error/progress retained and operation remains failed."],
+    ["I09", "Unavailable/expired native clock/zero getter/latch mismatch never renewed into failure copy or parentD0fallback; reachedownership HELD, no Source/decode/close/relaunch retry."],
+    ["I10", "M15 actual seconddecode raises after validfirst: phase may beRESTRICTED, firstscalar/header/exception retained, raw_bodyfalse and receive_attemptedtrue; actual run caller no widerintake/finalization/close. Required containment, NOT mandatory universal phaseFAILED."],
+    ["I11", "Other min shortread/allmissing/invalid/conflicting/domain/expired/semantic cases M09-M29 preserved under original conjuncts; tighterDATA never source/image/admission/earlierauthority grant."],
+    ["I12", "All actual frozen normal/failure/prebind/raw records keep separate retainedD and immutableS/D0 originalreservation; protected realend policy unchanged/hash-only, no new finalcustody theorem."],
+    ["I13", "Added pointer/index/eightbyte work/all implicit stack/compiler/read/CPU/time costs and all former work fit unchanged original caps; UNKNOWN_NOT_ZERO until actual admitted measurements/analysis."],
+    ["I14", "Fresh final61/88 manifest/id9/fullSHA and compiledimage/source/header/parent schema rebind; independent acceptance of final artifact/fullmandatorygate; old compiled results not copied to changed Source."]
+  ],
+  "Source_execution_tests": 0,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

@@ -1,0 +1,53 @@
+{
+  "schema": "friday.astra.a305.publisher.initial-min-connected-implementation.v1",
+  "base": {
+    "path": "/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/manifest.json",
+    "bytes": 81450,
+    "sha256": "6e2e06418fd01dfa452bddcc189a01c4b6ea79e185ca914035eea699e3c3917e",
+    "identity9_decimal_strings": [
+      "2050",
+      "7086806",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "81450",
+      "1791265155979619319",
+      "1791265155979619319"
+    ],
+    "stable9": true
+  },
+  "author": "Astra",
+  "state": "INERT_AUTHOR_DELTA_PENDING_SOL161_NONAUTHOR_REVIEW",
+  "changed": [
+    "native/publisher_root_bank.c"
+  ],
+  "source_changed": 1,
+  "source_same": 60,
+  "candidate_changed": 1,
+  "candidate_same": 87,
+  "fix": "Actual bank_bind verifies all bytes of RP_FINAL_DEADLINE output-only cell are zero before RB_OP_HEADER validation event/accepted bind. This tail cell was not covered by word[128] or bind-region zero loops. B65 check unchanged. No new issuer/grant/pool/cap or runtime execution.",
+  "integration": "Sol160 complete producer/wire/actual parent retained min source carried unchanged other than this native initial guard. Parent/prelaunch/all outcomes, native getter/Commit/bank_clock/publication and fixed v6/v2 sizes unchanged.",
+  "review_of_base": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A305-SOL160-MIN-WIRE-REVIEW-20261006.json",
+    "bytes": 4764,
+    "sha256": "bf597f8e72381294c72bd73d381c0234743e75964739836caeb34861b87f3713",
+    "identity9_decimal_strings": [
+      "2050",
+      "8536843",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "4764",
+      "1791265848386633382",
+      "1791265848403634340"
+    ],
+    "stable9": true
+  },
+  "resources": "One sizeof(uint64_t) byte loop at prebind, one local pointer and bounded pointer/index/branch operations; no new allocation/read syscall/clock or output. Existing unchanged uint64_t/fixed record declarations constrain width; current compiled ABI and added implicit costs UNKNOWN_NOT_ZERO.",
+  "proof_scope": "Scoped Sol160 credits remain at exact contexts; Sol161 reviews Astra delta only and rejoined actual callers, not self-acceptance of own Sol160 baseline.",
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

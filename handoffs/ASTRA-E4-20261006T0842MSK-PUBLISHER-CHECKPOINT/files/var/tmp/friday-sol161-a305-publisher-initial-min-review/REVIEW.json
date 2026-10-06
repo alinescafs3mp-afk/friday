@@ -1,0 +1,101 @@
+{
+  "schema": "friday.sol161.a305.initial-min.connected-nonauthor-review.v1",
+  "assignment": "ASTRA-E4-A305-PUBLISHER-INITIAL-MIN-CELL-CONNECTED-REVIEW-SOL161",
+  "generation": 1,
+  "reviewer": "Sol, nonauthor of Astra A305 six-line delta only",
+  "decision": "SCOPED_STATIC_ACCEPT_EXACT_A305_INITIAL_RP31_ZERO_GUARD_CONNECTED_CONTEXT_ONLY",
+  "snapshot_manifest": "/var/tmp/friday-astra-a305-min-wire.k8srseMV/manifest.json",
+  "snapshot_manifest_sha256": "7b73d830d31e69ab52e997a4f9d33baa33d5e15ba74e32c6d779dc0f3834a175",
+  "base_manifest": "/var/tmp/friday-sol160-a304-publisher-retained-min-wire-parent/manifest.json",
+  "base_manifest_sha256": "6e2e06418fd01dfa452bddcc189a01c4b6ea79e185ca914035eea699e3c3917e",
+  "verification": {
+    "full_current_manifest_physical": 93,
+    "full_base_manifest_physical": 107,
+    "input_pin_count": 211,
+    "full_SHA_and_identity9_stable": true,
+    "current_candidate88": 88,
+    "current_Source61": 61,
+    "changed": ["native/publisher_root_bank.c"],
+    "source_same": 60,
+    "candidate_same": 87,
+    "exact_delta": "EXACT-SOURCE-DELTA.patch; 938 bytes, six inserted lines only. Removing only that exact raw block restores entire SOL160 bank.c.",
+    "protected_quality_gate_process": "FULL_HASH_ONLY_UNCHANGED; no policy inspection, qualification or modification",
+    "host_raw_observations": 28,
+    "safe_raw_spans": 14,
+    "Source_tests": 0,
+    "method": "Trusted host metadata/full streaming SHA/stable9 plus safe raw literal bytes/equality/spans only. Source never parsed, compiled, imported, executed or tested. Host booleans are NOT runtime controls."
+  },
+  "A305_MIN_WIRE_F1": {
+    "status": "EXACT_REQUIRED_SOURCE_GUARD_PRESENT_SCOPED_STATIC_ONLY; runtime negatives REQUIRED_NOT_RUN",
+    "original_class": "SOURCE_CONTRACT_MISMATCH_NOT_OBSERVED_RUNTIME_BYPASS",
+    "geometry": "v6 B65 is byte520, inside prior word128 zero loop. v2 RP31 is word31 of the existing word32 publication record; PUBLICATION_AT3840+31*sizeof(uint64_t), conditionally [4088,4096) for selected 8-byte uint64_t. Prior word128 reaches1024 and original bind loop reaches2048, so neither covered RP31. All constants/enums/header4096/publication256 unchanged.",
+    "actual_guard": "Actual bank_bind after successful receiving mmap and prior original checks, before RB_OP_HEADER and RB_HEADER_VALID=1: existing fixed tail pointer, sizeof(uint64_t) byte loop, every nonzero unsigned byte makes valid=0. All declared bytes examined; no early success, no input normalization, no value read as a grant, no endian-dependent numeric zero assumption.",
+    "predicate": "The new conjunct accepts exactly an all-zero declared RP_FINAL_DEADLINE cell. A nonzero byte cannot become an accepted RB_OP_HEADER event or verified header. This is static path reasoning conditional on the actual admitted ABI/mapping; no hostile kernel or same-UID resistance claim.",
+    "accepted_bind_order": "Rejected header enters original bind_failure(fd,h,NULL,v[6]); RB_HEADER_VALID remains0 and BankCommand returns78 before ColdPerform/Commit. Healthy zero leaves existing predicate unchanged and reaches original madvise/seals/private/close/attach/clock path.",
+    "initial_bad_failure_custody": "Original close/reached bind-event/unverified-map unmap behavior byte-exact. When header is not verified, bind_failure does NOT copy a trusted bind record into it. Those local facts are not complete surviving transport. Parent rejects missing verified record and/or changed pristine tail. New rejection is NOT an accepted typed78, Root end theorem, complete original-error handoff or deletion approval."
+  },
+  "connected_context": [
+    {
+      "id": "C01_INITIAL_CREATION",
+      "fact": "Actual parent reserve original S/D0 then create fresh memfd/ftruncate, words=[0]*128 and bytearray4096; only input words0..24 and image2048..2111 assigned before full4096 pwrite. Thus both output-only B65 and tailRP31 are initial zero on this exact positive caller. Original header/seals/layout/PID/FD/generation/image/debit predicates unchanged. Parent/native actual layout/admission remains separately qualified, not guessed from declarations."
+    },
+    {
+      "id": "C02_BIND_FAILURE",
+      "fact": "Zero RP31 permits all original later verified-bind failure prefixes. Original bind record occupies640..2047 and image2048..2111, disjoint from4088..4095. Valid later78 still requires full pristine input outside bind region, exact full record/original once-close/clock/seals/no-writer/end relation before VERIFIED_PREBIND and D0. New nonzero prebind failure has NO verified receiving-header transport; exit78 alone remains insufficient."
+    },
+    {
+      "id": "C03_ACTUAL_POST_COLD_SCALAR",
+      "fact": "Entire postbind BankCommand is base byte-equal: actual ColdPerform -> one retained getter latch -> private working B65 and original local publication RP31 -> Commit's same-getter equality -> bank_clock same domain/latch/private/local scalar checks. New initial guard never tests this later legitimate nonzero output as an input, never modifies original B_DEADLINE/reservation or RP16/S/RP17/D0. Only safe numeric Commit excerpt was interpreted; stock/type/callback/provider bodies remain opaque/unqualified."
+    },
+    {
+      "id": "C04_NORMAL_0_70",
+      "fact": "Actual publication establishes eligible clock/state, writes destination B65 BEFORE body chunks, checks same retained bound before each existing chunk and full header LAST. Private RP31 initiallyzero is not changed by local publication_record assignment; normal full header therefore retains unused RP tailzero. Actual normal parent requires same B65 retained bound, unusedRP31zero, pristine fulltail, v6/originalbind/body/outcome/resource/completion/finalcopy predicates. Ordinary0 vs genuineearly70 remains separate; static rejoin is not independent whole Sol160 acceptance."
+    },
+    {
+      "id": "C05_VALID_79",
+      "fact": "Actual eligible failure transport copies original fixed local v2 record3840..4095 including the SAME assigned RP31; B65 can still be0 before normal early scalar publication, or match afterward. Original compare-body capture/both operands/first-secondary/partial-progress semantics and no retry remain unchanged. Parent first restricts from actual header/RP cells, then requires v2/PID/parent/immutableS/D0/time/RP31/progress/actualbind/flags/operand predicates; failure stays failure, never complete uncopied native/pointee/alias/history custody. New guard applies only at initial bind, not this later output."
+    },
+    {
+      "id": "C06_CLOCK_LOSS_OR_EXPIRED",
+      "fact": "Entire bank_failed_publication is byte-equal: retained unavailable/expired commit/publication clock does not get a blind second clock or renewed failure-copy allowance. No valid final wire is manufactured. Parent missing/unavailable bound or clock uncertainty keeps actual reached storage and ownership HELD; no D0 final success/fallback or second intake/close. No existing unsafe operational policy was inspected or qualified."
+    },
+    {
+      "id": "C07_PARENT_RESTRICTION_AND_ENDS",
+      "fact": "Entire parent is byte-equal. Actual process/end/no-writer/identity prepare prefix precedes the one bounded header read. Header retained before scalar interpretation; each usable scalar min-shrinks separate retained_deadline before full body allocation; normal/79 clock is checked immediately afterward and before semantic/full intake. Later actual reads/recheck/onceclose/freeze/final timestamp use restrictive shared _clock; four NEW frozen result records expose retained_deadline_ns separately from immutable original reservation. Valid78 is distinct verified pristine prefix with D0. No full earlier authority, atomic next-effect-span fit or final native custody accepted."
+    },
+    {
+      "id": "C08_ACTUAL_CALLER",
+      "fact": "Entire actual run_preowned_root and main remain unchanged. The SAME Root _Exit feeds existing actual parent proof/receive/normal and failure finalization. Original prelaunch/post-start wait still uses D0 before late child scalar exists. Real guarded close is attempted once only after full retained raw plus actual proof; failed/uncertain read/clock/close/freezing retains reached facts with no fabricated final result or retry. Protected OwnedCommandScope implementation is only hash-equal, not a newly qualified containment policy."
+    }
+  ],
+  "M15_wording_reconciliation": {
+    "lead_source": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A305-SOL160-MIN-WIRE-REVIEW-20261006.json",
+    "lead_sha256": "bf597f8e72381294c72bd73d381c0234743e75964739836caeb34861b87f3713",
+    "exact_fact": "When the first bounded B65 scalar is retained and the second bounded RP31 decoder raises, min_wire_phase can remain RESTRICTED. It is NOT necessarily ENTERED/FAILED. No universal helper-phase invariant is asserted or added as a requirement.",
+    "actual_containment": "Exception returns through actual receive/run caller before raw_body_retained=True. receive_attempted is alreadyTrue. Launch was already attempted, no setup endpoint; generic failed-receive finalization is available only when raw_body_retained and notfinish_attempted, so it is not called. Normal/received/native finalization and _close_retained_raw also require complete retained raw. Firstscalar/rawheader/error/descriptor ownership remain reached DATA with no actual wider full read/close/final result/retry. A helper name or phase alone is not the custody theorem.",
+    "controls_interpretation": "Original M15 keeps its required actual containment/no wider continuation/first-error preservation; inherited helper-phase shorthand in controls/WIRE-CONTRACT is provenance-only and qualified by this exact A305 wording. No new requirement forcing phaseFAILED, no Source rewrite and no waiver."
+  },
+  "Astra_Sol160_credit_provenance": {
+    "retained": "Astra nonauthor scoped static numeric producer/wire/actual receiver credits as explicitly listed in pinned A305 review; this review rejoins their unchanged safe contexts only to assess the new A305 conjunct.",
+    "not_self_accepted": "Sol authored SOL160. Full current61/baseline custody/compiler/image/ABI/runtime/provider/whole execution/gate are NOT independently accepted by Sol161. Existing base credits never transfer runtime execution or acceptance to new bytes.",
+    "copied_metadata": "All copied image/proof/old version/checkpoint metadata PROVENANCE_ONLY; exact A305 manifest/CURRENT-SOURCE-JOIN and observed fixed declaration/actual consumer bytes govern current static scope."
+  },
+  "introduced_code_contradictions": [],
+  "resource_delta": {
+    "fixed_storage": "No changed header/TLS struct/bank/full body allocation/table/result/output/caps/reservation/read formula. Original4096/256 storage and 2total+scratch / 7total+4scratch unchanged.",
+    "additional_work": "One automatic local unsigned-byte pointer, bounded sizeof(uint64_t) byte inspections (selected8), index/pointer/arithmetic/conditional operations at actual bind. Existing RB_OP_HEADER row reused, no extra row, Source clock/read syscall/failure retry/transport/output allocation.",
+    "qualification": "Added implicit stack/compiler/loader/CPU/time/page reads and existing whole-body/reference costs UNKNOWN_NOT_ZERO within ORIGINAL budget. Declared source bounds do not prove actual compiled ABI/image mapping or aggregate fit; no largergrant/cap/role introduced."
+  },
+  "remaining_required": [
+    "All original69/mandatory20/full140/v2/inherited plus A30318/Sol15720/Sol15820/Sol15923/Sol160M01-M37 and A305cases remain REQUIRED/no waiver/NOT_RUN. Exact controls and references pinned; unsafe bodies opaque/hash-only; stopped scopes not reopened.",
+    "Exact selected native image/compiler/header/enum/byteorder/uint64_t-width/mapping/ABI and actual positive/negative bind checks after lawful admission; current source changes cannot inherit old image execution.",
+    "Earlier exact applicable-min authority/identity/generation/semantic witness before original acquisition/prelaunch and full next-effect-span remains OPEN. Late restrictive scalar is DATA-only, never a grant or retrospective authorization. Initial D0 wait/header/no-writer prefix is not certified against an unknown earlier E.",
+    "Whole original native/error/value/body/alias/history/last-writer transfer and both finite final owners OPEN. Full received destination on79/semanticfailure is not complete uncopied historical working/pointee custody.",
+    "Actual whole positive workload/full implicit read/RAM/CPU/output/time accounting and atomic effect-span fit under unchanged original limits UNKNOWN_NOT_ZERO, independent final full mandatory gate required."
+  ],
+  "Source_parser_compiler_execution_tests": 0,
+  "own_baseline_independent_acceptance": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}

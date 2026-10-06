@@ -1,0 +1,42 @@
+{
+  "schema": "friday.sol159.actual-prelaunch-connected-required-controls.v1",
+  "required": true,
+  "waiver": false,
+  "status": "REQUIRED_NOT_RUN_SOURCE_INERT",
+  "inherited": "All original69/mandatory20/full140/v2/inherited controls retained. Unsafe operational bodies are opaque/hash-only, required/no waiver; no stopped107#2/Scanner075/SOL139 partials or equivalent stopped scope replay.",
+  "inherited_clock_refs": [
+    {"path":"/var/tmp/friday-astra-a303-publisher-work-seal.QvP70b/REQUIRED-CHECKS.json","sha256":"d0f0f8e71eb46b367b7f7c0e2c883e82103e96353ca1bb47f71224a469cfdb60","cases":18},
+    {"path":"/var/tmp/friday-sol157-a303-publisher-applicable-deadline-decision/REQUIRED-CONTROLS.json","sha256":"9196762318d3373967d68fded7c454053f1812c5e0595b932208f312d40bce4f","cases":20},
+    {"path":"/var/tmp/friday-sol158-a303-publisher-work-seal-review/REQUIRED-CONTROLS.json","cases":20,"exact_pin":"INPUT-PINS.json"}
+  ],
+  "cases": [
+    ["P01","Healthy original reservation/scope entry/prelaunch sample/start/post-start positive remaining; exactly one launch/wait, ordinary full body/normal immutable final result preserved."],
+    ["P02","Scope entry uses real elapsed original time: valid before entry but expired on returned prelaunch sample forbids intent/start, no renewed D0."],
+    ["P03","Prelaunch T==D0 strict denial, T>D0 denial; launch_attempted false, no start/wait/receive/final success."],
+    ["P04","Prelaunch invalid int domain: bool/nonint/zero/negative/uint64 overflow/beforeS all terminal original error; original returned object retained."],
+    ["P05","Prelaunch primitive exception: SAME exception object/traceback latched before context exit; no subsequent primitive or lost bank descriptor/data."],
+    ["P06","ENTERED/nonreturned or prior FAILED check refuses before primitive/start; no repeated clock-to-good/reservation/reset/new interval."],
+    ["P07","Prelaunch failure and normal context exit: no process end or close inferred; one original setup endpoint invocation stops at FAILED guard with resources retained and no frozen setup result."],
+    ["P08","Prelaunch failure and a different exit/cleanup error: clock first retained/re-raised, original exact exit secondary/cause retained, cleanup proof actual or None; no second cleanup."],
+    ["P09","Context exit suppresses prelaunch error: explicit marker restores same first before receive or final success; no unused returncode/PID fabricated."],
+    ["P10","Native/publication-shaped exception in prelaunch primitive or exit cannot misroute into received-native finish; never-attempted semantics retained."],
+    ["P11","Existing fault-list growth failure: original slot/clock/local first kept, exact collection error retained, no append retry or new lossy text wrapper."],
+    ["P12","Healthy precheck then partly attempted/failing scope.start/Popen or argument conversion: launch intent stays true even without PID, no never-attempted setup result/relaunch."],
+    ["P13","Start elapsed consumes interval: wait=(sameD0-actual post-startT)/1e9, never stale precheck allowance/new duration."],
+    ["P14","Post-start equality/pastD0 or unavailable/invalid/nonreturned clock: attempted status retained, no zero/negative wait, original context cleanup policy unchanged/no retry."],
+    ["P15","Actual successful normal and early native70 outcome retain full raw/history/no-writer/once-close/freeze and NEW immutable result, not old exposed tuple mutation."],
+    ["P16","Actual native78 bind failure and native79 partial publication failure use original one finish_received, first/secondary body/error retained, failed operation never success."],
+    ["P17","Semantic receive refusal with complete raw DATA uses unchanged finish_receive_failure conditions/close/freeze/new failed record; partial or uncertain data/cleanup stays held."],
+    ["P18","Unrelated original reservation/create/scope-entry/intake/close/freeze/allocation failures preserve their original attempted/never-attempted routes and exact first/secondary errors."],
+    ["P19","Any uncertain failed close/retirement/clock has no confirmed setup/final result or resource release; immutable historical bodies remain retained."],
+    ["P20","Actual all-outcome consumers see same original reservation/S/D0 and native A303 work-stop bytes; full61/current88 pins/identity stable, old metadata provenance only."],
+    ["P21","Earlier qualified tighter-min/generation/semantic witness separately bound to true outside producer/caller/native/receiver before claiming full cutoff closure; valid D0 check does NOT waive this OPEN join."],
+    ["P22","Independent current image/native ABI/caller/admission and complete positive workload/all-effect span/read/RAM/implicit/new primitive/frame overhead fit, UNKNOWN_NOT_ZERO until qualified. All mandatory gate controls still required."],
+    ["P23","Successful sample before start is an endpoint, not atomic syscall/argv/exit span proof; selected monotonic primitive semantics and actual finite span fit must be established, not assumed from this static delta."]
+  ],
+  "execution": false,
+  "own_independent_acceptance": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "GO": false
+}
